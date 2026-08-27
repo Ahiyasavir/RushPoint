@@ -26,14 +26,23 @@
 // the reason the server gave. A simulator that quietly drops stuck teams would report
 // a clean run for a game no one can finish.
 // ═══════════════════════════════════════════════════════════════════════════════
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 // The SAME send verdict the shipped client applies (change: participant-read-budget).
 // Modelling an unconditional 20s ping would measure a call pattern the app no longer has,
 // and would overstate this run's read cost by ~3x.
 import { shouldWritePin } from '@rushpoint/shared';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+
+// ── Why this speaks the callable protocol directly instead of using the Firebase SDK ──
+// Two reasons, both learned the hard way at 120 teams:
+//   1. AUTH RATE LIMITS. Creating 120 anonymous users from one machine trips
+//      `auth/too-many-requests` — Firebase throttles anonymous sign-up per IP. Real players
+//      arrive on ~100 different devices and networks; a load harness on one laptop does not.
+//      So identities are created ONCE and their refresh tokens cached to disk, and later runs
+//      re-use them instead of minting more.
+//   2. WEIGHT. 120 `initializeApp` instances in one process is a lot of machinery to model
+//      what is, on the wire, an HTTP POST with a bearer token.
+// The wire format below is exactly what the SDK sends: POST <origin>/<name> with
+// {"data": …} and a Firebase ID token, answered with {"result": …} or {"error": …}.
 
 // ── Args ─────────────────────────────────────────────────────────────────────
 const arg = (n, d) => (process.argv.find((a) => a.startsWith(`--${n}=`)) ?? '').split('=')[1] ?? d;
@@ -97,24 +106,74 @@ const latency = new Map();
 const errorTally = new Map();
 let callCount = 0;
 
-function makeParty(name) {
-  const app = initializeApp({
-    apiKey: env.VITE_FIREBASE_API_KEY,
-    authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: PROJECT,
-    storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: env.VITE_FIREBASE_APP_ID,
-  }, name);
-  const auth = getAuth(app);
-  const functions = getFunctions(app, API_ORIGIN);
+const KEY = env.VITE_FIREBASE_API_KEY;
+const IDENTITY = 'https://identitytoolkit.googleapis.com/v1';
+const SECURETOKEN = 'https://securetoken.googleapis.com/v1';
+
+/** Where reusable participant identities live, so repeat runs mint none. */
+const IDENTITY_CACHE = arg('identity-cache', 'prod-sim-identities.json');
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = json?.error?.message ?? `HTTP ${res.status}`;
+    const err = new Error(msg); err.code = msg; throw err;
+  }
+  return json;
+}
+
+/** A fresh anonymous identity. Rate-limited per IP — see the header. */
+const signUpAnonymous = () => postJson(`${IDENTITY}/accounts:signUp?key=${KEY}`, { returnSecureToken: true });
+/** Exchange a cached refresh token for a live ID token. Not rate-limited the same way. */
+const refreshIdToken = (refreshToken) =>
+  postJson(`${SECURETOKEN}/token?key=${KEY}`, { grant_type: 'refresh_token', refresh_token: refreshToken });
+const signInCustom = (token) =>
+  postJson(`${IDENTITY}/accounts:signInWithCustomToken?key=${KEY}`, { token, returnSecureToken: true });
+
+/**
+ * The uid an ID token was minted for. `accounts:signInWithCustomToken` returns the token but
+ * NOT `localId` (unlike `accounts:signUp`), and an undefined ownerUid silently poisons every
+ * later ctx — the run launches, then every participant call addresses `users/undefined/...`.
+ * The uid is the JWT's `sub`; this reads it rather than trusting the response shape.
+ */
+function uidFromIdToken(idToken) {
+  try {
+    const payload = String(idToken).split('.')[1];
+    const json = JSON.parse(Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+    return json.user_id ?? json.sub ?? null;
+  } catch { return null; }
+}
+
+/**
+ * A party is an identity plus the ability to invoke callables as it. `call` speaks the
+ * callable wire protocol directly and normalises errors to the same `functions/<code>` shape
+ * the SDK produces, so every error tally in this script stays comparable with the SDK-based
+ * suites.
+ */
+function makeParty(idToken, uid) {
   return {
-    auth,
+    uid,
+    idToken: async () => idToken,
     call: async (fn, data) => {
       const t0 = Date.now();
       callCount++;
       try {
-        return (await httpsCallable(functions, fn)(data)).data;
+        const res = await fetch(`${API_ORIGIN}/${fn}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({ data: data ?? {} }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (json?.error) {
+          const e = new Error(json.error.message ?? 'callable error');
+          e.code = `functions/${json.error.status ? String(json.error.status).toLowerCase().replace(/_/g, '-') : 'unknown'}`;
+          throw e;
+        }
+        if (!res.ok) { const e = new Error(`HTTP ${res.status}`); e.code = `functions/http-${res.status}`; throw e; }
+        return json?.result;
       } catch (e) {
         const key = `${fn}:${e.code ?? 'unknown'}`;
         errorTally.set(key, (errorTally.get(key) ?? 0) + 1);
@@ -124,8 +183,66 @@ function makeParty(name) {
         latency.get(fn).push(Date.now() - t0);
       }
     },
-    idToken: () => auth.currentUser?.getIdToken(),
   };
+}
+
+/**
+ * N participant identities, re-using any previously cached ones. New identities are minted
+ * SERIALLY with backoff: anonymous sign-up is throttled per IP, and a burst of 120 from one
+ * machine is the one part of this harness that a real crowd of phones would never reproduce.
+ */
+async function ensureIdentities(n) {
+  // An admin-minted token file sidesteps the per-IP anonymous sign-up quota entirely: the
+  // uids are created with the Admin SDK on the server and handed here as custom tokens. Real
+  // participants arrive from ~100 different devices and networks and never approach that
+  // quota; a load harness on one laptop hits it at around 30.
+  const tokenFile = arg('custom-tokens', '');
+  if (tokenFile && existsSync(tokenFile)) {
+    const rows = JSON.parse(readFileSync(tokenFile, 'utf8')).slice(0, n);
+    const out = [];
+    for (const row of rows) {
+      const s = await signInCustom(row.customToken);
+      out.push(makeParty(s.idToken, row.uid ?? uidFromIdToken(s.idToken)));
+    }
+    console.log(`identities ready: ${out.length} (from admin-minted custom tokens)`);
+    return out;
+  }
+  let cache = [];
+  if (existsSync(IDENTITY_CACHE)) {
+    try { cache = JSON.parse(readFileSync(IDENTITY_CACHE, 'utf8')); } catch { cache = []; }
+  }
+  const parties = [];
+  let minted = 0;
+  for (let i = 0; i < n; i++) {
+    if (cache[i]?.refreshToken) {
+      try {
+        const r = await refreshIdToken(cache[i].refreshToken);
+        parties.push(makeParty(r.id_token, r.user_id ?? cache[i].uid));
+        continue;
+      } catch { /* stale entry — mint a replacement below */ }
+    }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const s = await signUpAnonymous();
+        cache[i] = { uid: s.localId, refreshToken: s.refreshToken };
+        parties.push(makeParty(s.idToken, s.localId));
+        minted++;
+        // Persist after EVERY mint, not at the end. Anonymous sign-up is throttled per IP and
+        // eventually refuses outright; writing once at the end threw away every identity
+        // created before the refusal, so each retry restarted from zero into the same wall.
+        writeFileSync(IDENTITY_CACHE, JSON.stringify(cache, null, 2));
+        break;
+      } catch (e) {
+        if (attempt >= 6) throw e;
+        // TOO_MANY_REQUESTS is the expected wall; back off hard rather than hammering.
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      }
+    }
+    if (minted % 10 === 0 && minted) console.log(`  minted ${minted} new identities…`);
+  }
+  writeFileSync(IDENTITY_CACHE, JSON.stringify(cache, null, 2));
+  console.log(`identities ready: ${parties.length} (${minted} newly minted, ${parties.length - minted} reused)`);
+  return parties;
 }
 
 async function pMap(items, fn, concurrency) {
@@ -331,8 +448,14 @@ async function playTeam(team, uid, ctx, code, stats) {
         catch { /* a ping is never worth failing a team over */ }
       }
     }
-    const pending = recs.find((t) => t.status === 'pending_review');
-    if (pending) { stats.awaitingReview++; await sleep(1500); continue; }
+    // A submitted photo/video parks the team on a human reviewer, and that state lives in
+    // team.taskSubmissions — NOT on the stage task record, whose status stays 'assigned'.
+    // Reading the task record instead made this harness re-submit the same photo every turn
+    // until the per-user rate limiter refused it (885 submissions across 100 teams that each
+    // owed at most two), which read like a product fault and was entirely self-inflicted.
+    const submissions = state?.team?.taskSubmissions ?? {};
+    const awaitingReview = assigned && submissions[assigned.taskId]?.status === 'pending';
+    if (awaitingReview) { stats.awaitingReview++; await sleep(2000); continue; }
     if (!assigned) {
       const r = await team.call('requestNextTask', { ...ctx, lat: pos.lat, lng: pos.lng }).catch((e) => ({ error: e.code }));
       if (r?.reason) stats.holds.set(r.reason, (stats.holds.get(r.reason) ?? 0) + 1);
@@ -358,10 +481,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   const t0 = Date.now();
-  const owner = makeParty('prod-sim-owner');
   if (!OWNER_TOKEN) { console.error('--owner-token=<custom token> is required.'); process.exit(2); }
-  const ownerCred = await signInWithCustomToken(owner.auth, OWNER_TOKEN);
-  const ownerUid = ownerCred.user.uid;
+  const ownerAuth = await signInCustom(OWNER_TOKEN);
+  const ownerUid = ownerAuth.localId ?? uidFromIdToken(ownerAuth.idToken);
+  if (!ownerUid) { console.error('could not determine the owner uid from the custom token'); process.exit(1); }
+  const owner = makeParty(ownerAuth.idToken, ownerUid);
   console.log(`owner signed in: ${ownerUid}`);
 
   const gameId = plan.gameId;
@@ -371,14 +495,29 @@ async function main() {
 
   const stats = { acts: new Map(), holds: new Map(), actErrors: [], awaitingReview: 0, fixesTaken: 0, pingsSent: 0 };
 
-  console.log(`joining ${TEAMS} teams…`);
-  const joined = await pMap(Array.from({ length: TEAMS }, (_, i) => i), async (i) => {
-    const p = makeParty(`prod-sim-team-${i}`);
-    const cred = await signInAnonymously(p.auth);
-    await p.call('joinRun', { code: accessCode, displayName: `SIM ${i + 1}` });
-    return { p, uid: cred.user.uid };
-  }, JOIN_CONCURRENCY);
-  console.log(`joined ${joined.length} teams`);
+  console.log(`preparing ${TEAMS} participant identities…`);
+  const parties = await ensureIdentities(TEAMS);
+
+  // Everyone scans the QR at once. THIS is the burst that broke joinRun in production, so it
+  // is deliberately concurrent rather than paced — pacing it would test a moment that never
+  // happens at a real event.
+  console.log(`joining ${TEAMS} teams (concurrency ${JOIN_CONCURRENCY})…`);
+  const joinFailures = [];
+  const joined = (await pMap(parties, async (p, i) => {
+    try {
+      await p.call('joinRun', { code: accessCode, displayName: `SIM ${i + 1}` });
+      return { p, uid: p.uid };
+    } catch (e) {
+      joinFailures.push(`team ${i + 1}: ${e.code ?? e.message}`);
+      return null;
+    }
+  }, JOIN_CONCURRENCY)).filter(Boolean);
+  console.log(`joined ${joined.length}/${TEAMS} teams`);
+  if (joinFailures.length) {
+    console.log(`
+⚠ ${joinFailures.length} TEAMS COULD NOT JOIN:`);
+    for (const f of joinFailures.slice(0, 10)) console.log(`   ${f}`);
+  }
 
   const started = await owner.call('startTeams', { gameId, runId });
   console.log(`startTeams launched=${started?.launched}\n`);
@@ -413,7 +552,8 @@ async function main() {
   // ── Report ────────────────────────────────────────────────────────────────
   const finished = results.filter((r) => r?.finished).length;
   console.log(`\n══ RESULT ══`);
-  console.log(`teams finished: ${finished}/${TEAMS}`);
+  console.log(`teams joined:   ${joined.length}/${TEAMS}${joinFailures.length ? `  (${joinFailures.length} FAILED TO JOIN)` : ''}`);
+  console.log(`teams finished: ${finished}/${joined.length}`);
   console.log(`wall time: ${((Date.now() - t0) / 1000 / 60).toFixed(1)} min`);
   console.log(`callables invoked (client-side count): ${callCount}`);
   if (stats.fixesTaken) {
@@ -448,7 +588,7 @@ async function main() {
 
   console.log(`\nrun: game=${gameId} run=${runId} code=${accessCode}`);
   console.log('(the run and its teams remain in production — delete the SIM game when finished)');
-  process.exit(finished === TEAMS && !abortReason ? 0 : 1);
+  process.exit(finished === TEAMS && joinFailures.length === 0 && !abortReason ? 0 : 1);
 }
 
 main().catch((e) => { console.error('\n💥', e?.message ?? e); console.error(e); process.exit(1); });
