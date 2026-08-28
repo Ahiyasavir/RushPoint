@@ -3,6 +3,7 @@ import { render } from 'astro:content';
 
 import PageLayout from '~/layouts/PageLayout.astro';
 import Image from '~/components/common/Image.astro';
+import Media from '~/components/Media.astro';
 import { findImage } from '~/utils/images';
 
 import { pagePath, OG_LOCALE, SITE_ORIGIN, type Language } from '~/utils/i18n';
@@ -113,18 +114,11 @@ const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB'
     }
 
     {
-      post.data.video && (
-        // 16:9 without a layout shift. A video is an addition to the post, never
-        // a prerequisite for reading it, so it sits after the opening text.
-        <div class="mb-8 relative w-full" style="padding-top:56.25%">
-          <iframe
-            class="absolute inset-0 h-full w-full rounded-lg"
-            src={post.data.video}
-            title={post.data.title}
-            loading="lazy"
-            allowfullscreen
-          />
-        </div>
+      post.data.media && (
+        // Self-hosted, same as the standing pages: a file we serve, not a
+        // third-party embed. Sits after the opening text — an addition to the
+        // post, never a prerequisite for reading it.
+        <Media class="mb-8" media={post.data.media} />
       )
     }
 
