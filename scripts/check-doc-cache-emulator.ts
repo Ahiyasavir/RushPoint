@@ -123,6 +123,35 @@ async function main(): Promise<void> {
       rows.map((r) => r.id).join(',') === 'a,b,c', rows.map((r) => r.id).join(','));
   }
 
+  // ── The two properties hot-path-read-cost newly depends on ────────────────────────────────
+  // The mechanics above prove the proxy; these two name the PRODUCT invariants that would break
+  // if it ever stopped working, so a regression reads as what it actually costs rather than as
+  // an abstract cache miss.
+  console.log('\n-- a team that just scored is never ranked on its old score --');
+  {
+    // maybeRefreshLeaderboardSnapshot reads the whole team collection through the cache on a
+    // 20s throttle and feeds it straight to buildRankings. If a warm read could serve a stale
+    // score, the live board would rank a team on points it has already superseded: visible to
+    // every participant, and exactly the kind of wrongness nobody would blame on a cache.
+    await cachedGetCollection(db, docCachePolicy, TEAMS);
+    await db.doc(`${TEAMS}/a`).update({ score: 250 });
+    const rows = await cachedGetCollection<{ score: number }>(db, docCachePolicy, TEAMS);
+    const a = rows.find((r) => r.id === 'a');
+    check('the ranking read sees the new score, not the cached one',
+      a?.data.score === 250, `score=${a?.data.score}`);
+  }
+
+  console.log('\n-- resolveCallerTeam never hands a participant a stale team --');
+  {
+    // Every participant callable resolves its team through a cachedGetDoc on this exact path.
+    // A stale hit would let a team act on progress it no longer has.
+    await cachedGetDoc(db, docCachePolicy, `${TEAMS}/a`);
+    await db.doc(`${TEAMS}/a`).update({ score: 251 });
+    const snap = await cachedGetDoc<{ score: number }>(db, docCachePolicy, `${TEAMS}/a`);
+    check('the per-team read reflects the write that just happened',
+      snap.data?.score === 251, JSON.stringify(snap.data));
+  }
+
   console.log('\n-- a deleted document stops being served --');
   {
     await cachedGetCollection(db, docCachePolicy, TEAMS);
