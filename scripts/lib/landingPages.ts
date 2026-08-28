@@ -165,7 +165,7 @@ export const SUBJECT_SLUGS: Record<LandingSubject, string> = {
 
 const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slug'>> = {
   home: {
-    title: 'RushPoint: בונים משחק שדה אמיתי לכל אירוע',
+    title: 'בונים משחק שדה אמיתי לכל אירוע, RushPoint',
     description: 'פלטפורמה לבניית משחקי שדה בשטח: מסלול משימות אמיתי, ניווט אוטומטי בין תחנות, ניקוד בזמן אמת וטבלת מובילים חיה. בלי אפליקציה להתקין ובלי שופטים.',
     headline: 'המשחק יוצא החוצה',
     intro: 'בונים משחק שדה משלכם, משתפים קוד כניסה אחד, והשחקנים יוצאים לשטח. הניקוד קורה לבד.',
@@ -194,7 +194,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'בונים משחק עכשיו',
   },
   birthday: {
-    title: 'משחק שדה ליום הולדת: מסלול משימות בשכונה',
+    title: 'משחק שדה ליום הולדת עם מסלול משימות בשכונה',
     description: 'יום הולדת שיוצא מהסלון. מסלול משימות אמיתי בשכונה או בפארק, עם צילומים, אתגרים וניקוד אוטומטי. מתאים לילדים ולנוער, ומוכן תוך דקות.',
     headline: 'יום הולדת שיוצא מהסלון',
     intro: 'מסלול משימות בשכונה, בפארק או בכל מקום שאתם מכירים. קצר, רועש, ומלא תמונות.',
@@ -240,7 +240,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'בונים משחק לבר מצווה',
   },
   wedding: {
-    title: 'משחק לחתונה: פעילות לאורחים בין החלקים',
+    title: 'משחק לחתונה שמעסיק את האורחים בין החלקים',
     description: 'פעילות לאורחי החתונה שלא דורשת ללכת רחוק ולא הורסת את הנעליים. משימות צילום קצרות בשטח האירוע, ניקוד אוטומטי ואלבום שנבנה מעצמו.',
     headline: 'פעילות לחתונה שלא הורסת נעליים',
     intro: 'האורחים לבושים ולא הולכים רחוק. המשחק הוא הבידור בין החלקים של הערב, לא הערב עצמו.',
@@ -262,7 +262,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'בונים משחק לחתונה',
   },
   'team-building': {
-    title: 'גיבוש צוות: משחק שדה לחברות וארגונים',
+    title: 'משחק שדה לגיבוש צוות בחברות ובארגונים',
     description: 'יום גיבוש שבו הקושי הוא הנקודה. מסלול בן חמישה שלבים עם טוויסט באמצע, משימות שדורשות שיתוף פעולה אמיתי, וניקוד אובייקטיבי בלי שופטים.',
     headline: 'גיבוש שבו הקושי הוא הנקודה',
     intro: 'הקבוצה נמצאת שם כדי להיאלץ לשתף פעולה תחת לחץ. המסלול בנוי בשביל זה.',
@@ -285,7 +285,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'בונים יום גיבוש',
   },
   'youth-group': {
-    title: 'פעולה בתנועת נוער: משחק שדה לחניכים',
+    title: 'פעולה בתנועת נוער כמשחק שדה לחניכים',
     description: 'פעולה שבועית שמדריך יכול להכין בזמן שיש לו. מסלול משימות בשכונה עם תוכן חינוכי, סיום מאתגר וניקוד אוטומטי. בלי ציוד ובלי הכנה בשטח.',
     headline: 'פעולה שאפשר להכין בערב',
     intro: 'משהו לעשות, משהו ללמוד, וסיום שמדברים עליו בפעולה הבאה.',
@@ -311,7 +311,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
 
 const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slug'>> = {
   home: {
-    title: 'RushPoint: build a real world field game for any event',
+    title: 'Build a real world field game for any event, RushPoint',
     description: 'Build your own outdoor team game: real missions on a map, automatic routing between stops, live scoring and a leaderboard that updates itself. No app to install and no judges.',
     headline: 'The game goes outside',
     intro: 'Build a field game, share one access code, and send players into the street. The scoring takes care of itself.',
@@ -340,7 +340,7 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'Start building',
   },
   birthday: {
-    title: 'Birthday scavenger hunt: a real mission route nearby',
+    title: 'Birthday scavenger hunt on a real mission route nearby',
     description: 'A birthday party that leaves the living room. A real mission route around your neighbourhood or park, with photo challenges and automatic scoring. Built for kids and teens, ready in minutes.',
     headline: 'A birthday that leaves the living room',
     intro: 'A mission route through your neighbourhood, a park, or anywhere you already know. Short, loud, and full of photos.',
@@ -363,7 +363,7 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'Build a birthday game',
   },
   mitzvah: {
-    title: 'Bar mitzvah activity: a field game the whole crowd can play',
+    title: 'Bar mitzvah field game the whole crowd can play',
     description: 'A bar mitzvah activity that holds a crowd running from grandparents to classmates. An outdoor mission route, automatic scoring, and a finish that leads into the ceremony. No staff and no equipment.',
     headline: 'A bar mitzvah activity everyone can play',
     intro: 'A crowd that runs from grandparents to classmates, and one game that holds both.',
@@ -386,7 +386,7 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'Build a bar mitzvah game',
   },
   wedding: {
-    title: 'Wedding game: an activity for guests between the parts',
+    title: 'Wedding game that keeps guests busy between the parts',
     description: 'A wedding activity that asks nobody to walk far or ruin their shoes. Short photo missions around the venue, automatic scoring, and an album that builds itself from the guests.',
     headline: 'A wedding activity that spares the shoes',
     intro: 'Guests are dressed up and are not walking far. The game is the entertainment between the parts of the evening, not the evening itself.',
@@ -431,7 +431,7 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'Build a team building day',
   },
   'youth-group': {
-    title: 'Youth group activity: a field game for a weekly session',
+    title: 'Youth group field game for a weekly session',
     description: 'A weekly session a group leader can actually prepare in the time they have. An outdoor mission route with real content, a hard finish and automatic scoring. No equipment and no site visit.',
     headline: 'A session you can prepare in one evening',
     intro: 'Something to do, something to learn, and a finish worth talking about next week.',

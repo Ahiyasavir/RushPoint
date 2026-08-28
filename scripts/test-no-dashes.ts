@@ -451,5 +451,81 @@ check('E · no hyphen or dash in marketing site content',
 check('E · the marketing content scan actually reached the copy', marketingScanned >= 100,
   `${marketingScanned} field(s)`);
 
+// ── PART F — NO COLON IN A SHIPPED PAGE TITLE ────────────────────────────────
+// A different rule from the dash standard above, deliberately much narrower, and the
+// narrowness is the whole design. A colon INSIDE A SENTENCE is ordinary punctuation and
+// this product's descriptions and paragraphs use it correctly in a dozen places; banning
+// it everywhere would either fail correct copy or collect exemptions until it meant
+// nothing. What is actually wrong is a colon in a NAME.
+//
+// Every title we shipped read `RushPoint: build your own real world field game`. In a
+// search result that spends the first eleven characters, the ones a reader scans hardest,
+// on the brand, and pushes the words they were actually searching for to the right of a
+// piece of punctuation doing the work of a sentence. The house pattern was already decided
+// and written down for the marketing site (apps/marketing/src/config.yaml: "A COMMA, not
+// an em dash", applied as `%s, RushPoint`); the applications and the landing pages simply
+// predate it.
+//
+// VALUES ONLY, never whole tags. `<meta property="og:title" ...>` carries a colon in its
+// KEY on every page ever written, so a rule applied to tag text would fail universally and
+// be deleted within the day. Same reason URLs, times and codes are not scanned: a colon is
+// only a defect where a human reads a name.
+const BANNED_TITLE_SEPARATOR = /:/;
+/** The metadata whose value Google prints AS the link. Not descriptions. */
+const HTML_TITLE_META = new Set(['og:title', 'twitter:title']);
+const MANIFEST_TITLE_KEYS = new Set(['name', 'short_name']);
+
+const titleOffenders: string[] = [];
+let titlesScanned = 0;
+
+for (const app of ['creator-web', 'play-web']) {
+  const htmlRel = `apps/${app}/index.html`;
+  const html = stripComments(readFileSync(join(ROOT, htmlRel), 'utf8'));
+
+  const title = /<title>([\s\S]*?)<\/title>/.exec(html);
+  if (title) {
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(title[1])) {
+      titleOffenders.push(`${htmlRel} <title> → "${title[1].trim()}"`);
+    }
+  }
+
+  const metaRe = /<meta\s+(?:name|property)=["']([^"']+)["']\s+content=["']([^"']*)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = metaRe.exec(html))) {
+    const [, key, value] = m;
+    // `key` is matched against the set and then DISCARDED. Only `value` is tested, which is
+    // what keeps `og:title` from reporting itself.
+    if (!HTML_TITLE_META.has(key)) continue;
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(value)) {
+      titleOffenders.push(`${htmlRel} ${key} → "${value.trim()}"`);
+    }
+  }
+
+  const manRel = `apps/${app}/public/manifest.webmanifest`;
+  const manifest = JSON.parse(readFileSync(join(ROOT, manRel), 'utf8')) as Record<string, unknown>;
+  for (const key of MANIFEST_TITLE_KEYS) {
+    const v = manifest[key];
+    if (typeof v !== 'string') continue;
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(v)) titleOffenders.push(`${manRel} ${key} → "${v}"`);
+  }
+}
+
+for (const page of LANDING_PAGES) {
+  titlesScanned++;
+  if (BANNED_TITLE_SEPARATOR.test(page.title)) {
+    titleOffenders.push(`${page.language}/${page.subject}.title → "${page.title}"`);
+  }
+}
+
+check('F · no colon in a shipped page title', titleOffenders.length === 0, titleOffenders.join(' | '));
+
+// The same reach assertion PARTS C, D and E carry, for the same reason: this part is a set
+// of absences, and an empty input set satisfies every one of them. Two apps contribute a
+// title, two title meta fields and two manifest keys each, plus twelve landing pages.
+check('F · the title scan actually reached the titles', titlesScanned >= 20, `${titlesScanned} title(s)`);
+
 console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);
