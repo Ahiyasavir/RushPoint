@@ -8,6 +8,8 @@
 // server string ("Missing or insufficient permissions") ends up rendered to a
 // Hebrew-speaking volunteer. No code ⇒ 'generic' ⇒ localized fallback copy.
 
+import { isDailyQuotaRejection } from '@rushpoint/shared';
+
 // ─── 1. Task-card message tone ───────────────────────────────────────────────
 // TaskRunner's single `msg` sink carries BOTH progress ("Uploading photo…") and
 // rejections ("Too far, 120m away") and used to render them in identical neutral
@@ -31,6 +33,7 @@ export type StaffFailureKey =
   | 'sessionExpired'
   | 'notFound'
   | 'rateLimited'
+  | 'dailyCapacity'
   | 'offline'
   | 'generic';
 
@@ -58,6 +61,10 @@ function bareCode(e: unknown): string {
 }
 
 export function classifyStaffError(e: unknown): StaffFailure {
+  // Before the code switch: the daily-quota refusal arrives AS a
+  // `resource-exhausted`, so the switch would tell a volunteer to "wait a moment"
+  // during an outage that lasts until the quota resets. Structured marker only.
+  if (isDailyQuotaRejection(e)) return { key: 'dailyCapacity', sessionExpired: false };
   switch (bareCode(e)) {
     // Firestore/Functions emit these only for a genuinely rejected identity, not
     // for a transient hiccup — so mapping them to "session expired" is safe.

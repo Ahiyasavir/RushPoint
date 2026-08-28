@@ -11,7 +11,7 @@
 // best-effort context is run through `redact()` to drop known-sensitive keys.
 
 import * as functions from 'firebase-functions';
-import { sanitizeFinite } from '@rushpoint/shared';
+import { sanitizeFinite, isFirestoreQuotaExhausted, DAILY_QUOTA_REASON } from '@rushpoint/shared';
 import { withCallableAttribution, invocationFirestoreCost } from '../opCounter';
 
 export interface CallMeta {
@@ -258,6 +258,37 @@ function logFirestoreCost(callable: string): void {
   }
 }
 
+/**
+ * Substitute Firestore's raw quota refusal with a callable error the clients can
+ * act on (change: daily-quota-user-message).
+ *
+ * When the project's daily Firestore budget is spent, every read rejects with a
+ * gRPC ServiceError carrying the NUMBER 8. `functions.https.onCall` does not
+ * recognise that as an HttpsError, so it reports a bare `internal` to the client —
+ * which both apps then render as "something went wrong", indistinguishable from a
+ * genuine bug. That is exactly what happened on 2026-08-28: hours of "טעינת
+ * המשחקים נכשלה" with nothing actually broken.
+ *
+ * Doing this HERE rather than at the call sites is the whole point: every one of
+ * the ~112 callables is built through loggedCallable (the callable-hardening suite
+ * enforces that no `functions.https.onCall` is called directly), so one conversion
+ * covers all of them by construction and a callable added tomorrow inherits it.
+ *
+ * An error we already classified is passed through untouched — our own rate
+ * limiter's `resource-exhausted` must keep meaning "slow down", not "come back
+ * tomorrow".
+ */
+export function asClientError(err: unknown): unknown {
+  if (!isFirestoreQuotaExhausted(err)) return err;
+  return new functions.https.HttpsError(
+    'resource-exhausted',
+    // Never rendered: both clients classify on `details.reason` and show their own
+    // localized copy. Kept meaningful for logs and for any future API consumer.
+    'Daily capacity reached. Service resumes when the quota resets.',
+    { reason: DAILY_QUOTA_REASON },
+  );
+}
+
 export function loggedCallable(
   name: string,
   handler: CallableHandler,
@@ -277,6 +308,12 @@ export function loggedCallable(
           // computation bug becomes a benign null field, not a failed call.
           async () => sanitizeFinite(await handler(data, context)),
         );
+      } catch (err) {
+        // OUTSIDE logCall on purpose: logCall has already recorded the ORIGINAL
+        // rejection, so the raw `errorCode: 8` stays in the logs where it is the
+        // diagnostic that identifies a quota outage. Only what travels to the
+        // client is substituted.
+        throw asClientError(err);
       } finally {
         // In `finally`, so a FAILED call still reports what it spent — a callable that
         // throws after twenty reads has still spent twenty reads of the daily quota, and

@@ -27,6 +27,7 @@ import { toast } from '../components/toast';
 import { ShareSheet } from '../components/ShareSheet';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
 import { firstLaunchBlocker, splitTestDriveReadiness, type ReadinessIssue } from '../lib/gameReadiness';
+import { describeCallFailure } from '../lib/callFeedback';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../components/AuthGate';
@@ -341,7 +342,14 @@ export default function DashboardPage() {
       // the UI — a load failure is always technical, not user-actionable. Show the
       // friendly localized message and keep the real error in the console.
       console.error('[dashboard] listGames failed:', e);
-      await dialog.alert(d.loadGamesFailed);
+      // One cause is worth naming: when the project's daily Firestore budget is
+      // spent, EVERY load fails until it resets, and the generic "failed to load"
+      // reads as a broken app for hours (2026-08-28). Say what is actually
+      // happening and when to come back; everything else keeps the generic copy.
+      const failure = describeCallFailure(e, { online: navigator.onLine });
+      await dialog.alert(
+        failure.key === 'dailyCapacity' ? t.callFailure.dailyCapacity : d.loadGamesFailed,
+      );
     }
   }
   useEffect(() => { void load(); }, []);

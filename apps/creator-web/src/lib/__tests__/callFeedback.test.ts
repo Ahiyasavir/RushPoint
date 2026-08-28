@@ -38,7 +38,24 @@ function rejectedWith(code: string, message = 'server said no'): unknown {
   return e;
 }
 
-const NOT_RETRYABLE: CallFailureKey[] = ['notAllowed', 'rejected'];
+/**
+ * The daily-quota rejection the server substitutes when Firestore refuses on
+ * quota. It travels as an ordinary `resource-exhausted` plus a structured
+ * `details.reason` marker — a CODE alone can never identify it, because our own
+ * rate limiter uses the same code with the opposite meaning.
+ */
+function rejectedWithDailyQuota(): unknown {
+  const e = rejectedWith('resource-exhausted', 'Daily capacity reached.') as Error & {
+    details: { reason: string };
+  };
+  e.details = { reason: 'daily-quota' };
+  return e;
+}
+
+// `dailyCapacity` is a WARNING that is nonetheless not retryable — the daily
+// Firestore budget is gone until it resets, so a Retry button would be a lie and
+// would spend whatever headroom freed up (change: daily-quota-user-message).
+const NOT_RETRYABLE: CallFailureKey[] = ['notAllowed', 'rejected', 'dailyCapacity'];
 
 describe('describeCallFailure — the code table', () => {
   const CASES: [string, CallFailureKey, 'error' | 'warning', boolean][] = [
@@ -77,12 +94,18 @@ describe('describeCallFailure — the code table', () => {
     // The Builder's Retry button hangs off this flag. Offering "try again" on a
     // signed-out session guarantees a second failure and hides the real fix.
     for (const key of CALL_FAILURE_KEYS) {
-      const sample = key === 'notAllowed' ? 'permission-denied'
-        : key === 'rejected' ? 'failed-precondition'
-        : key === 'rateLimited' ? 'resource-exhausted'
-        : key === 'offline' ? 'unavailable'
-        : 'teapot';
-      const got = describeCallFailure(rejectedWith(sample));
+      // dailyCapacity is the one key a code cannot select — it is carried by the
+      // structured marker, so it needs its own sample rejection.
+      const rejection = key === 'dailyCapacity'
+        ? rejectedWithDailyQuota()
+        : rejectedWith(
+          key === 'notAllowed' ? 'permission-denied'
+            : key === 'rejected' ? 'failed-precondition'
+            : key === 'rateLimited' ? 'resource-exhausted'
+            : key === 'offline' ? 'unavailable'
+            : 'teapot',
+        );
+      const got = describeCallFailure(rejection);
       expect(got.key).toBe(key);
       expect(got.retryable).toBe(!NOT_RETRYABLE.includes(key));
     }
@@ -150,7 +173,7 @@ describe('describeCallFailure — every outcome has actionable copy', () => {
 
   it('exposes at least the five outcomes the console distinguishes', () => {
     expect(new Set(CALL_FAILURE_KEYS)).toEqual(
-      new Set(['offline', 'notAllowed', 'rateLimited', 'rejected', 'generic']),
+      new Set(['offline', 'notAllowed', 'rateLimited', 'dailyCapacity', 'rejected', 'generic']),
     );
   });
 
