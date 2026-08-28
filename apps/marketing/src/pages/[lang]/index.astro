@@ -10,11 +10,11 @@ import GamePlanner from '~/components/widgets/GamePlanner.astro';
 import FAQs from '~/components/widgets/FAQs.astro';
 import { Icon } from 'astro-icon/components';
 
-import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, type Language } from '~/utils/i18n';
+import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
 import { landingPageUrl, mediaLabels } from '~/navigation';
 import { pageContent } from '~/utils/pages';
 import Media from '~/components/Media.astro';
-import VideoLightbox from '~/components/VideoLightbox.astro';
+import FounderVideo from '~/components/FounderVideo.astro';
 import TopoBackdrop from '~/components/TopoBackdrop.astro';
 
 export function getStaticPaths() {
@@ -64,6 +64,7 @@ const metadata = {
     subhead={t.subhead}
     trust={t.heroTrust}
     challenge={t.heroChallenge}
+    join={{ prompt: t.heroJoinPrompt, action: t.heroJoinAction, href: 'https://rush-point.com/' }}
     clip={t.heroClip}
     actions={[
       { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
@@ -95,13 +96,29 @@ const metadata = {
 
   {
     /*
-      The explainer, as a poster card that opens a player rather than a bare
-      <video> nobody pressed. Optional: with none set the page is exactly what it
-      was, so adding one is a content decision rather than a deploy.
+      Meet the person who built it. The video plays muted on its own once it is
+      on screen; there is no modal and no poster to press. Beside it, on a wide
+      screen, the short version in words and a link to the whole story, so a tall
+      portrait video is not a lonely column. Optional: with no `hero` media set,
+      the page renders exactly as it did before.
     */
     t.hero && (
-      <section class="mx-auto max-w-4xl px-4 py-16 sm:px-6">
-        <VideoLightbox media={t.hero} label={t.videoLabel} duration={t.videoDuration} labels={chrome} />
+      <section class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
+        <div class="grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_19rem] lg:gap-14">
+          <div class="text-center lg:text-start">
+            <h2 class="mb-4 font-heading text-3xl font-bold tracking-tight text-heading md:text-4xl">
+              {t.videoLabel}
+            </h2>
+            <p class="mx-auto mb-5 max-w-xl text-lg leading-relaxed text-muted lg:mx-0">{t.videoBody}</p>
+            <a
+              class="font-semibold text-secondary underline decoration-2 underline-offset-2 hover:text-primary dark:text-primary"
+              href={pagePath(language, 'story')}
+            >
+              {t.videoStoryAction}
+            </a>
+          </div>
+          <FounderVideo media={t.hero} duration={t.videoDuration} labels={chrome} />
+        </div>
       </section>
     )
   }

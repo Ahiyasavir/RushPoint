@@ -72,7 +72,7 @@ const COMPONENTS = {
   hero: 'src/components/widgets/HeroField.astro',
   map: 'src/components/HeroFieldMap.astro',
   phone: 'src/components/PhoneFrame.astro',
-  video: 'src/components/VideoLightbox.astro',
+  video: 'src/components/FounderVideo.astro',
 } as const;
 
 for (const [what, rel] of Object.entries(COMPONENTS)) {
@@ -122,9 +122,9 @@ if (homepage) {
   );
 
   check(
-    'B · the explainer video is presented through the lightbox',
-    /<VideoLightbox\b/.test(homepage),
-    'VideoLightbox.astro',
+    'B · the founder video is rendered inline, not in a modal',
+    /<FounderVideo\b/.test(homepage) && !/VideoLightbox/.test(homepage),
+    'FounderVideo.astro',
   );
 
   check(
@@ -138,10 +138,14 @@ if (homepage) {
 // ── C. The conversion strings live in the content files, in both languages ───
 
 const CONVERSION_KEYS = [
-  'heroTrust',       // engagement depth social proof, not a user count
-  'heroChallenge',   // the curiosity gap prompt beside the map
-  'lowFrictionNote', // no signup, no card, seconds to try
+  'heroTrust',        // engagement depth social proof, not a user count
+  'heroChallenge',    // the curiosity gap prompt beside the map
+  'heroJoinPrompt',   // the door for a visitor who came to PLAY
+  'heroJoinAction',
+  'lowFrictionNote',  // no signup, no card, seconds to try
   'videoLabel',
+  'videoBody',
+  'videoStoryAction',
   'videoDuration',
 ] as const;
 
@@ -343,25 +347,43 @@ for (const [what, rel] of Object.entries(COMPONENTS)) {
   }
 }
 
-// ── G. The video opens in a keyboard operable dialog ─────────────────────────
+// ── G. The founder video plays inline, muted, and by itself ──────────────────
 //
-// A modal that traps a mouse user and strands a keyboard user is worse than no modal. The
-// native <dialog> is required rather than merely suggested: it is the only option that
-// brings focus containment, inertness of the page behind it, and Escape without a
-// hand-rolled focus trap that will be subtly wrong.
+// The rework replaced a poster-and-modal with an inline player. The contract this pins:
+//  • it is a real inline <video>, NOT a <dialog> (no modal, no window sliding in from an
+//    edge with its dismiss half off screen);
+//  • it starts MUTED — the one autoplay a browser allows without a gesture, and the one
+//    this site's rules permit (no sound until asked);
+//  • it does NOT carry the `autoplay` ATTRIBUTE: playback is driven by an
+//    IntersectionObserver so it only ever runs while it is on screen, and stops when it
+//    is not, rather than decoding video into an empty viewport;
+//  • there is an explicit control to turn the sound on, because the native mute toggle is
+//    a few pixels in a corner and this is the actual invitation to hear it;
+//  • under prefers-reduced-motion it does not autostart.
 
 {
   const video = read(COMPONENTS.video);
   if (video === null) {
-    check('G · the video lightbox could be scanned', false, COMPONENTS.video);
+    check('G · the founder video could be scanned', false, COMPONENTS.video);
   } else {
-    check('G · the lightbox is a native dialog', /<dialog[\s>]/i.test(video), '<dialog>');
-    check('G · the lightbox opens as a modal', /showModal\s*\(/.test(video), 'showModal()');
-    check('G · the lightbox closes on Escape', /['"]Escape['"]|\bclose\b/.test(video), 'Escape or close event');
-    check('G · the lightbox returns focus to its trigger', /\.focus\s*\(/.test(video), 'focus() on close');
-    // Nothing is fetched until the visitor asks for it: the poster is an image, the video's
-    // source is attached on open. `autoplay` would defeat the entire point of the poster.
-    check('G · the lightbox does not autoplay', !/\bautoplay\b/i.test(video), 'no autoplay');
+    check('G · it is inline, not a dialog', !/<dialog[\s>]/i.test(video), 'no <dialog>');
+    check('G · it renders a real <video>', /<video[\s>]/i.test(video), '<video>');
+    check('G · it starts muted', /\bmuted\b/.test(video), 'muted attribute');
+    check(
+      'G · playback is IntersectionObserver driven, not the autoplay attribute',
+      /IntersectionObserver/.test(video) && !/<video[^>]*\bautoplay\b/i.test(video),
+      'IntersectionObserver, no autoplay attr on <video>',
+    );
+    check(
+      'G · it offers an explicit control to turn on sound',
+      /muted\s*=\s*false/.test(video),
+      'unmute path',
+    );
+    check(
+      'G · it honours prefers-reduced-motion',
+      /prefers-reduced-motion/.test(video),
+      'reduced-motion branch',
+    );
   }
 }
 

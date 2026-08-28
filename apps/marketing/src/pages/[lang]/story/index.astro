@@ -2,6 +2,7 @@
 import PageLayout from '~/layouts/PageLayout.astro';
 import HeroText from '~/components/widgets/HeroText.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
+import TopoBackdrop from '~/components/TopoBackdrop.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, type Language } from '~/utils/i18n';
 import { pageContent } from '~/utils/pages';
@@ -22,8 +23,22 @@ const metadata = {
 };
 ---
 
+{/*
+  The story is chronological, so it is drawn as a ROUTE with stops on it: the
+  same dashed line and pins the homepage map and the "how it works" steps use, so
+  a reader arriving from either recognises the shape. It also solves the real
+  problem this page had, which was that it was a wall of text with nothing for
+  the eye to hold. There is no photography, so the structure IS the visual.
+  Change: marketing-home-front-door.
+*/}
+
 <PageLayout metadata={metadata} language={language} alternates={alternatesFor('story')}>
-  <HeroText title={t.headline} subtitle={t.intro} />
+  <div class="relative overflow-hidden">
+    <TopoBackdrop />
+    <div class="relative">
+      <HeroText title={t.headline} subtitle={t.intro} />
+    </div>
+  </div>
 
   {
     t.portrait && (
@@ -33,24 +48,109 @@ const metadata = {
     )
   }
 
-  <section class="px-4 py-8 sm:px-6 mx-auto max-w-3xl lg:px-8 lg:py-12">
-    {
-      t.sections.map((section) => (
-        <article class="mb-10">
-          <h2 class="text-2xl font-bold tracking-tight mb-4">{section.title}</h2>
-          {section.body.map((paragraph) => (
-            <p class="mb-4 text-muted dark:text-slate-400 text-lg leading-relaxed">{paragraph}</p>
-          ))}
-          {section.media && <Media class="mt-6" media={section.media} />}
-        </article>
-      ))
-    }
-    <p class="text-lg leading-relaxed font-medium">{t.closing}</p>
+  <section class="px-4 py-10 sm:px-6 mx-auto max-w-3xl lg:px-8 lg:py-14">
+    <ol class="rp-story-timeline">
+      {
+        t.sections.map((section, i) => (
+          <li class="rp-story-stop">
+            <div class="rp-story-marker" aria-hidden="true">
+              <span>{i + 1}</span>
+            </div>
+            <div class="rp-story-body">
+              <h2 class="mb-3 text-2xl font-bold tracking-tight text-heading">{section.title}</h2>
+              {section.body.map((paragraph) => (
+                <p class="mb-4 text-lg leading-relaxed text-muted">{paragraph}</p>
+              ))}
+              {section.media && <Media class="mt-6" media={section.media} />}
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+
+    <blockquote class="rp-story-closing">
+      <p>{t.closing}</p>
+    </blockquote>
   </section>
 
-  <CallToAction
-    actions={[
-      { variant: 'primary', text: t.action, href: 'https://creator.rush-point.com', target: '_blank' },
-    ]}
-  />
+  <div class="bg-surface-tint">
+    <CallToAction
+      actions={[
+        { variant: 'primary', text: t.action, href: 'https://creator.rush-point.com', target: '_blank' },
+      ]}
+    />
+  </div>
 </PageLayout>
+
+<style>
+  .rp-story-timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .rp-story-stop {
+    position: relative;
+    display: grid;
+    grid-template-columns: 2.75rem 1fr;
+    gap: 1.25rem;
+    padding-block-end: 2.75rem;
+  }
+
+  /* The route between the stops. A repeating gradient rather than a dashed
+     border, for the same reason the homepage steps use one: a border cannot set
+     its own dash length, so it would render a different rhythm at every zoom and
+     never match the line on the map. */
+  .rp-story-stop::before {
+    content: '';
+    position: absolute;
+    inset-block: 2.75rem 0;
+    inset-inline-start: 1.3rem;
+    width: 2px;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgb(255 87 34 / 55%) 0 6px,
+      transparent 6px 13px
+    );
+  }
+  .rp-story-stop:last-child::before {
+    display: none;
+  }
+
+  .rp-story-marker {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 9999px;
+    border: 2px solid var(--aw-color-primary);
+    background: rgb(255 87 34 / 10%);
+    color: var(--aw-color-secondary);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+  :global(.dark) .rp-story-marker {
+    background: rgb(255 87 34 / 18%);
+    color: var(--aw-color-primary);
+  }
+
+  .rp-story-body {
+    padding-block-start: 0.3rem;
+  }
+
+  .rp-story-closing {
+    margin: 1rem 0 0;
+    border-inline-start: 3px solid var(--aw-color-primary);
+    padding-block: 1rem;
+    padding-inline-start: 1.25rem;
+  }
+  .rp-story-closing p {
+    margin: 0;
+    font-size: 1.15rem;
+    line-height: 1.7;
+    font-weight: 500;
+    color: var(--aw-color-text-default);
+  }
+</style>

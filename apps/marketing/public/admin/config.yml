@@ -72,9 +72,13 @@ collections:
           # ומבקש יותר אמון ממה שהרוויח.
           - { label: 'פס אמון מתחת לכפתורים', name: heroTrust, widget: string, hint: 'עומק מעורבות, לא מספר משתמשים' }
           - { label: 'האתגר ליד המפה', name: heroChallenge, widget: string, hint: 'שאלה שגורמת לרצות לנסות' }
+          - { label: 'שאלה לשחקן שבא להצטרף', name: heroJoinPrompt, widget: string }
+          - { label: 'כפתור הצטרפות עם קוד', name: heroJoinAction, widget: string }
           - { label: 'המשפט מעל המשימה לניסיון', name: lowFrictionNote, widget: string, hint: 'מה לא צריך כדי לנסות' }
-          - { label: 'הכיתוב על תמונת הסרטון', name: videoLabel, widget: string }
-          - { label: 'אורך הסרטון', name: videoDuration, widget: string, hint: 'למשל 1:30' }
+          - { label: 'כותרת ליד הסרטון', name: videoLabel, widget: string }
+          - { label: 'טקסט ליד הסרטון', name: videoBody, widget: text }
+          - { label: 'קישור לסיפור המלא', name: videoStoryAction, widget: string }
+          - { label: 'אורך הסרטון', name: videoDuration, widget: string, hint: 'למשל 1:35' }
 
           - label: 'תמונה או סרטון בראש העמוד'
             name: hero
@@ -309,9 +313,13 @@ collections:
           # ומבקש יותר אמון ממה שהרוויח.
           - { label: 'פס אמון מתחת לכפתורים', name: heroTrust, widget: string, hint: 'עומק מעורבות, לא מספר משתמשים' }
           - { label: 'האתגר ליד המפה', name: heroChallenge, widget: string, hint: 'שאלה שגורמת לרצות לנסות' }
+          - { label: 'שאלה לשחקן שבא להצטרף', name: heroJoinPrompt, widget: string }
+          - { label: 'כפתור הצטרפות עם קוד', name: heroJoinAction, widget: string }
           - { label: 'המשפט מעל המשימה לניסיון', name: lowFrictionNote, widget: string, hint: 'מה לא צריך כדי לנסות' }
-          - { label: 'הכיתוב על תמונת הסרטון', name: videoLabel, widget: string }
-          - { label: 'אורך הסרטון', name: videoDuration, widget: string, hint: 'למשל 1:30' }
+          - { label: 'כותרת ליד הסרטון', name: videoLabel, widget: string }
+          - { label: 'טקסט ליד הסרטון', name: videoBody, widget: text }
+          - { label: 'קישור לסיפור המלא', name: videoStoryAction, widget: string }
+          - { label: 'אורך הסרטון', name: videoDuration, widget: string, hint: 'למשל 1:35' }
 
           - label: 'תמונה או סרטון בראש העמוד'
             name: hero

@@ -55,12 +55,14 @@ export interface Props {
   trust: string;
   /** The question under the phone. */
   challenge: string;
+  /** The door for a visitor who came to PLAY. `prompt` + a link. */
+  join?: { prompt: string; action: string; href: string };
   /** A real screen capture, if one exists. Absent means the drawn map. */
   clip?: MediaItem;
   id?: string;
 }
 
-const { tagline, headline, subhead, actions = [], trust, challenge, clip, id } = Astro.props;
+const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, id } = Astro.props;
 ---
 
 <section class="rp-hero relative overflow-hidden md:-mt-[76px]" {...id ? { id } : {}}>
@@ -100,7 +102,23 @@ const { tagline, headline, subhead, actions = [], trust, challenge, clip, id } =
           )
         }
 
-        <p class="mt-7 flex items-start justify-center gap-2.5 text-sm text-muted lg:justify-start">
+        {
+          join && (
+            <p class="mt-5 text-sm text-muted lg:text-start">
+              {join.prompt}{' '}
+              <a
+                class="rp-hero-join font-semibold text-secondary underline decoration-2 underline-offset-2 hover:text-primary dark:text-primary"
+                href={join.href}
+                target="_blank"
+                rel="noopener"
+              >
+                {join.action}
+              </a>
+            </p>
+          )
+        }
+
+        <p class="mt-6 flex items-start justify-center gap-2.5 text-sm text-muted lg:justify-start">
           <Icon name="tabler:users" class="mt-0.5 h-5 w-5 shrink-0 text-secondary dark:text-primary" />
           <span class="max-w-md text-start">{trust}</span>
         </p>
@@ -184,6 +202,19 @@ const { tagline, headline, subhead, actions = [], trust, challenge, clip, id } =
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /* A directional cue that points the way the language reads: `border-inline-start`
+     is the left edge in English (triangle points right) and the right edge in
+     Hebrew (points left), so one rule is correct in both. Drawn with borders so
+     it needs no glyph a font might not carry. */
+  .rp-hero-join::after {
+    content: '';
+    display: inline-block;
+    margin-inline-start: 0.35rem;
+    border: 0.3rem solid transparent;
+    border-inline-start-color: currentColor;
+    vertical-align: 0.08em;
   }
 </style>
 

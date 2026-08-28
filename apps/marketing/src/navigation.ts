@@ -31,6 +31,8 @@ interface Copy {
   contact: string;
   ideas: string;
   startBuilding: string;
+  /** For a visitor who came to PLAY, not to build: a door to the player app. */
+  joinGame: string;
   legal: string;
   terms: string;
   privacy: string;
@@ -48,17 +50,17 @@ interface Copy {
    */
   skipToContent: string;
   /**
-   * The explainer video's controls (change: marketing-home-cro-redesign).
+   * The founder video's controls (change: marketing-home-front-door).
    *
    * Chrome, not marketing copy, which is why they live here beside `toggleMenu`
-   * and not in the CMS: an author asked to translate "close the video" is being
+   * and not in the CMS: an author asked to translate "turn on sound" is being
    * asked to maintain a control, and a control they leave blank has no
-   * accessible name at all. The poster is a button showing a picture and the
-   * dismiss is an icon, so for anyone not looking at the screen these two
-   * strings ARE the entire interface.
+   * accessible name at all. The video plays muted on its own; these labels are
+   * the play affordance a reduced motion visitor sees and the unmute button
+   * everyone else does.
    */
   playVideo: string;
-  closeVideo: string;
+  unmuteVideo: string;
 }
 
 const COPY: Record<Language, Copy> = {
@@ -69,6 +71,7 @@ const COPY: Record<Language, Copy> = {
     contact: 'דברו איתנו',
     ideas: 'רעיונות לפי סוג אירוע',
     startBuilding: 'בונים משחק',
+    joinGame: 'יש לי קוד',
     legal: 'מידע משפטי',
     terms: 'תנאי שימוש',
     privacy: 'מדיניות פרטיות',
@@ -79,7 +82,7 @@ const COPY: Record<Language, Copy> = {
     mainNav: 'ניווט ראשי',
     skipToContent: 'דילוג לתוכן',
     playVideo: 'הפעלת הסרטון',
-    closeVideo: 'סגירת הסרטון',
+    unmuteVideo: 'הפעלת הקול',
   },
   en: {
     home: 'Home',
@@ -88,6 +91,7 @@ const COPY: Record<Language, Copy> = {
     contact: 'Contact',
     ideas: 'Ideas by occasion',
     startBuilding: 'Build a game',
+    joinGame: 'I have a code',
     legal: 'Legal',
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
@@ -98,7 +102,7 @@ const COPY: Record<Language, Copy> = {
     mainNav: 'Main navigation',
     skipToContent: 'Skip to content',
     playVideo: 'Play the video',
-    closeVideo: 'Close the video',
+    unmuteVideo: 'Turn on sound',
   },
 };
 
@@ -111,7 +115,7 @@ const COPY: Record<Language, Copy> = {
  */
 export const mediaLabels = (language: Language) => ({
   playVideo: COPY[language].playVideo,
-  closeVideo: COPY[language].closeVideo,
+  unmuteVideo: COPY[language].unmuteVideo,
 });
 
 /**
@@ -150,6 +154,11 @@ export const headerData = (language: Language, counterpartHref?: string) => {
         href: counterpartHref ?? pagePath(other, ''),
         variant: 'secondary' as const,
       },
+      // Two doors, always both visible. A creator pays and is the reason the
+      // product exists, so "build" is the emphasised one; but a participant who
+      // followed a link here and just wants to enter a code must not have to
+      // read a marketing page to find the way in.
+      { text: t.joinGame, href: `${PLAY_ORIGIN}/`, variant: 'tertiary' as const, target: '_blank' },
       { text: t.startBuilding, href: CREATOR_APP, target: '_blank' },
     ],
   };

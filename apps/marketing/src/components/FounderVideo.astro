@@ -1,0 +1,272 @@
+---
+/**
+ * The founder's explainer video, playing inline.
+ *
+ * WHAT THIS REPLACES. The first version was a poster card that opened a modal.
+ * Three things were wrong with it and all three were reported by the person
+ * whose site it is: the poster was an awkward crop of a face, the modal slid in
+ * from the top edge with its dismiss control half off screen, and nothing
+ * happened until you found and pressed a play button that pointed the wrong way.
+ * A founder talking to camera does not need a lightbox. It needs to just be
+ * there, and to start.
+ *
+ * HOW IT BEHAVES NOW.
+ *  • Muted, and it starts ON ITS OWN once it scrolls into view, via an
+ *    IntersectionObserver. Muted autoplay is the one kind a browser allows
+ *    without a gesture, and it is the kind this site's rules permit: no sound
+ *    until asked, and it pauses the moment it leaves the viewport so it is not
+ *    decoding video nobody is watching.
+ *  • It does NOT loop. It is ninety five seconds of someone explaining a thing;
+ *    a talking head restarting silently on a loop is unsettling. It plays once
+ *    and then rests on its last frame with the controls showing.
+ *  • A large "turn on sound" button sits over it while it is muted. The native
+ *    mute toggle is eight pixels wide in a corner; this is the actual invitation
+ *    to hear it, and it disappears once the sound is on.
+ *  • Under prefers-reduced-motion it does not autostart. The button reads "play"
+ *    instead, and pressing it starts playback with sound, since by then it is a
+ *    deliberate act.
+ *
+ * SHAPE. The file is 720x1280, a real 9:16 phone recording. It is shown at that
+ * ratio, not cropped into a wide box, which is what produced the "top of a head"
+ * poster. On a wide screen it sits beside the copy rather than alone, so a tall
+ * portrait video is not a tall lonely column.
+ *
+ * Change: marketing-home-front-door.
+ */
+import type { MediaItem } from '~/components/Media.astro';
+
+export interface Props {
+  media: MediaItem;
+  /** Running time, e.g. "1:35". Shown as a badge. */
+  duration: string;
+  labels: { playVideo: string; unmuteVideo: string };
+  class?: string;
+}
+
+const { media, duration, labels, class: className = '' } = Astro.props;
+---
+
+<div class={`rp-founder-video ${className}`} data-rp-video>
+  <div class="rp-fv-frame">
+    <video
+      class="rp-fv-el"
+      data-rp-video-el
+      src={media.src}
+      poster={media.poster}
+      aria-label={media.alt}
+      muted
+      playsinline
+      preload="metadata"
+      controls></video>
+
+    <button
+      type="button"
+      class="rp-fv-sound"
+      data-rp-sound
+      data-play-label={labels.playVideo}
+      data-sound-label={labels.unmuteVideo}
+      aria-label={labels.unmuteVideo}
+    >
+      <svg class="rp-fv-ico-muted" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M4 9v6h4l5 4V5L8 9H4z" />
+        <path d="M16 9l5 5M21 9l-5 5" stroke-linecap="round" />
+      </svg>
+      <svg class="rp-fv-ico-play" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M8 5v14l11-7z" />
+      </svg>
+      <span data-rp-sound-label>{labels.unmuteVideo}</span>
+    </button>
+
+    <span class="rp-fv-duration" aria-hidden="true">{duration}</span>
+  </div>
+</div>
+
+<style>
+  .rp-founder-video {
+    width: 100%;
+    max-width: 19rem;
+    margin-inline: auto;
+  }
+
+  .rp-fv-frame {
+    position: relative;
+    border-radius: 1.5rem;
+    overflow: hidden;
+    /* A real object, so a fixed near black in both themes. The video is 9:16 and
+       fills this exactly; the colour only shows for the instant before the first
+       frame paints. */
+    background: #14110d;
+    aspect-ratio: 9 / 16;
+    box-shadow:
+      0 2px 6px rgb(20 17 13 / 20%),
+      0 24px 50px -16px rgb(20 17 13 / 40%);
+  }
+
+  .rp-fv-el {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    /* contain, not cover: the frame already IS the video's ratio, so there is
+       nothing to crop, and a mismatch should letterbox rather than slice a face. */
+    object-fit: contain;
+    background: #14110d;
+  }
+
+  .rp-fv-sound {
+    position: absolute;
+    inset-inline: 0.9rem;
+    inset-block-end: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1rem;
+    border: 0;
+    border-radius: 9999px;
+    background: rgb(255 87 34 / 97%);
+    /* Dark text, not white: white on the brand orange is 3.16:1 and this label
+       is small. Near black on it is ~6:1, and dark on bright orange still pops
+       against a video whose brightness nothing here controls. Same call the
+       marketing theme test documents for the primary button. */
+    color: #14110d;
+    font-size: 0.95rem;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 8px 22px -6px rgb(20 17 13 / 55%);
+    transition: transform 0.15s ease, opacity 0.2s ease;
+  }
+  .rp-fv-sound:hover {
+    transform: translateY(-1px);
+  }
+
+  .rp-fv-sound svg {
+    width: 1.35rem;
+    height: 1.35rem;
+    fill: currentColor;
+    stroke: currentColor;
+    stroke-width: 2;
+    flex-shrink: 0;
+  }
+  /* The play glyph shows only under reduced motion, where the video is not
+     already running; the muted-speaker glyph is the default. Swapped by a data
+     attribute the script sets. */
+  .rp-fv-ico-play {
+    display: none;
+  }
+  [data-rp-mode='reduced'] .rp-fv-ico-muted {
+    display: none;
+  }
+  [data-rp-mode='reduced'] .rp-fv-ico-play {
+    display: block;
+  }
+
+  /* Once the sound is on the button has done its job. */
+  [data-rp-sound-on] .rp-fv-sound {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .rp-fv-duration {
+    position: absolute;
+    inset-block-start: 0.9rem;
+    inset-inline-end: 0.9rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    background: rgb(20 17 13 / 80%);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+  }
+
+  @media (max-width: 40rem) {
+    .rp-founder-video {
+      /* A 9:16 block at 90vw is taller than most phones. Bound it by height and
+         let the width follow. */
+      max-width: min(19rem, calc((100vh - 12rem) * 9 / 16));
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rp-fv-sound {
+      transition: opacity 0.2s ease;
+    }
+  }
+</style>
+
+<script>
+  // Dependency free and defensive, like the other islands here: a throw would
+  // leave a dead rectangle in the middle of the page.
+  function initFounderVideo(root: HTMLElement): void {
+    const video = root.querySelector<HTMLVideoElement>('[data-rp-video-el]');
+    const soundBtn = root.querySelector<HTMLButtonElement>('[data-rp-sound]');
+    const soundLabel = root.querySelector<HTMLElement>('[data-rp-sound-label]');
+    if (!video || !soundBtn) return;
+
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (reduced) {
+      // No autostart. The button becomes a plain play control that also brings
+      // sound, because pressing it is now a deliberate choice.
+      root.dataset.rpMode = 'reduced';
+      const playLabel = soundBtn.getAttribute('data-play-label');
+      if (playLabel) {
+        soundBtn.setAttribute('aria-label', playLabel);
+        if (soundLabel) soundLabel.textContent = playLabel;
+      }
+      soundBtn.addEventListener('click', () => {
+        video.muted = false;
+        void video.play().catch(() => {});
+        root.dataset.rpSoundOn = '1';
+      });
+      return;
+    }
+
+    // Autoplay muted only while it is actually on screen, and pause it the moment
+    // it is not. IntersectionObserver rather than a scroll listener so it costs
+    // nothing between crossings.
+    let started = false;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            void video.play().catch(() => {});
+            started = true;
+          } else if (started) {
+            video.pause();
+          }
+        }
+      },
+      { threshold: 0.5 },
+    );
+    io.observe(video);
+
+    soundBtn.addEventListener('click', () => {
+      video.muted = false;
+      if (video.paused) void video.play().catch(() => {});
+      root.dataset.rpSoundOn = '1';
+    });
+
+    // If the viewer unmutes through the native control instead, retire the
+    // overlay too, so it is never a stale invitation to do something already done.
+    video.addEventListener('volumechange', () => {
+      if (!video.muted) root.dataset.rpSoundOn = '1';
+    });
+  }
+
+  const boot = () => {
+    document.querySelectorAll<HTMLElement>('[data-rp-video]').forEach((el) => {
+      if (el.dataset.rpBooted) return;
+      el.dataset.rpBooted = '1';
+      try {
+        initFounderVideo(el);
+      } catch {
+        /* leave the video as a plain element */
+      }
+    });
+  };
+  boot();
+  document.addEventListener('astro:page-load', boot);
+</script>

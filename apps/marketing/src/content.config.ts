@@ -160,11 +160,18 @@ const homePages = defineCollection({
     heroTrust: z.string(),
     /** The curiosity gap beside the hero map: a challenge, not a caption. */
     heroChallenge: z.string(),
+    /** The door for a visitor who came to PLAY, shown under the hero CTAs. */
+    heroJoinPrompt: z.string(),
+    heroJoinAction: z.string(),
     /** Friction reduction, immediately above the playable mission. */
     lowFrictionNote: z.string(),
-    /** The one line label on the explainer video's poster card. */
+    /** The heading beside the founder video. */
     videoLabel: z.string(),
-    /** Its running time, e.g. `1:30`. Shown as a badge on the poster. */
+    /** Two or three lines beside the founder video. */
+    videoBody: z.string(),
+    /** The link from the video section to the full story page. */
+    videoStoryAction: z.string(),
+    /** The video's running time, e.g. `1:35`. Shown as a badge. */
     videoDuration: z.string(),
 
     featuresTagline: z.string(),
