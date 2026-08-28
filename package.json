@@ -98,6 +98,8 @@
         "diagnose:task-media": "node scripts/diagnose-task-media.mjs",
         "measure:location": "node scripts/measure-location-cost.mjs",
         "preflight": "tsx scripts/preflight-game.ts",
+        "//simulate:prod": "SPENDS REAL FIRESTORE QUOTA (~34,000 reads for 120 teams) and writes real production data. The Spark day is 50,000 reads and resets 07:00 UTC. Run it early in a fresh quota day, never on the day of a real event.",
+        "simulate:prod": "bash scripts/run-prod-sim.sh",
         "fsops:report": "node scripts/fs-ops-report.mjs",
         "i18n:check": "tsx scripts/check-i18n.ts",
         "i18n:check:strict": "tsx scripts/check-i18n.ts --strict",
