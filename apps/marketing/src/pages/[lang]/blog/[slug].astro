@@ -4,6 +4,7 @@ import { render } from 'astro:content';
 import PageLayout from '~/layouts/PageLayout.astro';
 import Image from '~/components/common/Image.astro';
 import Media from '~/components/Media.astro';
+import DevlogSeries from '~/components/blog/DevlogSeries.astro';
 import { findImage } from '~/utils/images';
 
 import { pagePath, OG_LOCALE, SITE_ORIGIN, type Language } from '~/utils/i18n';
@@ -26,6 +27,18 @@ const t = blogCopy[language];
 
 const { Content } = await render(post);
 const alternates = await alternatesOfPost(post);
+
+/**
+ * The categories that are an ongoing SERIES rather than a standalone post. A
+ * post in one of these gets the series rail linking every part; anything else
+ * renders exactly as before. Declared per language, because the category string
+ * a Hebrew post carries is itself Hebrew.
+ */
+const SERIES_CATEGORIES: Record<Language, readonly string[]> = {
+  he: ['יומן בנייה'],
+  en: ['Build log'],
+};
+const isSeriesPost = Boolean(post.data.category && SERIES_CATEGORIES[language].includes(post.data.category));
 
 const metadata = {
   title: post.data.title,
@@ -119,6 +132,12 @@ const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB'
         // third-party embed. Sits after the opening text — an addition to the
         // post, never a prerequisite for reading it.
         <Media class="mb-8" media={post.data.media} />
+      )
+    }
+
+    {
+      isSeriesPost && post.data.category && (
+        <DevlogSeries language={language} currentSlug={post.data.slug} category={post.data.category} />
       )
     }
 
