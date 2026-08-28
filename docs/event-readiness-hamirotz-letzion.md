@@ -6,8 +6,19 @@ Prepared 2026-08-27/28. Source game: `users/FkAP7tr1BAa33lJU7AMuNlIbOnp1/games/F
 Reproduce every number below with:
 
 ```bash
-npx tsx scripts/preflight-game.ts <game.json> --teams=120 --minutes=120
+npm run preflight -- <game.json> --teams=120 --minutes=120
 ```
+
+To get `<game.json>` for a game that lives in production, dump it with the Admin SDK on the
+VPS (read only, no writes):
+
+```bash
+ssh root@31.70.107.184 'docker exec rushpoint-api-1 node /app/dump.cjs' > game.json
+```
+
+Re-run the pre-flight after changing anything in the Builder: it reads the authored game, so
+it will tell you immediately whether a widened geofence or a raised station cap actually fixed
+what it was flagging.
 
 ---
 
