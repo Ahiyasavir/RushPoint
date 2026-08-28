@@ -6,6 +6,7 @@ import Steps from '~/components/widgets/Steps.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
 import TryMission from '~/components/widgets/TryMission.astro';
 import MissionIdeas from '~/components/widgets/MissionIdeas.astro';
+import GamePlanner from '~/components/widgets/GamePlanner.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
 import { landingPageUrl } from '~/navigation';
@@ -77,6 +78,14 @@ const metadata = {
       WRITE. This answers it with ideas they can use as they are, signed up or not.
     */
     t.missionIdeas && <MissionIdeas content={t.missionIdeas} />
+  }
+
+  {
+    /*
+      And the question that decides whether the day works at all: how many stations. Same
+      capacity model scripts/preflight-game.ts runs against a real game before an event.
+    */
+    t.gamePlanner && <GamePlanner content={t.gamePlanner} />
   }
 
   {

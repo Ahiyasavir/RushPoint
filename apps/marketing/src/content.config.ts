@@ -243,6 +243,36 @@ const homePages = defineCollection({
           .min(3),
       })
       .optional(),
+
+    // The station planner (change: game-planner). Optional like the other two islands.
+    // The numeric defaults are content so a creator can point the tool at the kind of event
+    // they actually run, without a deploy.
+    gamePlanner: z
+      .object({
+        tagline: z.string().optional(),
+        title: z.string(),
+        subtitle: z.string(),
+        fieldLabels: z.object({
+          teams: z.string(),
+          minutes: z.string(),
+          missions: z.string(),
+          perMission: z.string(),
+          capacity: z.string(),
+        }),
+        defaultTeams: z.number().int().positive(),
+        defaultMinutes: z.number().int().positive(),
+        defaultMissions: z.number().int().positive(),
+        defaultPerMission: z.number().int().positive(),
+        defaultCapacity: z.number().int().positive(),
+        outputTitle: z.string(),
+        stationsLabel: z.string(),
+        durationLabel: z.string(),
+        throughputLabel: z.string(),
+        verdictOk: z.string(),
+        verdictTight: z.string(),
+        note: z.string(),
+      })
+      .optional(),
   }),
 });
 

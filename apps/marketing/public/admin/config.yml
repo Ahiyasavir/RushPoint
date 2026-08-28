@@ -222,6 +222,38 @@ collections:
                   - { label: 'הרעיון עצמו', name: text, widget: text }
                   - { label: 'מתאים לאירועים', name: occasions, widget: list, field: { label: 'מזהה', name: occasion, widget: string }, required: false }
                   - { label: 'מתאים למקומות', name: places, widget: list, field: { label: 'מזהה', name: place, widget: string }, required: false }
+          - label: 'מחשבון התחנות'
+            name: gamePlanner
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              המבקר מזיז מחוונים ורואה כמה תחנות צריך. אפשר להשאיר ריק והקטע לא יופיע.
+            fields:
+              - { label: 'תגית קטנה', name: tagline, widget: string, required: false }
+              - { label: 'כותרת הקטע', name: title, widget: string }
+              - { label: 'משפט מתחת לכותרת', name: subtitle, widget: text }
+              - label: 'שמות המחוונים'
+                name: fieldLabels
+                widget: object
+                fields:
+                  - { label: 'מחוון הקבוצות', name: teams, widget: string }
+                  - { label: 'מחוון הזמן', name: minutes, widget: string }
+                  - { label: 'מחוון המשימות', name: missions, widget: string }
+                  - { label: 'מחוון משך משימה', name: perMission, widget: string }
+                  - { label: 'מחוון קיבולת תחנה', name: capacity, widget: string }
+              - { label: 'ברירת מחדל: קבוצות', name: defaultTeams, widget: number, value_type: int }
+              - { label: 'ברירת מחדל: דקות', name: defaultMinutes, widget: number, value_type: int }
+              - { label: 'ברירת מחדל: משימות', name: defaultMissions, widget: number, value_type: int }
+              - { label: 'ברירת מחדל: דקות למשימה', name: defaultPerMission, widget: number, value_type: int }
+              - { label: 'ברירת מחדל: קיבולת', name: defaultCapacity, widget: number, value_type: int }
+              - { label: 'כותרת התוצאה', name: outputTitle, widget: string }
+              - { label: 'תווית התחנות', name: stationsLabel, widget: string }
+              - { label: 'תווית הזמן', name: durationLabel, widget: string }
+              - { label: 'תווית הקצב', name: throughputLabel, widget: string }
+              - { label: 'מה כתוב כשזה מסתדר', name: verdictOk, widget: text }
+              - { label: 'מה כתוב כשזה צפוף', name: verdictTight, widget: text }
+              - { label: 'הערה מתחת לתוצאה', name: note, widget: text }
 
       - name: home-en
         label: 'עמוד הבית (English)'
@@ -392,6 +424,38 @@ collections:
                   - { label: 'The idea itself', name: text, widget: text }
                   - { label: 'Fits these occasions', name: occasions, widget: list, field: { label: 'Id', name: occasion, widget: string }, required: false }
                   - { label: 'Fits these places', name: places, widget: list, field: { label: 'Id', name: place, widget: string }, required: false }
+          - label: 'Station planner'
+            name: gamePlanner
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              The visitor moves sliders and sees how many stations are needed. Leave it empty and the section does not appear.
+            fields:
+              - { label: 'Small tagline', name: tagline, widget: string, required: false }
+              - { label: 'Section title', name: title, widget: string }
+              - { label: 'Sentence under the title', name: subtitle, widget: text }
+              - label: 'Slider labels'
+                name: fieldLabels
+                widget: object
+                fields:
+                  - { label: 'Teams slider', name: teams, widget: string }
+                  - { label: 'Time slider', name: minutes, widget: string }
+                  - { label: 'Missions slider', name: missions, widget: string }
+                  - { label: 'Mission length slider', name: perMission, widget: string }
+                  - { label: 'Station capacity slider', name: capacity, widget: string }
+              - { label: 'Default: teams', name: defaultTeams, widget: number, value_type: int }
+              - { label: 'Default: minutes', name: defaultMinutes, widget: number, value_type: int }
+              - { label: 'Default: missions', name: defaultMissions, widget: number, value_type: int }
+              - { label: 'Default: minutes per mission', name: defaultPerMission, widget: number, value_type: int }
+              - { label: 'Default: capacity', name: defaultCapacity, widget: number, value_type: int }
+              - { label: 'Result heading', name: outputTitle, widget: string }
+              - { label: 'Stations label', name: stationsLabel, widget: string }
+              - { label: 'Duration label', name: durationLabel, widget: string }
+              - { label: 'Throughput label', name: throughputLabel, widget: string }
+              - { label: 'Text when the plan works', name: verdictOk, widget: text }
+              - { label: 'Text when the plan is tight', name: verdictTight, widget: text }
+              - { label: 'Note under the result', name: note, widget: text }
 
       - name: story-he
         label: 'הסיפור שלי (עברית)'

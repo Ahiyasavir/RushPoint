@@ -445,5 +445,29 @@
         "kindLabel": "Speech mission"
       }
     ]
+  },
+  "gamePlanner": {
+    "tagline": "The sum nobody does in advance",
+    "title": "How many stations do you actually need?",
+    "subtitle": "A field game’s ceiling is not the software, it is how many teams can be at a mission at once. Move the sliders and see.",
+    "fieldLabels": {
+      "teams": "How many teams",
+      "minutes": "How long you have (minutes)",
+      "missions": "Missions each team completes",
+      "perMission": "Minutes per mission",
+      "capacity": "Teams at one station at once"
+    },
+    "defaultTeams": 60,
+    "defaultMinutes": 120,
+    "defaultMissions": 8,
+    "defaultPerMission": 8,
+    "defaultCapacity": 3,
+    "outputTitle": "What that gives you",
+    "stationsLabel": "separate stations needed to finish in time",
+    "durationLabel": "minutes in practice",
+    "throughputLabel": "teams per minute",
+    "verdictOk": "This works. The number of stations is reasonable next to the number of missions you planned.",
+    "verdictTight": "This is tight. You need more stations than is reasonable to build. Add time, cut missions per team, or let more teams share a station.",
+    "note": "A plain capacity sum: each station clears its team count divided by the mission length. A real game also has walking between stations, so treat this as a floor rather than a ceiling."
   }
 }

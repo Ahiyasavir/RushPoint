@@ -321,3 +321,37 @@ export interface MissionIdeas {
   content: MissionIdeasContent;
   id?: string;
 }
+
+/**
+ * The station planner (change: game-planner). The numeric defaults are content so the tool can
+ * be pointed at the kind of event a given site actually runs.
+ */
+export interface GamePlannerContent {
+  tagline?: string;
+  title: string;
+  subtitle: string;
+  fieldLabels: {
+    teams: string;
+    minutes: string;
+    missions: string;
+    perMission: string;
+    capacity: string;
+  };
+  defaultTeams: number;
+  defaultMinutes: number;
+  defaultMissions: number;
+  defaultPerMission: number;
+  defaultCapacity: number;
+  outputTitle: string;
+  stationsLabel: string;
+  durationLabel: string;
+  throughputLabel: string;
+  verdictOk: string;
+  verdictTight: string;
+  note: string;
+}
+
+export interface GamePlanner {
+  content: GamePlannerContent;
+  id?: string;
+}

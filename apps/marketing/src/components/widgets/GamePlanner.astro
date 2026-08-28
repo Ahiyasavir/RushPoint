@@ -1,0 +1,197 @@
+---
+/**
+ * "How many stations do I need, and how long will this take?"
+ *
+ * WHY THIS EXISTS. This is the question that decides whether an event works, and almost nobody
+ * asks it until the day. A field game's ceiling is not the software, it is how many teams can be
+ * AT a mission at once: with 100 teams and eight stations that each hold three teams for ten
+ * minutes, the field simply cannot clear, and no amount of good routing fixes it. That is a
+ * property of arithmetic, and it is the single most useful thing this site can tell someone who
+ * is planning.
+ *
+ * The maths is the same model `scripts/preflight-game.ts` runs against a real authored game
+ * before an event: a stage's ceiling is the sum over its missions of `capacity / duration`, in
+ * teams per minute. Here it is one uniform station type, which is the honest simplification for
+ * a planning tool and is stated as such in the copy.
+ *
+ * It is useful WITHOUT the product. Someone planning a game on paper gets a real answer, which
+ * is the point — see MissionIdeas.astro for the same argument.
+ *
+ * Same constraints as the other two islands: no framework, no network, every string from the
+ * per-language JSON, RTL by construction, and it removes itself rather than rendering broken.
+ */
+import type { GamePlanner as Props } from '~/types';
+
+const { content, id = 'planner' } = Astro.props as Props;
+---
+
+<section id={id} class="px-4 py-16 sm:px-6 mx-auto max-w-4xl lg:px-8">
+  <div class="text-center mb-10">
+    {content.tagline && (
+      <p class="text-base font-bold tracking-wide uppercase text-secondary mb-2">{content.tagline}</p>
+    )}
+    <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-3">{content.title}</h2>
+    <p class="text-lg text-muted dark:text-slate-400 max-w-2xl mx-auto">{content.subtitle}</p>
+  </div>
+
+  <div
+    class="rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg overflow-hidden"
+    data-rp-planner
+    data-copy={JSON.stringify(content)}
+  >
+    <div class="grid gap-0 md:grid-cols-2">
+      <div class="p-5 sm:p-8 md:border-e border-gray-200 dark:border-slate-700">
+        <div data-rp-inputs class="flex flex-col gap-6"></div>
+      </div>
+
+      <div class="p-5 sm:p-8 bg-slate-50 dark:bg-slate-800/50">
+        <p class="text-sm font-bold uppercase tracking-wide text-secondary mb-4" data-rp-out-title></p>
+
+        <div class="mb-5">
+          <p class="text-5xl font-bold text-primary tabular-nums" data-rp-stations></p>
+          <p class="text-sm text-muted dark:text-slate-400" data-rp-stations-label></p>
+        </div>
+
+        <dl class="grid grid-cols-2 gap-4 mb-5">
+          <div>
+            <dt class="text-xs text-muted dark:text-slate-400" data-rp-duration-label></dt>
+            <dd class="text-2xl font-bold tabular-nums" data-rp-duration></dd>
+          </div>
+          <div>
+            <dt class="text-xs text-muted dark:text-slate-400" data-rp-throughput-label></dt>
+            <dd class="text-2xl font-bold tabular-nums" data-rp-throughput></dd>
+          </div>
+        </dl>
+
+        <p class="text-sm rounded-lg p-3" data-rp-verdict role="status"></p>
+        <p class="mt-4 text-xs text-muted dark:text-slate-500" data-rp-note></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .rp-field label { display: block; font-size: 0.9rem; font-weight: 700; margin-bottom: 0.4rem; }
+  .rp-field .rp-row { display: flex; align-items: center; gap: 0.75rem; }
+  .rp-field input[type='range'] { flex: 1; accent-color: var(--aw-color-primary, rgb(37 99 235)); }
+  .rp-value {
+    min-width: 3.5rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background: rgb(241 245 249);
+  }
+  :global(.dark) .rp-value { background: rgb(30 41 59); }
+  .rp-ok   { background: color-mix(in srgb, rgb(22 163 74) 12%, transparent); color: rgb(21 128 61); }
+  .rp-warn { background: color-mix(in srgb, rgb(217 119 6) 15%, transparent); color: rgb(146 64 14); }
+  :global(.dark) .rp-ok   { color: rgb(134 239 172); }
+  :global(.dark) .rp-warn { color: rgb(253 224 71); }
+</style>
+
+<script>
+  type Bag = Record<string, unknown>;
+
+  function initPlanner(root: HTMLElement) {
+    let copy: Bag;
+    try {
+      copy = JSON.parse(root.dataset.copy ?? '{}');
+    } catch {
+      root.closest('section')?.remove();
+      return;
+    }
+    const q = (s: string) => root.querySelector(s) as HTMLElement | null;
+    const str = (v: unknown, d = '') => (typeof v === 'string' ? v : d);
+    const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+
+    // Each control declares its own bounds so they are content, not magic numbers in code.
+    const FIELDS = [
+      { key: 'teams', min: 4, max: 200, step: 2, value: num(copy.defaultTeams, 60) },
+      { key: 'minutes', min: 30, max: 240, step: 15, value: num(copy.defaultMinutes, 120) },
+      { key: 'missions', min: 1, max: 15, step: 1, value: num(copy.defaultMissions, 8) },
+      { key: 'perMission', min: 2, max: 30, step: 1, value: num(copy.defaultPerMission, 8) },
+      { key: 'capacity', min: 1, max: 12, step: 1, value: num(copy.defaultCapacity, 3) },
+    ] as const;
+    const state: Record<string, number> = {};
+    for (const f of FIELDS) state[f.key] = f.value;
+
+    const labels = (copy.fieldLabels ?? {}) as Record<string, string>;
+
+    function buildInputs() {
+      const host = q('[data-rp-inputs]')!;
+      host.innerHTML = '';
+      for (const f of FIELDS) {
+        const wrap = document.createElement('div');
+        wrap.className = 'rp-field';
+        const id = `rp-plan-${f.key}`;
+        const label = document.createElement('label');
+        label.setAttribute('for', id);
+        label.textContent = labels[f.key] ?? f.key;
+        const row = document.createElement('div');
+        row.className = 'rp-row';
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.id = id;
+        input.min = String(f.min); input.max = String(f.max); input.step = String(f.step);
+        input.value = String(state[f.key]);
+        const out = document.createElement('output');
+        out.className = 'rp-value';
+        out.htmlFor = id;
+        out.textContent = String(state[f.key]);
+        input.addEventListener('input', () => {
+          state[f.key] = Number(input.value);
+          out.textContent = input.value;
+          compute();
+        });
+        row.append(input, out);
+        wrap.append(label, row);
+        host.appendChild(wrap);
+      }
+    }
+
+    function compute() {
+      const { teams, minutes, missions, perMission, capacity } = state;
+
+      // Total mission completions the field has to produce.
+      const completions = teams * missions;
+      // One station yields `capacity` teams every `perMission` minutes.
+      const perStationPerMin = capacity / Math.max(perMission, 1);
+      // Stations needed to clear the field inside the window.
+      const needed = Math.max(1, Math.ceil(completions / Math.max(minutes, 1) / perStationPerMin));
+      // What that many stations actually take, which is the window by construction; the useful
+      // number is how long the field takes if the planner builds exactly `needed` stations.
+      const durationMin = completions / (needed * perStationPerMin);
+      const throughput = needed * perStationPerMin;
+
+      q('[data-rp-stations]')!.textContent = String(needed);
+      q('[data-rp-duration]')!.textContent = `${Math.round(durationMin)}`;
+      q('[data-rp-throughput]')!.textContent = throughput.toFixed(1);
+
+      const verdict = q('[data-rp-verdict]')!;
+      // A plan needing more stations than the creator has missions is the real failure mode,
+      // and it is worth saying out loud rather than implying with a number.
+      const tight = needed > missions * 2;
+      verdict.textContent = tight ? str(copy.verdictTight) : str(copy.verdictOk);
+      verdict.className = `text-sm rounded-lg p-3 ${tight ? 'rp-warn' : 'rp-ok'}`;
+    }
+
+    q('[data-rp-out-title]')!.textContent = str(copy.outputTitle);
+    q('[data-rp-stations-label]')!.textContent = str(copy.stationsLabel);
+    q('[data-rp-duration-label]')!.textContent = str(copy.durationLabel);
+    q('[data-rp-throughput-label]')!.textContent = str(copy.throughputLabel);
+    q('[data-rp-note]')!.textContent = str(copy.note);
+    buildInputs();
+    compute();
+  }
+
+  const bootPlanner = () => {
+    document.querySelectorAll<HTMLElement>('[data-rp-planner]').forEach((el) => {
+      if (el.dataset.rpBooted) return;
+      el.dataset.rpBooted = '1';
+      try { initPlanner(el); } catch { el.closest('section')?.remove(); }
+    });
+  };
+  bootPlanner();
+  document.addEventListener('astro:page-load', bootPlanner);
+</script>
