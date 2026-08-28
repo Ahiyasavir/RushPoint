@@ -343,3 +343,55 @@ and the per-call costs above. What the full pass adds is confirmation that the p
 at the real number, which is worth having before an event and is not worth breaking the live site
 for tonight.
 
+---
+
+## 10. Join latency: 12 seconds down to 1.2
+
+The 120 team rehearsal in section 8 got everybody in, but slowly:
+
+```
+joinRun   p50 = 12,140ms    p95 = 38,776ms    max = 56,092ms
+```
+
+At an event that is the FIRST thing that happens, and a participant watching a spinner for the
+better part of a minute assumes it is broken and taps again, which makes it worse.
+
+The cause was the shape of the write, not the retry. `joinRun` enforced the capacity cap with a
+read-modify-write transaction on the ONE run document, so every simultaneous join contended for
+the same lock. Benchmarked against real Firestore, 120 simultaneous writers on one document:
+
+| write shape | p50 | writes that landed |
+|---|---|---|
+| transaction (what joinRun did) | 10,671 ms | **36 of 120** |
+| atomic increment | 1,258 ms | 120 of 120 |
+| sharded increment (10 shards) | 798 ms | 120 of 120 |
+
+The transaction did not merely queue: once its internal retries ran out it **dropped most of the
+writes**. Production survived only because `withLockRetry` caught the aborts and retried them,
+which is precisely where the twelve seconds came from. Wrapping it was the right emergency fix
+and the wrong permanent one.
+
+`joinRun` now reads the run once, checks both ceilings, and moves the counters with
+`FieldValue.increment` — commutative, so Firestore applies it with no read, no lock and nothing
+to retry. Idempotency moved to `teamRef.create()`, which fails on the team's own document and
+contends with nothing.
+
+**Re-measured against production, same 120 team burst:**
+
+```
+joinRun   p50 = 1,155ms     p95 = 2,730ms     max = 2,844ms
+```
+
+10.5x faster at the median, 20x at the worst case. And correct: `participantCount` = 120,
+`deviceCount` = 120, actual team documents = 120. Every increment landed.
+
+Sharding would be faster again (798 ms) and was deliberately not bought: it costs a shard read
+on every capacity check plus a rollup for anything displaying the count, to save time nobody
+perceives. It is the next lever if a run ever needs to admit thousands.
+
+**One trade, stated plainly.** The cap is now checked against a value read a moment before the
+increment, so a simultaneous burst can overshoot by at most the number of joins in flight. That
+is right here and would not be everywhere: the ceiling is a safety limit matched to measured
+server capacity, payments are off, and admitting a few past 150 costs nothing while turning a
+real participant away at a real event costs a great deal.
+
