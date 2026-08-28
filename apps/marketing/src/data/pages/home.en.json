@@ -469,5 +469,40 @@
     "verdictOk": "This works. The number of stations is reasonable next to the number of missions you planned.",
     "verdictTight": "This is tight. You need more stations than is reasonable to build. Add time, cut missions per team, or let more teams share a station.",
     "note": "A plain capacity sum: each station clears its team count divided by the mission length. A real game also has walking between stations, so treat this as a floor rather than a ceiling."
-  }
+  },
+  "faqTitle": "The questions people ask before they start",
+  "faqs": [
+    {
+      "title": "Do players need to install an app?",
+      "description": "No. Players open a link in their phone browser and start. No app store, no signup, no password. Anyone who wants to can add it to their home screen, but nobody has to."
+    },
+    {
+      "title": "What happens where there is no signal?",
+      "description": "The app keeps working. It holds the state on the device, shows that the connection is gone, and syncs the moment it returns. Missions that do not need a location can be solved offline."
+    },
+    {
+      "title": "What does it cost?",
+      "description": "Playing is free. You can run a real game with real teams without paying and without leaving payment details."
+    },
+    {
+      "title": "How many teams can I run?",
+      "description": "A free run is capped at one hundred participants. If you are planning more than that, it is worth checking in advance rather than on the day."
+    },
+    {
+      "title": "Who scores the missions?",
+      "description": "The server. Time, location and answers are checked automatically and the board updates within seconds. Photo and video missions are the only ones that wait for a person, and you can set those to approve themselves too."
+    },
+    {
+      "title": "How do I know where the teams are?",
+      "description": "There is a live console with a map, a table, distress alerts and a chat with each team. You can pause a station mid game, award a bonus, or skip one mission for one team without touching anyone else."
+    },
+    {
+      "title": "What about safety with children?",
+      "description": "You can draw an allowed area and the system flags a team that leaves it. There is a distress button that reaches staff with the location attached. There is also a guardian consent step for groups that need one."
+    },
+    {
+      "title": "How long does it take to build a game?",
+      "description": "A sensible first game takes about half an hour. You can also start from a ready template and edit it, or answer a few questions about your event and let the system assemble one for you."
+    }
+  ]
 }

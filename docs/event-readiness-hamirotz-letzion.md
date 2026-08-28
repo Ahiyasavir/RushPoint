@@ -105,7 +105,15 @@ Note the second is `captureKind: 'video'`, not a photo — participants record a
 
 ## 5. Recommended changes before the event
 
-In priority order, all in the Builder, all quick:
+In priority order:
+
+0. **Raise the participant cap before launching.** `FREE_MODE_MAX_PARTICIPANTS = 100` in
+   `packages/shared/src/freeMode.ts` is stamped onto the run at launch and cannot be changed
+   afterwards. At ~100 teams that is zero headroom. This is the only item on this list that is
+   a code change and a deploy rather than a Builder edit, and the only one that cannot be fixed
+   on the day.
+
+The rest are in the Builder and quick:
 
 1. **Widen the finish-line geofence** (`שולחן השופטים וסיום המסלול`) from 10 m to ~30 m.
 2. **Widen** `מכתב לישעיהו הנביא` (4 m) and `תעודת יינן מבית ראשון` (5 m) to ~25 m.
@@ -233,9 +241,17 @@ Teams 101–120 were refused with `resource-exhausted`:
 
 > This free run is full (100 participants max). The host can add an Event Credit or go Pro for more.
 
-**This matters for the event.** A free run caps at **100 participants**, and ~100 teams means
-zero headroom — one extra phone and someone is turned away. Launch with an Event Credit or Pro
-if the field might exceed 100.
+**This matters for the event, and the fix must happen BEFORE the run is launched.** The cap is
+`FREE_MODE_MAX_PARTICIPANTS = 100` in `packages/shared/src/freeMode.ts`. Payments are off
+(`PAYMENTS_ENABLED = false`), so **every** run gets that number regardless of plan: an Event
+Credit or Pro does not raise it, because that branch is never reached while payments are off.
+
+The value is **stamped onto `run.maxParticipants` at launch**, so changing it afterwards does
+nothing for a run already in flight. With ~100 teams expected there is zero headroom: one extra
+phone, or one team rejoining on a second device, and somebody is turned away with
+`resource-exhausted`.
+
+Raise it to about 130, deploy, and only then launch the run.
 
 ### What the run measured
 

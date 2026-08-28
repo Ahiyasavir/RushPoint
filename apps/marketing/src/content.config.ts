@@ -273,6 +273,11 @@ const homePages = defineCollection({
         note: z.string(),
       })
       .optional(),
+
+    // The questions that stop someone trying this (change: home-faq). Optional, and empty
+    // renders nothing rather than an empty heading.
+    faqTitle: z.string().optional(),
+    faqs: z.array(z.object({ title: z.string(), description: z.string() })).default([]),
   }),
 });
 

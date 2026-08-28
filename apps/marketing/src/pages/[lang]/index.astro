@@ -7,6 +7,7 @@ import CallToAction from '~/components/widgets/CallToAction.astro';
 import TryMission from '~/components/widgets/TryMission.astro';
 import MissionIdeas from '~/components/widgets/MissionIdeas.astro';
 import GamePlanner from '~/components/widgets/GamePlanner.astro';
+import FAQs from '~/components/widgets/FAQs.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
 import { landingPageUrl } from '~/navigation';
@@ -86,6 +87,15 @@ const metadata = {
       capacity model scripts/preflight-game.ts runs against a real game before an event.
     */
     t.gamePlanner && <GamePlanner content={t.gamePlanner} />
+  }
+
+  {
+    /*
+      Objections, answered plainly. Where there is a real limit (a free run caps at a hundred
+      participants) the limit is stated rather than dodged: someone who finds it out on the day
+      of their event is a worse outcome than someone who reads it here and plans around it.
+    */
+    t.faqs.length > 0 && <FAQs title={t.faqTitle} items={t.faqs} columns={2} />
   }
 
   {

@@ -254,6 +254,16 @@ collections:
               - { label: 'מה כתוב כשזה מסתדר', name: verdictOk, widget: text }
               - { label: 'מה כתוב כשזה צפוף', name: verdictTight, widget: text }
               - { label: 'הערה מתחת לתוצאה', name: note, widget: text }
+          - { label: 'כותרת השאלות הנפוצות', name: faqTitle, widget: string, required: false }
+          - label: 'שאלות נפוצות'
+            name: faqs
+            widget: list
+            required: false
+            hint: >-
+              שאלות שעוצרות אנשים לפני שהם מתחילים. עדיף לענות ישר, גם כשהתשובה היא מגבלה.
+            fields:
+              - { label: 'השאלה', name: title, widget: string }
+              - { label: 'התשובה', name: description, widget: text }
 
       - name: home-en
         label: 'עמוד הבית (English)'
@@ -456,6 +466,17 @@ collections:
               - { label: 'Text when the plan works', name: verdictOk, widget: text }
               - { label: 'Text when the plan is tight', name: verdictTight, widget: text }
               - { label: 'Note under the result', name: note, widget: text }
+          - { label: 'FAQ heading', name: faqTitle, widget: string, required: false }
+          - label: 'Frequently asked questions'
+            name: faqs
+            widget: list
+            required: false
+            hint: >-
+              The questions that stop people before they start. Answer them straight, including
+              when the answer is a limit.
+            fields:
+              - { label: 'The question', name: title, widget: string }
+              - { label: 'The answer', name: description, widget: text }
 
       - name: story-he
         label: 'הסיפור שלי (עברית)'
