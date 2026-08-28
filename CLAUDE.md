@@ -614,8 +614,12 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   to **play-web**, which returns 200 with its own SPA HTML → the live creator console is a **blank
   page**. **(b) backend clobber** — `isEmulatorBuild` (`packages/shared/src/env.ts`) is
   `DEV || MODE === 'playtest'`, so ONLY the playtest bundle keeps the emulator wiring; `play:build`'s
-  production bundle points participants' phones at real Firebase, where anonymous auth is disabled
-  (`auth/admin-restricted-operation`) and nobody can join. Fixed structurally: `--mode playtest`
+  production bundle points participants' phones at real Firebase rather than at the emulator the
+  playtest is actually running. (At the time this was written anonymous auth was disabled on the
+  real project, so the symptom was `auth/admin-restricted-operation` and nobody could join.
+  Anonymous auth is ENABLED in production now — verified 2026-08-28 with a live
+  `accounts:signUp` — so the symptom today is subtler: phones sign in fine and then find none of
+  the playtest's data, which is worse to diagnose, not better.) Fixed structurally: `--mode playtest`
   builds to **`dist-playtest`**, the gate keeps **`dist`**, and both playtest previews pin
   `--outDir dist-playtest` (supported on the pinned Vite 5.4.21,
   `node_modules/vite/dist/node/cli.js:878`). So: **gate/deploy ⇒ `npm run creator:build` /
