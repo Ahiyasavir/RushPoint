@@ -69,8 +69,24 @@ const { content, id = 'mission-ideas' } = Astro.props as Props;
   </div>
 </section>
 
-<style>
-  .rp-pick {
+<style is:global>
+  /* GLOBAL, and namespaced by the widget's own data attribute.
+
+     Astro scopes a component <style> by stamping `data-astro-cid-*` onto the elements in
+     its TEMPLATE at build time. The interactive parts of this widget are created by script
+     at runtime, so they never carry that attribute and a scoped rule simply does not match
+     them — every rule below silently applied to nothing. Found by measuring a tap target
+     and getting 24px where the rule says 44px, which is the only way this shows up: the
+     page looks fine, it is just wearing none of the styling it declares.
+
+     `is:global` restores the match, and the `[data-rp-ideas]` prefix keeps it from leaking:
+     these class names are generic enough that unscoped rules would be a real hazard. */
+  [data-rp-ideas] .rp-pick {
+    /* 44px touch-target baseline, as in TryMission.astro. Measured at 24px at 375px wide. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
     border-radius: 9999px;
     border: 1px solid var(--aw-color-border, rgb(203 213 225));
     padding: 0.5rem 1.1rem;
@@ -78,17 +94,17 @@ const { content, id = 'mission-ideas' } = Astro.props as Props;
     cursor: pointer;
     transition: background-color 0.12s ease, border-color 0.12s ease;
   }
-  .rp-pick[aria-pressed='true'] {
+  [data-rp-ideas] .rp-pick[aria-pressed='true'] {
     border-color: var(--aw-color-primary, rgb(37 99 235));
     background: color-mix(in srgb, var(--aw-color-primary, rgb(37 99 235)) 12%, transparent);
     font-weight: 700;
   }
-  .rp-idea {
+  [data-rp-ideas] .rp-idea {
     border-inline-start: 3px solid var(--aw-color-primary, rgb(37 99 235));
     padding-inline-start: 1rem;
   }
   @media (prefers-reduced-motion: reduce) {
-    .rp-pick { transition: none; }
+    [data-rp-ideas] .rp-pick { transition: none; }
   }
 </style>
 

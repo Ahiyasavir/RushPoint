@@ -70,11 +70,22 @@ const { content, id = 'planner' } = Astro.props as Props;
   </div>
 </section>
 
-<style>
-  .rp-field label { display: block; font-size: 0.9rem; font-weight: 700; margin-bottom: 0.4rem; }
-  .rp-field .rp-row { display: flex; align-items: center; gap: 0.75rem; }
-  .rp-field input[type='range'] { flex: 1; accent-color: var(--aw-color-primary, rgb(37 99 235)); }
-  .rp-value {
+<style is:global>
+  /* GLOBAL, and namespaced by the widget's own data attribute.
+
+     Astro scopes a component <style> by stamping `data-astro-cid-*` onto the elements in
+     its TEMPLATE at build time. The interactive parts of this widget are created by script
+     at runtime, so they never carry that attribute and a scoped rule simply does not match
+     them — every rule below silently applied to nothing. Found by measuring a tap target
+     and getting 24px where the rule says 44px, which is the only way this shows up: the
+     page looks fine, it is just wearing none of the styling it declares.
+
+     `is:global` restores the match, and the `[data-rp-planner]` prefix keeps it from leaking:
+     these class names are generic enough that unscoped rules would be a real hazard. */
+  [data-rp-planner] .rp-field label { display: block; font-size: 0.9rem; font-weight: 700; margin-bottom: 0.4rem; }
+  [data-rp-planner] .rp-field .rp-row { display: flex; align-items: center; gap: 0.75rem; }
+  [data-rp-planner] .rp-field input[type='range'] { flex: 1; accent-color: var(--aw-color-primary, rgb(37 99 235)); }
+  [data-rp-planner] .rp-value {
     min-width: 3.5rem;
     text-align: center;
     font-variant-numeric: tabular-nums;
@@ -83,11 +94,14 @@ const { content, id = 'planner' } = Astro.props as Props;
     padding: 0.25rem 0.5rem;
     background: rgb(241 245 249);
   }
-  :global(.dark) .rp-value { background: rgb(30 41 59); }
-  .rp-ok   { background: color-mix(in srgb, rgb(22 163 74) 12%, transparent); color: rgb(21 128 61); }
-  .rp-warn { background: color-mix(in srgb, rgb(217 119 6) 15%, transparent); color: rgb(146 64 14); }
-  :global(.dark) .rp-ok   { color: rgb(134 239 172); }
-  :global(.dark) .rp-warn { color: rgb(253 224 71); }
+  .dark [data-rp-planner] .rp-value { background: rgb(30 41 59); }
+  /* The light-mode text sits on a 12-15% tint over a near-white card, which measured 4.13:1 —
+     under the 4.5:1 WCAG asks for body text. Darkened one step (green-800 / amber-900) to clear
+     it. The tint stays light so the panel still reads as a status colour rather than a block. */
+  [data-rp-planner] .rp-ok { background: color-mix(in srgb, rgb(22 163 74) 12%, transparent); color: rgb(22 101 52); }
+  [data-rp-planner] .rp-warn { background: color-mix(in srgb, rgb(217 119 6) 15%, transparent); color: rgb(120 53 15); }
+  .dark [data-rp-planner] .rp-ok   { color: rgb(134 239 172); }
+  .dark [data-rp-planner] .rp-warn { color: rgb(253 224 71); }
 </style>
 
 <script>
