@@ -107,11 +107,16 @@ Note the second is `captureKind: 'video'`, not a photo — participants record a
 
 In priority order:
 
-0. **Raise the participant cap before launching.** `FREE_MODE_MAX_PARTICIPANTS = 100` in
-   `packages/shared/src/freeMode.ts` is stamped onto the run at launch and cannot be changed
-   afterwards. At ~100 teams that is zero headroom. This is the only item on this list that is
-   a code change and a deploy rather than a Builder edit, and the only one that cannot be fixed
-   on the day.
+0. ~~**Raise the participant cap before launching.**~~ **DONE.** Both ceilings are now 150:
+   `FREE_MODE_MAX_PARTICIPANTS` (`packages/shared/src/freeMode.ts`) and `MAX_RUN_DEVICES`
+   (`packages/shared/src/runCapacity.ts`), raised from 100 on the measured capacity in section 9
+   rather than on optimism. ~100 teams now has real headroom instead of none.
+
+   Two things to remember about it. The value is stamped onto `run.maxParticipants` at LAUNCH,
+   so **the deploy has to be live before the run is launched** and raising it mid event does
+   nothing. And DEVICES is what the read budget actually scales with, not teams, because every
+   additional phone polls team state on its own: 150 was chosen to cover ~120 teams plus their
+   second phones while keeping the projection under 0.8x of the ceiling.
 
 The rest are in the Builder and quick:
 

@@ -615,10 +615,18 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     const used = r.participantCount ?? r.freeParticipantsUsed ?? 0;
     const cap = r.maxParticipants ?? FREE_PARTICIPANTS_PER_FREE_RUN;
     if (used >= cap) {
+      // The advice has to match the world the caller is actually in. While payments are off
+      // (PAYMENTS_ENABLED === false, the launch default) EVERY run is billed as 'free', and the
+      // Event Credit and Pro branches of resolveLaunchBilling are never reached — so telling a
+      // turned-away participant's host to buy a credit sends them looking for a purchase that
+      // does not exist. Say the true thing instead: the ceiling is fixed for this run and can
+      // only be raised before the NEXT one is launched.
       const msg = r.billingType === 'test'
         ? `This is a ${cap}-person test run. Launch a real run to invite more players.`
         : r.billingType === 'free'
-          ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
+          ? (PAYMENTS_ENABLED
+            ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
+            : `This run is full (${cap} participants max). The limit is fixed when a run is launched, so the host would need to launch a new run to raise it.`)
           : `This run is full (${cap} participants max).`;
       throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
     }

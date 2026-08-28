@@ -161,8 +161,15 @@ describe('canAttachDevice', () => {
 describe('canAddRunDevice (global per-run phone ceiling)', () => {
   // Pinned on purpose: the ceiling is a capacity claim about the server, so
   // moving it must be a deliberate edit here too, never a silent drift.
-  test('MAX_RUN_DEVICES is 100', () => {
-    expect(MAX_RUN_DEVICES).toBe(100);
+  //
+  // 100 -> 150 on 2026-08-28 (change: hot-path-read-cost). The claim behind the new number was
+  // MEASURED rather than assumed: against production with the Firestore op counter enabled, a
+  // 120 team, 75 minute run projects to ~34,250 reads of a 50,000 daily ceiling and ~15,600
+  // writes of 20,000, and the VPS sat at load 0.14 with 2.8 GB free through a 100 team
+  // rehearsal. Note that DEVICES, not teams, is what the read budget scales with, because every
+  // extra phone polls team state on its own.
+  test('MAX_RUN_DEVICES is 150', () => {
+    expect(MAX_RUN_DEVICES).toBe(150);
   });
 
   test('admits a phone while the run is below the ceiling', () => {
