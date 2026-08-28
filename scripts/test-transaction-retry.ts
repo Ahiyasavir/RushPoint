@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   CONTENDED_TRANSACTIONS,
+  MUST_NOT_TRANSACT,
   findUnwrappedTransactions,
   transactionIsWrapped,
   extractCallableBody,
@@ -77,9 +78,23 @@ t('every declared contended transaction is wrapped in withLockRetry', () => {
   );
 });
 
-t('the declared list is not empty and names a reason for each site', () => {
+t('a callable declared MUST_NOT_TRANSACT is caught when it opens one', () => {
+  // Negative control: a guard that cannot fail is indistinguishable from one that works.
+  const regressed = [
+    'export const joinRun = loggedCallable("joinRun", async () => {',
+    '  await db.runTransaction(async (t) => { t.update(runRef, { n: 1 }); });',
+    '});',
+  ].join(String.fromCharCode(10));
+  const problems = findUnwrappedTransactions((f: string) =>
+    f === 'functions/src/runs/index.ts' ? regressed : readFileSync(f, 'utf8'));
+  assert.ok(problems.some((p) => p.fn === 'joinRun' && /must NOT/.test(p.problem)),
+    `re-introducing joinRun's transaction was not caught (got: ${problems.map((p) => p.fn).join(',')})`);
+});
+
+t('the declared lists are not empty and name a reason for each site', () => {
   assert.ok(CONTENDED_TRANSACTIONS.length > 0, 'nothing declared — the guard would check nothing');
-  for (const s of CONTENDED_TRANSACTIONS) {
+  assert.ok(MUST_NOT_TRANSACT.length > 0, 'nothing declared — the guard would check nothing');
+  for (const s of [...CONTENDED_TRANSACTIONS, ...MUST_NOT_TRANSACT]) {
     assert.ok(s.fn && s.file, `incomplete declaration: ${JSON.stringify(s)}`);
     assert.ok(
       typeof s.why === 'string' && s.why.length > 20,

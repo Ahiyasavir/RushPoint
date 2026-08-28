@@ -602,49 +602,89 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   // Capacity is a hard ceiling fixed at launch (free run = 5, credit = package
   // size, Pro = 50). Enforced inside a transaction so concurrent joins can't
   // overshoot the cap. No per-participant billing — the run was already paid for.
-  // withLockRetry (change: contended-transaction-retry): this transaction reads AND
-  // writes the ONE run document to enforce the capacity cap, so every simultaneous join
-  // queues on the same lock — and an event begins with the whole field scanning the same
-  // QR at the same moment. A 120-team production run lost joins here to
-  // "10 ABORTED: cross-transaction contention", which reached the player as an opaque
-  // INTERNAL. The lock frees in milliseconds; the jittered retry absorbs the burst.
-  const joined = await withLockRetry(() => db.runTransaction<{ already: boolean }>(async (t) => {
-    const [runFresh, teamFresh] = await Promise.all([t.get(runRef), t.get(teamRef)]);
-    if (teamFresh.exists) return { already: true };
-    const r = runFresh.data() as Run;
-    const used = r.participantCount ?? r.freeParticipantsUsed ?? 0;
-    const cap = r.maxParticipants ?? FREE_PARTICIPANTS_PER_FREE_RUN;
-    if (used >= cap) {
-      // The advice has to match the world the caller is actually in. While payments are off
-      // (PAYMENTS_ENABLED === false, the launch default) EVERY run is billed as 'free', and the
-      // Event Credit and Pro branches of resolveLaunchBilling are never reached — so telling a
-      // turned-away participant's host to buy a credit sends them looking for a purchase that
-      // does not exist. Say the true thing instead: the ceiling is fixed for this run and can
-      // only be raised before the NEXT one is launched.
-      const msg = r.billingType === 'test'
-        ? `This is a ${cap}-person test run. Launch a real run to invite more players.`
-        : r.billingType === 'free'
-          ? (PAYMENTS_ENABLED
-            ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
-            : `This run is full (${cap} participants max). The limit is fixed when a run is launched, so the host would need to launch a new run to raise it.`)
-          : `This run is full (${cap} participants max).`;
-      throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
+  // ── Why this is NOT a transaction (change: join-without-contention) ─────────────────────
+  // It was one, and the transaction was the problem. A read-modify-write on the ONE run
+  // document means every simultaneous join contends for the same lock, and an event begins
+  // with the entire field scanning the same QR in the same minute. Measured against real
+  // Firestore with 120 simultaneous writers on one document:
+  //
+  //   transaction (read-modify-write)   p50 10,671ms   and only 36 of 120 writes landed
+  //   atomic increment                  p50  1,258ms   all 120 landed
+  //   sharded increment (10 shards)     p50    798ms   all 120 landed
+  //
+  // The transaction did not merely queue: once its internal retries were exhausted it DROPPED
+  // most of the writes. Production survived that only because `withLockRetry` caught the
+  // aborts and retried them, which is precisely why a real 120-team rehearsal measured joinRun
+  // at p50 12.1s and max 56s. A participant staring at a spinner for the better part of a
+  // minute assumes it is broken and taps again, which makes it worse.
+  //
+  // An increment is commutative, so Firestore applies it server side with no read, no conflict
+  // and nothing to retry. Sharding is faster still, but it costs a shard read per capacity
+  // check and a rollup for anything that displays the count; 1.3s for the whole field is
+  // already imperceptible, so that complexity is not bought. Sharding is the next lever if a
+  // run ever needs to admit thousands.
+  //
+  // WHAT THIS TRADES. The cap is now enforced on a value read a moment BEFORE the increment,
+  // so a simultaneous burst can overshoot it by at most the number of joins in flight. That is
+  // acceptable here and would not be if it were a billing limit: `FREE_MODE_MAX_PARTICIPANTS`
+  // is a SAFETY ceiling matched to measured server capacity (see runCapacity.ts), payments are
+  // off, and admitting a handful past 150 costs nothing while turning a real participant away
+  // at a real event costs a great deal. If payments are ever switched back on and this becomes
+  // a paid entitlement, this decision has to be revisited — that is what the branch below on
+  // `PAYMENTS_ENABLED` is already about.
+  const runFresh = await runRef.get();
+  const r = runFresh.data() as Run;
+  const used = r.participantCount ?? r.freeParticipantsUsed ?? 0;
+  const cap = r.maxParticipants ?? FREE_PARTICIPANTS_PER_FREE_RUN;
+  if (used >= cap) {
+    // The advice has to match the world the caller is actually in. While payments are off
+    // (PAYMENTS_ENABLED === false, the launch default) EVERY run is billed as 'free', and the
+    // Event Credit and Pro branches of resolveLaunchBilling are never reached — so telling a
+    // turned-away participant's host to buy a credit sends them looking for a purchase that
+    // does not exist. Say the true thing instead: the ceiling is fixed for this run and can
+    // only be raised before the NEXT one is launched.
+    const msg = r.billingType === 'test'
+      ? `This is a ${cap}-person test run. Launch a real run to invite more players.`
+      : r.billingType === 'free'
+        ? (PAYMENTS_ENABLED
+          ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
+          : `This run is full (${cap} participants max). The limit is fixed when a run is launched, so the host would need to launch a new run to raise it.`)
+        : `This run is full (${cap} participants max).`;
+    throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
+  }
+  // Global per-run phone ceiling — additive to the billing cap above. The founding
+  // phone counts as one device. Legacy runs (no deviceCount) fall back to the team
+  // count as a lower bound; the field becomes exact once written here.
+  const usedDevices = r.deviceCount ?? used;
+  if (!canAddRunDevice(usedDevices).ok) {
+    throw new functions.https.HttpsError(
+      'resource-exhausted',
+      `This run is full (${MAX_RUN_DEVICES} devices max).`,
+      { cap: MAX_RUN_DEVICES, used: usedDevices },
+    );
+  }
+
+  // `create` rather than `set`: it fails with ALREADY_EXISTS if the document is there, which is
+  // exactly the idempotency the transaction's `teamFresh.exists` check used to provide — a
+  // second tap on the join button, or a retry after a flaky response, must not count twice.
+  // Doing it on the team's OWN document means it contends with nothing.
+  const joined = await (async (): Promise<{ already: boolean }> => {
+    try {
+      await teamRef.create(team);
+    } catch (e) {
+      // 6 === ALREADY_EXISTS. Anything else is a real failure and must surface.
+      if ((e as { code?: number }).code === 6) return { already: true };
+      throw e;
     }
-    // Global per-run phone ceiling — additive to the billing cap above. The founding
-    // phone counts as one device. Legacy runs (no deviceCount) fall back to the team
-    // count as a lower bound; the field becomes exact once written here.
-    const usedDevices = r.deviceCount ?? used;
-    if (!canAddRunDevice(usedDevices).ok) {
-      throw new functions.https.HttpsError(
-        'resource-exhausted',
-        `This run is full (${MAX_RUN_DEVICES} devices max).`,
-        { cap: MAX_RUN_DEVICES, used: usedDevices },
-      );
-    }
-    t.set(teamRef, team);
-    t.update(runRef, { participantCount: used + 1, deviceCount: usedDevices + 1, updatedAt: now });
+    // Only a join that actually created a team may move the counters. Ordered AFTER the create
+    // so a failed create can never inflate the count and quietly consume a place nobody holds.
+    await runRef.update({
+      participantCount: FieldValue.increment(1),
+      deviceCount: FieldValue.increment(1),
+      updatedAt: now,
+    });
     return { already: false };
-  }));
+  })();
 
   // Hand out the first task exactly as startTeams/startInstantPlay do. AFTER the
   // commit and only for a freshly self-started team, so a re-join short-circuits

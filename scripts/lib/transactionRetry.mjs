@@ -30,12 +30,6 @@
  */
 export const CONTENDED_TRANSACTIONS = [
   {
-    fn: 'joinRun',
-    file: 'functions/src/runs/index.ts',
-    why: 'reads and writes the run document to enforce the capacity cap; every participant '
-       + 'joins the same run, and an event starts with all of them scanning at once',
-  },
-  {
     fn: 'joinTeamAsDevice',
     file: 'functions/src/runs/index.ts',
     why: 'increments the run-wide device counter, so every additional phone contends on the '
@@ -46,6 +40,30 @@ export const CONTENDED_TRANSACTIONS = [
     file: 'functions/src/runs/index.ts',
     why: 'flips the whole field to started in one pass while late joiners are still writing '
        + 'the same run document',
+  },
+];
+
+/**
+ * The opposite rule: places that must NOT open a transaction at all.
+ *
+ * `joinRun` used to enforce the capacity cap with a read-modify-write transaction on the ONE
+ * run document. Measured against real Firestore with 120 simultaneous writers, that shape ran
+ * at p50 10,671ms and LANDED ONLY 36 OF 120 WRITES; an atomic increment ran at p50 1,258ms and
+ * landed all of them. Wrapping it in withLockRetry (which is what this file's other list is
+ * for) turned the dropped writes into slow ones, and a real 120-team rehearsal then measured
+ * joinRun at p50 12.1s and max 56s.
+ *
+ * So the fix was to remove the transaction, and this guard exists to stop it coming back: a
+ * future reader who sees a non-transactional counter update and "corrects" it would restore a
+ * minute-long join queue at the exact moment an event begins.
+ */
+export const MUST_NOT_TRANSACT = [
+  {
+    fn: 'joinRun',
+    file: 'functions/src/runs/index.ts',
+    why: 'every participant joins the same run at the same moment; the capacity counters are '
+       + 'moved with FieldValue.increment, which is commutative and needs no read, no lock and '
+       + 'no retry. A transaction here queues the whole field behind one document.',
   },
 ];
 
@@ -81,6 +99,23 @@ export function extractCallableBody(source, fn) {
  */
 export function findUnwrappedTransactions(readFile) {
   const problems = [];
+  for (const site of MUST_NOT_TRANSACT) {
+    let source;
+    try {
+      source = readFile(site.file);
+    } catch (e) {
+      problems.push({ ...site, problem: `could not read ${site.file}: ${e.message}` });
+      continue;
+    }
+    const body = extractCallableBody(source, site.fn);
+    if (body == null) {
+      problems.push({ ...site, problem: `declared callable "${site.fn}" not found in ${site.file} — renamed or removed?` });
+      continue;
+    }
+    if (/\.runTransaction\s*[<(]/.test(body)) {
+      problems.push({ ...site, problem: `opened a transaction, which this callable must NOT do — ${site.why}` });
+    }
+  }
   for (const site of CONTENDED_TRANSACTIONS) {
     let source;
     try {
