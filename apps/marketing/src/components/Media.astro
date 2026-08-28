@@ -30,8 +30,14 @@ const { media, class: className = '', eager = false } = Astro.props;
 <figure class={`m-0 ${className}`}>
   {
     media.kind === 'video' ? (
+      // `w-full` alone would stretch a portrait video to fill the width AND
+      // the max-height cap non-uniformly, since a <video> has no intrinsic
+      // ratio known to CSS until metadata loads. `w-auto h-auto` plus both
+      // max- bounds lets the browser pick the largest size that fits BOTH
+      // caps while keeping the real aspect ratio, the same trick as
+      // `object-fit: contain` without needing a fixed-size wrapper.
       <video
-        class="w-full rounded-2xl"
+        class="max-w-full max-h-[75vh] w-auto h-auto rounded-2xl block mx-auto"
         src={media.src}
         poster={media.poster}
         aria-label={media.alt}
