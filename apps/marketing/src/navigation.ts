@@ -47,6 +47,18 @@ interface Copy {
    * it: getting its language wrong is invisible to everyone who would notice.
    */
   skipToContent: string;
+  /**
+   * The explainer video's controls (change: marketing-home-cro-redesign).
+   *
+   * Chrome, not marketing copy, which is why they live here beside `toggleMenu`
+   * and not in the CMS: an author asked to translate "close the video" is being
+   * asked to maintain a control, and a control they leave blank has no
+   * accessible name at all. The poster is a button showing a picture and the
+   * dismiss is an icon, so for anyone not looking at the screen these two
+   * strings ARE the entire interface.
+   */
+  playVideo: string;
+  closeVideo: string;
 }
 
 const COPY: Record<Language, Copy> = {
@@ -66,6 +78,8 @@ const COPY: Record<Language, Copy> = {
     toggleTheme: 'מעבר בין מצב בהיר לכהה',
     mainNav: 'ניווט ראשי',
     skipToContent: 'דילוג לתוכן',
+    playVideo: 'הפעלת הסרטון',
+    closeVideo: 'סגירת הסרטון',
   },
   en: {
     home: 'Home',
@@ -83,8 +97,22 @@ const COPY: Record<Language, Copy> = {
     toggleTheme: 'Switch between light and dark mode',
     mainNav: 'Main navigation',
     skipToContent: 'Skip to content',
+    playVideo: 'Play the video',
+    closeVideo: 'Close the video',
   },
 };
+
+/**
+ * Accessible names for interface controls that carry no visible text.
+ *
+ * Same rule as `headerData`: a function of the language, so a page cannot render
+ * one language's chrome on the other language's document by forgetting an
+ * argument.
+ */
+export const mediaLabels = (language: Language) => ({
+  playVideo: COPY[language].playVideo,
+  closeVideo: COPY[language].closeVideo,
+});
 
 /**
  * @param counterpartHref Where the language switch should go: the SAME page in

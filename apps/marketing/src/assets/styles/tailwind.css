@@ -123,6 +123,13 @@
   background-color: var(--aw-color-bg-page);
 }
 
+/* The alternating section surface (change: marketing-home-cro-redesign).
+   Both modes are defined in CustomStyles.astro, so a section written once is
+   correct in both; see the reasoning beside the token there. */
+@utility bg-surface-tint {
+  background-color: var(--aw-color-bg-tint);
+}
+
 @utility text-page {
   /* `--aw-color-text-page` was never defined, by the template or by us, so this
      utility silently inherited. It happened to look right because what it

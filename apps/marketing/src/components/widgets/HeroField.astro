@@ -1,0 +1,204 @@
+---
+/**
+ * The homepage hero.
+ *
+ * WHY THIS IS NOT `Hero.astro`. The generic hero is a centred column of text
+ * used by several pages, and it is right for them. It was wrong here for one
+ * reason: the first screen of a site about going outside showed no place, no
+ * phone and no game, so a visitor's first impression of a field game was a
+ * paragraph about one. This hero shows the thing next to the claim.
+ *
+ * `Hero.astro` is deliberately left alone rather than given a variant flag. Five
+ * other pages render it, and a homepage specific layout, a homepage specific
+ * animation and a homepage specific trust line inside a shared component means
+ * every future edit to any of those pages has to reason about all six.
+ *
+ * WHAT THE COPY COLUMN IS DOING, in order, because the order is the argument:
+ *   tagline    what this is
+ *   headline   the promise
+ *   subhead    the contrast that makes the promise mean something: not another
+ *              thing to do ON a phone, a reason to put it in your pocket
+ *   actions    the outcome, with a time on it, rather than a verb
+ *   trust      who else did this, framed on how deeply people engaged rather
+ *              than on how many there were. A count invites the question "only
+ *              that many?"; depth does not, and depth is the honest claim for a
+ *              product this young
+ *
+ * And the visual column is the curiosity gap: a real route, four real stations,
+ * and a question underneath asking whether the reader's own team would have
+ * solved it. A question is answerable only by trying, and the playable mission
+ * is the very next thing on the page.
+ *
+ * RTL. Source order is copy first, which is the correct reading order in both
+ * directions AND the correct stacking order on a phone. The split is a grid with
+ * no physical float, so Hebrew puts the copy on the right without a second
+ * layout.
+ *
+ * Change: marketing-home-cro-redesign.
+ */
+import { Icon } from 'astro-icon/components';
+
+import Button from '~/components/ui/Button.astro';
+import PhoneFrame from '~/components/PhoneFrame.astro';
+import HeroFieldMap from '~/components/HeroFieldMap.astro';
+import TopoBackdrop from '~/components/TopoBackdrop.astro';
+import type { MediaItem } from '~/components/Media.astro';
+import type { CallToAction } from '~/types';
+
+export interface Props {
+  tagline?: string;
+  /** May carry markup, e.g. a highlighted word. */
+  headline: string;
+  subhead: string;
+  actions?: CallToAction[];
+  /** Social proof, framed on engagement depth. */
+  trust: string;
+  /** The question under the phone. */
+  challenge: string;
+  /** A real screen capture, if one exists. Absent means the drawn map. */
+  clip?: MediaItem;
+  id?: string;
+}
+
+const { tagline, headline, subhead, actions = [], trust, challenge, clip, id } = Astro.props;
+---
+
+<section class="rp-hero relative overflow-hidden md:-mt-[76px]" {...id ? { id } : {}}>
+  <TopoBackdrop />
+  <div class="rp-hero-glow" aria-hidden="true"></div>
+
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6">
+    <!-- Clears the transparent sticky header the section sits under. -->
+    <div class="pt-0 md:pt-[76px] pointer-events-none"></div>
+
+    <div
+      class="grid items-center gap-10 py-10 md:py-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,18rem)] lg:gap-16 lg:py-14"
+    >
+      <div class="text-center lg:text-start">
+        {
+          tagline && (
+            <p class="mb-3 text-sm font-bold uppercase tracking-[0.18em] text-secondary dark:text-primary">
+              {tagline}
+            </p>
+          )
+        }
+
+        <h1
+          class="mb-5 font-heading text-[2.6rem] font-extrabold leading-[1.05] tracking-tight text-heading sm:text-6xl lg:text-[4rem]"
+          set:html={headline}
+        />
+
+        <p class="mx-auto mb-8 max-w-xl text-lg leading-relaxed text-muted lg:mx-0 lg:text-xl" set:html={subhead} />
+
+        {
+          actions.length > 0 && (
+            <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-center lg:justify-start">
+              {actions.map((action) => (
+                <Button {...action} class="rp-hero-cta w-full sm:w-auto" />
+              ))}
+            </div>
+          )
+        }
+
+        <p class="mt-7 flex items-start justify-center gap-2.5 text-sm text-muted lg:justify-start">
+          <Icon name="tabler:users" class="mt-0.5 h-5 w-5 shrink-0 text-secondary dark:text-primary" />
+          <span class="max-w-md text-start">{trust}</span>
+        </p>
+      </div>
+
+      <div class="relative mx-auto w-full max-w-[18rem]">
+        <PhoneFrame>
+          {
+            clip ? (
+              // Muted, looping and silent by construction. The rule this site
+              // keeps is that a video never takes over the page or spends
+              // somebody's data unasked: this one has no sound, no controls to
+              // hunt for, and it does not start at all unless the visitor's
+              // system says motion is welcome (see the script below).
+              <video
+                class="rp-hero-clip"
+                data-rp-hero-clip
+                src={clip.src}
+                poster={clip.poster}
+                aria-label={clip.alt}
+                muted
+                loop
+                playsinline
+                preload="metadata"
+              />
+            ) : (
+              <HeroFieldMap />
+            )
+          }
+        </PhoneFrame>
+
+        <p class="mx-auto mt-5 flex max-w-xs items-start gap-2 text-center text-sm font-medium text-muted">
+          <Icon name="tabler:target" class="mt-0.5 h-5 w-5 shrink-0 text-secondary dark:text-primary" />
+          <span class="text-start">{challenge}</span>
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* A warm bloom behind the headline, so the type sits on light rather than on a
+     flat sheet. Two thirds of the "old template" feeling is the absence of any
+     depth at all behind the first screen. */
+  .rp-hero-glow {
+    position: absolute;
+    inset-block-start: -14rem;
+    inset-inline-start: 50%;
+    width: 68rem;
+    height: 44rem;
+    transform: translateX(-50%);
+    pointer-events: none;
+    background:
+      radial-gradient(38% 42% at 30% 42%, rgb(255 87 34 / 13%) 0%, transparent 70%),
+      radial-gradient(34% 38% at 72% 30%, rgb(255 179 0 / 12%) 0%, transparent 72%);
+    z-index: 0;
+  }
+  /* Physical translate under a logical inset needs mirroring, or the bloom is
+     pushed off the right edge on the Hebrew page. */
+  :global([dir='rtl']) .rp-hero-glow {
+    transform: translateX(50%);
+  }
+
+  :global(.dark) .rp-hero-glow {
+    background:
+      radial-gradient(38% 42% at 30% 42%, rgb(255 87 34 / 16%) 0%, transparent 70%),
+      radial-gradient(34% 38% at 72% 30%, rgb(255 179 0 / 10%) 0%, transparent 72%);
+  }
+
+  /* The primary action is the most important object on the page, so it is given
+     the weight of one. */
+  .rp-hero :global(.rp-hero-cta) {
+    font-size: 1.05rem;
+    padding-block: 1rem;
+  }
+  .rp-hero :global(.btn-primary.rp-hero-cta) {
+    box-shadow: 0 10px 30px -10px rgb(255 87 34 / 65%);
+  }
+
+  .rp-hero-clip {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+</style>
+
+<script>
+  // The hero clip plays only where motion is welcome. It cannot be expressed in
+  // CSS: playback is not a style, so the media query has to be asked in script.
+  // Absent a clip there is nothing here to run, which is the default case.
+  const startHeroClips = () => {
+    if (!window.matchMedia('(prefers-reduced-motion: no-preference)').matches) return;
+    document.querySelectorAll<HTMLVideoElement>('[data-rp-hero-clip]').forEach((video) => {
+      // Muted playback is permitted without a gesture. A rejection is a browser
+      // declining, and the poster frame is a perfectly good still.
+      void video.play().catch(() => {});
+    });
+  };
+  startHeroClips();
+  document.addEventListener('astro:page-load', startHeroClips);
+</script>

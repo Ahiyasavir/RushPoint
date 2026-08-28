@@ -66,6 +66,16 @@ collections:
           - { label: 'כפתור משני', name: secondaryAction, widget: string }
           - { label: 'קישור לרעיונות', name: ideasAction, widget: string }
 
+          # ── המשפטים שמשכנעים להתחיל ───────────────────────────────────────
+          # חמשת השדות האלה הם הסיבה שמישהו לוחץ או לא לוחץ. הם חובה בכוונה:
+          # עמוד בית בלי המשפט שאומר "בלי הרשמה ובלי אשראי" נראה תקין לגמרי
+          # ומבקש יותר אמון ממה שהרוויח.
+          - { label: 'פס אמון מתחת לכפתורים', name: heroTrust, widget: string, hint: 'עומק מעורבות, לא מספר משתמשים' }
+          - { label: 'האתגר ליד המפה', name: heroChallenge, widget: string, hint: 'שאלה שגורמת לרצות לנסות' }
+          - { label: 'המשפט מעל המשימה לניסיון', name: lowFrictionNote, widget: string, hint: 'מה לא צריך כדי לנסות' }
+          - { label: 'הכיתוב על תמונת הסרטון', name: videoLabel, widget: string }
+          - { label: 'אורך הסרטון', name: videoDuration, widget: string, hint: 'למשל 1:30' }
+
           - label: 'תמונה או סרטון בראש העמוד'
             name: hero
             widget: object
@@ -73,6 +83,21 @@ collections:
             collapsed: true
             hint: >-
               מופיע מתחת לכותרת הראשית. אפשר להשאיר ריק.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+
+          - label: 'סרטון קצר בתוך הטלפון שבראש העמוד'
+            name: heroClip
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              אפשר להשאיר ריק. בלי סרטון מוצגת מפה מצוירת שמשרטטת מסלול לבד,
+              שלא עולה שום זמן טעינה. עם סרטון הוא מתנגן בלולאה ובלי קול.
             fields:
               - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
               - { label: 'הקובץ', name: src, widget: file }
@@ -278,6 +303,16 @@ collections:
           - { label: 'כפתור משני', name: secondaryAction, widget: string }
           - { label: 'קישור לרעיונות', name: ideasAction, widget: string }
 
+          # ── המשפטים שמשכנעים להתחיל ───────────────────────────────────────
+          # חמשת השדות האלה הם הסיבה שמישהו לוחץ או לא לוחץ. הם חובה בכוונה:
+          # עמוד בית בלי המשפט שאומר "בלי הרשמה ובלי אשראי" נראה תקין לגמרי
+          # ומבקש יותר אמון ממה שהרוויח.
+          - { label: 'פס אמון מתחת לכפתורים', name: heroTrust, widget: string, hint: 'עומק מעורבות, לא מספר משתמשים' }
+          - { label: 'האתגר ליד המפה', name: heroChallenge, widget: string, hint: 'שאלה שגורמת לרצות לנסות' }
+          - { label: 'המשפט מעל המשימה לניסיון', name: lowFrictionNote, widget: string, hint: 'מה לא צריך כדי לנסות' }
+          - { label: 'הכיתוב על תמונת הסרטון', name: videoLabel, widget: string }
+          - { label: 'אורך הסרטון', name: videoDuration, widget: string, hint: 'למשל 1:30' }
+
           - label: 'תמונה או סרטון בראש העמוד'
             name: hero
             widget: object
@@ -285,6 +320,21 @@ collections:
             collapsed: true
             hint: >-
               מופיע מתחת לכותרת הראשית. אפשר להשאיר ריק.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+
+          - label: 'סרטון קצר בתוך הטלפון שבראש העמוד'
+            name: heroClip
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              אפשר להשאיר ריק. בלי סרטון מוצגת מפה מצוירת שמשרטטת מסלול לבד,
+              שלא עולה שום זמן טעינה. עם סרטון הוא מתנגן בלולאה ובלי קול.
             fields:
               - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
               - { label: 'הקובץ', name: src, widget: file }

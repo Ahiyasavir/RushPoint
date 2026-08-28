@@ -31,24 +31,31 @@ const {
             itemClasses?.panel
           )}
         >
-          <div class="flex flex-col items-center mr-4 rtl:mr-0 rtl:ml-4">
+          <div class="flex flex-col items-center me-4">
             <div>
               <div class="flex items-center justify-center">
                 {(icon || defaultIcon) && (
                   <Icon
                     name={icon || defaultIcon}
-                    class={twMerge('w-10 h-10 p-2 rounded-full border-2', defaultIconClass, itemClasses?.icon)}
+                    class={twMerge('rp-step-pin w-11 h-11 p-2.5 rounded-full border-2', defaultIconClass, itemClasses?.icon)}
                   />
                 )}
               </div>
             </div>
-            {index !== items.length - 1 && <div class="w-px h-full bg-black/10 dark:bg-slate-400/50" />}
+            {/*
+              The connector is a DASHED ROUTE rather than a hairline rule
+              (change: marketing-home-cro-redesign). It is the same mark the hero
+              map uses for the walk between stations, so a reader who has just
+              watched a route draw itself sees the steps as the same object: a
+              path with stops on it. A plain grey line said "list".
+            */}
+            {index !== items.length - 1 && <div class="rp-step-route w-0.5 h-full" />}
           </div>
-          <div class={`pt-1 ${index !== items.length - 1 ? 'pb-8' : ''}`}>
+          <div class={`pt-1.5 ${index !== items.length - 1 ? 'pb-10' : ''}`}>
             {title && <p class={twMerge('text-xl font-bold', titleClass, itemClasses?.title)} set:html={title} />}
             {description && (
               <p
-                class={twMerge('text-muted mt-2', descriptionClass, itemClasses?.description)}
+                class={twMerge('text-muted mt-2 leading-relaxed', descriptionClass, itemClasses?.description)}
                 set:html={description}
               />
             )}
@@ -58,3 +65,25 @@ const {
     </div>
   )
 }
+
+<style>
+  /* Dashes drawn with a repeating gradient rather than a border style: a dashed
+     BORDER cannot control its dash length, so it renders as a different rhythm
+     at every zoom level and never matches the route in the hero. */
+  .rp-step-route {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgb(255 87 34 / 55%) 0 6px,
+      transparent 6px 13px
+    );
+  }
+
+  /* The step marker reads as a station on that route: a brand tinted disc with
+     the brand ring around it, the same relationship the map's pins have. */
+  .rp-step-pin {
+    background: rgb(255 87 34 / 10%);
+  }
+  :global(.dark) .rp-step-pin {
+    background: rgb(255 87 34 / 18%);
+  }
+</style>

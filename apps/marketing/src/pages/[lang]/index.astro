@@ -1,6 +1,6 @@
 ---
 import PageLayout from '~/layouts/PageLayout.astro';
-import Hero from '~/components/widgets/Hero.astro';
+import HeroField from '~/components/widgets/HeroField.astro';
 import Features from '~/components/widgets/Features.astro';
 import Steps from '~/components/widgets/Steps.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
@@ -8,11 +8,14 @@ import TryMission from '~/components/widgets/TryMission.astro';
 import MissionIdeas from '~/components/widgets/MissionIdeas.astro';
 import GamePlanner from '~/components/widgets/GamePlanner.astro';
 import FAQs from '~/components/widgets/FAQs.astro';
+import { Icon } from 'astro-icon/components';
 
-import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
-import { landingPageUrl } from '~/navigation';
+import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, type Language } from '~/utils/i18n';
+import { landingPageUrl, mediaLabels } from '~/navigation';
 import { pageContent } from '~/utils/pages';
 import Media from '~/components/Media.astro';
+import VideoLightbox from '~/components/VideoLightbox.astro';
+import TopoBackdrop from '~/components/TopoBackdrop.astro';
 
 export function getStaticPaths() {
   return LANGUAGES.map((lang) => ({ params: { lang } }));
@@ -20,6 +23,10 @@ export function getStaticPaths() {
 
 const language = Astro.params.lang as Language;
 const t = await pageContent('homePages', 'home', language);
+const chrome = mediaLabels(language);
+
+/** Where the hero's second action goes. See the note on the section order below. */
+const TRY_MISSION_ID = 'try-mission';
 
 const metadata = {
   title: t.title,
@@ -29,56 +36,98 @@ const metadata = {
 };
 ---
 
+{/*
+  SECTION ORDER IS THE ARGUMENT (change: marketing-home-cro-redesign).
+
+  It used to be: hero, video, features, steps, THEN the playable mission. Which
+  is to say a visitor read six claims about what a field game feels like before
+  being allowed to feel one, and the single thing on this page that can settle
+  the question in thirty seconds was below four screens of prose.
+
+  Now: hero, play it, then watch how it is built, then the claims. Someone who
+  has already solved a mission reads the feature list as confirmation; someone
+  who has not reads it as advertising. That is the whole change.
+
+  The hero's second action points AT the playable mission rather than at the
+  story page, for the same reason: the cheapest possible next step is the one
+  that costs nothing and proves the most.
+
+  Backgrounds alternate between the page surface and the warm tint, which is what
+  gives a long page a rhythm instead of a scroll. The tint is one step off the
+  page colour on purpose; see the token in CustomStyles.astro.
+*/}
+
 <PageLayout metadata={metadata} language={language} alternates={alternatesFor('')}>
-  <Hero
+  <HeroField
     tagline={t.tagline}
+    headline={t.headline}
+    subhead={t.subhead}
+    trust={t.heroTrust}
+    challenge={t.heroChallenge}
+    clip={t.heroClip}
     actions={[
       { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
-      { text: t.secondaryAction, href: pagePath(language, 'story') },
+      { text: t.secondaryAction, href: `#${TRY_MISSION_ID}` },
     ]}
-  >
-    <Fragment slot="title" set:html={t.headline} />
-    <Fragment slot="subtitle" set:html={t.subhead} />
-  </Hero>
+  />
 
   {
     /*
-      A picture or a video of a real game, straight after the headline. Optional:
-      with none set the page is exactly what it was, so adding one is a content
-      decision rather than a deploy.
+      A mission the visitor can actually play (change: try-a-mission), now the
+      first thing after the hero. Optional content, so a page without it renders
+      exactly as it did before, friction line included.
+    */
+    t.tryMission && (
+      <div class="relative overflow-hidden bg-surface-tint">
+        <TopoBackdrop />
+        <div class="relative">
+          {/* Friction reduction, immediately above the thing it unlocks. Everything
+              a visitor is afraid this will cost, answered before they scroll into it. */}
+          <p class="mx-auto mt-16 flex w-fit items-center gap-2 rounded-full border border-line bg-page px-5 py-2.5 text-sm font-semibold text-default shadow-sm">
+            <Icon name="tabler:bolt" class="h-5 w-5 shrink-0 text-secondary dark:text-primary" />
+            <span>{t.lowFrictionNote}</span>
+          </p>
+          <TryMission content={t.tryMission} id={TRY_MISSION_ID} />
+        </div>
+      </div>
+    )
+  }
+
+  {
+    /*
+      The explainer, as a poster card that opens a player rather than a bare
+      <video> nobody pressed. Optional: with none set the page is exactly what it
+      was, so adding one is a content decision rather than a deploy.
     */
     t.hero && (
-      <section class="px-4 sm:px-6 mx-auto max-w-5xl">
-        <Media media={t.hero} eager />
+      <section class="mx-auto max-w-4xl px-4 py-16 sm:px-6">
+        <VideoLightbox media={t.hero} label={t.videoLabel} duration={t.videoDuration} labels={chrome} />
       </section>
     )
   }
 
-  <Features
-    id="what-it-is"
-    tagline={t.featuresTagline}
-    title={t.featuresTitle}
-    subtitle={t.featuresSubtitle}
-    items={t.features}
-  />
+  <div class="bg-surface-tint">
+    <Features
+      id="what-it-is"
+      tagline={t.featuresTagline}
+      title={t.featuresTitle}
+      subtitle={t.featuresSubtitle}
+      items={t.features}
+    />
+  </div>
 
   <Steps title={t.stepsTitle} items={t.steps} isReversed />
-
-  {
-    /*
-      A mission the visitor can actually play (change: try-a-mission). Everything above this
-      point DESCRIBES the product; a field game is a thing you feel. Optional content, so a
-      page without it renders exactly as it did before.
-    */
-    t.tryMission && <TryMission content={t.tryMission} />
-  }
 
   {
     /*
       Having felt what playing is like, the visitor's next question is what they would have to
       WRITE. This answers it with ideas they can use as they are, signed up or not.
     */
-    t.missionIdeas && <MissionIdeas content={t.missionIdeas} />
+    t.missionIdeas && (
+      <div class="bg-surface-tint">
+        <MissionIdeas content={t.missionIdeas} />
+      </div>
+    )
   }
 
   {
@@ -95,7 +144,11 @@ const metadata = {
       participants) the limit is stated rather than dodged: someone who finds it out on the day
       of their event is a worse outcome than someone who reads it here and plans around it.
     */
-    t.faqs.length > 0 && <FAQs title={t.faqTitle} items={t.faqs} columns={2} />
+    t.faqs.length > 0 && (
+      <div class="bg-surface-tint">
+        <FAQs title={t.faqTitle} items={t.faqs} columns={2} />
+      </div>
+    )
   }
 
   {
@@ -124,13 +177,15 @@ const metadata = {
     )
   }
 
-  <CallToAction
-    actions={[
-      { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
-      { text: t.ideasAction, href: landingPageUrl(language) },
-    ]}
-  >
-    <Fragment slot="title" set:html={t.ctaTitle} />
-    <Fragment slot="subtitle" set:html={t.ctaSubtitle} />
-  </CallToAction>
+  <div class="bg-surface-tint">
+    <CallToAction
+      actions={[
+        { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
+        { text: t.ideasAction, href: landingPageUrl(language) },
+      ]}
+    >
+      <Fragment slot="title" set:html={t.ctaTitle} />
+      <Fragment slot="subtitle" set:html={t.ctaSubtitle} />
+    </CallToAction>
+  </div>
 </PageLayout>

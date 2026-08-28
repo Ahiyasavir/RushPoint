@@ -146,6 +146,27 @@ const homePages = defineCollection({
     primaryAction: z.string(),
     secondaryAction: z.string(),
     ideasAction: z.string(),
+
+    // ── The conversion copy (change: marketing-home-cro-redesign) ────────────
+    //
+    // REQUIRED, not optional, and that is the point. Every other island on this
+    // page is optional so a page without it still renders; these five are the
+    // reasons a visitor does or does not start, and a homepage that quietly
+    // drops the one line saying "no signup, no card" looks completely fine while
+    // asking for more trust than it has earned. A missing key fails the build,
+    // in the language it is missing from.
+    //
+    /** Social proof framed on engagement DEPTH, never on a user count. */
+    heroTrust: z.string(),
+    /** The curiosity gap beside the hero map: a challenge, not a caption. */
+    heroChallenge: z.string(),
+    /** Friction reduction, immediately above the playable mission. */
+    lowFrictionNote: z.string(),
+    /** The one line label on the explainer video's poster card. */
+    videoLabel: z.string(),
+    /** Its running time, e.g. `1:30`. Shown as a badge on the poster. */
+    videoDuration: z.string(),
+
     featuresTagline: z.string(),
     featuresTitle: z.string(),
     featuresSubtitle: z.string(),
@@ -157,6 +178,17 @@ const homePages = defineCollection({
 
     // Media. All optional, so the page keeps working with none of it.
     hero: optionalMedia(),
+
+    /**
+     * The clip inside the hero's phone frame (change: marketing-home-cro-redesign).
+     *
+     * ABSENT BY DESIGN. With nothing here the frame shows an inline SVG field map
+     * that draws its own route, which costs no request and cannot be the reason
+     * the largest paint on the page is slow. Set it once a real screen capture of
+     * a game exists and the frame plays that instead, muted and looping, with no
+     * code change: a content decision rather than a deploy.
+     */
+    heroClip: optionalMedia(),
     galleryTitle: z.string().optional(),
     gallerySubtitle: z.string().optional(),
     gallery: z.array(mediaItem()).default([]),
