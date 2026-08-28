@@ -1,5 +1,21 @@
 # Results — measured before and after
 
+> ⚠️ **SUPERSEDED IN PART, and worth reading for why.** The projection in this file
+> (~41,000 reads at 120 participants) counted only `updateLocation`. It was later shown to be
+> badly incomplete: the live-leaderboard refresh reads EVERY team document on a 20 s throttle
+> from inside player callables, `resolveCallerTeam` was an uncached read on every participant
+> call, and the run console polls the teams board every 5 s. Modelled at real time-scale the
+> true figure was ~83,000 reads, 1.66x the ceiling.
+>
+> The per-ping numbers below are correct and still stand. The RUN-LEVEL projection does not.
+> The current figures live in `docs/event-readiness-hamirotz-letzion.md` section 9 and in
+> `openspec/changes/hot-path-read-cost/`.
+>
+> The mistake is the interesting part: per-call costs were measured in a COMPRESSED simulation,
+> where anything throttled by wall-clock fires a fraction as often per unit of game time as it
+> really does. Measuring per-call cost under compression is fine; taking call FREQUENCY from the
+> harness's clock is not.
+
 Same harness both times: `scripts/measure-location-cost.mjs` under the emulator with
 `RUSHPOINT_FS_OPCOUNT=1`, aggregated by `scripts/fs-ops-report.mjs`. Game configured **with a
 safe zone**, which is the configuration that makes `updateLocation` read the game document.
