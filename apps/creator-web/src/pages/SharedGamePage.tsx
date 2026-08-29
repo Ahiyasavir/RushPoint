@@ -15,6 +15,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { SharedGameView, SharedStageView, SharedTaskView } from '@rushpoint/shared';
+import { hasMappedMission } from '@rushpoint/shared';
 import { Button, Spinner, Badge } from '../components/ui';
 import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
@@ -54,8 +55,6 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
   const g = t.sharedGame;
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
-  const [openStage, setOpenStage] = useState(0);
-  const [openTask, setOpenTask] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -101,12 +100,13 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
 
   const { game, allowCopy } = state;
   const stages = [...game.stages].sort((a, b) => a.order - b.order);
-  const stage: SharedStageView | undefined = stages[Math.min(openStage, stages.length - 1)];
-  const task = stage?.tasks.find((x) => x.id === openTask) ?? null;
+  // A whole game can be locationless. Rendering a full-height map with an apology
+  // inside it spends the most expensive space on the page saying "nothing here".
+  const showRoute = hasMappedMission(game);
 
   return (
-    <div className="max-w-5xl mx-auto pb-16">
-      {/* ── Header ── */}
+    <div className="max-w-3xl mx-auto pb-16">
+      {/* \u2500\u2500 Header \u2500\u2500 */}
       <header className="mb-5">
         <div className="flex flex-wrap items-center gap-2 mb-2">
           <Badge>{g.readOnly}</Badge>
@@ -115,7 +115,7 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
         <h1 className="text-2xl font-bold mb-1" dir="auto">{game.title}</h1>
         {game.description && <p className="text-sm text-[--ink-2] mb-2" dir="auto">{game.description}</p>}
         <p className="text-xs text-[--ink-3]">
-          {g.stagesLabel({ n: game.stageCount })} · {g.missionsLabel({ n: game.taskCount })}
+          {g.stagesLabel({ n: game.stageCount })} \u00b7 {g.missionsLabel({ n: game.taskCount })}
         </p>
         <p className="text-xs text-[--ink-3] mt-1">{g.readOnlyHelp}</p>
 
@@ -131,71 +131,59 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
         </div>
       </header>
 
-      {/* ── The route ── */}
-      <section className="mb-6">
-        <h2 className="text-sm font-semibold text-[--ink-2] mb-2">{g.route}</h2>
-        <Suspense fallback={<div className="h-64 rounded-xl bg-[--surface-2]" />}>
-          <RoutePreviewMap stages={stages} className="h-64" />
-        </Suspense>
-      </section>
+      {/* \u2500\u2500 The route \u2500\u2500 rendered only when there is something to plot. */}
+      {showRoute && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-[--ink-2] mb-2">{g.route}</h2>
+          <Suspense fallback={<div className="h-64 rounded-xl bg-[--surface-2]" />}>
+            <RoutePreviewMap stages={stages} className="h-64" />
+          </Suspense>
+        </section>
+      )}
 
-      {/* ── Stages → missions → detail ── */}
-      <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4">
-        <div>
-          {/* Stage rail */}
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {stages.map((st, i) => (
-              <button
-                key={st.id}
-                onClick={() => { setOpenStage(i); setOpenTask(null); }}
-                className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
-                  i === openStage
-                    ? 'border-rp-fire/60 bg-rp-fire/10 text-ink-fire'
-                    : 'border-[--rp-border] text-[--ink-3] hover:text-[--ink-1]'
-                }`}
-              >
-                {st.title || g.stage({ n: i + 1 })}
-              </button>
-            ))}
-          </div>
-
-          {stage && (
-            <>
-              {stage.isFinal && <div className="text-xs text-[--ink-3] mb-2">{g.finalStage}</div>}
-              {typeof stage.requiredTaskCount === 'number' && (
-                <div className="text-xs text-[--ink-3] mb-2">
-                  {g.requiredTaskCount({ n: stage.requiredTaskCount })}
-                </div>
-              )}
-              {stage.tasks.length === 0 && <p className="text-sm text-[--ink-3]">{g.noMissions}</p>}
-              <ul className="space-y-1.5">
-                {stage.tasks.map((tk, i) => (
-                  <li key={tk.id}>
-                    <button
-                      onClick={() => setOpenTask(tk.id === openTask ? null : tk.id)}
-                      className={`w-full text-start px-3 py-2 rounded-xl border transition-colors ${
-                        tk.id === openTask
-                          ? 'border-rp-fire/60 bg-rp-fire/5'
-                          : 'border-[--rp-border] hover:bg-[--surface-2]'
-                      }`}
-                    >
-                      <span className="text-xs text-[--ink-3] me-2">{i + 1}</span>
-                      <span className="text-sm" dir="auto">{tk.title}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-[--rp-border] p-4 min-h-[200px]">
-          {task ? <MissionDetail task={task} /> : <p className="text-sm text-[--ink-3]">{g.selectMission}</p>}
-        </div>
-      </div>
+      {/* \u2500\u2500 The game itself, top to bottom \u2500\u2500
+          Everything is on the page. There is no selection state and nothing to
+          click: this is a document somebody was sent to READ (and often to
+          print), and a game with 34 missions behind a detail panel is 34 clicks
+          that nobody makes \u2014 which is exactly how a link that DOES carry the
+          station codes reads as one that does not. */}
+      {stages.map((stage, i) => (
+        <StageSection key={stage.id} stage={stage} index={i} revealed={game.answersRevealed} />
+      ))}
 
       <footer className="mt-10 text-center text-xs text-[--ink-3]">{g.poweredBy}</footer>
     </div>
+  );
+}
+
+function StageSection({ stage, index, revealed }: {
+  stage: SharedStageView;
+  index: number;
+  revealed: boolean;
+}) {
+  const g = useT().sharedGame;
+  return (
+    <section className="mb-8">
+      <div className="flex flex-wrap items-baseline gap-2 mb-1">
+        <span className="text-xs font-medium text-[--ink-3]">{g.stage({ n: index + 1 })}</span>
+        <h2 className="text-lg font-semibold" dir="auto">{stage.title}</h2>
+        {stage.isFinal && <Badge>{g.finalStage}</Badge>}
+      </div>
+      {typeof stage.requiredTaskCount === 'number' && (
+        <p className="text-xs text-[--ink-3] mb-2">{g.requiredTaskCount({ n: stage.requiredTaskCount })}</p>
+      )}
+      {stage.narrative?.intro?.body && (
+        <p className="text-sm text-[--ink-2] mb-3 border-s-2 border-[--rp-border] ps-3" dir="auto">
+          {stage.narrative.intro.body}
+        </p>
+      )}
+      {stage.tasks.length === 0 && <p className="text-sm text-[--ink-3]">{g.noMissions}</p>}
+      <div className="space-y-3">
+        {stage.tasks.map((task, n) => (
+          <MissionCard key={task.id} task={task} index={n} revealed={revealed} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -208,11 +196,33 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function MissionDetail({ task }: { task: SharedTaskView }) {
+/**
+ * Does this mission type have an answer the creator was supposed to author?
+ *
+ * Used ONLY to decide whether a revealing link says "not set" instead of drawing
+ * nothing. A silently missing row cannot be told apart from a withheld one, and
+ * that ambiguity is what made a link which really did carry every station code
+ * read as a link that carried none.
+ */
+function expectsAnswer(task: SharedTaskView): boolean {
+  return task.type === 'quiz' || task.type === 'numeric' || task.type === 'sequence';
+}
+
+function MissionCard({ task, index, revealed }: {
+  task: SharedTaskView;
+  index: number;
+  revealed: boolean;
+}) {
   const g = useT().sharedGame;
+  const answerText = task.answers?.length
+    ? task.answers.join(' · ')
+    : (typeof task.numericAnswer === 'number' ? String(task.numericAnswer) : null);
   return (
-    <div>
-      <h3 className="font-semibold mb-1" dir="auto">{task.title}</h3>
+    <article className="rounded-xl border border-[--rp-border] p-4">
+      <div className="flex items-baseline gap-2 mb-1">
+        <span className="text-xs text-[--ink-3]">{index + 1}</span>
+        <h3 className="font-semibold" dir="auto">{task.title}</h3>
+      </div>
       {task.description && <p className="text-sm text-[--ink-2] mb-3" dir="auto">{task.description}</p>}
 
       <div className="mb-3 flex flex-wrap gap-1.5">
@@ -240,9 +250,17 @@ function MissionDetail({ task }: { task: SharedTaskView }) {
           )}
         </Row>
       )}
-      {task.answers && task.answers.length > 0 && <Row label={g.fieldAnswer}>{task.answers.join(' · ')}</Row>}
-      {typeof task.numericAnswer === 'number' && <Row label={g.fieldAnswer}>{task.numericAnswer}</Row>}
+      {/* On a revealing link the answer and the station code are stated even when
+          the creator left them blank — an unfinished mission is exactly what a
+          reviewer is looking for, and a blank row says so out loud. */}
+      {answerText !== null && <Row label={g.fieldAnswer}>{answerText}</Row>}
+      {answerText === null && revealed && expectsAnswer(task) && (
+        <Row label={g.fieldAnswer}><span className="text-[--ink-3]">{g.notSet}</span></Row>
+      )}
       {task.secretCode && <Row label={g.fieldCode}>{task.secretCode}</Row>}
+      {!task.secretCode && revealed && task.type === 'smart_station' && (
+        <Row label={g.fieldCode}><span className="text-[--ink-3]">{g.notSet}</span></Row>
+      )}
 
       {task.steps && task.steps.length > 0 && (
         <div className="mt-3">
@@ -270,6 +288,6 @@ function MissionDetail({ task }: { task: SharedTaskView }) {
           </div>
         </div>
       )}
-    </div>
+    </article>
   );
 }

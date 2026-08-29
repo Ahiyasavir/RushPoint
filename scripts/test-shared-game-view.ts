@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
-  sanitizeGameForShare, sanitizeTaskForShare, SECRET_SHARE_FIELD_NAMES,
+  sanitizeGameForShare, sanitizeTaskForShare, hasMappedMission, SECRET_SHARE_FIELD_NAMES,
 } from '../packages/shared/src/sharedGameView';
 import type { Game, Task, Stage } from '../packages/shared/src/types';
 
@@ -174,6 +174,29 @@ check('an explicitly cleared safe zone is omitted, not sent as null',
 // the projection is a plain data value.
 check('the view round-trips through JSON unchanged',
   JSON.stringify(JSON.parse(JSON.stringify(sealed))) === JSON.stringify(sealed));
+
+// ── Is there anything to put on a map? ───────────────────────────
+// A whole game can be locationless (a classroom race, an indoor gibush). The page
+// used to answer that with a full-height map carrying an apology inside it.
+check('a game with a located mission wants a map', hasMappedMission(sanitizeGameForShare(game())) === true);
+check('a game whose only mission is locationless does NOT',
+  hasMappedMission(sanitizeGameForShare(game({ stages: [stage({ tasks: [task({ locationless: true })] })] }))) === false);
+check('a mission left at the 0,0 sentinel does NOT count as placed',
+  hasMappedMission(sanitizeGameForShare(game({
+    stages: [stage({ tasks: [task({ coordinates: { lat: 0, lng: 0 } })] })],
+  }))) === false);
+check('a game with no coordinates at all does NOT',
+  hasMappedMission(sanitizeGameForShare(game({
+    stages: [stage({ tasks: [task({ coordinates: undefined as unknown as Task['coordinates'] })] })],
+  }))) === false);
+check('ONE located mission among many locationless ones is enough',
+  hasMappedMission(sanitizeGameForShare(game({
+    stages: [stage({ tasks: [task({ locationless: true }), task({ id: 't2' })] })],
+  }))) === true);
+check('a game with no stages does not throw', hasMappedMission({ stages: [] }) === false);
+check('undefined does not throw', hasMappedMission(undefined) === false);
+check('a malformed stage list does not throw',
+  hasMappedMission({ stages: 'nope' as unknown as never[] }) === false);
 
 // ── The allowlist guard: a NEW Task field must be considered ─────────────────
 // Read the Task interface out of the type source and require every field to be

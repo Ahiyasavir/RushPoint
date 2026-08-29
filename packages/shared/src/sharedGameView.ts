@@ -228,6 +228,27 @@ export function sanitizeStageForShare(stage: Stage, revealAnswers = false): Shar
 }
 
 /**
+ * Does this game have anything to put on a map?
+ *
+ * A whole game can be locationless — a classroom race, an indoor gibush — and the
+ * share page used to answer that with a full-height map carrying an apology
+ * inside it. That is a lot of screen spent saying "nothing here". Pure and total
+ * so the page can simply not render the section.
+ */
+export function hasMappedMission(view: Pick<SharedGameView, 'stages'> | null | undefined): boolean {
+  const stages = view && Array.isArray(view.stages) ? view.stages : [];
+  return stages.some((st) => (Array.isArray(st?.tasks) ? st.tasks : []).some(
+    (t) => !t?.locationless
+      && typeof t?.coordinates?.lat === 'number'
+      && typeof t?.coordinates?.lng === 'number'
+      // 0,0 is the "never placed" sentinel the Builder leaves behind, not a spot
+      // in the Gulf of Guinea. RoutePreviewMap already skips it; the decision to
+      // show the section at all has to agree, or the map renders empty again.
+      && (t.coordinates.lat !== 0 || t.coordinates.lng !== 0),
+  ));
+}
+
+/**
  * The whole read-only projection. `revealAnswers` comes from the LINK document,
  * never from the caller's payload.
  */

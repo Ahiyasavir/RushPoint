@@ -1581,7 +1581,7 @@ const HE = {
     finalStage: 'שלב אחרון',
     requiredTaskCount: ({ n }: { n: number }) => `צריך להשלים ${n} מהמשימות בשלב`,
     noMissions: 'אין משימות בשלב הזה.',
-    selectMission: 'בחרו משימה כדי לראות את הפרטים שלה.',
+    notSet: 'לא הוגדר',
     fieldType: 'סוג',
     // שמות סוגי המשימות — אף פעם לא מציגים לאדם את שם ה-enum עצמו.
     types: {
@@ -3995,7 +3995,7 @@ const EN: typeof HE = {
     finalStage: 'Final stage',
     requiredTaskCount: ({ n }: { n: number }) => `Teams complete ${n} of these missions`,
     noMissions: 'This stage has no missions.',
-    selectMission: 'Pick a mission to see its details.',
+    notSet: 'Not set',
     fieldType: 'Type',
     // Mission type names — a person is never shown the raw enum.
     types: {
