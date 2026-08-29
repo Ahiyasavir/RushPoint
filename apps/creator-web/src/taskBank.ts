@@ -399,6 +399,51 @@
 // on-site tolerates plain `self_report`; a from-anywhere mission with nobody
 // around to notice does not.
 //
+// ─── 30. `noPrep` is a promise about QUICK SETUP too, not only about props ───
+//
+// A creator answering prep level 1 is saying "I prepare nothing at all", and the
+// composer honoured that by reading the mission's prep TAG — which describes
+// props to bring and says nothing about the fields Quick Setup will then demand.
+// So a level-1 game shipped missions tagged `noPrep` that could not be launched
+// until the creator dropped a pin, attached a photo of a spot they had to go and
+// photograph, wrote an emoji clue, or authored an olympiad riddle and its answer
+// (`youth-hardest-question`, cut in this pass). Nothing was flagged: every one of
+// them was tagged truthfully by the old reading of the tag.
+//
+// Two halves, both needed. The TAG is now judged on what the creator really has
+// to do — if a REQUIRED Quick Setup step asks them to author content, it is
+// `needsSetup`, whatever props are involved — and `fitScore` refuses any mission
+// with a required step when the answer was level 1, derived from the entry's own
+// `setup` so it cannot drift from the tag again (`demandsRequiredSetup`,
+// composeGame.ts). Rule 18 said "no map pin is not no prep"; this is the same
+// mistake seen from the creator's screen instead of from the props table.
+//
+// ─── 31. A mission whose ingredients might not exist has no finish ───────────
+//
+// Rule 5 asks for one unambiguous finish; the way that fails in practice is a
+// mission that depends on something the world may simply not be holding today.
+// "צלמו מישהו עם קולה" needs a stranger to be drinking one right now; "מצאו שלט
+// עם טעות" needs the building to contain a mistake; "חלון ראווה עם פריט שלא
+// מתאים" needs a subjective judgement about a window that may not exist. In all
+// three the team cannot tell the difference between "we have not found it yet"
+// and "there is nothing here", so they either stall or quietly give up — and
+// nothing in the product can tell them which happened.
+//
+// The cola mission was cut. The other two were rewritten onto something the
+// venue is guaranteed to hold: any window at all, and a sign saying what is
+// forbidden (every mall, office and school has one). Before shipping a mission,
+// name the thing it needs and ask whether it is certainly there.
+//
+// ─── 32. Missions for ten-year-olds are made of the players, not of the world ─
+//
+// The zero-prep pool for young players leaned on strangers, shop windows,
+// evacuation maps and found materials — all fine for a teenage city race, all
+// unreliable for a kids' game in a park or a living room. The three missions
+// added in this pass (line up by height in silence, recreate a famous statue,
+// one funny sentence each on video) need nothing that is not already standing
+// there. When a young band comes out thin, reach for what the group itself can
+// supply before reaching for what the venue might.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -666,7 +711,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'youth-find-place-one',
     sourceTemplateKey: 'youth-missions',
     family: 'photo-navigate',
-    tags: ['thinking', 'action', 'noPrep', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach'],
+    tags: ['thinking', 'action', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach'],
     difficulty: 5,
     // A real leg of the route: the whole mission is getting there.
     transitMinutes: 8,
@@ -683,7 +728,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-emoji-riddle',
     sourceTemplateKey: 'youth-missions',
-    tags: ['thinking', 'noPrep', 'locationBased', 'outdoor', 'youth', 'mixed', 'hard', 'neighborhood', 'cityCenter', 'park'],
+    // The creator writes the emoji line themselves — the mission has no content
+    // at all until they do, which is `needsSetup`, not `noPrep` (rule 30).
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'hard', 'neighborhood', 'cityCenter', 'park'],
     difficulty: 8,
     transitMinutes: 8,
     setup: [
@@ -718,63 +765,14 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
     }),
   },
-  {
-    key: 'youth-cola',
-    sourceTemplateKey: 'youth-missions',
-    tags: ['camera', 'action', 'noPrep', 'locationBased', 'outdoor', 'youth', 'mixed', 'easy', 'cityCenter', 'mall', 'neighborhood', 'beach'],
-    difficulty: 2,
-    // Opportunistic — done wherever people happen to be, so barely a detour.
-    transitMinutes: 3,
-    setup: [PLACE_IT],
-    build: () => sited({
-      title: 'קולה',
-      description: 'צלמו מישהו עם בקבוק או פחית קולה.',
-      type: 'photo',
-      difficulty: 2,
-      estimatedMinutes: 8,
-      pointValue: 50,
-      smart: upload({ longInstructions: 'מצאו מישהו ששותה עכשיו קולה וצלמו אותו' }),
-      // Opportunistic and unlimited by nature — no object to share or queue for.
-      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
-    }),
-  },
-  {
-    key: 'youth-hardest-question',
-    sourceTemplateKey: 'youth-missions',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'hard', 'cityCenter', 'mall', 'neighborhood'],
-    difficulty: 8,
-    setup: [
-      // NOT the shared ATTACH_PHOTO constant: its prompt is written for a photo
-      // players navigate BY ("one the team can recognise, to know where to
-      // go") — this photo is a math riddle to solve, nothing about a place.
-      {
-        field: 'media',
-        required: true,
-        prompt: 'צרפו תמונה של החידה המתמטית שהקבוצה צריכה לפתור.\n\nAttach a photo of the math riddle the team needs to solve.',
-      },
-      {
-        field: 'numericAnswer',
-        required: true,
-        prompt: 'עדכנו את התשובה המספרית של החידה שצירפתם.\n\nSet the numeric answer to the riddle you attached.',
-      },
-    ],
-    build: () => anywhere({
-      title: 'השאלה הכי מורכבת בעולם',
-      description: 'זו חידה ברמת אולימפיאדה במתמטיקה! מצאו אדם חכם ברחוב ובקשו את עזרתו בפתרון החידה שבתמונה (בלי לרמות!).',
-      type: 'numeric',
-      difficulty: 8,
-      estimatedMinutes: 20,
-      pointValue: 150,
-      numericAnswer: 50,
-      numericTolerance: 0,
-      hint: 'הסוד הוא לא לנסות למצוא כמה שווים a, b ו c בנפרד (הם לא מספרים שלמים, אלא שורשים עם שברים!). נסו לעבוד עם המשוואות כיחידה אחת שלמה.',
-    }),
-  },
+  // Both "מצאו את המקום" missions ask the creator to attach a photo OF THE SPOT,
+  // which means going there and shooting it beforehand — real preparation, so
+  // `needsSetup` (rule 18/30), not `noPrep` because there is no prop involved.
   {
     key: 'youth-find-place-two',
     sourceTemplateKey: 'youth-missions',
     family: 'photo-navigate',
-    tags: ['thinking', 'action', 'noPrep', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach'],
+    tags: ['thinking', 'action', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach'],
     difficulty: 5,
     transitMinutes: 8,
     setup: [PLACE_IT, ATTACH_PHOTO],
@@ -818,7 +816,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'גאווה ישראלית',
-      description: 'תבנו דגל ישראל ענק מדברים שאתם מוצאים וצלמו אותו.',
+      description: 'הרכיבו דגל ישראל מדברים שיש בסביבה: בגדים, תיקים, בקבוקים, עלים או אבנים. הוא לא חייב להיות גדול, הוא חייב להיות ברור. צלמו אותו מלמעלה.',
       type: 'photo',
       estimatedMinutes: 8,
       smart: upload(),
@@ -869,6 +867,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'challenge-beatles-crossing',
     sourceTemplateKey: 'challenge-missions',
+    // Same mission as `statue-remake` in different clothes: recreate a famous
+    // image with your bodies. One game, one of them.
+    family: 'recreate-famous-image',
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood'],
     difficulty: 5,
     // The source game attached the reference shot. Bank missions carry no media
@@ -1021,7 +1022,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'האות האנושית',
-      description: 'שכבו על הרצפה וצרו בגופכם את האות הראשונה של שם הקבוצה. צלמו מלמעלה, ממדרגות או מגבעה, כך שרואים את כולה.',
+      description: 'שכבו על הרצפה וצרו בגופכם את האות הראשונה של שם הקבוצה. אחד מכם מצלם מלמעלה, עם יד מורמת גבוה, כך שרואים את כל האות.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
@@ -1168,7 +1169,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'שרשרת הפעולות',
-      description: 'בנו שרשרת של שלוש פעולות לפחות מציוד שיש לכם: כל פעולה מפעילה את הבאה (חפץ נופל, מגלגל כדור, מפיל בקבוק, הרעיון שלכם). בלי לגעת בידיים אחרי שהתחלתם. צלמו ברצף אחד, בלי לעצור.',
+      description: 'בנו שרשרת של שלוש פעולות לפחות מכל מה שיש בסביבה: בקבוק, תיק, נעל, אבן, ענף. כל פעולה מפעילה את הבאה, ואחרי שהתחלתם אסור לגעת בידיים. צלמו ברצף אחד, בלי לעצור.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 10,
@@ -1347,7 +1348,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     // people or reading street signs, not opening a map.
     key: 'human-gps',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'action', 'teamwork', 'noPrep', 'locationBased', 'outdoor',
+    // `needsSetup`, not `noPrep`: the address clue is the ENTIRE mission, and
+    // the creator has to write it (rule 30).
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor',
       'neighborhood', 'cityCenter', 'park',
       'mixed', 'youth', 'adults', 'hard'],
     difficulty: 7,
@@ -1556,7 +1559,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 7,
     build: () => anywhere({
       title: 'האגדה המקומית',
-      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן. בקשו סיפור מוזר או מפתיע על המקום, עם פרט שאפשר לבדוק (שם, שנה, אירוע). מצאו אדם שני ושאלו אם שמע את אותו סיפור. צלמו את שתי התשובות.',
+      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן. בקשו ממנו סיפור מוזר או מפתיע על המקום, ובקשו פרט אחד שאפשר לבדוק: שם, שנה או אירוע. צלמו את התשובה, וחזרו על הפרט בקול בסוף הסרטון.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -1592,35 +1595,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   // honour-system beat, and an opinion with no wrong answer to breathe between
   // the loud ones.
 
-  {
-    // Narrowed to kids — the "line up by height, then a countdown-cheer" beats
-    // read as a kids'-camp drill, not something a work team or a group of adults
-    // does without visible discomfort (same mismatch as open-team-name earlier).
-    key: 'relay-of-three',
-    sourceTemplateKey: 'authored',
-    tags: ['teamwork', 'action', 'thinking', 'noPrep', 'fromAnywhere',
-      'park', 'school', 'beach', 'neighborhood',
-      'kids', 'medium'],
-    difficulty: 5,
-    build: () => anywhere({
-      title: 'שלושה בשרשרת',
-      description: 'שלושה שלבים, לפי הסדר, כל הקבוצה ביחד. אי אפשר לדלג ואי אפשר להתקדם בלי לסיים את הקודם.',
-      type: 'sequence',
-      difficulty: 5,
-      estimatedMinutes: 9,
-      pointValue: 140,
-      steps: [
-        { id: uuid(), prompt: 'הסתדרו בשורה לפי גובה, בלי לדבר. כשסיימתם, אשרו.' },
-        { id: uuid(), prompt: 'כתבו את שם הקבוצה שלכם.', answer: '' },
-        { id: uuid(), prompt: 'ספירה לאחור מחמש בקול אחד, ואז קפיצה משותפת. אשרו לסיום.' },
-      ],
-    }),
-    setup: [{
-      field: 'steps',
-      required: true,
-      prompt: 'בצעד השני, הזינו את שם הקבוצה או כל מילה שתרצו שיקלידו.\n\nIn step two, enter the team name, or any word you want them to type.',
-    }],
-  },
   {
     // "Pick two points you can both see, guess, then go count" only works if
     // the creator actually surveyed the spot — self-directed, a team could pick
@@ -1744,7 +1718,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'הסיפור שבחלון',
-      description: 'מצאו חלון ראווה עם פריט אחד שלא מתאים לשאר, כאילו הונח שם בטעות. צלמו את החלון וספרו בווידאו של 30 שניות: מי קנה דווקא אותו ולמה. הסבירו פרט אחד שרואים בתמונה.',
+      description: 'עצרו מול חלון ראווה ובחרו בו פריט אחד. צלמו את החלון וספרו בווידאו של 30 שניות: מי האדם שקנה דווקא אותו, ולמה. חייבים להזכיר פרט אחד שבאמת רואים בחלון.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 7,
@@ -2063,10 +2037,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'השלט השבור',
-      // "Write in one sentence what's broken" asked for a text field a photo
-      // submission never had (same bug class as oldest-thing-here / price-target).
-      // Saying it on camera fixes that and fits the mission just as well.
-      description: 'מצאו שלט אמיתי עם טעות: תרגום עקום, הוראה סותרת, חץ לכיוון הלא נכון, או מידע שפג תוקפו. צלמו אותו בווידאו והסבירו בקול מה בדיוק שבור בו. אסור לביים שלט בעצמכם.',
+      // "Find a sign with a real mistake" had no guaranteed answer: a building
+      // may simply not contain one, and the team has no way to know whether to
+      // keep looking (rule 5). A sign saying what is FORBIDDEN is somewhere in
+      // every mall, office and school, so the search always terminates — and
+      // inventing the person it was hung for is a better beat than proofreading.
+      description: 'מצאו שלט שכתוב עליו משהו שאסור לעשות. צלמו אותו בווידאו, וספרו בקול את הסיפור של האדם שבגללו תלו דווקא את השלט הזה. אסור להמציא שלט בעצמכם.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -2482,6 +2458,83 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 3,
       pointValue: 70,
       smart: upload({ captureKind: 'video', videoMaxSeconds: 20 }),
+    }),
+  },
+
+  // ── Young players, no venue, nothing to prepare ───────────────────────────
+  //
+  // The zero-prep pool skewed towards missions that assume a lot: a stranger who
+  // happens to be holding the right thing, a shop window with an odd item in it,
+  // an olympiad riddle the creator never wrote. A ten-year-old's game needs
+  // missions whose ingredients are the players themselves and nothing else —
+  // they are the only ones guaranteed to be there.
+  {
+    key: 'height-line-up',
+    sourceTemplateKey: 'authored',
+    tags: ['start', 'teamwork', 'action', 'camera', 'noPrep', 'fromAnywhere',
+      'park', 'school', 'beach', 'neighborhood', 'home',
+      'kids', 'youth', 'mixed', 'easy'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'שורה לפי גובה',
+      // The no-talking rule is the whole mission (rule 4): ordering a line by
+      // height is trivial out loud and genuinely funny in hand signals.
+      description: 'הסתדרו בשורה אחת מהנמוך לגבוה, בלי לדבר, רק בסימני ידיים. כשהשורה מוכנה, צלמו אותה מהצד כך שרואים את כולם.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 60,
+      smart: upload(),
+    }),
+  },
+  {
+    // The bank had no mission built around a picture the CREATOR supplies, even
+    // though attaching one is a control the Builder has always had. It ships
+    // with a real, famous default (rule 24 — Quick Setup replaces a working
+    // default, never supplies a missing one), so it is fully playable with zero
+    // prep, and the optional step lets a creator swap in a statue that actually
+    // stands where they are playing.
+    key: 'statue-remake',
+    sourceTemplateKey: 'authored',
+    family: 'recreate-famous-image',
+    tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+      'park', 'school', 'home', 'mall', 'cityCenter',
+      'kids', 'youth', 'mixed', 'easy'],
+    difficulty: 3,
+    setup: [{
+      field: 'media',
+      prompt: 'אפשר לצרף תמונה של פסל או של תמונה מפורסמת שתרצו שהקבוצות ישחזרו. בלי תמונה המשימה עובדת כמו שהיא.\n\nOptional: attach a photo of a statue or a famous picture for the teams to recreate. Without one the mission works exactly as written.',
+    }],
+    build: () => anywhere({
+      title: 'פסל חי',
+      description: 'שחזרו בגופכם את הפסל "החושב" של רודן: ישיבה כפופה, מרפק על הברך, אגרוף מתחת לסנטר. אחד מכם הפסל והשאר מבקרים במוזיאון שמצלמים אותו. אם צורפה למשימה תמונה, שחזרו את מה שרואים בה במקום.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 5,
+      pointValue: 80,
+      smart: upload(),
+    }),
+  },
+  {
+    // The bonding beat the bank never had: not a stunt, not a puzzle, just the
+    // group hearing something about each other. "Sit down and tell us how it is
+    // going" was cut from this bank as padding (rule 11), and rightly — the
+    // difference is the constraints: one sentence each, no repeated topic, and
+    // everyone has to be in the frame, so it ends somewhere definite.
+    key: 'story-round',
+    sourceTemplateKey: 'authored',
+    tags: ['teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere',
+      'park', 'school', 'home', 'beach', 'neighborhood',
+      'kids', 'youth', 'mixed', 'easy'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'סיבוב סיפורים',
+      description: 'סרטון אחד: כל אחד בקבוצה מספר במשפט אחד על משהו מצחיק שקרה לו פעם. אסור שיהיו שני סיפורים על אותו נושא, וכולם חייבים להופיע בסרטון.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 6,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMinSeconds: 20, videoMaxSeconds: 60 }),
     }),
   },
 

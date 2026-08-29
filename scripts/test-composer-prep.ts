@@ -38,6 +38,7 @@ import {
   type ComposerAnswers,
   type ComposerDescriptionCopy,
 } from '../apps/creator-web/src/lib/composeGame';
+import { demandsRequiredSetup } from '../apps/creator-web/src/lib/composeGame';
 import { TASK_BANK } from '../apps/creator-web/src/taskBank';
 import {
   PREP_SCALE, PREP_TAG_IDS, prepTierOf, prepToleranceOf, prepWantsPlacedMissions,
@@ -139,6 +140,51 @@ console.log('\n── 3. level 1 never yields a mission that needs prep ──�
   }
   ok(`composed ${composed} zero-prep games`, composed >= 30);
   eq('not one mission asks the creator to prepare anything', violation, '');
+}
+
+console.log('\n── 3b. …and level 1 asks nothing of them in Quick Setup ────');
+{
+  // The tag tier above is a claim about PROPS. It said nothing about the fields
+  // Quick Setup then demands, so a level-1 game — "I prepare nothing at all" —
+  // shipped `noPrep` missions that could not be launched until the creator
+  // dropped a pin, went and photographed a spot, wrote an emoji clue, or
+  // authored an olympiad riddle and its answer. Every one of them passed §3.
+  //
+  // Measured on the composer's REAL output (`wizardSteps`), not on the entries,
+  // so it also covers the steps the composer itself adds when it sites a
+  // play-from-anywhere mission.
+  let violation = '';
+  let composed = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const r = composeGame(TASK_BANK, { ...BASE, prepEffort: 1 }, COPY, seededRng(seed), { recentBankKeys: [] });
+    if (!r) continue;
+    composed++;
+    for (const k of r.usedBankKeys) {
+      if (demandsRequiredSetup(byKey.get(k))) violation ||= `seed ${seed}: "${k}" has a required setup step`;
+    }
+    const required = r.wizardSteps.filter((w) => w.isRequired);
+    if (required.length > 0) {
+      violation ||= `seed ${seed}: Quick Setup demands "${required[0].targetFieldPath}"`;
+    }
+  }
+  ok(`inspected ${composed} zero-prep games`, composed >= 30);
+  eq('a level-1 game launches with nothing filled in', violation, '');
+
+  // The same guard must NOT fire above level 1 — a creator who agreed to place
+  // missions is meant to be asked for pins, and one who agreed to prepare things
+  // is meant to be asked for content. A filter that silently swallowed those
+  // would pass the assertion above by emptying the pool.
+  const requiredAt = (level: number): number => {
+    let n = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const r = composeGame(TASK_BANK, { ...BASE, prepEffort: level as never }, COPY,
+        seededRng(seed), { recentBankKeys: [] });
+      n += (r?.wizardSteps ?? []).filter((w) => w.isRequired).length;
+    }
+    return n;
+  };
+  const atThree = requiredAt(3);
+  ok(`level 3 still asks the creator for what it needs (${atThree} required steps)`, atThree > 0);
 }
 
 console.log('\n── 4. level 3 allows self-prep, never an outside partner ───');

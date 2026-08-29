@@ -270,6 +270,23 @@ export interface FitContext {
    * a filter: level 4 admits exactly the missions level 3 admits.
    */
   placedPreference: boolean;
+  /**
+   * May a chosen mission carry a REQUIRED Quick Setup step?
+   *
+   * False only at prep level 1, whose answer is literally "I prepare nothing at
+   * all". `prepTierOf` reads the mission's TAGS, and a tag describes the props a
+   * creator must bring — it says nothing about the fields Quick Setup will then
+   * demand. So a mission tagged `noPrep` could still open the creator's very
+   * first screen with a mandatory blank: drop a pin, attach a photo of the spot,
+   * write the emoji clue, set the numeric answer. A level-1 creator was told
+   * nothing would be asked of them and was then blocked from launching until
+   * they authored mission content.
+   *
+   * Derived from the entry's own `setup`, never from a tag, for the same reason
+   * `family` and `exclusiveStation` are declared rather than inferred: the two
+   * can drift, and only one of them is what the creator actually experiences.
+   */
+  requiredSetupAllowed: boolean;
 }
 
 /** The minimum a candidate needs to be sampled. */
@@ -555,6 +572,11 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
     // but only level 4 says the creator is going there beforehand, which is what
     // makes a located mission worth preferring rather than merely tolerable.
     placedPreference: prepWantsPlacedMissions(a.prepEffort) && (num(a.prepEffort) ?? 0) >= 4,
+    // Level 2 ("I'll put the missions on real spots") is already an agreement to
+    // fill something in, so only level 1 refuses. An ABSENT answer resolves via
+    // `prepToleranceOf`'s fallback (level 3) and therefore allows it — a creator
+    // who never saw the question is not the one making this promise.
+    requiredSetupAllowed: prepToleranceOf(a.prepEffort) > 0 || prepWantsPlacedMissions(a.prepEffort),
     // Sanitised the same way as preferredTags, then narrowed to real area ids, so
     // a stray tag in the answers cannot silently become an area filter.
     areas: safeTags(a.areas).filter((t): t is AreaTagId =>
@@ -568,6 +590,16 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
 // ═══════════════════════════════════════════════════════════════════════════
 // 5. Fit score
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Does this mission block its launch on a field the creator must fill in?
+ *
+ * Total: a malformed entry, or one with no setup at all, demands nothing.
+ */
+export function demandsRequiredSetup(entry: TaskBankEntry | undefined): boolean {
+  const setup = Array.isArray(entry?.setup) ? entry.setup : [];
+  return setup.some((s) => s?.required === true);
+}
 
 /**
  * How well one mission suits one slot.
@@ -597,6 +629,10 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
   // with a business" describes their world, not their taste — see
   // ComposerAnswers.prepEffort.
   if (prepTierOf(tags) > (num(ctx.prepTolerance) ?? 1)) return -Infinity;
+  // …and the same budget again, measured on what Quick Setup will REALLY ask
+  // for rather than on what the mission claims to cost. See
+  // `FitContext.requiredSetupAllowed`.
+  if (ctx.requiredSetupAllowed === false && demandsRequiredSetup(entry)) return -Infinity;
   // "No venue" makes a location-only mission literally unplayable.
   if (ctx.setting === 'fromAnywhere' && tags.includes('locationBased') && !tags.includes('fromAnywhere')) {
     return -Infinity;
