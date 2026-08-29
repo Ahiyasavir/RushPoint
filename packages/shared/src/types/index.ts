@@ -39,6 +39,9 @@ export const COLLECTIONS = {
   // Join codes
   ACCESS_CODES: 'accessCodes',
 
+  // Read-only share links for an unpublished game (change: game-share-link)
+  GAME_SHARE_LINKS: 'gameShareLinks',
+
   // Smart stations
   STATION_SECRETS: 'stationSecrets',
   STATION_REVIEWS: 'stationReviews',
@@ -93,6 +96,13 @@ export const FIRESTORE_PATHS = {
   transaction: (uid: string, txId: string) => `wallets/${uid}/transactions/${txId}`,
 
   accessCode:  (code: string) => `accessCodes/${code}`,
+
+  // Share links for an unpublished game (change: game-share-link). Top-level and
+  // keyed by the token for the same reason as accessCodes: the holder resolves
+  // owner + game FROM the address, so the link can be handed out without ever
+  // naming either. Server-write-only AND server-read-only (firestore.rules).
+  gameShareLink:     (token: string) => `gameShareLinks/${token}`,
+  gameShareLinksCol: () => 'gameShareLinks',
 
   runAnnouncement: (ownerUid: string, gameId: string, runId: string, id: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/announcements/${id}`,

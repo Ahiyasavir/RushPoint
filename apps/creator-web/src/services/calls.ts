@@ -1,5 +1,5 @@
 // Typed wrappers around every creator-facing Cloud Function callable.
-import { callable } from './api';
+import { callable, publicCallable } from './api';
 import type {
   Game,
   CreateGamePayload,
@@ -29,6 +29,9 @@ import type {
   AdminUserSummary,
   TemplateGenre,
   RunPlayerReport,
+  GameShareLink,
+  ShareLinkRefusal,
+  SharedGameView,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -37,9 +40,31 @@ export const updateGame    = callable<UpdateGamePayload, { ok: boolean }>('updat
 // SOFT delete (change: recoverable-game-deletion): tombstones the game and
 // revokes its join codes. Destroys nothing — see purgeGameNow / the trash view.
 export const deleteGame    = callable<{ gameId: string }, { ok: boolean; deletedAt: string; purgeDueAt: string | null }>('deleteGame');
-export const duplicateGame = callable<{ gameId: string; sourceOwnerUid?: string }, { gameId: string }>('duplicateGame');
+// `shareToken` is the third door (change: game-share-link): the token resolves
+// the owner and the game itself, so gameId/sourceOwnerUid are not sent with it.
+export const duplicateGame = callable<
+  { gameId?: string; sourceOwnerUid?: string; shareToken?: string },
+  { gameId: string }
+>('duplicateGame');
 export const publishGame   = callable<{ gameId: string; visibility: 'public' | 'private' }, { ok: boolean; visibility: string }>('publishGame');
 export const getGame       = callable<{ gameId: string }, { game: Game }>('getGame');
+
+// ── Share links (change: game-share-link) ──
+// A read-only link to an UNPUBLISHED game. `getSharedGame` needs no account: it
+// is the one call this app makes that a signed-out visitor is expected to make.
+export const createGameShareLink = callable<
+  { gameId: string; allowCopy?: boolean; revealAnswers?: boolean; expiresInDays?: number },
+  { link: GameShareLink }
+>('createGameShareLink');
+export const listGameShareLinks = callable<
+  { gameId: string },
+  { links: (GameShareLink & { refusal: ShareLinkRefusal | null })[] }
+>('listGameShareLinks');
+export const revokeGameShareLink = callable<{ token: string }, { ok: boolean; revokedAt: string }>('revokeGameShareLink');
+export const getSharedGame = publicCallable<
+  { token: string },
+  { game: SharedGameView; allowCopy: boolean; sharedAt: string }
+>('getSharedGame');
 export const listGames     = callable<void, { games: Game[] }>('listGames');
 // Creator-owned portability (change: game-file-export-import). exportGameFile is
 // OWNER-ONLY: the document it returns deliberately contains answer keys, hint text,

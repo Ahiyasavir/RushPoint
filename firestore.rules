@@ -304,6 +304,21 @@ service cloud.firestore {
     }
 
 
+    // ── gameShareLinks/{token} ───────────────────────────────────────────────
+    //    Read-only share links for an UNPUBLISHED game (change: game-share-link).
+    //    Written by createGameShareLink / revokeGameShareLink, read by
+    //    getSharedGame — all three through the Admin SDK.
+    //
+    //    Closed to clients in BOTH directions. The document id IS the credential,
+    //    so an open read would let anyone LIST every live share token on the
+    //    platform: one query, and every unpublished game becomes readable. The
+    //    write half is equally load-bearing — a client that could mint a link
+    //    could grant itself access to any game whose id it can guess.
+    match /gameShareLinks/{token} {
+      allow read, write: if false;
+    }
+
+
     // ═════════════════════════════════════════════════════════════════════════
     // Helpers
     // ═════════════════════════════════════════════════════════════════════════

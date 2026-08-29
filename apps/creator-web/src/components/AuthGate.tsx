@@ -22,10 +22,14 @@ import { authErrorInfo } from '../lib/authError';
 import { ToastHost } from './toast';
 import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
+import { resolvePublicCreatorRoute } from '../lib/publicCreatorPath';
 
 const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
-
-const LEGAL_PATHS = ['/privacy', '/terms'];
+// A game shared by link (change: game-share-link). Served WITHOUT an account for
+// the same reason the legal pages are: the recipient of a link is very often
+// somebody who has never heard of the product, and bouncing them to a sign-up
+// form is indistinguishable from a broken link.
+const SharedGamePage = lazyWithRetry('sharedGame', () => import('../pages/SharedGamePage'));
 
 // The participant app, for the no-signup "try a sample game" demo link. This
 // opens the FLAGSHIP instant-play demo ("אקדמיית הסוכנים"): the `?game=<id>` promo
@@ -85,12 +89,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  // Legal pages are public: serve them without requiring auth.
-  if (!user && LEGAL_PATHS.includes(window.location.pathname)) {
-    const type = window.location.pathname === '/privacy' ? 'privacy' : 'terms';
+  // Public routes: served without requiring auth. Resolved by ONE pure function
+  // (lib/publicCreatorPath) rather than compared inline, because the pathname
+  // carries the router basename — `/creator/terms` behind the playtest proxy —
+  // and the old inline comparison silently missed every one of those.
+  const publicRoute = !user
+    ? resolvePublicCreatorRoute(window.location.pathname, import.meta.env.BASE_URL)
+    : null;
+  if (publicRoute?.kind === 'legal') {
     return (
       <Suspense fallback={<Spinner label="..." />}>
-        <LegalPage type={type} standalone />
+        <LegalPage type={publicRoute.type} standalone />
+      </Suspense>
+    );
+  }
+  if (publicRoute?.kind === 'shared') {
+    return (
+      <Suspense fallback={<Spinner label="..." />}>
+        <div className="min-h-screen bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] px-4 py-8">
+          <SharedGamePage token={publicRoute.token} signedIn={false} />
+        </div>
       </Suspense>
     );
   }

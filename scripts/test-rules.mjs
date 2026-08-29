@@ -356,6 +356,23 @@ async function main() {
       assertFails(setDoc(doc(ctx, 'contactMessages/forged'), { name: 'x', email: 'x@y.z', message: 'x' })));
   }
 
+  // ── Game share links (change: game-share-link) ───────────────────────
+  //    The document ID *is* the credential. An open READ would let anyone LIST
+  //    every live share token on the platform — one query, and every unpublished
+  //    game becomes readable. An open WRITE would let a client mint itself a link
+  //    to any game whose id it can guess. The OWNER is asserted too: even the
+  //    creator of the game reaches these only through the callables, because a
+  //    client-written link would skip the audit record entirely.
+  console.log('\n── Game share links: closed to clients in both directions ──');
+  for (const [who, ctx] of [['anon', anon], ['the game owner', owner], ['a participant', team]]) {
+    await check(`${who} CANNOT read a share link`,
+      assertFails(getDoc(doc(ctx, 'gameShareLinks/tok1'))));
+    await check(`${who} CANNOT list share links`,
+      assertFails(getDocs(collection(ctx, 'gameShareLinks'))));
+    await check(`${who} CANNOT mint a share link directly`,
+      assertFails(setDoc(doc(ctx, 'gameShareLinks/forged'), { ownerUid: OWNER, gameId: GAME, allowCopy: true })));
+  }
+
   console.log('\n── Storage: photo uploads are owner+type+size gated ──');
   const img = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]); // tiny jpeg-ish
   const big = new Uint8Array(11 * 1024 * 1024); // >10MB

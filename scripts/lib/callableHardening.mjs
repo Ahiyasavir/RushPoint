@@ -44,6 +44,15 @@ export const PUBLIC_CALLABLES = {
     + 'bound, and a rate limit keyed on the CONNECTION rather than on anything the caller sends. '
     + 'It returns only { ok }, never a document id, and the collection it writes is closed to '
     + 'clients in both directions.',
+  getSharedGame:
+    'A share link for an unpublished game (change: game-share-link). The recipient is by '
+    + 'definition someone the creator wants to show a game to, which is very often somebody '
+    + 'who has no account yet — requiring one would defeat the point of sending a link. What '
+    + 'authentication would normally carry is carried by a 128-bit unguessable token that IS '
+    + 'the address of the link document, a rate limit keyed on the CONNECTION rather than on '
+    + 'anything the caller sends, and a projection that copies fields out by name so no server '
+    + 'secret can reach the response by default. It returns a read-only view and never the '
+    + 'owner uid; taking a COPY is a different callable and does require an account.',
 };
 
 /**
@@ -95,6 +104,15 @@ export const PRIVILEGED_CALLABLES = {
     + 'lets an operator purge the whole trash immediately.',
   backfillPublicTaskCoordinatesNow:
     'Bulk-rewrites documents in the world-readable publicTasks collection.',
+  createGameShareLink:
+    'Mints a credential that lets anybody holding it read an UNPUBLISHED game in full. That is '
+    + 'a disclosure of private content, and the only way to answer "who opened this game up, '
+    + 'when, and with which permissions" after the fact is a durable record — the link document '
+    + 'itself is deletable by the same owner.',
+  revokeGameShareLink:
+    'The counterpart of createGameShareLink: it withdraws read access somebody may be relying '
+    + 'on. Both ends of a disclosure decision belong in the same trail, or the trail only ever '
+    + 'shows access being granted.',
   listContactMessages:
     'Reads a list of names, email addresses and free text belonging to people who are NOT users '
     + 'of the platform and never agreed to anything beyond "I am sending you a question". They '

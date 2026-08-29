@@ -26,6 +26,7 @@ import { resolveWizardTarget, type TemplateWizardStep } from '@rushpoint/shared'
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, TagChips, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
+import ShareLinkDialog from '../components/ShareLinkDialog';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
@@ -309,6 +310,8 @@ export default function BuilderPage() {
   const [saveError, setSaveError] = useState<CallFailure | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
+  // Share this game by link, published or not (change: game-share-link).
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Refs let the debounced auto-save and the beforeunload guard read the latest
   // game/saved-snapshot without re-subscribing on every keystroke.
@@ -1105,6 +1108,15 @@ export default function BuilderPage() {
             >
               {b.importFile}
             </button>
+            {/* Sharing lives beside export/import on purpose: all three answer
+                "get this game to somebody else" (change: game-share-link). */}
+            <button
+              role="menuitem"
+              onClick={() => setShareOpen(true)}
+              className={HEADER_MENU_ITEM_CLASS}
+            >
+              {t.share.menuLabel}
+            </button>
           </OverflowMenu>
         </div>
         )}
@@ -1234,10 +1246,21 @@ export default function BuilderPage() {
               >
                 {b.launchTestRun}
               </button>
+              <button
+                role="menuitem"
+                onClick={() => setShareOpen(true)}
+                className={HEADER_MENU_ITEM_CLASS}
+              >
+                {t.share.menuLabel}
+              </button>
             </OverflowMenu>
           </div>
         )}
       </header>
+
+      {shareOpen && game && (
+        <ShareLinkDialog gameId={game.id} gameTitle={game.title} onClose={() => setShareOpen(false)} />
+      )}
 
       {/* ── Persistent failed-save banner ──────────────────────────────────
           Deliberately NOT a toast: a toast auto-dismisses in ~3 seconds, and

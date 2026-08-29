@@ -11022,6 +11022,158 @@ async function main() {
       JSON.stringify({ before: scoreBefore, after: afterPrune?.players?.[0]?.score }));
   });
 
+  // ── game share links (change: game-share-link) ──────────────────────────────
+  // A creator hands ONE person a URL to an UNPUBLISHED game: read-only, and
+  // optionally copyable. The three things that must hold are (1) the game never
+  // reaches the gallery, (2) the read is sealed unless the LINK opted in, and
+  // (3) every way a link can die actually kills it.
+  await scenario('share links (unpublished read-only link, copy, revoke, expiry)', async () => {
+    const { gameId: gShare } = await creator.call('createGame', { title: 'Shared Draft', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gShare,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 'st-sh', order: 0, title: 'Chapter one', isFinal: true,
+        tasks: [{
+          id: 'sh-1', title: 'The fountain riddle', type: 'quiz',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 6,
+          pointValue: 100, maxConcurrentTeams: 3,
+          choices: ['1948', '1967'], answers: ['1948'],
+          hint: 'SHARE-HINT-TEXT', hintPenalty: 20,
+        }, {
+          id: 'sh-2', title: 'The station', type: 'smart_station',
+          coordinates: { lat: 31.79, lng: 35.22 }, difficulty: 3, estimatedMinutes: 4,
+          pointValue: 80, maxConcurrentTeams: 3,
+          smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'SHARE-CODE' },
+        }],
+      }],
+    });
+
+    // A party with NO account at all — the actual condition of a link recipient.
+    const linkVisitor = makeParty('shareLinkVisitor');
+
+    const created = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: true });
+    const token = created?.link?.token;
+    check('createGameShareLink returns a token', typeof token === 'string' && token.length >= 22, String(token));
+    check('a new link starts un-revoked and never-expiring',
+      !created?.link?.revokedAt && !created?.link?.expiresAt, JSON.stringify(created?.link));
+
+    // (1) The game is still private. Sharing must not touch the gallery.
+    const gallery = await creator.call('searchGallery', { query: 'Shared Draft' });
+    check('sharing does NOT publish the game to the gallery',
+      !(gallery?.games ?? []).some((g) => g.id === gShare),
+      (gallery?.games ?? []).map((g) => g.id).join(','));
+
+    // (2) The read: everything an author needs, no answer key.
+    const view = await linkVisitor.call('getSharedGame', { token });
+    const shared = view?.game;
+    check('an unauthenticated visitor can read the shared game', shared?.title === 'Shared Draft', JSON.stringify(view).slice(0, 160));
+    check('the shared view carries the stages and missions',
+      shared?.stageCount === 1 && shared?.taskCount === 2, JSON.stringify({ s: shared?.stageCount, t: shared?.taskCount }));
+    const sharedTask = shared?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1');
+    check('the mission carries its authored map point (the builder view needs one)',
+      sharedTask?.coordinates?.lat === 31.78, JSON.stringify(sharedTask?.coordinates));
+    check('quiz choices are visible', (sharedTask?.choices ?? []).length === 2, JSON.stringify(sharedTask?.choices));
+    const raw = JSON.stringify(view);
+    check('no answer key reaches the sealed view', !raw.includes('1948') || !raw.includes('"answers"'), 'answers present');
+    check('the hint TEXT does not reach the sealed view', !raw.includes('SHARE-HINT-TEXT'), 'hint leaked');
+    check('the station secret code does not reach the sealed view', !raw.includes('SHARE-CODE'), 'secretCode leaked');
+    check('the hint EXISTENCE is still reported', sharedTask?.hasHint === true, JSON.stringify(sharedTask?.hasHint));
+    check('the owner uid is never disclosed to the viewer',
+      !raw.includes(creatorCred.user.uid), 'ownerUid leaked');
+
+    // A revealing link is a deliberate, per-link opt-in — and it is the LINK that
+    // decides, never the caller's payload.
+    const openLink = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: false, revealAnswers: true });
+    const openView = await linkVisitor.call('getSharedGame', { token: openLink?.link?.token });
+    const openTask = openView?.game?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1');
+    check('a revealing link carries the answer key', (openTask?.answers ?? [])[0] === '1948', JSON.stringify(openTask?.answers));
+    check('a revealing link carries the hint text', openTask?.hint === 'SHARE-HINT-TEXT', String(openTask?.hint));
+    check('a viewer cannot ask a SEALED link to reveal answers',
+      (await linkVisitor.call('getSharedGame', { token, revealAnswers: true }))
+        ?.game?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1')?.answers === undefined,
+      'payload flag honoured');
+    check('a revealing link still hides the owner uid',
+      !JSON.stringify(openView).includes(creatorCred.user.uid), 'ownerUid leaked');
+
+    // (3) Copying: allowed only when the link says so, and only with an account.
+    const copier = makeParty('shareCopier');
+    const copierCred = await signInAnonymously(copier.auth);
+    await expectError('a copy through a NON-copyable link is refused',
+      copier.call('duplicateGame', { shareToken: openLink?.link?.token }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('a stranger cannot copy the private game directly, token or not',
+      copier.call('duplicateGame', { gameId: gShare, sourceOwnerUid: creatorCred.user.uid }),
+      { codeIn: ['functions/permission-denied'] });
+
+    const copied = await copier.call('duplicateGame', { shareToken: token });
+    check('a copyable link yields a copy in the copier’s own account', !!copied?.gameId, JSON.stringify(copied));
+    const copiedGame = (await copier.call('getGame', { gameId: copied?.gameId }))?.game;
+    check('the copy is owned by the copier', copiedGame?.ownerUid === copierCred.user.uid, String(copiedGame?.ownerUid));
+    check('the copy is PRIVATE, never published by the copy', copiedGame?.visibility === 'private', String(copiedGame?.visibility));
+    // The copy is a WORKING game: the copier gets the answer keys even though the
+    // sealed VIEW never showed them. That is the point of copying server-side.
+    const copiedTask = copiedGame?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1');
+    check('the copy carries the answer key the view withheld', (copiedTask?.answers ?? [])[0] === '1948', JSON.stringify(copiedTask?.answers));
+    check('the copy counter is visible to the owner',
+      ((await creator.call('listGameShareLinks', { gameId: gShare }))?.links ?? [])
+        .find((l) => l.token === token)?.copyCount === 1, 'copyCount');
+
+    // The owner's list, and the states it reports.
+    const listed = await creator.call('listGameShareLinks', { gameId: gShare });
+    check('the owner sees both links', (listed?.links ?? []).length === 2, String((listed?.links ?? []).length));
+    check('a live link reports no refusal',
+      (listed?.links ?? []).every((l) => l.refusal === null || l.refusal === undefined),
+      JSON.stringify((listed?.links ?? []).map((l) => l.refusal)));
+    await expectError('a stranger cannot list the owner’s share links',
+      copier.call('listGameShareLinks', { gameId: gShare }),
+      { codeIn: ['functions/not-found', 'functions/permission-denied'] });
+
+    // Revocation kills the link, and says so.
+    await expectError('a stranger cannot revoke a link they merely hold',
+      copier.call('revokeGameShareLink', { token }),
+      { codeIn: ['functions/permission-denied'] });
+    const revoked = await creator.call('revokeGameShareLink', { token });
+    check('revokeGameShareLink stamps a revokedAt', !!revoked?.revokedAt, JSON.stringify(revoked));
+    await expectError('a revoked link no longer reads',
+      linkVisitor.call('getSharedGame', { token }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('a revoked link no longer copies',
+      copier.call('duplicateGame', { shareToken: token }),
+      { codeIn: ['functions/not-found'] });
+
+    // A garbage token must be refused before any document path is built.
+    for (const bad of ['', 'short', 'a/b/c', null, 42, { token: 'x' }]) {
+      await expectError(`a malformed token (${JSON.stringify(bad)}) is refused`,
+        linkVisitor.call('getSharedGame', { token: bad }),
+        { codeIn: ['functions/not-found', 'functions/invalid-argument'] });
+    }
+
+    // Expiry. A one-day link is alive now; the stored instant is what kills it
+    // later, so the assertion here is that the field is set and in the future.
+    const dated = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: true, expiresInDays: 1 });
+    check('an expiring link stores a future expiresAt',
+      !!dated?.link?.expiresAt && Date.parse(dated.link.expiresAt) > Date.now(), String(dated?.link?.expiresAt));
+    check('an expiring link still reads while it is alive',
+      (await linkVisitor.call('getSharedGame', { token: dated?.link?.token }))?.game?.title === 'Shared Draft');
+
+    // A tombstoned game reads as gone through EVERY door, this one included.
+    const { gameId: gTomb } = await creator.call('createGame', { title: 'Doomed Draft', mode: 'individual' });
+    const tombLink = await creator.call('createGameShareLink', { gameId: gTomb, allowCopy: true });
+    await creator.call('deleteGame', { gameId: gTomb });
+    await expectError('a link to a TRASHED game stops reading',
+      linkVisitor.call('getSharedGame', { token: tombLink?.link?.token }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('a trashed game cannot be shared with a NEW link either',
+      creator.call('createGameShareLink', { gameId: gTomb }),
+      { codeIn: ['functions/failed-precondition', 'functions/not-found'] });
+
+    // The owner-side callables are owner-only at the door.
+    await expectError('a stranger cannot mint a link for a game they do not own',
+      copier.call('createGameShareLink', { gameId: gShare }),
+      { codeIn: ['functions/not-found', 'functions/permission-denied'] });
+  }); // scenario: share links
+
   // ── contact messages (change: marketing-site) ───────────────────────────────
   // The marketing site's contact form. Unauthenticated by necessity: the sender
   // is by definition someone who does not have an account yet. That makes it the

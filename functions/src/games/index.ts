@@ -70,6 +70,10 @@ import {
   pruneWizardSteps,
 } from '@rushpoint/shared';
 import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
+// Read-only share links for an unpublished game (change: game-share-link).
+import {
+  resolveShareTokenForCopy, bumpShareLinkCopyCount, deleteGameShareLinks,
+} from './share';
 // What a PUBLIC GAME may say about where it is (change: surface-invisible-fields).
 // The gallery map plots publicGames by approxLocation and nothing ever wrote one, so
 // the map was permanently blank; this derives a coarse area from the game's own
@@ -696,6 +700,12 @@ export async function purgeGameTree(ownerUid: string, gameId: string, operatorId
   await deleteDocsInChunks(codes.map((d) => d.ref))
     .catch((e) => logBestEffort('accessCodes.purge', { ownerUid, gameId }, e));
 
+  // Same orphan class, newer collection (change: game-share-link): share links
+  // live OUTSIDE users/{uid}, so the recursiveDelete below never reaches them and
+  // a link would survive as a read token for a game that no longer exists.
+  await deleteGameShareLinks(ownerUid, gameId)
+    .catch((e) => logBestEffort('gameShareLinks.purge', { ownerUid, gameId }, e));
+
   await db.recursiveDelete(ref);
 
   await auditBestEffort({
@@ -870,10 +880,23 @@ export const purgeGameNow = loggedCallable('purgeGameNow', async (data, context)
 
 export const duplicateGame = loggedCallable('duplicateGame', async (data, context) => {
   const uid = requireAuth(context);
-  const { gameId, sourceOwnerUid } = data as { gameId: string; sourceOwnerUid?: string };
+  const { gameId: requestedGameId, sourceOwnerUid, shareToken } = data as {
+    gameId?: string; sourceOwnerUid?: string; shareToken?: string;
+  };
+
+  // A share link (change: game-share-link) is the THIRD way to reach a source
+  // game, beside "my own" and "someone's public one". The token resolves owner +
+  // game itself, so the caller never sends — and never needs to know — either;
+  // whatever they DID send is ignored rather than merged, so a token cannot be
+  // paired with someone else's gameId to reach a game the link is not for.
+  const sharedLink = shareToken !== undefined && shareToken !== null
+    ? await resolveShareTokenForCopy(shareToken)
+    : null;
 
   // Can duplicate own private games OR any public game by any creator
-  const ownerUid = sourceOwnerUid ?? uid;
+  const ownerUid = sharedLink ? sharedLink.ownerUid : (sourceOwnerUid ?? uid);
+  const gameId = sharedLink ? sharedLink.gameId : (requestedGameId ?? '');
+  if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
   const sourceRef = db.doc(gamePath(ownerUid, gameId));
   const sourceSnap = await sourceRef.get();
 
@@ -884,8 +907,10 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
   // creator asked to delete, and would survive the purge of the original.
   assertGameNotDeleted(sourceGame);
 
-  // Enforce: can only copy public games from other creators
-  if (ownerUid !== uid && sourceGame.visibility !== 'public') {
+  // Enforce: can only copy public games from other creators — UNLESS a live
+  // share link said otherwise. That is the whole point of the link: the owner
+  // authorized this copy explicitly, one recipient at a time, without publishing.
+  if (!sharedLink && ownerUid !== uid && sourceGame.visibility !== 'public') {
     throw new functions.https.HttpsError('permission-denied', 'Game is not public');
   }
 
@@ -920,10 +945,16 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
 
   await newRef.set(copy);
 
+  // A share-link copy is counted on the LINK, so the owner can see that the
+  // person they sent it to actually took it. It deliberately does NOT touch
+  // bumpPublicSignals: there is no publicGames document to rank — not publishing
+  // is the entire reason this path exists.
+  if (sharedLink) bumpShareLinkCopyCount(sharedLink);
+
   // Increment original's playCount (best-effort). The PUBLIC bump goes through
   // bumpPublicSignals so the gallery's ranking score is recomputed with the
   // counter, never after it (change: gallery-popularity-ranking).
-  if (ownerUid !== uid) {
+  if (!sharedLink && ownerUid !== uid) {
     sourceRef.update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
     bumpPublicSignals('game', gameId, { uses: 1 }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
   }

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Stage } from '@rushpoint/shared';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
@@ -14,7 +13,21 @@ ensureRtlTextPlugin(maplibregl);
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
-export default function RoutePreviewMap({ stages, className = '' }: { stages: Stage[]; className?: string }) {
+/**
+ * The structural minimum this map reads. Declared instead of taking `Stage[]` so
+ * the read-only share view (SharedStageView, change: game-share-link) can render
+ * the same route without either side casting: the map never needed a full Stage.
+ */
+export interface RouteStage {
+  order: number;
+  tasks: {
+    title?: string;
+    locationless?: boolean;
+    coordinates?: { lat: number; lng: number };
+  }[];
+}
+
+export default function RoutePreviewMap({ stages, className = '' }: { stages: RouteStage[]; className?: string }) {
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -25,7 +38,8 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: St
   const stops = stages
     .slice().sort((a, b) => a.order - b.order)
     .flatMap((s) => s.tasks)
-    .filter((t) => !t.locationless && t.coordinates && isValidCoord(t.coordinates.lat, t.coordinates.lng)
+    .filter((t): t is RouteStage['tasks'][number] & { coordinates: { lat: number; lng: number } } =>
+      !t.locationless && !!t.coordinates && isValidCoord(t.coordinates.lat, t.coordinates.lng)
       && (t.coordinates.lat !== 0 || t.coordinates.lng !== 0))
     .map((t) => ({ title: t.title || b.untitledTask, lat: t.coordinates.lat, lng: t.coordinates.lng }));
 

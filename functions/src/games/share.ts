@@ -1,0 +1,318 @@
+/**
+ * Share links for an UNPUBLISHED game (change: game-share-link).
+ *
+ * A creator wants to hand ONE person a URL that opens their game read-only —
+ * every stage, every mission, the whole map — and lets that person take a copy,
+ * without the game appearing in the public gallery. Publishing is the wrong lever
+ * for that: it writes publicGames/publicTasks and exposes the game to everybody.
+ *
+ * ── The shape, and why ───────────────────────────────────────────────────────
+ * `gameShareLinks/{token}` is top-level and keyed by an unguessable token, the
+ * same design as `accessCodes/{CODE}`: the holder resolves owner + game FROM the
+ * address, so the link can be sent to someone who is never told either. One game
+ * may hold several links, so revoking the one sent to a person leaves the rest
+ * alive. The collection is closed to clients in BOTH directions (firestore.rules)
+ * — everything here goes through a callable.
+ *
+ * `getSharedGame` is the second unauthenticated callable on the platform (after
+ * the marketing contact form), for the same reason: the recipient is by
+ * definition someone who may not have an account, and demanding one would defeat
+ * the point of sending them a link. What authentication would normally carry is
+ * carried by a 128-bit token, a connection-keyed rate limit, and a projection
+ * that copies fields out by name (packages/shared/src/sharedGameView.ts) rather
+ * than stripping secrets out of the stored document.
+ *
+ * Taking a COPY does require an account — the copy has to land somewhere.
+ */
+import * as functions from 'firebase-functions';
+import { randomBytes } from 'node:crypto';
+
+import { db } from '../firebase';
+import { requireAuth } from '../auth';
+import { loggedCallable, logBestEffort } from '../obs/log';
+import { auditBestEffort } from '../obs/audit';
+import { enforceRateLimit } from '../rateLimitStore';
+import { deleteDocsInChunks } from '../batchUtil';
+import { assertGameNotDeleted } from './lifecycle';
+import {
+  FIRESTORE_PATHS,
+  isValidShareToken,
+  shareLinkRefusal,
+  shareLinkCopyRefusal,
+  shareLinkExpiryIso,
+  sanitizeGameForShare,
+  SHARE_TOKEN_BYTES,
+  type Game,
+  type GameShareLink,
+  type ShareLinkRefusal,
+} from '@rushpoint/shared';
+
+export const AUDIT_SHARE_LINK_CREATED = 'game_share_link_created';
+export const AUDIT_SHARE_LINK_REVOKED = 'game_share_link_revoked';
+
+/** How many live links one game may hold. Bounded so the list stays reviewable. */
+export const MAX_SHARE_LINKS_PER_GAME = 20;
+
+function shareLinkPath(token: string): string {
+  return FIRESTORE_PATHS.gameShareLink(token);
+}
+
+function newShareToken(): string {
+  return randomBytes(SHARE_TOKEN_BYTES).toString('base64url');
+}
+
+/**
+ * Every refusal reads as `not-found` to the CALLER, whatever the real reason.
+ * A holder of a dead link learns only that it does not work — never that the
+ * game exists, nor whose it is. The reason is returned separately so the UI can
+ * say "this link was turned off" when the SERVER is willing to say so, which it
+ * is: the person already held the link.
+ */
+function refuseShareLink(reason: ShareLinkRefusal): never {
+  throw new functions.https.HttpsError('not-found', `share-link:${reason}`);
+}
+
+/** Load the link document behind a token, or refuse. Never leaks why to a stranger. */
+async function loadUsableLink(
+  token: unknown,
+  mode: 'read' | 'copy',
+): Promise<{ link: GameShareLink; ref: FirebaseFirestore.DocumentReference }> {
+  if (!isValidShareToken(token)) refuseShareLink('not-found');
+  const ref = db.doc(shareLinkPath(token));
+  const snap = await ref.get();
+  const link = snap.exists ? (snap.data() as GameShareLink) : undefined;
+  const refusal = mode === 'copy'
+    ? shareLinkCopyRefusal(link, new Date().toISOString())
+    : shareLinkRefusal(link, new Date().toISOString());
+  if (refusal) refuseShareLink(refusal);
+  return { link: link as GameShareLink, ref };
+}
+
+/** The owner's own game, refusing a tombstoned one. Used by every owner-side callable. */
+async function loadOwnGame(uid: string, gameId: unknown): Promise<Game> {
+  if (typeof gameId !== 'string' || !gameId.trim()) {
+    throw new functions.https.HttpsError('invalid-argument', 'gameId required');
+  }
+  const snap = await db.doc(FIRESTORE_PATHS.game(uid, gameId)).get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = snap.data() as Game;
+  if (game.ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your game');
+  }
+  assertGameNotDeleted(game);
+  return game;
+}
+
+/**
+ * The rate-limit key for the unauthenticated read path. Derived from the
+ * CONNECTION, never from the payload: a key the caller supplies is a key the
+ * caller can vary, which turns the limit off for exactly whoever is abusing it.
+ * An unresolvable address shares one bucket — throttling harder, which is the
+ * correct direction to fail here. (Same helper shape as the contact form's.)
+ */
+export function shareRateKeyFor(context: functions.https.CallableContext): string {
+  const raw = context.rawRequest as { ip?: string; headers?: Record<string, unknown> } | undefined;
+  const forwarded = raw?.headers?.['x-forwarded-for'];
+  const first = typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined;
+  const ip = first || raw?.ip;
+  return `share:${ip && ip.length > 0 ? ip : 'unknown'}`;
+}
+
+
+// ─── createGameShareLink ──────────────────────────────────────────────────────
+
+export const createGameShareLink = loggedCallable('createGameShareLink', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'createGameShareLink');
+
+  const { gameId, allowCopy, revealAnswers, expiresInDays } = (data ?? {}) as {
+    gameId?: string; allowCopy?: boolean; revealAnswers?: boolean; expiresInDays?: number;
+  };
+  const game = await loadOwnGame(uid, gameId);
+
+  // Bound the list rather than letting it grow forever: a creator who cannot see
+  // their links cannot revoke them, and an unbounded list is unreadable.
+  const existing = await db.collection(FIRESTORE_PATHS.gameShareLinksCol())
+    .where('ownerUid', '==', uid)
+    .where('gameId', '==', game.id)
+    .get();
+  const live = existing.docs.filter((d) => !shareLinkRefusal(d.data(), new Date().toISOString()));
+  if (live.length >= MAX_SHARE_LINKS_PER_GAME) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      `This game already has ${MAX_SHARE_LINKS_PER_GAME} active share links — revoke one first`,
+    );
+  }
+
+  const now = new Date().toISOString();
+  const token = newShareToken();
+  const link: GameShareLink = {
+    token,
+    ownerUid: uid,
+    gameId: game.id,
+    createdAt: now,
+    createdBy: uid,
+    // Both default to the conservative answer. `!== false` would make a client
+    // that omits the field opt IN, which is the wrong direction for a disclosure.
+    allowCopy: allowCopy === true,
+    revealAnswers: revealAnswers === true,
+    viewCount: 0,
+    copyCount: 0,
+  };
+  const expiresAt = shareLinkExpiryIso(now, expiresInDays);
+  if (expiresAt) link.expiresAt = expiresAt;
+
+  await db.doc(shareLinkPath(token)).set(link);
+
+  // Handing out read access to private content is exactly the kind of act that
+  // must be answerable after the fact.
+  await auditBestEffort({
+    operatorId: uid,
+    actionType: AUDIT_SHARE_LINK_CREATED,
+    gameId: game.id,
+    gameTitle: game.title,
+    newValue: token,
+    reason: `allowCopy=${link.allowCopy} revealAnswers=${link.revealAnswers}`,
+  });
+
+  return { link };
+});
+
+
+// ─── listGameShareLinks ───────────────────────────────────────────────────────
+
+export const listGameShareLinks = loggedCallable('listGameShareLinks', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId } = (data ?? {}) as { gameId?: string };
+  const game = await loadOwnGame(uid, gameId);
+
+  const snap = await db.collection(FIRESTORE_PATHS.gameShareLinksCol())
+    .where('ownerUid', '==', uid)
+    .where('gameId', '==', game.id)
+    .get();
+
+  const now = new Date().toISOString();
+  const links = snap.docs
+    .map((d) => d.data() as GameShareLink)
+    .map((l) => ({ ...l, refusal: shareLinkRefusal(l, now) }))
+    // Newest first; a creator reads the one they just made.
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+
+  return { links };
+});
+
+
+// ─── revokeGameShareLink ──────────────────────────────────────────────────────
+
+export const revokeGameShareLink = loggedCallable('revokeGameShareLink', async (data, context) => {
+  const uid = requireAuth(context);
+  const { token } = (data ?? {}) as { token?: string };
+  if (!isValidShareToken(token)) {
+    throw new functions.https.HttpsError('invalid-argument', 'token required');
+  }
+
+  const ref = db.doc(shareLinkPath(token));
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Share link not found');
+  const link = snap.data() as GameShareLink;
+  if (link.ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your share link');
+  }
+
+  // Stamped, not deleted: a revoked link can then say "this link was turned off"
+  // instead of looking like a typo, and the audit trail keeps a target.
+  const revokedAt = link.revokedAt ?? new Date().toISOString();
+  await ref.update({ revokedAt });
+
+  await auditBestEffort({
+    operatorId: uid,
+    actionType: AUDIT_SHARE_LINK_REVOKED,
+    gameId: link.gameId,
+    previousValue: token,
+    reason: 'share link revoked by owner',
+  });
+
+  return { ok: true, revokedAt };
+});
+
+
+// ─── getSharedGame (PUBLIC — no auth) ─────────────────────────────────────────
+
+export const getSharedGame = loggedCallable('getSharedGame', async (data, context) => {
+  // Charged for EVERY call, valid token or not: the bound must apply to the
+  // caller who is guessing, and a caller who is guessing never gets past the
+  // lookup below.
+  await enforceRateLimit(shareRateKeyFor(context), 'getSharedGame');
+
+  const { token } = (data ?? {}) as { token?: string };
+  const { link, ref } = await loadUsableLink(token, 'read');
+
+  const snap = await db.doc(FIRESTORE_PATHS.game(link.ownerUid, link.gameId)).get();
+  if (!snap.exists) refuseShareLink('not-found');
+  const game = snap.data() as Game;
+  // A game in the trash reads as gone through every door, this one included —
+  // the tombstone is what the creator asked for and a stale link must not
+  // outlive it. (Defence in depth: revoking on delete is best-effort.)
+  if (game.deletedAt) refuseShareLink('not-found');
+
+  // Best-effort telemetry for the owner's link list. NEVER blocks the read: a
+  // counter write that fails must not turn a working link into a broken one.
+  ref.update({
+    viewCount: (typeof link.viewCount === 'number' ? link.viewCount : 0) + 1,
+    lastViewedAt: new Date().toISOString(),
+  }).catch((e) => logBestEffort('gameShareLink.viewCount', { gameId: link.gameId }, e));
+
+  return {
+    game: sanitizeGameForShare(game, link.revealAnswers === true),
+    allowCopy: link.allowCopy === true,
+    // The viewer is told what they may do, never who owns it: `ownerUid` is not
+    // in the projection and is not returned here either.
+    sharedAt: link.createdAt,
+  };
+});
+
+
+// ─── cleanup ──────────────────────────────────────────────────────────────────
+
+/**
+ * Delete every share link of a game. Called from the permanent-destruction path
+ * and from account deletion.
+ *
+ * `gameShareLinks` lives OUTSIDE `users/{uid}`, so `recursiveDelete` on the game
+ * (or on the user) does not reach it — the same trap `userNotes`/`userEngagement`
+ * already sprang once. A surviving link would be a dangling read token for a
+ * game that no longer exists.
+ */
+export async function deleteGameShareLinks(ownerUid: string, gameId: string): Promise<void> {
+  const snap = await db.collection(FIRESTORE_PATHS.gameShareLinksCol())
+    .where('ownerUid', '==', ownerUid)
+    .where('gameId', '==', gameId)
+    .get();
+  await deleteDocsInChunks(snap.docs.map((d) => d.ref));
+}
+
+/** Every share link owned by a user, for account deletion. */
+export async function deleteAllShareLinksForOwner(ownerUid: string): Promise<void> {
+  const snap = await db.collection(FIRESTORE_PATHS.gameShareLinksCol())
+    .where('ownerUid', '==', ownerUid)
+    .get();
+  await deleteDocsInChunks(snap.docs.map((d) => d.ref));
+}
+
+/**
+ * Resolve a share token for the COPY path, used by duplicateGame. Returns the
+ * link only when it is live AND copying is allowed; refuses exactly as the read
+ * path does, so a stranger cannot tell a copy-disabled link from a dead one by
+ * the error code.
+ */
+export async function resolveShareTokenForCopy(token: unknown): Promise<GameShareLink> {
+  const { link } = await loadUsableLink(token, 'copy');
+  return link;
+}
+
+/** Best-effort copy counter for the owner's link list. Never blocks a copy. */
+export function bumpShareLinkCopyCount(link: GameShareLink): void {
+  db.doc(shareLinkPath(link.token)).update({
+    copyCount: (typeof link.copyCount === 'number' ? link.copyCount : 0) + 1,
+  }).catch((e) => logBestEffort('gameShareLink.copyCount', { gameId: link.gameId }, e));
+}

@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { useAuth } from './components/AuthGate';
 import { useEngagementTracker } from './hooks/useEngagementTracker';
@@ -10,6 +10,7 @@ import { DialogHost } from './components/dialog';
 import { ToastHost } from './components/toast';
 import ActiveRunBar from './components/ActiveRunBar';
 import { buildNavDestinations } from './lib/creatorNav';
+import { SHARE_RETURN_KEY, sharedGamePath } from './lib/publicCreatorPath';
 import AppFooter from './components/AppFooter';
 // First-run guided tour (change: creator-guided-tour). Mounted once, renders
 // nothing unless it is running, and is replayable from here and from Settings.
@@ -43,6 +44,10 @@ const AdminTemplatesPage = lazyWithRetry('adminTemplates', () => import('./pages
 // Contact form messages from the marketing site (change: marketing-site). Same
 // treatment again: admin only, direct URL, gated by the page and by the callable.
 const AdminContactPage = lazyWithRetry('adminContact', () => import('./pages/AdminContactPage'));
+// A game shared by link, read-only (change: game-share-link). Registered here for
+// a SIGNED-IN visitor; AuthGate serves the same page to a signed-out one, since
+// the whole point of a share link is that the recipient may not have an account.
+const SharedGamePage = lazyWithRetry('sharedGame', () => import('./pages/SharedGamePage'));
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -78,6 +83,22 @@ export default function App() {
   // possible moment (change: run-console-density). It gets the Builder's width
   // while keeping the ordinary scrolling shell, header and footer.
   const isRunConsole = pathname.startsWith('/run/');
+
+  // Coming back from a share link (change: game-share-link). A signed-out visitor
+  // who pressed "make a copy" was sent to the login screen; landing them on an
+  // empty dashboard afterwards would lose both the game and the reason they
+  // signed up. The token is read ONCE and cleared, so a later reload cannot
+  // teleport the creator out of whatever they are doing.
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!user) return;
+    let token: string | null = null;
+    try {
+      token = sessionStorage.getItem(SHARE_RETURN_KEY);
+      if (token) sessionStorage.removeItem(SHARE_RETURN_KEY);
+    } catch { /* private mode — nothing was stored either */ }
+    if (token) navigate(sharedGamePath(token), { replace: true });
+  }, [user, navigate]);
 
   // Mobile nav drawer: below `sm` the inline links collapse behind a hamburger.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -219,6 +240,7 @@ export default function App() {
             <Route path="/admin/users"         element={<AdminUsersPage />} />
             <Route path="/admin/templates"     element={<AdminTemplatesPage />} />
             <Route path="/admin/contact"       element={<AdminContactPage />} />
+            <Route path="/p/:token"            element={<SharedGamePage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />
           </Routes>

@@ -25,6 +25,7 @@ import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import { ShareSheet } from '../components/ShareSheet';
+import ShareLinkDialog from '../components/ShareLinkDialog';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
 import { firstLaunchBlocker, splitTestDriveReadiness, type ReadinessIssue } from '../lib/gameReadiness';
 import { describeCallFailure } from '../lib/callFeedback';
@@ -251,6 +252,9 @@ export default function DashboardPage() {
   const previewedGameIds = readStoredPreviewed();
   const { runs: liveRuns } = useLiveRuns();
   const [sharing, setSharing] = useState<Game | null>(null);
+  // The read-only share link (change: game-share-link) — a different dialog from
+  // `sharing` above, which shares the PUBLIC promo page and offers to publish.
+  const [sharingLink, setSharingLink] = useState<Game | null>(null);
   // The game whose delete confirmation is open (change: recoverable-game-deletion).
   // A creator destroyed a real game with the old single-click dialog.confirm, so
   // deleting now costs a deliberate act: type this game's title.
@@ -987,7 +991,7 @@ export default function DashboardPage() {
                       </Button>
                       <OverflowMenu label="⋯" ariaLabel={d.cardMoreActions}>
                         {dashboardCardActions(g).overflow.map((id) => {
-                          const items: Record<'testRun' | 'history' | 'publish' | 'unpublish' | 'share' | 'delete', {
+                          const items: Record<'testRun' | 'history' | 'publish' | 'unpublish' | 'share' | 'shareLink' | 'delete', {
                             label: string; title: string | undefined; disabled: boolean;
                             onClick: () => void; destructive: boolean;
                           }> = {
@@ -1029,6 +1033,13 @@ export default function DashboardPage() {
                               title: undefined as string | undefined,
                               disabled: false,
                               onClick: () => setSharing(g),
+                              destructive: false,
+                            },
+                            shareLink: {
+                              label: t.share.menuLabel,
+                              title: undefined as string | undefined,
+                              disabled: false,
+                              onClick: () => setSharingLink(g),
                               destructive: false,
                             },
                             delete: {
@@ -1180,6 +1191,14 @@ export default function DashboardPage() {
             void load(true);
           }}
           onClose={() => setSharing(null)}
+        />
+      )}
+
+      {sharingLink && (
+        <ShareLinkDialog
+          gameId={sharingLink.id}
+          gameTitle={sharingLink.title}
+          onClose={() => setSharingLink(null)}
         />
       )}
 

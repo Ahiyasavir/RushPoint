@@ -99,6 +99,20 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   //   string comparisons; it is worth bounding, but not at that price.
   submitContactMessage: { max: 5, windowMs: 10 * MIN },
   submitContactMessageAttempt: { max: 120, windowMs: 10 * MIN },
+  // Share links for an unpublished game (change: game-share-link). `getSharedGame`
+  // is the second unauthenticated callable on the platform, keyed on the
+  // connection for the same reason the contact form is: there is no uid.
+  //
+  // Generous, because the honest caller is a person READING a game — they open
+  // the link, walk the stages, reload, come back tomorrow — and a limit that
+  // interrupts that is a broken link as far as they can tell. The token is 128
+  // random bits, so this budget is not what stands between a stranger and the
+  // game; it bounds the COST of someone hammering the endpoint, nothing more.
+  getSharedGame: { max: 120, windowMs: 10 * MIN },
+  // Minting a link is an owner action (keyed by uid) and writes an audit row, so
+  // it is bounded rather than free — but a creator legitimately makes one per
+  // person they are sending it to.
+  createGameShareLink: { max: 30, windowMs: 10 * MIN },
   triggerSOS: { max: 5, windowMs: MIN },
   sendTeamChatMessage: { max: 10, windowMs: MIN }, // per-sender uid; one spammer can't starve teammates/HQ
   // Staff↔admin channel (staff-console-field-ops). Roomier than team chat: this is

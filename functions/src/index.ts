@@ -69,6 +69,8 @@ import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
+// Read-only share links for an unpublished game (change: game-share-link).
+export * from './games/share';
 export * from './gallery/index';
 export { updateMyProfile, exportMyData, deleteMyAccount } from './users/index';
 export {

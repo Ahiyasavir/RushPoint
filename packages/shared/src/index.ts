@@ -142,3 +142,5 @@ export * from './runPlayerReport';
 // Telling Firestore's daily-quota refusal apart from our own rate limiter's, so
 // the two can give opposite advice (change: daily-quota-user-message).
 export * from './quotaExhaustion';
+export * from './gameShareLink';
+export * from './sharedGameView';

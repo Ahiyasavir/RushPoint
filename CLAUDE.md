@@ -294,6 +294,11 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   canonical upload origin is declared identically in shared and functions/server.js) ·
   `test-hidden-search-area` (the coarse sealed-task circle + the play-web selector) ·
   `test-map-recenter` (the play map's recentre verdict) · `test-skip-single-task` (`planTaskSkip`) ·
+  `test-game-share-link` (the share-link token shape + the fail-CLOSED read/copy verdicts) ·
+  `test-shared-game-view` (the share projection: a deep sweep for every secret NAME and every secret
+  VALUE, plus a guard that a new `Task` field is projected or declared withheld) ·
+  `test-public-creator-path` (which creator-web routes render without signing in — a share link that
+  lands on the login screen is indistinguishable from a broken one) ·
   `test-gallery-task-detail` (the gallery mission detail view-model + its secrecy sweep) ·
   `test-creator-tour` (the guided-tour step data, reducer and persistence) ·
   `test-location-ping-economy` (the ping write/retain verdicts, incl. every fail-open case) ·
@@ -334,6 +339,14 @@ publicGames/{gameId}, publicTasks/{taskId}                   denormalized galler
                                                              exact `coordinates` key is never written.
 wallets/{uid}, wallets/{uid}/transactions/{txId}             creator credit ledger
 accessCodes/{CODE}                                           join-code → {ownerUid, gameId, runId}
+gameShareLinks/{token}                                       read-only SHARE link to a game, published or not
+                                                             (change: game-share-link). The document id IS the
+                                                             credential, exactly like accessCodes: the holder
+                                                             resolves owner+game FROM the address. Closed to
+                                                             clients in BOTH directions — an open read would
+                                                             list every live token on the platform. Nothing is
+                                                             written to publicGames/publicTasks: not publishing
+                                                             is the whole point.
 auditLogs/{id}                                               immutable admin trail (CF only)
 ```
 
@@ -355,7 +368,7 @@ helpers are **internal** (not triggers) — never re-export them.
 
 | Module | Callables |
 |---|---|
-| `games/index.ts` | createGame · updateGame · **deleteGame (SOFT: tombstone + 30-day trash)** · listDeletedGames · restoreGame · purgeGameNow · duplicateGame · publishGame · getGame · listGames · checkChallengeAnswer · translateGame · **exportGameFile** · **importGameFile** |
+| `games/index.ts` | createGame · updateGame · **deleteGame (SOFT: tombstone + 30-day trash)** · listDeletedGames · restoreGame · purgeGameNow · duplicateGame · publishGame · getGame · listGames · checkChallengeAnswer · translateGame · **exportGameFile** · **importGameFile** · **createGameShareLink** · **listGameShareLinks** · **revokeGameShareLink** · **getSharedGame** (games/share.ts; getSharedGame is PUBLIC — the second unauthenticated callable, declared in `PUBLIC_CALLABLES` with its reason, connection-keyed rate limit, and a copy-out projection instead of a strip-list. `duplicateGame` grew a `shareToken` door: the token resolves owner+game itself, so a caller cannot pair it with someone else's gameId) |
 | `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · **skipTaskForTeam (skips ONE mission for ONE team, stays in the stage)** · finalizeRun · refreshLeaderboard · getPublicLeaderboard · getRunRecap · getRunReplay · getRunAnalytics · getRunSummary · getRunHeatmap · listRunTeams · completeTask · requestNextTask · requestTaskHint · reportArrival · submitTaskAnswer · submitSequenceStep · getRecommendedTasks · checkOutTask · getMyTeamState · listLiveRuns · getMyProfile · createTrackable · getRunTrackables · pickUpTrackable · dropTrackable · startInstantPlay · createZone · deleteZone · getRunZones · captureZone · joinTeamAsDevice · transferController · claimController · submitRunFeedback · getRunFeedbackSummary · getRunSurveyResults · requestGuardianConsent · grantGuardianConsent · activateHotZone · deactivateHotZone · getRunDiscoveryPois · claimDiscoveryPoi · **onRunFinalized (Firestore trigger, not a callable)** |
 | `gallery/index.ts` | searchGallery · searchTaskLibrary · incrementTaskCopyCount · **setPublicLike** |
 | `payments/index.ts` | getWallet · getWalletStatus · purchaseCredits · subscribePro · claimReferral · stripeWebhook (onRequest) |
