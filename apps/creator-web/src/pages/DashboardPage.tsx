@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game, GameMode, Stage, GameFile } from '@rushpoint/shared';
 import {
-  GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL,
+  GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED,
   DEFAULT_WRONG_ANSWER_LEVEL, parseGameFile, AGE_BANDS,
 } from '@rushpoint/shared';
 import {
@@ -24,7 +24,6 @@ import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
-import { ShareSheet } from '../components/ShareSheet';
 import ShareLinkDialog from '../components/ShareLinkDialog';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
 import { firstLaunchBlocker, splitTestDriveReadiness, type ReadinessIssue } from '../lib/gameReadiness';
@@ -75,10 +74,6 @@ function readGamesCache(uid: string | undefined): Game[] | null {
   if (Date.now() - _gamesCache.ts >= CACHE_TTL) return null;
   return _gamesCache.data;
 }
-
-const PLAY_URL = import.meta.env.DEV
-  ? resolvePlayOrigin(window.location.origin)
-  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
 
 function getAccentBar(g: Game): string {
   if (g.visibility === 'public') return 'from-rp-plasma to-rp-go';
@@ -251,9 +246,10 @@ export default function DashboardPage() {
   const [dismissed, setDismissed] = useState(() => readFlag(ONBOARDING_DISMISSED_KEY));
   const previewedGameIds = readStoredPreviewed();
   const { runs: liveRuns } = useLiveRuns();
-  const [sharing, setSharing] = useState<Game | null>(null);
-  // The read-only share link (change: game-share-link) — a different dialog from
-  // `sharing` above, which shares the PUBLIC promo page and offers to publish.
+  // Share this game by read-only link (change: game-share-link). This REPLACED the
+  // card's public promo share: that URL only resolves once the game is published,
+  // and on a published game with instant play it starts a solo demo run rather
+  // than showing the reader the game. Sharing must not depend on publishing.
   const [sharingLink, setSharingLink] = useState<Game | null>(null);
   // The game whose delete confirmation is open (change: recoverable-game-deletion).
   // A creator destroyed a real game with the old single-click dialog.confirm, so
@@ -991,7 +987,7 @@ export default function DashboardPage() {
                       </Button>
                       <OverflowMenu label="⋯" ariaLabel={d.cardMoreActions}>
                         {dashboardCardActions(g).overflow.map((id) => {
-                          const items: Record<'testRun' | 'history' | 'publish' | 'unpublish' | 'share' | 'shareLink' | 'delete', {
+                          const items: Record<'testRun' | 'history' | 'publish' | 'unpublish' | 'shareLink' | 'delete', {
                             label: string; title: string | undefined; disabled: boolean;
                             onClick: () => void; destructive: boolean;
                           }> = {
@@ -1026,13 +1022,6 @@ export default function DashboardPage() {
                               title: undefined as string | undefined,
                               disabled: publishAction.isBusy(g.id),
                               onClick: () => void publishAction.run(g),
-                              destructive: false,
-                            },
-                            share: {
-                              label: d.cardShare,
-                              title: undefined as string | undefined,
-                              disabled: false,
-                              onClick: () => setSharing(g),
                               destructive: false,
                             },
                             shareLink: {
@@ -1177,21 +1166,6 @@ export default function DashboardPage() {
           </div>
         </div>,
         document.body,
-      )}
-
-      {sharing && (
-        <ShareSheet
-          title={d.shareTitle(sharing.title)}
-          text={d.shareText(sharing.title)}
-          url={`${PLAY_URL}/?game=${sharing.id}`}
-          notPublic={sharing.visibility !== 'public'}
-          onPublish={async () => {
-            await publishGame({ gameId: sharing.id, visibility: 'public' });
-            setSharing({ ...sharing, visibility: 'public' });
-            void load(true);
-          }}
-          onClose={() => setSharing(null)}
-        />
       )}
 
       {sharingLink && (

@@ -400,7 +400,6 @@ const HE = {
     cardTestRunHint: 'ריצת חזרה חינמית עד 2 משתתפים, לא נספרת בסטטיסטיקות',
     cardPublish:  'פרסם',
     cardUnpublish:'בטל פרסום',
-    cardShare:    'שיתוף',
     cardHistory: 'ריצות קודמות',
     cardHistoryHint: 'ניקוד, תשובות ותמונות מכל ריצה של המשחק הזה',
     cardDelete:   'מחיקה',
@@ -655,8 +654,6 @@ const HE = {
     deleteFailed:       'מחיקת המשחק נכשלה',
     trashLink:          'נמחקו לאחרונה',
     loadingGames:  'טוען משחקים...',
-    shareTitle:    (title: string) => `שתף "${title}"`,
-    shareText:     (title: string) => `הצטרף למשחק השדה שלי בפלטפורמת RushPoint: ${title}`,
   },
   // Recently deleted games (change: recoverable-game-deletion).
   trash: {
@@ -2866,7 +2863,6 @@ const EN: typeof HE = {
     cardTestRunHint: 'Free rehearsal, up to 2 players, not counted in your stats',
     cardPublish:   'Publish',
     cardUnpublish: 'Unpublish',
-    cardShare:     'Share',
     cardHistory: 'Past runs',
     cardHistoryHint: 'Scores, answers and photos from every run of this game',
     cardDelete:    'Delete',
@@ -3076,8 +3072,6 @@ const EN: typeof HE = {
     deleteFailed:       'Could not delete the game',
     trashLink:          'Recently deleted',
     loadingGames:  'Loading your games…',
-    shareTitle:    (title: string) => `Share "${title}"`,
-    shareText:     (title: string) => `Join my field game on RushPoint: ${title}`,
   },
   // Recently deleted games (change: recoverable-game-deletion).
   trash: {
