@@ -41,6 +41,10 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
   const [links, setLinks] = useState<LinkRow[] | null>(null);
   const [allowCopy, setAllowCopy] = useState(true);
   const [revealAnswers, setRevealAnswers] = useState(false);
+  // Starting a run WRITES into this creator's own account, so unlike the other
+  // two switches it is off until they turn it on, and the server refuses on
+  // absence rather than on falsity (shareLinkLaunchRefusal).
+  const [allowLaunch, setAllowLaunch] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState<number>(0);
   const [qrFor, setQrFor] = useState<string | null>(null);
   const [qr, setQr] = useState('');
@@ -70,6 +74,7 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
         gameId,
         allowCopy,
         revealAnswers,
+        allowLaunch,
         ...(expiresInDays > 0 ? { expiresInDays } : {}),
       });
       await reload();
@@ -167,6 +172,18 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
               <span className="block text-xs text-[--ink-3]">{s.revealAnswersHelp}</span>
             </span>
           </label>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allowLaunch}
+              onChange={(e) => setAllowLaunch(e.target.checked)}
+              className="mt-1"
+            />
+            <span>
+              <span className="font-medium">{s.allowLaunch}</span>
+              <span className="block text-xs text-[--ink-3]">{s.allowLaunchHelp}</span>
+            </span>
+          </label>
           <div>
             <div className="text-xs text-[--ink-3] mb-1">{s.expiry}</div>
             <div className="flex flex-wrap gap-1.5">
@@ -206,6 +223,7 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
                   <span className={`font-medium ${state.tone}`}>{state.text}</span>
                   {!link.allowCopy && <span className="text-[--ink-3]">· {s.stateCopyOff}</span>}
                   {link.revealAnswers && <span className="text-ink-alert">· {s.stateAnswers}</span>}
+                  {link.allowLaunch && <span className="text-ink-go">· {s.stateLaunchOn}</span>}
                   <span className="text-[--ink-3] ms-auto">
                     {s.stats({ views: link.viewCount ?? 0, copies: link.copyCount ?? 0 })}
                   </span>

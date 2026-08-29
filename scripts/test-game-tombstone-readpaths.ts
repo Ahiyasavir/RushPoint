@@ -71,9 +71,43 @@ function callableBody(src: string, name: string): string | null {
   return next < 0 ? after : after.slice(0, next);
 }
 
+/**
+ * The source text of an exported plain function, same coarse slicing.
+ *
+ * Needed because a callable may DELEGATE its whole body to one — `launchRun` is
+ * now a two line route into `launchRunCore`, which is what a share-link launch
+ * calls too (change: game-share-link). Reading only the callable would report the
+ * tombstone guard as missing while it sits, correctly, one hop away; declaring
+ * the core "guarded" without following the hop would be worse, because then
+ * deleting the delegation would still pass.
+ */
+function functionBody(src: string, name: string): string | null {
+  const start = src.search(new RegExp(`export\\s+(?:async\\s+)?function\\s+${name}\\s*\\(`));
+  if (start < 0) return null;
+  const after = src.slice(start + 10);
+  const next = after.search(/\nexport\s+(?:const|async\s+function|function)\s/);
+  return next < 0 ? after : after.slice(0, next);
+}
+
+/**
+ * The callable's own text PLUS, for one hop, the text of any exported function in
+ * the same module that it calls. One hop only: deeper and the slice stops meaning
+ * anything, and a guard three calls away is not one a reader would find either.
+ */
+function guardScope(src: string, name: string): string | null {
+  const body = callableBody(src, name);
+  if (body === null) return null;
+  let scope = body;
+  for (const m of body.matchAll(/\b(\w+Core)\s*\(/g)) {
+    const delegated = functionBody(src, m[1]);
+    if (delegated) scope += delegated;
+  }
+  return scope;
+}
+
 // ── (1) Every game-loading callable guards against a tombstone ───────────────
 for (const [mod, name] of GUARDED) {
-  const body = callableBody(read(mod), name);
+  const body = guardScope(read(mod), name);
   if (body === null) {
     check(`${mod}: callable "${name}" exists`, false, 'callable not found — was it renamed?');
     continue;
@@ -81,6 +115,20 @@ for (const [mod, name] of GUARDED) {
   const guarded = GUARD_TOKENS.some((t) => body.includes(t));
   check(`${mod}: "${name}" refuses a tombstoned game`, guarded,
     guarded ? '' : `add assertGameNotDeleted(game) after the game read (see games/lifecycle.ts)`);
+}
+
+// ── (1b) The delegation hop is REAL, not a way to pass ───────────────────────
+// A scanner that follows a call into another function can be defeated by a
+// delegation that is not there. These two assertions are what stop `guardScope`
+// from becoming "the guard passes if the word Core appears anywhere".
+{
+  const runs = read('runs/index.ts');
+  check('launchRun delegates to launchRunCore',
+    /launchRunCore\s*\(/.test(callableBody(runs, 'launchRun') ?? ''),
+    'the callable no longer routes into the core');
+  check('the tombstone guard really lives in launchRunCore',
+    GUARD_TOKENS.some((t) => (functionBody(runs, 'launchRunCore') ?? '').includes(t)),
+    'launchRunCore lost its assertGameNotDeleted');
 }
 
 // ── (2) Every game-listing callable filters the list ─────────────────────────

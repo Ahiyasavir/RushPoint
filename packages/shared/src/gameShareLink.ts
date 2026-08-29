@@ -49,6 +49,16 @@ export interface GameShareLink {
   createdBy: string;
   /** May the holder take a copy into their own account? */
   allowCopy: boolean;
+  /**
+   * May the holder START A RUN of this game — without owning it and without
+   * copying it? The run lands in the OWNER's account and is billed to the owner
+   * (free while PAYMENTS_ENABLED is off), and the holder gets staff access to
+   * operate it. Absent reads as FALSE: this is the one permission on a link that
+   * writes into somebody else's account, so it is never granted by omission.
+   */
+  allowLaunch?: boolean;
+  /** How many runs this link has started. Bounded by MAX_LAUNCHES_PER_SHARE_LINK. */
+  launchCount?: number;
   /** May the holder SEE the answer keys? Copying always yields a working game. */
   revealAnswers: boolean;
   /** ISO instant. Absent = never expires (revocation is the normal off switch). */
@@ -61,7 +71,9 @@ export interface GameShareLink {
 }
 
 /** Why a link cannot be used. `null` from the verdict functions means "usable". */
-export type ShareLinkRefusal = 'not-found' | 'revoked' | 'expired' | 'copy-not-allowed';
+export type ShareLinkRefusal =
+  | 'not-found' | 'revoked' | 'expired' | 'copy-not-allowed'
+  | 'launch-not-allowed' | 'launch-limit';
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
@@ -101,6 +113,30 @@ export function shareLinkCopyRefusal(link: unknown, nowIso: string): ShareLinkRe
   const read = shareLinkRefusal(link, nowIso);
   if (read) return read;
   return (link as Partial<GameShareLink>).allowCopy === true ? null : 'copy-not-allowed';
+}
+
+/**
+ * How many runs one link may start. A run is a write into the owner's account —
+ * documents, an access code, and their daily Firestore quota — so the holder gets
+ * a generous allowance rather than an unbounded one. Reached, the owner can mint
+ * a fresh link; nothing is lost.
+ */
+export const MAX_LAUNCHES_PER_SHARE_LINK = 10;
+
+/**
+ * Is this link still usable to START A RUN? Read access is a precondition, so the
+ * read verdict runs first and its refusal is returned unchanged.
+ *
+ * Fails closed twice over: the permission must be explicitly `true`, and a
+ * launch counter that cannot be read as a number is treated as exhausted.
+ */
+export function shareLinkLaunchRefusal(link: unknown, nowIso: string): ShareLinkRefusal | null {
+  const read = shareLinkRefusal(link, nowIso);
+  if (read) return read;
+  const l = link as Partial<GameShareLink>;
+  if (l.allowLaunch !== true) return 'launch-not-allowed';
+  const used = typeof l.launchCount === 'number' && Number.isFinite(l.launchCount) ? l.launchCount : 0;
+  return used >= MAX_LAUNCHES_PER_SHARE_LINK ? 'launch-limit' : null;
 }
 
 /**

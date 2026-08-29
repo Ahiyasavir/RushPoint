@@ -109,6 +109,11 @@ export const PRIVILEGED_CALLABLES = {
     + 'a disclosure of private content, and the only way to answer "who opened this game up, '
     + 'when, and with which permissions" after the fact is a durable record — the link document '
     + 'itself is deletable by the same owner.',
+  launchSharedRun:
+    'Creates a run, an access code and a staff invite inside an account other than the caller own, '
+    + 'on the strength of a link the owner handed out. The owner is not present when it happens '
+    + 'and it consumes whatever a launch costs them, so "who started this run on my game, when, '
+    + 'and through which link" has to stay answerable afterwards.',
   revokeGameShareLink:
     'The counterpart of createGameShareLink: it withdraws read access somebody may be relying '
     + 'on. Both ends of a disclosure decision belong in the same trail, or the trail only ever '

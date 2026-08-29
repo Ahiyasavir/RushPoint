@@ -113,6 +113,11 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // it is bounded rather than free — but a creator legitimately makes one per
   // person they are sending it to.
   createGameShareLink: { max: 30, windowMs: 10 * MIN },
+  // Starting a run through somebody else's share link. Tight: every call creates
+  // a run, an access code and a staff invite in the OWNER's account, and the
+  // per-link cap (MAX_LAUNCHES_PER_SHARE_LINK) bounds the total either way. A
+  // person running a real event presses this once.
+  launchSharedRun: { max: 5, windowMs: 10 * MIN },
   triggerSOS: { max: 5, windowMs: MIN },
   sendTeamChatMessage: { max: 10, windowMs: MIN }, // per-sender uid; one spammer can't starve teammates/HQ
   // Staff↔admin channel (staff-console-field-ops). Roomier than team chat: this is

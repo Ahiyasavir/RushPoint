@@ -53,9 +53,19 @@ export const getGame       = callable<{ gameId: string }, { game: Game }>('getGa
 // A read-only link to an UNPUBLISHED game. `getSharedGame` needs no account: it
 // is the one call this app makes that a signed-out visitor is expected to make.
 export const createGameShareLink = callable<
-  { gameId: string; allowCopy?: boolean; revealAnswers?: boolean; expiresInDays?: number },
+  { gameId: string; allowCopy?: boolean; revealAnswers?: boolean; allowLaunch?: boolean; expiresInDays?: number },
   { link: GameShareLink }
 >('createGameShareLink');
+// Start a run of a game you neither own nor copied, on a link that allows it. The
+// run lands in the OWNER's account; the caller gets staff access to operate it.
+export const launchSharedRun = callable<
+  { token: string; name?: string },
+  {
+    runId: string;
+    accessCode: string;
+    staff: { ownerUid: string; gameId: string; runId: string; pin: string };
+  }
+>('launchSharedRun');
 export const listGameShareLinks = callable<
   { gameId: string },
   { links: (GameShareLink & { refusal: ShareLinkRefusal | null })[] }
@@ -63,7 +73,10 @@ export const listGameShareLinks = callable<
 export const revokeGameShareLink = callable<{ token: string }, { ok: boolean; revokedAt: string }>('revokeGameShareLink');
 export const getSharedGame = publicCallable<
   { token: string },
-  { game: SharedGameView; allowCopy: boolean; sharedAt: string }
+  {
+    game: SharedGameView; allowCopy: boolean; sharedAt: string;
+    allowLaunch: boolean; launchExhausted: boolean;
+  }
 >('getSharedGame');
 export const listGames     = callable<void, { games: Game[] }>('listGames');
 // Creator-owned portability (change: game-file-export-import). exportGameFile is

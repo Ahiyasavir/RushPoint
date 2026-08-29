@@ -7,8 +7,8 @@
 //   npx tsx scripts/test-game-share-link.ts
 import {
   isValidShareToken, SHARE_TOKEN_PATTERN, SHARE_TOKEN_LENGTH,
-  shareLinkRefusal, shareLinkCopyRefusal, shareLinkExpiryIso,
-  SHARE_LINK_MAX_EXPIRY_DAYS,
+  shareLinkRefusal, shareLinkCopyRefusal, shareLinkLaunchRefusal, shareLinkExpiryIso,
+  SHARE_LINK_MAX_EXPIRY_DAYS, MAX_LAUNCHES_PER_SHARE_LINK,
   type GameShareLink,
 } from '../packages/shared/src/gameShareLink';
 
@@ -87,6 +87,32 @@ check('an expired link reports "expired", not "copy-not-allowed"',
   shareLinkCopyRefusal(link({ expiresAt: '2020-01-01T00:00:00.000Z' }), NOW) === 'expired');
 check('an unreadable document reports "not-found" from the copy path too',
   shareLinkCopyRefusal(null, NOW) === 'not-found');
+
+// ── Launch verdict: the one permission that writes into the owner's account ──
+check('a launch-enabled link may start a run',
+  shareLinkLaunchRefusal(link({ allowLaunch: true }), NOW) === null);
+check('launching is refused by DEFAULT (absent means no)',
+  shareLinkLaunchRefusal(link(), NOW) === 'launch-not-allowed');
+check('an explicit false refuses',
+  shareLinkLaunchRefusal(link({ allowLaunch: false }), NOW) === 'launch-not-allowed');
+check('a truthy-but-not-true value fails closed',
+  shareLinkLaunchRefusal(link({ allowLaunch: 1 as unknown as boolean }), NOW) === 'launch-not-allowed');
+check('allowCopy does NOT imply allowLaunch',
+  shareLinkLaunchRefusal(link({ allowCopy: true }), NOW) === 'launch-not-allowed');
+check('a revoked link reports "revoked", not "launch-not-allowed"',
+  shareLinkLaunchRefusal(link({ allowLaunch: true, revokedAt: NOW }), NOW) === 'revoked');
+check('an expired link reports "expired"',
+  shareLinkLaunchRefusal(link({ allowLaunch: true, expiresAt: '2020-01-01T00:00:00.000Z' }), NOW) === 'expired');
+check('an unreadable document reports "not-found"',
+  shareLinkLaunchRefusal(null, NOW) === 'not-found');
+check('the launch allowance is bounded',
+  shareLinkLaunchRefusal(link({ allowLaunch: true, launchCount: MAX_LAUNCHES_PER_SHARE_LINK }), NOW) === 'launch-limit');
+check('one below the cap is still allowed',
+  shareLinkLaunchRefusal(link({ allowLaunch: true, launchCount: MAX_LAUNCHES_PER_SHARE_LINK - 1 }), NOW) === null);
+check('an absent counter means none used yet',
+  shareLinkLaunchRefusal(link({ allowLaunch: true }), NOW) === null);
+check('a NEGATIVE counter cannot buy extra launches beyond the cap',
+  shareLinkLaunchRefusal(link({ allowLaunch: true, launchCount: -50 }), NOW) === null);
 
 // ── Expiry computation ───────────────────────────────────────────────────────
 check('30 days from creation', shareLinkExpiryIso('2026-08-01T00:00:00.000Z', 30) === '2026-08-31T00:00:00.000Z');

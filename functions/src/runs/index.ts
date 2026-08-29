@@ -256,9 +256,24 @@ function buildInitialStages(game: Game): RunStageRecord[] {
 
 // ─── launchRun ────────────────────────────────────────────────────────────────
 
-export const launchRun = loggedCallable('launchRun', async (data, context) => {
-  const uid = requireAuth(context);
-  const { gameId, testDrive } = data as { gameId: string; testDrive?: boolean };
+/**
+ * Start a run of `gameId`, owned by `ownerUid`.
+ *
+ * Extracted from the callable so a SECOND door can reach it: a share-link holder
+ * launching the owner's game (change: game-share-link). The alternative — a
+ * parallel launch path for that case — would mean two copies of the launch
+ * validation, the billing decision and the atomic run+access-code write, and the
+ * copy that gets forgotten is always the one that then charges nothing, skips the
+ * unwinnable-task guard, or writes a run without its access code.
+ *
+ * The billing decision is the OWNER's, whoever pressed the button: it is their
+ * game, the run lands in their account, and any credit it costs is theirs. Deciding
+ * that this launch is ALLOWED at all is the caller's job.
+ */
+export async function launchRunCore(
+  { ownerUid, gameId, testDrive }: { ownerUid: string; gameId: string; testDrive?: boolean },
+): Promise<{ runId: string; accessCode: string }> {
+  const uid = ownerUid;
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
@@ -410,6 +425,14 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   }
 
   return { runId: runRef.id, accessCode: code };
+}
+
+export const launchRun = loggedCallable('launchRun', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, testDrive } = data as { gameId: string; testDrive?: boolean };
+  // The owner IS the caller here. Ownership is re-checked inside the core against
+  // the loaded document, so this line is a route, not a trust boundary.
+  return launchRunCore({ ownerUid: uid, gameId, testDrive });
 });
 
 

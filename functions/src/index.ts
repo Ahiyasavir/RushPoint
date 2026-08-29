@@ -11,7 +11,6 @@ import { cachedGetDoc } from './docCache';
 // in-process store that answers "what did we last write for this team" without a read.
 import { lastFixStore, lastFixKey } from './lastFixStore';
 import * as admin from 'firebase-admin';
-import { randomInt } from 'node:crypto';
 import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 // The recorded answer sheet (change: post-run-player-report) — every submission,
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
@@ -59,10 +58,8 @@ async function recordStationCodeAttempt(
   });
 }
 
-/** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
-function generatePin(): string {
-  return String(randomInt(100000, 1000000));
-}
+
+import { createRunStaffInvite } from './runs/staffInvite';
 import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
@@ -199,23 +196,9 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
   }
   const cleanName = validate(() => requireString(name, 'name', MAX_MESSAGE_LEN));
 
-  const pin = generatePin();
-  const now = new Date().toISOString();
-  const ref = db
-    .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
-    .doc();
-
-  await ref.set({
-    id: ref.id,
-    ownerUid, gameId, runId,
-    name: cleanName,
-    permissions: permissions ?? [],
-    pin,
-    used: false,
-    createdAt: now,
-  });
-
-  return { inviteId: ref.id, pin };
+  // One writer for the invite document, shared with launchSharedRun — see
+  // runs/staffInvite.ts. WHO may mint one is decided above; this only writes it.
+  return createRunStaffInvite({ ownerUid, gameId, runId, name: cleanName, permissions });
 });
 
 

@@ -11168,6 +11168,80 @@ async function main() {
       creator.call('createGameShareLink', { gameId: gTomb }),
       { codeIn: ['functions/failed-precondition', 'functions/not-found'] });
 
+    // ---- Launching a run through the link (change: game-share-link) ----------
+    // The permission that WRITES into the owner's account, so every assertion
+    // here is about it being refused unless the owner said yes, and about the
+    // launcher getting something that can actually be operated.
+    const launcher = makeParty('shareLauncher');
+    await signInAnonymously(launcher.auth);
+
+    await expectError('a link that does not allow launching refuses',
+      launcher.call('launchSharedRun', { token }),
+      { codeIn: ['functions/not-found'] });
+    check('a non-launch link reports allowLaunch=false to the viewer',
+      (await linkVisitor.call('getSharedGame', { token: dated?.link?.token }))?.allowLaunch === false);
+
+    const launchLink = await creator.call('createGameShareLink', {
+      gameId: gShare, allowCopy: false, allowLaunch: true,
+    });
+    const launchToken = launchLink?.link?.token;
+    check('allowLaunch is stored as granted', launchLink?.link?.allowLaunch === true, JSON.stringify(launchLink?.link));
+    check('the viewer is TOLD they may launch',
+      (await linkVisitor.call('getSharedGame', { token: launchToken }))?.allowLaunch === true);
+
+    const started = await launcher.call('launchSharedRun', { token: launchToken });
+    check('launchSharedRun returns a run and an access code',
+      !!started?.runId && typeof started?.accessCode === 'string' && started.accessCode.length > 0,
+      JSON.stringify(started));
+    check('the launcher is given staff credentials for THAT run',
+      started?.staff?.runId === started?.runId && typeof started?.staff?.pin === 'string'
+        && started.staff.pin.length === 6,
+      JSON.stringify(started?.staff));
+    check('the staff credentials name the owner + game the run belongs to',
+      started?.staff?.ownerUid === creatorCred.user.uid && started?.staff?.gameId === gShare,
+      JSON.stringify(started?.staff));
+
+    // The run belongs to the OWNER, not to whoever pressed the button. If it
+    // landed anywhere else the owner could not see, staff or finalize it.
+    const ownerRuns = await creator.call('listLiveRuns', {});
+    check('the run lands in the OWNER account, visible in their live runs',
+      (ownerRuns?.runs ?? []).some((r) => r.runId === started?.runId),
+      JSON.stringify((ownerRuns?.runs ?? []).map((r) => r.runId)));
+
+    // The staff PIN is a real one: it signs in through the SAME callable a
+    // marshal uses, with no special case for share links.
+    const staffToken = await launcher.call('staffSignIn', {
+      ownerUid: started.staff.ownerUid,
+      gameId: started.staff.gameId,
+      runId: started.staff.runId,
+      pin: started.staff.pin,
+      name: 'Guest organizer',
+    });
+    // `customToken`, not `token`: staffSignIn mints a Firebase custom token the
+    // client then signs in with. Asserting the wrong field name here would have
+    // reported a working staff handoff as broken.
+    check('the staff PIN really opens a staff session for the run',
+      typeof staffToken?.customToken === 'string' && staffToken.customToken.length > 0,
+      JSON.stringify(staffToken).slice(0, 120));
+
+    // Players can join the run that was started this way.
+    const guestPlayer = makeParty('shareLaunchPlayer');
+    await signInAnonymously(guestPlayer.auth);
+    const joined = await guestPlayer.call('joinRun', { code: started.accessCode, displayName: 'Guest team' });
+    check('a player can join the run started through the link', !!joined?.teamId, JSON.stringify(joined));
+
+    // A launch is counted on the link, and a revoked link cannot start any more.
+    check('the launch is counted on the link',
+      ((await creator.call('listGameShareLinks', { gameId: gShare }))?.links ?? [])
+        .find((l) => l.token === launchToken)?.launchCount === 1, 'launchCount');
+    await creator.call('revokeGameShareLink', { token: launchToken });
+    await expectError('a revoked link cannot start a run',
+      launcher.call('launchSharedRun', { token: launchToken }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('an unauthenticated caller cannot start a run at all',
+      linkVisitor.call('launchSharedRun', { token: launchToken }),
+      { codeIn: ['functions/unauthenticated', 'functions/not-found'] });
+
     // The owner-side callables are owner-only at the door.
     await expectError('a stranger cannot mint a link for a game they do not own',
       copier.call('createGameShareLink', { gameId: gShare }),

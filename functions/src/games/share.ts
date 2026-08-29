@@ -33,12 +33,15 @@ import { loggedCallable, logBestEffort } from '../obs/log';
 import { auditBestEffort } from '../obs/audit';
 import { enforceRateLimit } from '../rateLimitStore';
 import { deleteDocsInChunks } from '../batchUtil';
+import { launchRunCore } from '../runs/index';
+import { createRunStaffInvite } from '../runs/staffInvite';
 import { assertGameNotDeleted } from './lifecycle';
 import {
   FIRESTORE_PATHS,
   isValidShareToken,
   shareLinkRefusal,
   shareLinkCopyRefusal,
+  shareLinkLaunchRefusal,
   shareLinkExpiryIso,
   sanitizeGameForShare,
   SHARE_TOKEN_BYTES,
@@ -49,6 +52,7 @@ import {
 
 export const AUDIT_SHARE_LINK_CREATED = 'game_share_link_created';
 export const AUDIT_SHARE_LINK_REVOKED = 'game_share_link_revoked';
+export const AUDIT_SHARE_LINK_LAUNCH  = 'game_share_link_run_launched';
 
 /** How many live links one game may hold. Bounded so the list stays reviewable. */
 export const MAX_SHARE_LINKS_PER_GAME = 20;
@@ -75,15 +79,16 @@ function refuseShareLink(reason: ShareLinkRefusal): never {
 /** Load the link document behind a token, or refuse. Never leaks why to a stranger. */
 async function loadUsableLink(
   token: unknown,
-  mode: 'read' | 'copy',
+  mode: 'read' | 'copy' | 'launch',
 ): Promise<{ link: GameShareLink; ref: FirebaseFirestore.DocumentReference }> {
   if (!isValidShareToken(token)) refuseShareLink('not-found');
   const ref = db.doc(shareLinkPath(token));
   const snap = await ref.get();
   const link = snap.exists ? (snap.data() as GameShareLink) : undefined;
-  const refusal = mode === 'copy'
-    ? shareLinkCopyRefusal(link, new Date().toISOString())
-    : shareLinkRefusal(link, new Date().toISOString());
+  const now = new Date().toISOString();
+  const refusal = mode === 'copy' ? shareLinkCopyRefusal(link, now)
+    : mode === 'launch' ? shareLinkLaunchRefusal(link, now)
+    : shareLinkRefusal(link, now);
   if (refusal) refuseShareLink(refusal);
   return { link: link as GameShareLink, ref };
 }
@@ -125,8 +130,9 @@ export const createGameShareLink = loggedCallable('createGameShareLink', async (
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'createGameShareLink');
 
-  const { gameId, allowCopy, revealAnswers, expiresInDays } = (data ?? {}) as {
-    gameId?: string; allowCopy?: boolean; revealAnswers?: boolean; expiresInDays?: number;
+  const { gameId, allowCopy, revealAnswers, allowLaunch, expiresInDays } = (data ?? {}) as {
+    gameId?: string; allowCopy?: boolean; revealAnswers?: boolean;
+    allowLaunch?: boolean; expiresInDays?: number;
   };
   const game = await loadOwnGame(uid, gameId);
 
@@ -156,8 +162,13 @@ export const createGameShareLink = loggedCallable('createGameShareLink', async (
     // that omits the field opt IN, which is the wrong direction for a disclosure.
     allowCopy: allowCopy === true,
     revealAnswers: revealAnswers === true,
+    // The only permission here that WRITES into the owner's account. Same
+    // `=== true` posture as the others, and read back through
+    // shareLinkLaunchRefusal, which refuses on absence rather than on falsity.
+    allowLaunch: allowLaunch === true,
     viewCount: 0,
     copyCount: 0,
+    launchCount: 0,
   };
   const expiresAt = shareLinkExpiryIso(now, expiresInDays);
   if (expiresAt) link.expiresAt = expiresAt;
@@ -172,7 +183,7 @@ export const createGameShareLink = loggedCallable('createGameShareLink', async (
     gameId: game.id,
     gameTitle: game.title,
     newValue: token,
-    reason: `allowCopy=${link.allowCopy} revealAnswers=${link.revealAnswers}`,
+    reason: `allowCopy=${link.allowCopy} revealAnswers=${link.revealAnswers} allowLaunch=${link.allowLaunch}`,
   });
 
   return { link };
@@ -265,9 +276,92 @@ export const getSharedGame = loggedCallable('getSharedGame', async (data, contex
   return {
     game: sanitizeGameForShare(game, link.revealAnswers === true),
     allowCopy: link.allowCopy === true,
+    // What the holder may DO is told to the holder — the alternative is a page
+    // that offers a button the server will refuse, or hides one it would honour.
+    // `launchExhausted` separates "the owner said no" from "this link has already
+    // started its allowance of runs": the second is fixable by asking for a new
+    // link, and a page that cannot tell them apart says the wrong thing to both.
+    allowLaunch: shareLinkLaunchRefusal(link, new Date().toISOString()) === null,
+    launchExhausted: shareLinkLaunchRefusal(link, new Date().toISOString()) === 'launch-limit',
     // The viewer is told what they may do, never who owns it: `ownerUid` is not
     // in the projection and is not returned here either.
     sharedAt: link.createdAt,
+  };
+});
+
+
+// ─── launchSharedRun ──────────────────────────────────────────────────────────
+//
+// The holder of a launch-enabled link STARTS A RUN of a game they do not own and
+// have not copied, and gets staff access to operate it.
+//
+// Two things had to be true for this to be a real feature rather than a button:
+//
+//   1. It goes through `launchRunCore`, the same path the owner's own launch
+//      takes — same validation, same billing decision, same atomic run + access
+//      code write. A second launch path would be a second place for "free run"
+//      to be forgotten.
+//   2. The launcher gets a STAFF invite for that run. A run nobody can operate is
+//      not a run: somebody has to press start, watch the board and finish it, and
+//      the person who pressed the button is not the owner and cannot reach the
+//      owner's console. The existing staff PIN + `?staff=` link is exactly the
+//      scoped, run-limited access this needs — no new authorization concept.
+//
+// The run lands in the OWNER's account: it is their game, their standings, their
+// participants and (whenever payments are switched back on) their credit. That is
+// why `allowLaunch` is opt-in per link and never granted by omission, why the
+// count per link is bounded, and why this writes an audit record.
+
+export const launchSharedRun = loggedCallable('launchSharedRun', async (data, context) => {
+  // An account is required, unlike the read: this WRITES, the audit trail needs a
+  // subject, and the staff invite has to belong to somebody.
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'launchSharedRun');
+
+  const { token, name } = (data ?? {}) as { token?: string; name?: string };
+  const { link, ref } = await loadUsableLink(token, 'launch');
+
+  const { runId, accessCode } = await launchRunCore({
+    ownerUid: link.ownerUid,
+    gameId: link.gameId,
+  });
+
+  // Staff access for whoever launched it, scoped to THIS run only.
+  const staffName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 60) : 'Guest organizer';
+  const invite = await createRunStaffInvite({
+    ownerUid: link.ownerUid,
+    gameId: link.gameId,
+    runId,
+    name: staffName,
+  });
+
+  // Best-effort counter; a failed increment must not undo a run that exists.
+  ref.update({
+    launchCount: (typeof link.launchCount === 'number' ? link.launchCount : 0) + 1,
+  }).catch((e) => logBestEffort('gameShareLink.launchCount', { gameId: link.gameId }, e));
+
+  await auditBestEffort({
+    operatorId: uid,
+    actionType: AUDIT_SHARE_LINK_LAUNCH,
+    gameId: link.gameId,
+    runId,
+    newValue: accessCode,
+    reason: `run launched by a share-link holder (token ${link.token.slice(0, 6)}…)`,
+  });
+
+  return {
+    runId,
+    accessCode,
+    // The two ids the staff console needs beside the PIN. This is the ONE place a
+    // share link discloses the owner uid, and it is unavoidable: a staff session
+    // is addressed by owner + game + run. It is disclosed only to a caller the
+    // owner explicitly authorized to run their game, never on the read path.
+    staff: {
+      ownerUid: link.ownerUid,
+      gameId: link.gameId,
+      runId,
+      pin: invite.pin,
+    },
   };
 });
 
