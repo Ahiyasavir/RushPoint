@@ -150,10 +150,10 @@
         "title": "Reconstruct the case",
         "prompt": "The diamond vanished from the gallery. Put what actually happened in the right order.",
         "items": [
-          "The gallery lights suddenly cut out for two minutes",
-          "The alarm went off all at once",
-          "The guard ran over and found the display case empty",
-          "The parking camera caught a car leaving through an exit that's always locked"
+          "Suddenly, the gallery lights cut out for two minutes",
+          "The instant the lights cut out, the alarm went off",
+          "The guard ran in after hearing the alarm, and found the case already empty",
+          "While the guard still stood there stunned, the parking camera caught a car leaving through a locked exit"
         ],
         "kindLabel": "Investigation mission"
       },
