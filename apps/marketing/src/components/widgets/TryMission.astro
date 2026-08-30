@@ -28,6 +28,7 @@
  * says so.
  */
 import type { TryMission as Props } from '~/types';
+import { CREATOR_BUILD_URL } from '~/navigation';
 
 const { content, id = 'try-mission' } = Astro.props as Props;
 ---
@@ -132,7 +133,7 @@ const { content, id = 'try-mission' } = Astro.props as Props;
         <p class="text-xs text-muted dark:text-slate-500 mb-6" data-rp-board-note></p>
 
         <div class="flex flex-wrap gap-3 justify-center">
-          <a class="btn btn-primary" href="https://creator.rush-point.com" target="_blank" rel="noopener" data-rp-done-cta></a>
+          <a class="btn btn-primary" href={CREATOR_BUILD_URL} target="_blank" rel="noopener" data-rp-done-cta></a>
           <button type="button" class="btn" data-rp-replay></button>
         </div>
       </div>

@@ -38,7 +38,7 @@ import { liveRunForGame } from '../lib/creatorNav';
 import {
   KNOWN_GAME_COUNT_KEY, ONBOARDING_DISMISSED_KEY, PREVIEWED_STORAGE_KEY, TOUR_FIRST_GAME_KEY, firstGameIdKey,
   buildOnboardingChecklist, knownGameCountKey, readKnownGameCount, readPreviewedGames,
-  skeletonCardCount,
+  skeletonCardCount, consumeStartIntent,
   type OnboardingStepId,
 } from '../lib/creatorOnboarding';
 
@@ -218,6 +218,21 @@ export default function DashboardPage() {
   // Escape closes the template picker, matching its backdrop click. Gated on
   // `picking` because this page renders the whole dashboard behind it.
   useModalDismiss(() => { setPicking(false); setChosen(null); }, undefined, picking);
+
+  // Arriving from the marketing CTA opens the new-game wizard straight away
+  // (change: marketing-cta-straight-to-build) — its first step is already "what
+  // is this game called", which is exactly where that link promised to land.
+  //
+  // The ref guard is load-bearing under StrictMode, which mounts effects twice in
+  // dev: `consumeStartIntent` clears on read, so an unguarded second call would
+  // read `false` and the intent would look like it had never arrived when
+  // debugging. Guarding keeps dev and production behaving identically.
+  const startIntentChecked = useRef(false);
+  useEffect(() => {
+    if (startIntentChecked.current) return;
+    startIntentChecked.current = true;
+    if (consumeStartIntent()) setPicking(true);
+  }, []);
   // Firestore-backed templates (change: admin-manage-game-templates). null = still
   // loading; [] + failed = the fetch errored. Seeded SYNCHRONOUSLY from the cache
   // (perf: template-picker-latency) so a returning creator's picker paints its menu

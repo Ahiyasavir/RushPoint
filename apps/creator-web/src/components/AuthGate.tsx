@@ -3,7 +3,10 @@ import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { User } from 'firebase/auth';
 import { getAdditionalUserInfo } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import { markJustSignedUp, shouldRedirectAfterSignup } from '../lib/creatorOnboarding';
+import {
+  markJustSignedUp, shouldRedirectAfterSignup,
+  readStartIntent, markStartIntent, hasStartIntent,
+} from '../lib/creatorOnboarding';
 import { doc, setDoc } from 'firebase/firestore';
 import {
   watchAuth,
@@ -54,6 +57,12 @@ export const useAuth = () => useContext(Ctx);
 const REF_KEY = 'rp_ref';
 const incomingRef = new URLSearchParams(window.location.search).get('ref');
 if (incomingRef) { try { localStorage.setItem(REF_KEY, incomingRef); } catch { /* private mode */ } }
+
+// "Take me straight to building" (change: marketing-cta-straight-to-build).
+// Captured at module load, exactly like the referral above, because it has to
+// survive whatever the auth flow does to the URL next — a Google redirect, or the
+// post-signup `nav('/', ...)` — and both of those drop the query string.
+if (readStartIntent(window.location.search)) markStartIntent();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const t = useT();
@@ -375,12 +384,35 @@ function LoginScreen() {
   // forgot-password confirmation, the referral-bonus alert) silently no-op. Mounting
   // them here makes that pre-signin feedback actually render. These two branches are
   // mutually exclusive with App, so the module-singleton host is never double-owned.
+  // A visitor who arrived from the marketing CTA has already read the pitch and
+  // clicked anyway — showing them the landing page again is asking them to
+  // decide twice (change: marketing-cta-straight-to-build). They get the auth
+  // card on its own; everyone else gets the full landing page, unchanged.
+  //
+  // Read, never consumed, here: this screen re-renders on a failed password or a
+  // switch to sign-up, and each of those still needs the bare layout. The
+  // Dashboard is what spends the intent, once, when it acts on it.
   return (
     <>
-      <Landing authCard={authCard} />
+      {hasStartIntent() ? <BareSignIn authCard={authCard} /> : <Landing authCard={authCard} />}
       <DialogHost />
       <ToastHost />
     </>
+  );
+}
+
+/** The auth card alone, centred, on the same ambient background the Landing uses. */
+function BareSignIn({ authCard }: { authCard: ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[--surface-1] text-[--ink-1] relative overflow-hidden flex items-center justify-center p-4">
+      <div aria-hidden="true" className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-[46rem] h-[46rem] rounded-full opacity-70"
+          style={{ background: 'radial-gradient(circle, rgba(255,87,34,0.16) 0%, transparent 62%)', filter: 'blur(90px)' }} />
+        <div className="absolute bottom-0 left-1/3 w-[36rem] h-[36rem] rounded-full opacity-40"
+          style={{ background: 'radial-gradient(circle, rgba(255,179,0,0.12) 0%, transparent 62%)', filter: 'blur(90px)' }} />
+      </div>
+      <div className="relative flex justify-center w-full">{authCard}</div>
+    </div>
   );
 }
 

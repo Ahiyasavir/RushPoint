@@ -475,6 +475,60 @@ export function consumeJustSignedUp(): boolean {
   } catch { return false; }
 }
 
+// ── "Start building" intent, carried in from the marketing site ─────────────
+//
+// The marketing CTA used to land on the creator LANDING page — a second pitch,
+// to somebody who had just read the first one and clicked anyway. This carries
+// their intent across the sign-in instead: the login screen drops the marketing
+// copy and shows only the auth card, and the Dashboard opens the new-game wizard
+// (whose first step is already "what is this game called") the moment it mounts.
+//
+// SESSION scoped, not local: it describes one arrival, not a standing
+// preference. A creator who clicks the link, closes the tab and comes back next
+// week should get their ordinary dashboard, not a modal they never asked for.
+
+const START_INTENT_KEY = 'rp-start-intent';
+
+/**
+ * Does this URL ask to go straight to building?
+ *
+ * Pure and total — it is read at module load on every single page view, so a
+ * malformed query string must yield `false` rather than throw and take the whole
+ * app down before it renders. Only the exact value is honoured: `?start=` on its
+ * own, or any other value, is not an instruction.
+ */
+export function readStartIntent(search: unknown): boolean {
+  if (typeof search !== 'string' || search === '') return false;
+  try {
+    return new URLSearchParams(search).get('start') === 'game';
+  } catch { return false; }
+}
+
+export function markStartIntent(): void {
+  try { sessionStorage.setItem(START_INTENT_KEY, '1'); } catch { /* storage unavailable */ }
+}
+
+/** Is the intent still pending? Does NOT clear it — see `consumeStartIntent`. */
+export function hasStartIntent(): boolean {
+  try { return sessionStorage.getItem(START_INTENT_KEY) === '1'; } catch { return false; }
+}
+
+/**
+ * True at most once per arrival: reading it clears it.
+ *
+ * Consumed by the Dashboard rather than the login screen, because the login
+ * screen may be rendered several times over one arrival (a failed password, a
+ * switch between sign-in and sign-up) and each of those still needs the bare
+ * layout. Only the thing that ACTS on the intent gets to spend it.
+ */
+export function consumeStartIntent(): boolean {
+  try {
+    const hit = sessionStorage.getItem(START_INTENT_KEY) === '1';
+    if (hit) sessionStorage.removeItem(START_INTENT_KEY);
+    return hit;
+  } catch { return false; }
+}
+
 // ── Presentation decisions (still pure) ────────────────────────────────────
 
 /**

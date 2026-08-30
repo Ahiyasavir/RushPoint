@@ -6,6 +6,7 @@ import TopoBackdrop from '~/components/TopoBackdrop.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, type Language } from '~/utils/i18n';
 import { pageContent } from '~/utils/pages';
+import { CREATOR_BUILD_URL } from '~/navigation';
 import Media from '~/components/Media.astro';
 
 export function getStaticPaths() {
@@ -76,7 +77,7 @@ const metadata = {
   <div class="bg-surface-tint">
     <CallToAction
       actions={[
-        { variant: 'primary', text: t.action, href: 'https://creator.rush-point.com', target: '_blank' },
+        { variant: 'primary', text: t.action, href: CREATOR_BUILD_URL, target: '_blank' },
       ]}
     />
   </div>

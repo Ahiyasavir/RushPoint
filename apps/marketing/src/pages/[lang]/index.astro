@@ -11,7 +11,7 @@ import FAQs from '~/components/widgets/FAQs.astro';
 import { Icon } from 'astro-icon/components';
 
 import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
-import { landingPageUrl, mediaLabels } from '~/navigation';
+import { landingPageUrl, mediaLabels, CREATOR_BUILD_URL } from '~/navigation';
 import { pageContent } from '~/utils/pages';
 import Media from '~/components/Media.astro';
 import FounderVideo from '~/components/FounderVideo.astro';
@@ -68,7 +68,7 @@ const metadata = {
     clip={t.heroClip}
     taste={t.heroTaste}
     actions={[
-      { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
+      { variant: 'primary', text: t.primaryAction, href: CREATOR_BUILD_URL, target: '_blank' },
       { text: t.secondaryAction, href: `#${TRY_MISSION_ID}` },
     ]}
   />
@@ -198,7 +198,7 @@ const metadata = {
   <div class="bg-surface-tint">
     <CallToAction
       actions={[
-        { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
+        { variant: 'primary', text: t.primaryAction, href: CREATOR_BUILD_URL, target: '_blank' },
         { text: t.ideasAction, href: landingPageUrl(language) },
       ]}
     >

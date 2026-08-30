@@ -12,6 +12,22 @@ import { pagePath, otherLanguage, LANGUAGE_NAME, type Language } from './utils/i
 
 /** Where a reader goes to actually use the product. */
 const CREATOR_APP = 'https://creator.rush-point.com';
+
+/**
+ * The destination for every "build a game" call to action
+ * (change: marketing-cta-straight-to-build).
+ *
+ * `?start=game` is read by the creator app's AuthGate, which then drops its own
+ * landing page — a second pitch, to somebody who just read this one and clicked
+ * anyway — and shows the sign-in card alone. Once signed in, the dashboard opens
+ * the new-game wizard, whose first step asks what the game is called. So the
+ * link lands exactly where it promises to.
+ *
+ * Exported and used by every CTA rather than typed inline at each one: the param
+ * is the whole contract with the other app, and six copies of a magic string is
+ * six chances for one of them to quietly lose it.
+ */
+export const CREATOR_BUILD_URL = `${CREATOR_APP}/?start=game`;
 /** The participant origin, which also serves the occasion landing pages. */
 const PLAY_ORIGIN = 'https://rush-point.com';
 
@@ -159,7 +175,7 @@ export const headerData = (language: Language, counterpartHref?: string) => {
       // followed a link here and just wants to enter a code must not have to
       // read a marketing page to find the way in.
       { text: t.joinGame, href: `${PLAY_ORIGIN}/`, variant: 'tertiary' as const, target: '_blank' },
-      { text: t.startBuilding, href: CREATOR_APP, target: '_blank' },
+      { text: t.startBuilding, href: CREATOR_BUILD_URL, target: '_blank' },
     ],
   };
 };
@@ -172,7 +188,7 @@ export const footerData = (language: Language) => {
       {
         title: t.product,
         links: [
-          { text: t.startBuilding, href: CREATOR_APP },
+          { text: t.startBuilding, href: CREATOR_BUILD_URL },
           { text: t.ideas, href: landingPageUrl(language, '') },
           { text: t.blog, href: pagePath(language, 'blog') },
         ],

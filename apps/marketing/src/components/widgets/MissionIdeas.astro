@@ -24,6 +24,7 @@
  *  • No framework, no network, same as the demo above it.
  */
 import type { MissionIdeas as Props } from '~/types';
+import { CREATOR_BUILD_URL } from '~/navigation';
 
 const { content, id = 'mission-ideas' } = Astro.props as Props;
 ---
@@ -61,7 +62,7 @@ const { content, id = 'mission-ideas' } = Astro.props as Props;
         <ol class="flex flex-col gap-4" data-rp-list aria-live="polite"></ol>
         <p class="mt-4 text-xs text-muted dark:text-slate-500" data-rp-note></p>
         <div class="mt-6 flex flex-wrap gap-3">
-          <a class="btn btn-primary" href="https://creator.rush-point.com" target="_blank" rel="noopener" data-rp-cta></a>
+          <a class="btn btn-primary" href={CREATOR_BUILD_URL} target="_blank" rel="noopener" data-rp-cta></a>
           <button type="button" class="btn" data-rp-again></button>
         </div>
       </div>
