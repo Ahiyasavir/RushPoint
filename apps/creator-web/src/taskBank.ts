@@ -2750,4 +2750,125 @@ export const TASK_BANK: TaskBankEntry[] = [
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Added 2026-08-30 (change: brand-any-place). Zero-prep thinking missions for
+  // the audience the site's own marketing now explicitly courts: a group playing
+  // from a living room, with no venue and nothing to bring. The bank already had
+  // 61 `fromAnywhere` entries out of 84 and a solid `home`-tagged party cluster
+  // (celebrant ranking, birthday wish, candle count…), but almost nothing in the
+  // "one clever riddle, zero setup, works for a birthday table or a corporate
+  // offsite alike" lane the vault/echo pair below fills. Ported from
+  // `scripts/lib/spy-academy-game-def.mjs`'s own flagship demo content — already
+  // authored, already fun, already proven — rather than invented from scratch;
+  // see rule 15 (ship the real content, not a mechanic label).
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    // Rule 23 (a riddle needs a payoff): the classic echo riddle's answer is the
+    // one thing in the room that can genuinely answer back — teams that read it
+    // aloud usually hear it before they solve it.
+    key: 'echo-riddle',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'חידת ההד',
+      description: 'מדבר בלי פה, שומע בלי אוזניים, נולד מהרים ומת בשקט. מי אני? הקלידו את התשובה במילה אחת.',
+      type: 'quiz',
+      difficulty: 4,
+      estimatedMinutes: 3,
+      pointValue: 110,
+      answers: ['הד'],
+      hint: 'רמז: תצעקו במקום ריק וסגור, ותקשיבו למה שחוזר אליכם.',
+      hintPenalty: 15,
+    }),
+  },
+  {
+    // A real lateral-thinking calculation with one committed answer, not a
+    // decorative "add these up" — the two facts it leans on (spider legs, days
+    // in a week) are true for every reader, so nothing here can come out
+    // ambiguous the way a venue-dependent count could (rule 8/31).
+    key: 'vault-combination-riddle',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'corporate', 'mixed', 'easy'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'פיצוח הכספת',
+      description: 'צירוף הכספת הוא מספר הרגליים של עכביש, ועוד מספר הימים בשבוע. הקלידו את הצירוף.',
+      type: 'numeric',
+      difficulty: 3,
+      estimatedMinutes: 2,
+      pointValue: 90,
+      numericAnswer: 15,
+      numericTolerance: 0,
+      hint: 'רמז: לעכביש יש 8 רגליים. בשבוע יש 7 ימים.',
+      hintPenalty: 10,
+    }),
+  },
+  {
+    // The bank's `sequence` type had exactly ONE representative
+    // (team-decision-drill) across 87 entries before this one — and that entry
+    // needs a required setup step (a real value to arrive at), so there was no
+    // zero-prep sequence mission at all. This one needs nothing from the
+    // creator: every step is fixed, fully self-contained content, same source
+    // as `echo-riddle`/`vault-combination-riddle` above.
+    key: 'disarm-the-device',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'נטרול המנגנון',
+      description: 'שלושה סוכנים לפניכם נכשלו כאן. בצעו את שלושת השלבים בדיוק לפי הסדר, בלי טעויות.',
+      type: 'sequence',
+      difficulty: 5,
+      estimatedMinutes: 4,
+      pointValue: 120,
+      steps: [
+        { id: uuid(), prompt: 'שלב 1: חברו את החוט הכחול. אשרו כשסיימתם.' },
+        { id: uuid(), prompt: 'שלב 2: הקלידו את מילת הקוד הסודית.', answer: 'פרוטוקול' },
+        { id: uuid(), prompt: 'שלב 3: קחו נשימה עמוקה, ולחצו לנטרול סופי.' },
+      ],
+    }),
+  },
+  {
+    // A classic riddle whose answer is guaranteed to exist wherever this is
+    // played (rule 31): every home, office and school bathroom holds one. The
+    // youngest-friendly entry of the three, and the only one carrying `home`.
+    key: 'household-riddle-comb',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    difficulty: 2,
+    minAge: 6,
+    build: () => anywhere({
+      title: 'החידה שיושבת בבית',
+      description: 'יש לי שיניים אבל אני לא נושך, יש לי גב אבל אף אחד לא שוכב עליי. מי אני? הקלידו את התשובה במילה אחת.',
+      type: 'quiz',
+      difficulty: 2,
+      estimatedMinutes: 2,
+      pointValue: 70,
+      answers: ['מסרק'],
+      hint: 'רמז: תמצאו אותי ליד הכיור, או במגירה באמבטיה.',
+      hintPenalty: 10,
+    }),
+  },
+  {
+    // A real named practice (rule 3), and `noPrep` on purpose: unlike
+    // paper-airplane-trial (needs paper someone must supply in advance), this
+    // uses only furniture and soft goods already standing in the room — the
+    // same reasoning `human-letter`/`open-everyone-airborne` use for bodies.
+    key: 'blanket-fort',
+    sourceTemplateKey: 'authored',
+    tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    difficulty: 3,
+    minAge: 6,
+    build: () => anywhere({
+      title: 'המצודה מהסלון',
+      description: 'בנו מצודה משמיכות, כריות וכריות ספה. כל חברי הקבוצה חייבים להיכנס פנימה בבת אחת. צלמו את המצודה מבחוץ, ואת כולכם דחוסים בפנים.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 8,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
 ];
