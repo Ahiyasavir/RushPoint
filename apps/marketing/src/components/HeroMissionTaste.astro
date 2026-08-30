@@ -1,0 +1,375 @@
+---
+/**
+ * The hero's phone screen: a real mission, mid race.
+ *
+ * WHY THIS REPLACED THE MAP. `HeroFieldMap.astro` drew contours, a route and four
+ * pins. It was well made and it argued the wrong thing twice over:
+ *
+ *  1. It DESCRIBED rather than tasted. A visitor looking at a drawn map learns
+ *     that RushPoint knows where things are. What actually sells a field game is
+ *     the moment a team reads a mission, solves it, and watches points land two
+ *     seconds later. The playable demo further down the page proves this works;
+ *     the hero was spending the most valuable pixels on the page on a metaphor.
+ *  2. It said "outdoors only" with its whole body. A topographic map IS the
+ *     outdoor claim, so no amount of copy saying "at home too" could survive
+ *     sitting next to it. The product has run map free missions since
+ *     `Task.locationless` existed; the hero simply never showed one.
+ *
+ * So this shows the PLAYER'S OWN SCREEN, and cycles it through settings: a
+ * living room, a hall, a street. Same header, same card, same points landing.
+ * The breadth argument is made by repetition rather than by an adjective.
+ *
+ * WHY IT IS STILL DRAWN MARKUP. Unchanged from the map it replaces, and for the
+ * same reason: this sits on the page's largest contentful paint.
+ * `scripts/test-marketing-home-cro.ts` holds the line — no <img>, no <video>, no
+ * `src`, no `url()`. A screen capture belongs in the optional `heroClip` content
+ * field, which swaps the whole frame honestly instead of smuggling a request in
+ * here.
+ *
+ * WHY MOTION IS OPT IN. Every animation sits inside
+ * `@media (prefers-reduced-motion: no-preference)`, and the STATIC state is the
+ * first mission, fully rendered, points showing. A visitor who asked their system
+ * for less motion gets a finished screen immediately rather than an animation
+ * that is then undone.
+ *
+ * NO PROSE HERE. This site has no `t.*` dictionary: a string's language is decided
+ * by which content FILE it lives in. Every word below therefore arrives as a prop
+ * from `home.<lang>.json`, and the same test enforces it.
+ *
+ * Change: brand-any-place.
+ */
+export interface TasteMission {
+  /** Mission type chip, e.g. "a cracking mission". */
+  kind: string;
+  /** Where this one is being played. The breadth argument, one word at a time. */
+  place: string;
+  title: string;
+  prompt: string;
+  /** The score chip. A signed number, so it needs no translation. */
+  points: string;
+}
+
+export interface Props {
+  /** "Mission 2 of 6", already interpolated by the caller. */
+  progress: string;
+  /** A running clock, e.g. `04:12`. Digits, so no translation. */
+  clock: string;
+  /** The team's score so far, already formatted with its unit. */
+  score: string;
+  missions: TasteMission[];
+  class?: string;
+}
+
+const { progress, clock, score, missions, class: className = '' } = Astro.props;
+---
+
+<div class={`rp-taste ${className}`}>
+  {/* The player's status bar. Same three facts play-web puts there: where you are
+      in the run, how long you have been going, what you have banked. */}
+  <div class="rp-taste-bar">
+    <span class="rp-taste-progress">{progress}</span>
+    <span class="rp-taste-clock">{clock}</span>
+    <span class="rp-taste-score">{score}</span>
+  </div>
+
+  <div class="rp-taste-stack">
+    {
+      missions.map((mission, i) => (
+        <article class={`rp-taste-card rp-taste-card-${i + 1}`}>
+          <p class="rp-taste-meta">
+            <span class="rp-taste-kind">{mission.kind}</span>
+            <span class="rp-taste-place">{mission.place}</span>
+          </p>
+
+          <h3 class="rp-taste-title">{mission.title}</h3>
+          <p class="rp-taste-prompt">{mission.prompt}</p>
+
+          {/* The answer row. Deliberately empty of words: it is the SHAPE of an
+              input a team is about to fill, and a label here would be prose. */}
+          <div class="rp-taste-input" aria-hidden="true">
+            <span class="rp-taste-caret" />
+          </div>
+
+          <div class="rp-taste-points">{mission.points}</div>
+        </article>
+      ))
+    }
+  </div>
+</div>
+
+<style>
+  .rp-taste {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+
+    /* The palette in one place, so the dark override is a handful of lines
+       rather than a second copy of the stylesheet. Mirrors play-web's warm
+       light surfaces rather than inventing a third theme. */
+    --rp-t-page: #fbf4e9;
+    --rp-t-card: #fffdf9;
+    --rp-t-ink: #2c2318;
+    --rp-t-muted: rgb(70 56 38 / 62%);
+    --rp-t-line: rgb(90 70 45 / 14%);
+    --rp-t-brand: #ff5722;
+    --rp-t-on-brand: #ffffff;
+    --rp-t-chip: rgb(255 87 34 / 12%);
+
+    background: var(--rp-t-page);
+    color: var(--rp-t-ink);
+    font-family: var(--rp-font-body), system-ui, sans-serif;
+  }
+
+  /* `:global(.dark)` because the theme class sits on an ancestor OUTSIDE this
+     component; a scoped selector would look for this component's hash on it. */
+  :global(.dark) .rp-taste {
+    --rp-t-page: #14110d;
+    --rp-t-card: #1e1913;
+    --rp-t-ink: #f4efe6;
+    --rp-t-muted: rgb(240 236 229 / 60%);
+    --rp-t-line: rgb(240 236 229 / 14%);
+    --rp-t-chip: rgb(255 87 34 / 20%);
+  }
+
+  /* ── Status bar ─────────────────────────────────────────────────────────── */
+
+  .rp-taste-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.85rem 0.9rem;
+    border-block-end: 1px solid var(--rp-t-line);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--rp-t-muted);
+    flex-shrink: 0;
+  }
+
+  /* Digits read left to right in both languages: a clock is a number, not a
+     sentence, and mirroring it in Hebrew would print the minutes first. */
+  .rp-taste-clock {
+    direction: ltr;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rp-taste-score {
+    direction: ltr;
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+    color: var(--rp-t-brand);
+  }
+
+  /* ── The card stack ─────────────────────────────────────────────────────── */
+
+  .rp-taste-stack {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .rp-taste-card {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    margin: 0.75rem;
+    padding: 0.9rem;
+    border: 1px solid var(--rp-t-line);
+    border-radius: 1rem;
+    background: var(--rp-t-card);
+    box-shadow: 0 8px 24px -18px rgb(60 40 20 / 55%);
+
+    /* The STATIC state is the first mission, finished and readable. Everything
+       after it is hidden until an animation is allowed to run, so a reduced
+       motion visitor sees one complete screen rather than three stacked. */
+    opacity: 0;
+  }
+  .rp-taste-card-1 {
+    opacity: 1;
+  }
+
+  .rp-taste-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin: 0;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .rp-taste-kind {
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    background: var(--rp-t-chip);
+    color: var(--rp-t-brand);
+  }
+
+  /* The place is the whole breadth argument, so it is legible rather than
+     decorative: a living room and a street sit in the same slot, one after the
+     other, in the same typeface. */
+  .rp-taste-place {
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--rp-t-line);
+    border-radius: 999px;
+    color: var(--rp-t-muted);
+  }
+
+  .rp-taste-title {
+    margin: 0;
+    font-family: var(--rp-font-display), var(--rp-font-body), system-ui, sans-serif;
+    font-size: 1.02rem;
+    font-weight: 800;
+    line-height: 1.25;
+    color: var(--rp-t-ink);
+  }
+
+  .rp-taste-prompt {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--rp-t-muted);
+
+    /* A hero is a glance, not a read: clamp so a long prompt cannot push the
+       points chip out of the frame on a narrow phone. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .rp-taste-input {
+    margin-block-start: auto;
+    height: 2.1rem;
+    display: flex;
+    align-items: center;
+    padding-inline: 0.6rem;
+    border: 1px solid var(--rp-t-line);
+    border-radius: 0.6rem;
+    background: var(--rp-t-page);
+  }
+
+  .rp-taste-caret {
+    width: 2px;
+    height: 0.95rem;
+    background: var(--rp-t-brand);
+    opacity: 0.75;
+  }
+
+  .rp-taste-points {
+    align-self: flex-start;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    background: var(--rp-t-brand);
+    color: var(--rp-t-on-brand);
+    font-family: var(--rp-font-display), var(--rp-font-body), system-ui, sans-serif;
+    font-size: 0.92rem;
+    font-weight: 800;
+    /* A signed number reads left to right in both languages. */
+    direction: ltr;
+  }
+
+  /* ── Motion, opt in ─────────────────────────────────────────────────────── */
+  @media (prefers-reduced-motion: no-preference) {
+    /* Each card owns the screen for a third of the cycle. Written as one shared
+       animation with a per-card delay rather than three keyframe sets, so the
+       timing is edited in one place and the cards cannot drift apart. */
+    .rp-taste-card {
+      animation: rp-taste-cycle 13.5s ease-in-out infinite both;
+    }
+    .rp-taste-card-1 {
+      animation-delay: 0s;
+    }
+    .rp-taste-card-2 {
+      animation-delay: 4.5s;
+    }
+    .rp-taste-card-3 {
+      animation-delay: 9s;
+    }
+
+    /* The caret blinks like a cursor waiting for an answer. It is the only hint
+       that this screen expects a person. */
+    .rp-taste-caret {
+      animation: rp-taste-blink 1.15s steps(1, end) infinite;
+    }
+
+    /* The points land a beat AFTER the card arrives, which is the actual felt
+       moment: you answer, then it pays. */
+    .rp-taste-points {
+      animation: rp-taste-pay 13.5s ease-out infinite both;
+    }
+    .rp-taste-card-1 .rp-taste-points {
+      animation-delay: 0s;
+    }
+    .rp-taste-card-2 .rp-taste-points {
+      animation-delay: 4.5s;
+    }
+    .rp-taste-card-3 .rp-taste-points {
+      animation-delay: 9s;
+    }
+  }
+
+  @keyframes rp-taste-cycle {
+    /* One third visible, with short crossfades either side. The card also rises
+       a few pixels on entry so a swap reads as the next mission arriving rather
+       than as the page flickering. */
+    0% {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    4% {
+      opacity: 1;
+      transform: none;
+    }
+    30% {
+      opacity: 1;
+      transform: none;
+    }
+    34% {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+  }
+
+  @keyframes rp-taste-pay {
+    0%,
+    8% {
+      opacity: 0;
+      transform: translateY(8px) scale(0.85);
+    }
+    13% {
+      opacity: 1;
+      transform: none;
+    }
+    30% {
+      opacity: 1;
+      transform: none;
+    }
+    34%,
+    100% {
+      opacity: 0;
+      transform: none;
+    }
+  }
+
+  @keyframes rp-taste-blink {
+    0%,
+    50% {
+      opacity: 0.75;
+    }
+    51%,
+    100% {
+      opacity: 0;
+    }
+  }
+</style>

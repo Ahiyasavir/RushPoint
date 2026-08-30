@@ -40,7 +40,7 @@ import { Icon } from 'astro-icon/components';
 
 import Button from '~/components/ui/Button.astro';
 import PhoneFrame from '~/components/PhoneFrame.astro';
-import HeroFieldMap from '~/components/HeroFieldMap.astro';
+import HeroMissionTaste, { type Props as HeroMissionTasteProps } from '~/components/HeroMissionTaste.astro';
 import TopoBackdrop from '~/components/TopoBackdrop.astro';
 import type { MediaItem } from '~/components/Media.astro';
 import type { CallToAction } from '~/types';
@@ -57,12 +57,16 @@ export interface Props {
   challenge: string;
   /** The door for a visitor who came to PLAY. `prompt` + a link. */
   join?: { prompt: string; action: string; href: string };
-  /** A real screen capture, if one exists. Absent means the drawn map. */
+  /** A real screen capture, if one exists. Absent means the drawn mission taste. */
   clip?: MediaItem;
+  /** The drawn mission-taste screen, shown whenever `clip` is absent. Required
+   * in that case: unlike the old field map this has no hardcoded content of its
+   * own, every word comes from the page's own language file. */
+  taste?: Omit<HeroMissionTasteProps, 'class'>;
   id?: string;
 }
 
-const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, id } = Astro.props;
+const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, taste, id } = Astro.props;
 ---
 
 <section class="rp-hero relative overflow-hidden md:-mt-[76px]" {...id ? { id } : {}}>
@@ -145,7 +149,7 @@ const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, 
                 preload="metadata"
               />
             ) : (
-              <HeroFieldMap />
+              taste && <HeroMissionTaste {...taste} />
             )
           }
         </PhoneFrame>

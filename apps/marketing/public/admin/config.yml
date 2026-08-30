@@ -100,14 +100,37 @@ collections:
             required: false
             collapsed: true
             hint: >-
-              אפשר להשאיר ריק. בלי סרטון מוצגת מפה מצוירת שמשרטטת מסלול לבד,
-              שלא עולה שום זמן טעינה. עם סרטון הוא מתנגן בלולאה ובלי קול.
+              אפשר להשאיר ריק. בלי סרטון מוצג מסך משימה מצויר שמתחלף בין שלוש
+              משימות לדוגמה, שלא עולה שום זמן טעינה. עם סרטון הוא מתנגן
+              בלולאה ובלי קול.
             fields:
               - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
               - { label: 'הקובץ', name: src, widget: file }
               - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
               - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
               - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+
+          - label: 'מסך המשימה המצויר בטלפון (כשאין סרטון)'
+            name: heroTaste
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              מוצג רק כשאין סרטון למעלה. שלוש משימות לדוגמה שמתחלפות זו בזו,
+              כל אחת עם מקום אחר, כדי להראות שאפשר לשחק בכל מקום.
+            fields:
+              - { label: 'שורת ההתקדמות', name: progress, widget: string, hint: 'למשל משימה 2 מתוך 6' }
+              - { label: 'השעון', name: clock, widget: string, hint: 'למשל 04:12' }
+              - { label: 'הניקוד', name: score, widget: string, hint: 'למשל 186 נק׳' }
+              - label: 'שלוש המשימות'
+                name: missions
+                widget: list
+                fields:
+                  - { label: 'סוג המשימה', name: kind, widget: string }
+                  - { label: 'איפה זה קורה', name: place, widget: string }
+                  - { label: 'כותרת המשימה', name: title, widget: string }
+                  - { label: 'טקסט המשימה', name: prompt, widget: text }
+                  - { label: 'הניקוד שמתקבל', name: points, widget: string, hint: 'למשל +30' }
           - { label: 'תגית מעל היתרונות', name: featuresTagline, widget: string }
           - { label: 'כותרת היתרונות', name: featuresTitle, widget: string }
           - { label: 'משפט מתחת לכותרת היתרונות', name: featuresSubtitle, widget: text }
@@ -341,14 +364,37 @@ collections:
             required: false
             collapsed: true
             hint: >-
-              אפשר להשאיר ריק. בלי סרטון מוצגת מפה מצוירת שמשרטטת מסלול לבד,
-              שלא עולה שום זמן טעינה. עם סרטון הוא מתנגן בלולאה ובלי קול.
+              אפשר להשאיר ריק. בלי סרטון מוצג מסך משימה מצויר שמתחלף בין שלוש
+              משימות לדוגמה, שלא עולה שום זמן טעינה. עם סרטון הוא מתנגן
+              בלולאה ובלי קול.
             fields:
               - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
               - { label: 'הקובץ', name: src, widget: file }
               - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
               - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
               - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+
+          - label: 'מסך המשימה המצויר בטלפון (כשאין סרטון)'
+            name: heroTaste
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              מוצג רק כשאין סרטון למעלה. שלוש משימות לדוגמה שמתחלפות זו בזו,
+              כל אחת עם מקום אחר, כדי להראות שאפשר לשחק בכל מקום.
+            fields:
+              - { label: 'שורת ההתקדמות', name: progress, widget: string, hint: 'למשל משימה 2 מתוך 6' }
+              - { label: 'השעון', name: clock, widget: string, hint: 'למשל 04:12' }
+              - { label: 'הניקוד', name: score, widget: string, hint: 'למשל 186 נק׳' }
+              - label: 'שלוש המשימות'
+                name: missions
+                widget: list
+                fields:
+                  - { label: 'סוג המשימה', name: kind, widget: string }
+                  - { label: 'איפה זה קורה', name: place, widget: string }
+                  - { label: 'כותרת המשימה', name: title, widget: string }
+                  - { label: 'טקסט המשימה', name: prompt, widget: text }
+                  - { label: 'הניקוד שמתקבל', name: points, widget: string, hint: 'למשל +30' }
           - { label: 'תגית מעל היתרונות', name: featuresTagline, widget: string }
           - { label: 'כותרת היתרונות', name: featuresTitle, widget: string }
           - { label: 'משפט מתחת לכותרת היתרונות', name: featuresSubtitle, widget: text }

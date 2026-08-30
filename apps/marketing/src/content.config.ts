@@ -196,6 +196,30 @@ const homePages = defineCollection({
      * code change: a content decision rather than a deploy.
      */
     heroClip: optionalMedia(),
+    /**
+     * The mission-taste screen shown in the hero when `heroClip` is absent
+     * (change: brand-any-place). Three real-feeling missions, each tagged with
+     * a different PLACE, so the hero itself makes the "any place" argument
+     * instead of a topographic map that argued the opposite.
+     */
+    heroTaste: z
+      .object({
+        progress: z.string(),
+        clock: z.string(),
+        score: z.string(),
+        missions: z
+          .array(
+            z.object({
+              kind: z.string(),
+              place: z.string(),
+              title: z.string(),
+              prompt: z.string(),
+              points: z.string(),
+            }),
+          )
+          .min(1),
+      })
+      .optional(),
     galleryTitle: z.string().optional(),
     gallerySubtitle: z.string().optional(),
     gallery: z.array(mediaItem()).default([]),
