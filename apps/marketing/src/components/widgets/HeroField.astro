@@ -128,7 +128,15 @@ const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, 
         </p>
       </div>
 
-      <div class="relative mx-auto w-full max-w-[18rem]">
+      {/* DESKTOP ONLY (change: hero-phone-desktop-only).
+          Stacked under the headline on a phone, this frame is a tall block a
+          reader has to scroll past before reaching anything actionable — on the
+          one device where the fold is tightest and the CTA matters most. It was
+          reported as "takes a lot of scroll and is not good" twice. It earns its
+          place beside the copy on a wide screen and nowhere else, so a phone
+          simply does not render it: no scroll cost, and (with the lazy <img>
+          inside never entering a viewport) no image request either. */}
+      <div class="relative mx-auto hidden w-full max-w-[18rem] lg:block">
         <PhoneFrame>
           {
             clip ? (

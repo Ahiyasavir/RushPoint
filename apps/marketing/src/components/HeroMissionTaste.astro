@@ -19,12 +19,14 @@
  * living room, a hall, a street. Same header, same card, same points landing.
  * The breadth argument is made by repetition rather than by an adjective.
  *
- * WHY IT IS STILL DRAWN MARKUP. Unchanged from the map it replaces, and for the
- * same reason: this sits on the page's largest contentful paint.
- * `scripts/test-marketing-home-cro.ts` holds the line — no <img>, no <video>, no
- * `src`, no `url()`. A screen capture belongs in the optional `heroClip` content
- * field, which swaps the whole frame honestly instead of smuggling a request in
- * here.
+ * WHY IT IS MOSTLY DRAWN MARKUP. This sits on the page's largest contentful
+ * paint, so it costs no network request beyond ONE deliberate exception: the
+ * recreate-the-photo mission carries a real image, because a drawn stand-in
+ * could not make its point. `scripts/test-marketing-home-cro.ts` holds that
+ * line — at most that one <img>, local and lazy, and no <video>, no `url()`.
+ * The frame itself is desktop-only (see HeroField), so a phone renders none of
+ * it and never fetches the photo. A full screen capture still belongs in the
+ * optional `heroClip` content field, which swaps the whole frame honestly.
  *
  * WHY MOTION IS OPT IN. Every animation sits inside
  * `@media (prefers-reduced-motion: no-preference)`, and the STATIC state is the
@@ -48,12 +50,11 @@ export interface TasteMission {
   /** The score chip. A signed number, so it needs no translation. */
   points: string;
   /**
-   * Swaps the generic answer-row mockup for a drawn illustration
-   * (change: hero-photo-reveal). `'crosswalkPhoto'`: a grayscale drawn scene
-   * crossfades to color on an automatic hand-tap, evoking a recreate-the-photo
-   * mission without reproducing any real photograph — original shapes only,
-   * same reason the whole component draws rather than embeds. Absent means the
-   * ordinary input-row mockup below.
+   * Swaps the generic answer-row mockup for the recreate-the-photo visual
+   * (change: hero-photo-real). `'crosswalkPhoto'`: a real photo, desaturated as
+   * the reference, revealed in colour on an automatic hand-tap. The image is an
+   * ORIGINAL recreation, never the Beatles' own Abbey Road cover, which is
+   * still under copyright. Absent means the ordinary input-row mockup below.
    */
   visual?: 'crosswalkPhoto';
 }
@@ -95,45 +96,17 @@ const { progress, clock, score, missions, class: className = '' } = Astro.props;
 
           {
             mission.visual === 'crosswalkPhoto' ? (
-              // Two scenes, one per breakpoint (change: hero-photo-real). On a
-              // narrow phone this stays the drawn illustration below — the real
-              // Abbey Road cover is still under copyright, so mobile never
-              // carries a real photo of it, and never pays for one either. On a
-              // wide viewport it swaps for an ORIGINAL photo the creator made
-              // (their own AI-generated recreation, not the Beatles' image),
-              // desaturated as "the reference" and revealed in color as "the
-              // result" on the same automatic tap. The shutter and hand sit in
-              // their own overlay so one pair works over either scene.
+              // The real photo, revealed (change: hero-photo-real). It is an
+              // ORIGINAL recreation the creator made, never the Beatles' own
+              // Abbey Road cover, which is still under copyright.
+              //
+              // There used to be a drawn-illustration twin here, shown to phones
+              // so they never fetched the photo. The whole hero frame is now
+              // desktop-only (see HeroField), so that twin had no audience left
+              // and was deleted rather than kept as a branch nothing can reach.
+              // A phone still pays nothing: the frame is not rendered, and the
+              // lazy <img> inside never enters a viewport to be fetched.
               <div class="rp-cross" style={`--rp-delay:${i * 4.5}s`} aria-hidden="true">
-                <div class="rp-cross-illustrated">
-                  <svg class="rp-cross-scene" viewBox="0 0 220 84" preserveAspectRatio="xMidYMid meet">
-                    <rect class="rp-cross-road" x="0" y="0" width="220" height="84" rx="10" />
-                    {[18, 54, 90, 126, 162, 198].map((x) => (
-                      <rect class="rp-cross-stripe" x={x} y="10" width="10" height="64" />
-                    ))}
-                    <g class="rp-cross-mono">
-                      {[40, 84, 128, 172].map((x, fi) => (
-                        <g transform={`translate(${x} 20)`}>
-                          <circle cx="0" cy="0" r="7" class="rp-cross-fig-head" />
-                          <rect x="-6" y="8" width="12" height="24" rx="5" class="rp-cross-fig-body" />
-                          <rect x={fi % 2 === 0 ? -9 : 1} y="30" width="6" height="18" rx="3" class="rp-cross-fig-leg" />
-                          <rect x={fi % 2 === 0 ? 3 : -7} y="30" width="6" height="18" rx="3" class="rp-cross-fig-leg" />
-                        </g>
-                      ))}
-                    </g>
-                    <g class="rp-cross-color">
-                      {[40, 84, 128, 172].map((x, fi) => (
-                        <g transform={`translate(${x} 20)`}>
-                          <circle cx="0" cy="0" r="7" class={`rp-cross-fig-head rp-cross-hue-${fi}`} />
-                          <rect x="-6" y="8" width="12" height="24" rx="5" class={`rp-cross-fig-body rp-cross-hue-${fi}`} />
-                          <rect x={fi % 2 === 0 ? -9 : 1} y="30" width="6" height="18" rx="3" class={`rp-cross-fig-leg rp-cross-hue-${fi}`} />
-                          <rect x={fi % 2 === 0 ? 3 : -7} y="30" width="6" height="18" rx="3" class={`rp-cross-fig-leg rp-cross-hue-${fi}`} />
-                        </g>
-                      ))}
-                    </g>
-                  </svg>
-                </div>
-
                 <div class="rp-cross-photo">
                   <img
                     class="rp-cross-photo-img"
@@ -335,37 +308,12 @@ const { progress, clock, score, missions, class: className = '' } = Astro.props;
     opacity: 0.75;
   }
 
-  /* ── The crosswalk illustration (change: hero-photo-reveal) ───────────────
-     A drawn scene, not a photo — see the template comment for why. Sized to
-     the same slot the input-row mockup occupies, so both variants keep the
-     card's overall proportions identical. */
+  /* ── The recreate-the-photo mission's visual (change: hero-photo-real) ────
+     Sized to the same slot the input-row mockup occupies, so both variants keep
+     the card's overall proportions identical. */
   .rp-cross {
     position: relative;
     margin-block-start: auto;
-  }
-  /* Mobile default: the drawn scene. Never a real photo, never a request. */
-  .rp-cross-illustrated {
-    display: block;
-  }
-  .rp-cross-photo {
-    display: none;
-  }
-  /* Desktop only (change: hero-photo-real): swap for the real recreation
-     photo. `min-width` is a page-viewport proxy for "not a phone", the same
-     signal the original hero-map complaint was about — see the file header. */
-  @media (min-width: 768px) {
-    .rp-cross-illustrated {
-      display: none;
-    }
-    .rp-cross-photo {
-      display: block;
-    }
-  }
-  .rp-cross-scene {
-    display: block;
-    width: 100%;
-    height: auto;
-    overflow: visible;
   }
   .rp-cross-photo-img {
     display: block;
@@ -376,46 +324,9 @@ const { progress, clock, score, missions, class: className = '' } = Astro.props;
        "reduced motion sees the end result" rule the rest of the file follows. */
     filter: none;
   }
-  .rp-cross-road {
-    fill: #3a2f22;
-  }
-  :global(.dark) .rp-cross-road {
-    fill: #0f0d0a;
-  }
-  .rp-cross-stripe {
-    fill: rgb(255 253 249 / 55%);
-  }
-  .rp-cross-fig-head,
-  .rp-cross-fig-body,
-  .rp-cross-fig-leg {
-    fill: currentColor;
-  }
-  /* The "before" figures: one flat mid-gray, deliberately colorless so the
-     reveal reads as "this brought it to life" rather than a mere fade. */
-  .rp-cross-mono {
-    color: rgb(255 253 249 / 45%);
-  }
-  .rp-cross-color {
-    opacity: 0;
-  }
-  /* Four distinct hues so the "after" reads as a real, varied team rather
-     than four copies of one figure. */
-  .rp-cross-hue-0 {
-    color: var(--rp-t-brand);
-  }
-  .rp-cross-hue-1 {
-    color: #2f8f6b;
-  }
-  .rp-cross-hue-2 {
-    color: #caa23c;
-  }
-  .rp-cross-hue-3 {
-    color: #6b6fd6;
-  }
-  /* Positioned by percentage against `.rp-cross` itself, not against either
-     scene's own coordinates — the illustrated scene and the real photo render
-     at different aspect ratios, so a shared overlay can only anchor to the
-     container both of them share. */
+  /* Positioned by percentage against `.rp-cross` itself rather than in the
+     photo's own pixel space, so the tap lands in the same visual spot whatever
+     aspect ratio the image happens to have. */
   .rp-cross-shutter {
     position: absolute;
     inset-inline-end: 6%;
@@ -516,14 +427,6 @@ const { progress, clock, score, missions, class: className = '' } = Astro.props;
     }
     .rp-cross-flash {
       animation: rp-cross-flash 13.5s ease-in-out infinite both;
-      animation-delay: var(--rp-delay);
-    }
-    .rp-cross-mono {
-      animation: rp-cross-mono-out 13.5s ease-in-out infinite both;
-      animation-delay: var(--rp-delay);
-    }
-    .rp-cross-color {
-      animation: rp-cross-color-in 13.5s ease-in-out infinite both;
       animation-delay: var(--rp-delay);
     }
     /* The real photo's own reveal (change: hero-photo-real): one image, a
@@ -639,28 +542,6 @@ const { progress, clock, score, missions, class: className = '' } = Astro.props;
     13.5%,
     100% {
       opacity: 0;
-    }
-  }
-
-  @keyframes rp-cross-mono-out {
-    0%,
-    12% {
-      opacity: 1;
-    }
-    13%,
-    100% {
-      opacity: 0;
-    }
-  }
-
-  @keyframes rp-cross-color-in {
-    0%,
-    12% {
-      opacity: 0;
-    }
-    13%,
-    100% {
-      opacity: 1;
     }
   }
 

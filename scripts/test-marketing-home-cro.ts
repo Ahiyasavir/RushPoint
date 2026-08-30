@@ -338,7 +338,17 @@ for (const [what, rel] of Object.entries(COMPONENTS)) {
   if (taste === null) {
     check('F · the hero taste screen could be scanned', false, COMPONENTS.taste);
   } else {
-    const template = taste.replace(/^---\r?\n[\s\S]*?\r?\n---/, ' ');
+    // Strip the frontmatter AND every comment before scanning. Comments are prose
+    // ABOUT the markup, and this section's whole job is to count real markup: a
+    // sentence explaining why the lazy image tag is safe was itself counted as a
+    // second one, so the file failed its own rule by documenting it. The `//`
+    // pattern refuses a match preceded by a colon, or it would eat the rest of
+    // every `https://` line it touched.
+    const template = taste
+      .replace(/^---\r?\n[\s\S]*?\r?\n---/, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(?<!:)\/\/[^\n]*/g, ' ');
     const external = [
       ['a <video> tag', /<video[\s/>]/i],
       ['an <image> href', /<image[\s/>]/i],
@@ -363,25 +373,11 @@ for (const [what, rel] of Object.entries(COMPONENTS)) {
       );
       check('F · the one real photo lazy loads', /loading\s*=\s*"lazy"/i.test(img), 'loading="lazy"');
 
-      // The gate lives on the img's WRAPPER, not the img itself — the wrapper
-      // is what toggles display:none/block, so it is what has to be checked.
-      // Named directly rather than derived from the markup: this section is
-      // already pinned to this component's real structure everywhere else.
-      const photoClass = 'rp-cross-photo';
-      const inMarkup = new RegExp(`class\\s*=\\s*"[^"]*\\b${photoClass}\\b[^"]*"`).test(template);
-      check('F · the <img> sits inside its gating wrapper', inMarkup, photoClass);
-
-      const styleBlocks = [...taste.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n');
-      const hiddenByDefault = new RegExp(`\\.${photoClass}\\s*\\{[^}]*display:\\s*none`, 'i').test(
-        // Outside any @media block: strip every media block first, so a rule
-        // that ONLY exists inside one cannot masquerade as the default.
-        styleBlocks.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, ' '),
-      );
-      const shownInMinWidthQuery = [...styleBlocks.matchAll(/@media\s*\(min-width:[^{]*\{([\s\S]*?)\}\s*\}/g)].some(
-        (m) => new RegExp(`\\.${photoClass}\\s*\\{[^}]*display:\\s*block`, 'i').test(m[1]),
-      );
-      check('F · the photo is hidden by default outside any media query', hiddenByDefault, photoClass);
-      check('F · the photo is revealed only inside a min-width query', shownInMinWidthQuery, photoClass);
+      // The gate moved OUT of this component (change: hero-phone-desktop-only):
+      // the whole phone frame is now desktop-only in HeroField, so a phone
+      // renders none of this and the lazy <img> never enters a viewport to be
+      // fetched. Asserting it here would pin a wrapper that no longer decides
+      // anything; the real contract is one class on the frame, checked below.
     }
 
     check(
