@@ -94,14 +94,14 @@ const { content, id = 'try-mission' } = Astro.props as Props;
         <p class="mt-3 text-sm" data-rp-answer-feedback role="status"></p>
       </div>
 
-      <!-- PHOTO PROMPT: the real thing uploads a picture; here the visitor chooses which shot
-           satisfies the brief, which is the judgement the mission actually asks for. -->
-      <div data-rp-screen="photo" hidden>
-        <p class="text-sm font-bold uppercase tracking-wide text-secondary mb-1" data-rp-photo-kind></p>
-        <h3 class="text-xl font-bold mb-2" data-rp-photo-title></h3>
-        <p class="text-muted dark:text-slate-400 mb-5" data-rp-photo-prompt></p>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3" data-rp-photo-options></div>
-        <p class="mt-3 text-sm" data-rp-photo-feedback role="status"></p>
+      <!-- CLOSING QUESTION: not a mission, no wrong answer. Three real mission types are already
+           proven by this point (change: try-mission-occasion) — this learns what the VISITOR
+           wants instead of testing a fourth mechanic, and every choice moves straight on. -->
+      <div data-rp-screen="occasion" hidden>
+        <p class="text-sm font-bold uppercase tracking-wide text-secondary mb-1" data-rp-occasion-kind></p>
+        <h3 class="text-xl font-bold mb-2" data-rp-occasion-title></h3>
+        <p class="text-muted dark:text-slate-400 mb-5" data-rp-occasion-prompt></p>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" data-rp-occasion-options></div>
       </div>
 
       <!-- RESULT -->
@@ -233,7 +233,7 @@ const { content, id = 'try-mission' } = Astro.props as Props;
       start: q('[data-rp-screen="start"]'),
       order: q('[data-rp-screen="order"]'),
       answer: q('[data-rp-screen="answer"]'),
-      photo: q('[data-rp-screen="photo"]'),
+      occasion: q('[data-rp-screen="occasion"]'),
       done: q('[data-rp-screen="done"]'),
     };
     const show = (name: keyof typeof screens) => {
@@ -381,7 +381,7 @@ const { content, id = 'try-mission' } = Astro.props as Props;
     function runAnswer() {
       const m = obj(missions.answer);
       const accepted: string[] = arr<string>(m.answers);
-      if (!accepted.length) return runPhoto();
+      if (!accepted.length) return runOccasion();
       text('[data-rp-answer-kind]', m.kindLabel);
       text('[data-rp-answer-title]', m.title);
       text('[data-rp-answer-prompt]', m.prompt);
@@ -416,24 +416,23 @@ const { content, id = 'try-mission' } = Astro.props as Props;
         score += award(stepStart);
         step = 2;
         paintStatus();
-        runPhoto();
+        runOccasion();
       };
 
       show('answer');
       input.focus({ preventScroll: true });
     }
 
-    // ── Step 3: photo judgement ──
-    function runPhoto() {
-      const m = obj(missions.photo);
-      const options = arr<{ label: string; emoji?: string; correct?: boolean }>(m.options);
-      if (!options.some((o) => o.correct)) return finish();
-      text('[data-rp-photo-kind]', m.kindLabel);
-      text('[data-rp-photo-title]', m.title);
-      text('[data-rp-photo-prompt]', m.prompt);
+    // ── Step 3: the closing question — not graded, every choice moves on ──
+    function runOccasion() {
+      const m = obj(missions.occasion);
+      const options = arr<{ label: string; emoji?: string }>(m.options);
+      if (options.length === 0) return finish();
+      text('[data-rp-occasion-kind]', m.kindLabel);
+      text('[data-rp-occasion-title]', m.title);
+      text('[data-rp-occasion-prompt]', m.prompt);
 
-      const wrap = q('[data-rp-photo-options]')!;
-      const feedback = q('[data-rp-photo-feedback]')!;
+      const wrap = q('[data-rp-occasion-options]')!;
       const stepStart = Date.now();
       wrap.innerHTML = '';
       options.forEach((opt) => {
@@ -443,18 +442,13 @@ const { content, id = 'try-mission' } = Astro.props as Props;
         const face = document.createElement('span');
         face.className = 'text-4xl';
         face.setAttribute('aria-hidden', 'true');
-        face.textContent = opt.emoji ?? '📷';
+        face.textContent = opt.emoji ?? '✨';
         const label = document.createElement('span');
         label.textContent = opt.label;
         b.append(face, label);
+        // No wrong answer here (change: try-mission-occasion): every choice is equally valid,
+        // so a click always scores and always advances — there is nothing to disable or retry.
         b.addEventListener('click', () => {
-          if (!opt.correct) {
-            feedback.textContent = String(copy.wrongFeedback ?? '');
-            feedback.className = 'mt-3 text-sm rp-wrong';
-            b.classList.add('rp-wrong');
-            b.disabled = true;
-            return;
-          }
           score += award(stepStart);
           step = 3;
           paintStatus();
@@ -462,7 +456,7 @@ const { content, id = 'try-mission' } = Astro.props as Props;
         });
         wrap.appendChild(b);
       });
-      show('photo');
+      show('occasion');
     }
 
     // ── Result ──

@@ -282,11 +282,12 @@ export interface TryMissionContent {
   missions: {
     order: { kindLabel: string; title: string; prompt: string; items: string[] };
     answer: { kindLabel: string; title: string; prompt: string; hint?: string; answers: string[] };
-    photo: {
+    /** The closing question — not graded, no `correct` flag (change: try-mission-occasion). */
+    occasion: {
       kindLabel: string;
       title: string;
       prompt: string;
-      options: { label: string; emoji?: string; correct?: boolean }[];
+      options: { label: string; emoji?: string }[];
     };
   };
 }

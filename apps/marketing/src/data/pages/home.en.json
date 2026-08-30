@@ -44,10 +44,11 @@
       },
       {
         "kind": "Photo mission",
-        "place": "At the party",
-        "title": "The group photo",
-        "prompt": "Everyone in frame, with the station sign behind you.",
-        "points": "+25"
+        "place": "On the street",
+        "title": "The Beatles",
+        "prompt": "Recreate the Beatles crosswalk photo.",
+        "points": "+35",
+        "visual": "crosswalkPhoto"
       }
     ]
   },
@@ -120,8 +121,8 @@
     "scoreLabel": "{score} pts",
     "youLabel": "You",
     "doneTitle": "That is the whole course",
-    "doneBody": "This is exactly what a team sees when they finish: score, time, and where they landed. Nobody sat there with a clipboard.",
-    "doneAction": "Build a game like this",
+    "doneBody": "This is exactly what a team sees when they finish: score, time, and where they landed. Nobody sat there with a clipboard. Your next game can be built and run completely for free.",
+    "doneAction": "Let's build you a game for free",
     "doneScoreLabel": "Score",
     "doneTimeLabel": "Time",
     "doneRankLabel": "Place",
@@ -146,46 +147,55 @@
     ],
     "missions": {
       "order": {
-        "title": "Disarm the device",
-        "prompt": "Three agents before you failed right here. Put the steps in the right order, no mistakes.",
+        "title": "Reconstruct the case",
+        "prompt": "The diamond vanished from the gallery. Put what actually happened in the right order.",
         "items": [
-          "Connect the blue wire",
-          "Type the code word",
-          "Take a deep breath",
-          "Press to disarm"
+          "The gallery lights suddenly cut out for two minutes",
+          "The alarm went off all at once",
+          "The guard ran over and found the display case empty",
+          "The parking camera caught a car leaving through an exit that's always locked"
         ],
-        "kindLabel": "Ordering mission"
+        "kindLabel": "Investigation mission"
       },
       "answer": {
-        "title": "Crack the vault",
-        "prompt": "The vault combination is a spider's number of legs, plus the number of days in a week. What is the combination?",
-        "hint": "A spider has 8 legs. A week has 7 days.",
+        "title": "The badge the suspect dropped",
+        "prompt": "The suspect dropped a badge with scrambled letters: N O D A I D M. Which word is hiding there?",
+        "hint": "Hint: it's exactly what vanished from the gallery.",
         "answers": [
-          "15"
+          "diamond"
         ],
         "kindLabel": "Cracking mission"
       },
-      "photo": {
-        "title": "The agent's ID",
-        "prompt": "The brief said: a selfie in your coolest secret agent pose, whole team in frame. Which photo satisfies it?",
+      "occasion": {
+        "title": "What are you building a game for?",
+        "prompt": "So we know how to help you. Pick whatever fits best.",
         "options": [
           {
-            "label": "Just a face, no pose, no team",
-            "emoji": "🙂",
-            "correct": false
+            "label": "An educational activity",
+            "emoji": "📚"
           },
           {
-            "label": "Full agent pose, whole team in frame",
-            "emoji": "🕶️",
-            "correct": true
+            "label": "A team building day",
+            "emoji": "🤝"
           },
           {
-            "label": "A blurry shot of the floor",
-            "emoji": "📷",
-            "correct": false
+            "label": "A birthday",
+            "emoji": "🎂"
+          },
+          {
+            "label": "A youth movement",
+            "emoji": "🏕️"
+          },
+          {
+            "label": "Playing with friends",
+            "emoji": "👯"
+          },
+          {
+            "label": "Something else",
+            "emoji": "✨"
           }
         ],
-        "kindLabel": "Photo mission"
+        "kindLabel": "One last question"
       }
     }
   },

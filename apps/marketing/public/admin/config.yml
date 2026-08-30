@@ -131,6 +131,7 @@ collections:
                   - { label: 'כותרת המשימה', name: title, widget: string }
                   - { label: 'טקסט המשימה', name: prompt, widget: text }
                   - { label: 'הניקוד שמתקבל', name: points, widget: string, hint: 'למשל +30' }
+                  - { label: 'איור מיוחד', name: visual, widget: select, required: false, options: [{ label: 'ללא (שורת תשובה רגילה)', value: '' }, { label: 'מעבר חצייה (שחור-לבן שהופך לצבע)', value: crosswalkPhoto }], hint: 'משנה את הריבוע התחתון בכרטיס לאיור מצויר במקום שורת תשובה.' }
           - { label: 'תגית מעל היתרונות', name: featuresTagline, widget: string }
           - { label: 'כותרת היתרונות', name: featuresTitle, widget: string }
           - { label: 'משפט מתחת לכותרת היתרונות', name: featuresSubtitle, widget: text }
@@ -220,12 +221,12 @@ collections:
                       - { label: 'ההוראה לשחקן', name: prompt, widget: text }
                       - { label: 'רמז', name: hint, widget: string, required: false }
                       - { label: 'תשובות מתקבלות', name: answers, widget: list, field: { label: 'תשובה', name: answer, widget: string }, hint: 'כל אחת מהן תיחשב נכונה.' }
-                  - label: 'משימת צילום'
-                    name: photo
+                  - label: 'השאלה האחרונה (לא משימה, בלי תשובה נכונה)'
+                    name: occasion
                     widget: object
                     fields:
-                      - { label: 'סוג המשימה', name: kindLabel, widget: string }
-                      - { label: 'שם המשימה', name: title, widget: string }
+                      - { label: 'תגית קטנה', name: kindLabel, widget: string }
+                      - { label: 'הכותרת', name: title, widget: string }
                       - { label: 'ההוראה לשחקן', name: prompt, widget: text }
                       - label: 'האפשרויות'
                         name: options
@@ -233,7 +234,6 @@ collections:
                         fields:
                           - { label: 'מה כתוב', name: label, widget: string }
                           - { label: 'אימוג׳י', name: emoji, widget: string, required: false }
-                          - { label: 'זו התשובה הנכונה', name: correct, widget: boolean, required: false, default: false }
           - label: 'מחולל רעיונות למשימות'
             name: missionIdeas
             widget: object
@@ -395,6 +395,7 @@ collections:
                   - { label: 'כותרת המשימה', name: title, widget: string }
                   - { label: 'טקסט המשימה', name: prompt, widget: text }
                   - { label: 'הניקוד שמתקבל', name: points, widget: string, hint: 'למשל +30' }
+                  - { label: 'איור מיוחד', name: visual, widget: select, required: false, options: [{ label: 'ללא (שורת תשובה רגילה)', value: '' }, { label: 'מעבר חצייה (שחור-לבן שהופך לצבע)', value: crosswalkPhoto }], hint: 'משנה את הריבוע התחתון בכרטיס לאיור מצויר במקום שורת תשובה.' }
           - { label: 'תגית מעל היתרונות', name: featuresTagline, widget: string }
           - { label: 'כותרת היתרונות', name: featuresTitle, widget: string }
           - { label: 'משפט מתחת לכותרת היתרונות', name: featuresSubtitle, widget: text }

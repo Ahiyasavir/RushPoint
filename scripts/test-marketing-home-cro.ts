@@ -70,7 +70,7 @@ function read(rel: string): string | null {
 const HOMEPAGE = 'src/pages/[lang]/index.astro';
 const COMPONENTS = {
   hero: 'src/components/widgets/HeroField.astro',
-  map: 'src/components/HeroFieldMap.astro',
+  taste: 'src/components/HeroMissionTaste.astro',
   phone: 'src/components/PhoneFrame.astro',
   video: 'src/components/FounderVideo.astro',
 } as const;
@@ -322,28 +322,73 @@ for (const [what, rel] of Object.entries(COMPONENTS)) {
   }
 }
 
-// ── F. The hero map costs no network request ─────────────────────────────────
+// ── F. The hero taste screen costs (almost) no network request ───────────────
+//
+// This used to be zero images, full stop. `change: hero-photo-real` earned one
+// deliberate exception: a real recreation photo, but ONLY behind a desktop
+// viewport — a mobile visitor, the one this hero was rebuilt to stop failing,
+// never pays for it. So the bar here is not "no <img> ever" any more; it is
+// "at most the one known asset, gated shut on mobile by default and opened
+// only inside a min-width query" — anything past that (a second image, a
+// video, an external url()) is exactly the request creep this section exists
+// to catch.
 
 {
-  const map = read(COMPONENTS.map);
-  if (map === null) {
-    check('F · the hero map could be scanned', false, COMPONENTS.map);
+  const taste = read(COMPONENTS.taste);
+  if (taste === null) {
+    check('F · the hero taste screen could be scanned', false, COMPONENTS.taste);
   } else {
-    const template = map.replace(/^---\r?\n[\s\S]*?\r?\n---/, ' ');
+    const template = taste.replace(/^---\r?\n[\s\S]*?\r?\n---/, ' ');
     const external = [
-      ['an <img> tag', /<img[\s/>]/i],
       ['a <video> tag', /<video[\s/>]/i],
       ['an <image> href', /<image[\s/>]/i],
-      ['a src attribute', /\bsrc\s*=/i],
       ['a css url()', /\burl\(/i],
       ['an xlink href', /xlink:href/i],
     ] as const;
 
     for (const [what, pattern] of external) {
-      check(`F · the hero map references ${what} nowhere`, !pattern.test(template), what);
+      check(`F · the hero taste screen references ${what} nowhere`, !pattern.test(template), what);
     }
 
-    check('F · the hero map is a real inline svg', /<svg[\s>]/i.test(template), '<svg>');
+    const imgTags = [...template.matchAll(/<img\b[^>]*>/gi)];
+    check('F · at most one <img> tag', imgTags.length <= 1, `${imgTags.length} found`);
+
+    if (imgTags.length === 1) {
+      const img = imgTags[0][0];
+      const srcMatch = img.match(/\bsrc\s*=\s*"([^"]*)"/i);
+      check(
+        'F · the one real photo is a local upload, not an external request',
+        !!srcMatch && /^\/uploads\//.test(srcMatch[1]),
+        srcMatch?.[1] ?? 'no src attribute',
+      );
+      check('F · the one real photo lazy loads', /loading\s*=\s*"lazy"/i.test(img), 'loading="lazy"');
+
+      // The gate lives on the img's WRAPPER, not the img itself — the wrapper
+      // is what toggles display:none/block, so it is what has to be checked.
+      // Named directly rather than derived from the markup: this section is
+      // already pinned to this component's real structure everywhere else.
+      const photoClass = 'rp-cross-photo';
+      const inMarkup = new RegExp(`class\\s*=\\s*"[^"]*\\b${photoClass}\\b[^"]*"`).test(template);
+      check('F · the <img> sits inside its gating wrapper', inMarkup, photoClass);
+
+      const styleBlocks = [...taste.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n');
+      const hiddenByDefault = new RegExp(`\\.${photoClass}\\s*\\{[^}]*display:\\s*none`, 'i').test(
+        // Outside any @media block: strip every media block first, so a rule
+        // that ONLY exists inside one cannot masquerade as the default.
+        styleBlocks.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, ' '),
+      );
+      const shownInMinWidthQuery = [...styleBlocks.matchAll(/@media\s*\(min-width:[^{]*\{([\s\S]*?)\}\s*\}/g)].some(
+        (m) => new RegExp(`\\.${photoClass}\\s*\\{[^}]*display:\\s*block`, 'i').test(m[1]),
+      );
+      check('F · the photo is hidden by default outside any media query', hiddenByDefault, photoClass);
+      check('F · the photo is revealed only inside a min-width query', shownInMinWidthQuery, photoClass);
+    }
+
+    check(
+      'F · the hero taste screen renders real inline markup',
+      /<div\b/i.test(template) && /<style[\s>]/i.test(taste),
+      '<div> + <style>',
+    );
   }
 }
 

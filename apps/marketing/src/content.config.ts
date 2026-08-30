@@ -215,6 +215,16 @@ const homePages = defineCollection({
               title: z.string(),
               prompt: z.string(),
               points: z.string(),
+              /**
+               * Swaps the generic answer-row mockup for a drawn illustration
+               * (change: hero-photo-reveal). `'crosswalkPhoto'` is the only value:
+               * a grayscale drawn scene that crossfades to color, evoking a
+               * recreate-the-photo mission WITHOUT reproducing any real photograph
+               * — the actual Beatles Abbey Road cover is still under copyright, so
+               * this is an original illustration, never an embedded image. Absent
+               * means the ordinary input-row mockup, unchanged.
+               */
+              visual: z.enum(['crosswalkPhoto']).optional(),
             }),
           )
           .min(1),
@@ -266,13 +276,18 @@ const homePages = defineCollection({
             hint: z.string().optional(),
             answers: z.array(z.string()).min(1),
           }),
-          photo: z.object({
+          // The demo's closing question (change: try-mission-occasion). Not a graded mission —
+          // there is no right answer — so the option shape carries no `correct` flag: every
+          // choice is equally valid and simply moves on to the done screen with its strong,
+          // cost-free CTA. Personalizing the closing pitch rather than testing a fourth
+          // mechanic is deliberate: three real mission types are already proven by this point,
+          // and a marketing demo's job here is to learn what THIS visitor wants, not to grade
+          // one more answer.
+          occasion: z.object({
             kindLabel: z.string(),
             title: z.string(),
             prompt: z.string(),
-            options: z
-              .array(z.object({ label: z.string(), emoji: z.string().optional(), correct: z.boolean().optional() }))
-              .min(2),
+            options: z.array(z.object({ label: z.string(), emoji: z.string().optional() })).min(2),
           }),
         }),
       })
