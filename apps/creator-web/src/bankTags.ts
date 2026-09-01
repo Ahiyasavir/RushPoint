@@ -122,6 +122,72 @@ export function isBankTagId(value: unknown): value is BankTagId {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(BANK_TAGS, value);
 }
 
+// ── The difficulty band, and the ONE place that maps a number onto it ────────
+//
+// `difficulty` (1-10) and the band tag are two writings of a single fact: the
+// number paces the composed game's arc, the tag is what a creator filters and
+// reads. They have to agree, and until an admin could edit the bank from the
+// console nothing could make them disagree — the authored bank has never had an
+// exception (2-3 easy, 4-6 medium, 7-10 hard, all 103 entries).
+//
+// The admin editor changed that: it offers the number and the tags as two
+// independent controls, and the first real editing pass produced exactly the
+// drift you would predict — a mission moved to 8 while still tagged `medium`,
+// another moved to 4 while still tagged `easy`. Neither is visible anywhere: the
+// game paces off the number and the creator reads the tag, so the mission simply
+// lies to one of them.
+//
+// So the mapping lives HERE, imported by the bank's test, by the overlay merge
+// and by the admin page, rather than being restated in each — the same rule the
+// i18n leak predicate lives by (see CLAUDE.md).
+
+/** The coarse band tags, in ascending order. */
+export const DIFFICULTY_TAG_IDS = ['easy', 'medium', 'hard'] as const;
+export type DifficultyTagId = typeof DIFFICULTY_TAG_IDS[number];
+
+export function isDifficultyTagId(value: unknown): value is DifficultyTagId {
+  return typeof value === 'string' && (DIFFICULTY_TAG_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * The band a 1-10 difficulty belongs to.
+ *
+ * Total: anything that is not a real number in range is treated as the middle
+ * of the scale, because the only callers are a merge and a form — neither may
+ * throw, and `medium` is the answer that mis-sorts a mission rather than hiding
+ * it from every filter.
+ */
+export function difficultyBandFor(difficulty: unknown): DifficultyTagId {
+  const n = typeof difficulty === 'number' && Number.isFinite(difficulty) ? difficulty : 5;
+  if (n <= 3) return 'easy';
+  if (n <= 6) return 'medium';
+  return 'hard';
+}
+
+/**
+ * `tags` with exactly one band tag, the one `difficulty` implies.
+ *
+ * Order-preserving: an existing band tag is replaced in place, so re-banding a
+ * mission never reshuffles the rest of its tags and never shows up as a spurious
+ * diff. A mission with no band tag at all gains the right one at the end.
+ */
+export function withDifficultyBand(
+  tags: readonly BankTagId[],
+  difficulty: unknown,
+): BankTagId[] {
+  const want = difficultyBandFor(difficulty);
+  const out: BankTagId[] = [];
+  let placed = false;
+  for (const tag of tags) {
+    if (!isDifficultyTagId(tag)) { out.push(tag); continue; }
+    if (placed) continue;          // a second band tag is dropped, never kept
+    out.push(want);
+    placed = true;
+  }
+  if (!placed) out.push(want);
+  return out;
+}
+
 /**
  * The label for a creator's current language.
  *

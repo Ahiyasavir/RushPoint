@@ -7792,6 +7792,28 @@ async function main() {
     check('setMissionBankOverride: a deletion is stored as a flag',
       deleted?.deleted === true, JSON.stringify(deleted));
 
+    // 6b. CURATION FLAGS. `reviewedCopy` / `verifiedSetup` record that a person
+    //     has looked at a mission. A row carrying ONLY a flag has to be storable
+    //     — most missions have never been edited, and the whole point is being
+    //     able to resume a pass over a hundred of them.
+    await platformAdmin.call('clearMissionBankOverride', { key });
+    const flagged = await platformAdmin.call('setMissionBankOverride', { key, reviewedCopy: true });
+    check('setMissionBankOverride: a flag-only row is accepted',
+      flagged?.ok === true && flagged?.override?.reviewedCopy === true, JSON.stringify(flagged?.override));
+    check('setMissionBankOverride: a flag-only row carries no content',
+      flagged?.override?.title === undefined && flagged?.override?.tags === undefined,
+      JSON.stringify(flagged?.override));
+    const bothFlags = await platformAdmin.call('setMissionBankOverride',
+      { key, reviewedCopy: true, verifiedSetup: true });
+    check('setMissionBankOverride: both flags together',
+      bothFlags?.override?.reviewedCopy === true && bothFlags?.override?.verifiedSetup === true,
+      JSON.stringify(bothFlags?.override));
+    // Only `true` is stored: an untick is the ABSENCE of the field, so a row of
+    // nothing but `false` says nothing and must be refused rather than kept.
+    await expectError('setMissionBankOverride: a row of nothing but false flags is refused',
+      platformAdmin.call('setMissionBankOverride', { key, reviewedCopy: false, verifiedSetup: false }),
+      { codeIn: ['functions/invalid-argument'] });
+
     // 7. Reset. Clearing an override that is already absent is a no-op, not an
     //    error: two admins pressing reset is not a conflict.
     const cleared = await platformAdmin.call('clearMissionBankOverride', { key });

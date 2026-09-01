@@ -2517,6 +2517,18 @@ const HE = {
     filterAll:        'הכול',
     filterEdited:     'נערכו',
     filterDeleted:    'נמחקו',
+    filterUnreviewed: 'לא נבדק מלל',
+    filterUnverified: 'לא אומת',
+    sortLabel:        'מיון',
+    sortBank:         'סדר הבנק',
+    sortUnreviewedFirst: 'לא נבדקו קודם',
+    sortUnverifiedFirst: 'לא אומתו קודם',
+    progressLabel:    (reviewed: number, verified: number, total: number) =>
+      `${reviewed}/${total} נבדקו · ${verified}/${total} אומתו`,
+    reviewedCopyLabel: 'עברתי על המלל',
+    reviewedCopyHint:  'קראתי את השם ואת ההוראות לשחקנים.',
+    verifiedSetupLabel: 'מאומתת',
+    verifiedSetupHint:  'הרצתי את המשימה במלואה, כולל הוראות ההקמה ליוצר.',
     editedBadge:      'נערכה',
     deletedBadge:     'נמחקה',
     emptyTitle:       'אין משימות שמתאימות לחיפוש',
@@ -2536,6 +2548,7 @@ const HE = {
     tagsHint:         'התגיות קובעות למי ולאיפה המשימה מתאימה. אי אפשר להשאיר משימה בלי אף תגית.',
     difficultyLabel:  'קושי (1 עד 10)',
     difficultyShort:  'קושי',
+    bandDerived:      (band: string) => `רמה: ${band} (נגזרת מהמספר)`,
     minAgeLabel:      'גיל מינימלי',
     minAgeNone:       'ללא',
     transitLabel:     'דקות הליכה למשימה',
@@ -2550,6 +2563,7 @@ const HE = {
     // The merge refuses a deletion that would leave the composer without an
     // opening or a closing mission (lib/missionBankOverlay.ts).
     refusedDeletion:  'אי אפשר למחוק את המשימה הזאת: היא המשימה האחרונה שפותחת או סוגרת משחק, ובלעדיה המרכיב לא יוכל לבנות משחק בכלל.',
+    restoredBookend:  'תגית הפתיחה או הסיום הוחזרה למשימה הזאת: היא האחרונה שנשארה, ובלי אף אחת כזאת המרכיב לא יוכל לבנות משחק.',
   },
 };
 
@@ -5005,6 +5019,18 @@ const EN: typeof HE = {
     filterAll:        'All',
     filterEdited:     'Edited',
     filterDeleted:    'Deleted',
+    filterUnreviewed: 'Copy not read',
+    filterUnverified: 'Not verified',
+    sortLabel:        'Sort',
+    sortBank:         'Bank order',
+    sortUnreviewedFirst: 'Unreviewed first',
+    sortUnverifiedFirst: 'Unverified first',
+    progressLabel:    (reviewed: number, verified: number, total: number) =>
+      `${reviewed}/${total} read · ${verified}/${total} verified`,
+    reviewedCopyLabel: 'Copy read',
+    reviewedCopyHint:  'I have read the title and the player instructions.',
+    verifiedSetupLabel: 'Verified',
+    verifiedSetupHint:  'I have run the whole mission, setup instructions included.',
     editedBadge:      'Edited',
     deletedBadge:     'Deleted',
     emptyTitle:       'No missions match that search',
@@ -5024,6 +5050,7 @@ const EN: typeof HE = {
     tagsHint:         'Tags decide who and where this mission suits. A mission cannot be left with no tags at all.',
     difficultyLabel:  'Difficulty (1 to 10)',
     difficultyShort:  'Difficulty',
+    bandDerived:      (band: string) => `Band: ${band} (derived from the number)`,
     minAgeLabel:      'Minimum age',
     minAgeNone:       'None',
     transitLabel:     'Walking minutes to reach it',
@@ -5034,6 +5061,7 @@ const EN: typeof HE = {
     deleteConfirmBody: (title: string) => `Take "${title}" out of the mission bank? It will no longer be offered to any creator. You can put it back at any time.`,
     deleteConfirmCta: 'Remove from the bank',
     refusedDeletion:  'This mission cannot be deleted: it is the last one that opens or closes a game, and without it the composer cannot build a game at all.',
+    restoredBookend:  'The opening or closing tag was put back on this mission: it is the last one left, and without one the composer cannot build a game.',
   },
 };
 

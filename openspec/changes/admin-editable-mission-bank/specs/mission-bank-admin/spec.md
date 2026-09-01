@@ -87,3 +87,33 @@ the authored bank unchanged and the new-game flow keeps working.
 #### Scenario: The override read fails
 - **WHEN** the Firestore read of `missionBankOverrides` throws
 - **THEN** the composer is handed the authored `TASK_BANK` and composing succeeds
+
+### Requirement: Curation ticks, and an order that puts the unfinished work first
+Each mission SHALL carry two independent, admin-settable ticks, stored on the same override
+document and readable in the list without opening the mission:
+
+- `reviewedCopy` — the words have been read: title, player instructions, tone.
+- `verifiedSetup` — the whole mission has been stood up for real, its Quick Setup prompts and
+  whatever the creator must bring or arrange included.
+
+They are BOOKKEEPING, not content: `applyBankOverrides` SHALL ignore both entirely, and a row that
+carries only ticks SHALL leave the merged bank byte-identical — not even the tag repairs above.
+Only `true` SHALL be stored; unticking SHALL remove the field, and a row left with no ticks and no
+content edit SHALL be deleted rather than kept as an empty husk.
+
+Because `setMissionBankOverride` replaces the stored document, ticking a box SHALL carry the
+mission's existing content edit across, and saving a content edit SHALL carry the existing ticks
+across. Neither may silently discard the other.
+
+The list SHALL be filterable to the missions that are not yet reviewed and not yet verified,
+sortable to put either group first, and SHALL show how far the pass has got. A mission that has
+only been ticked SHALL NOT be shown as edited.
+
+#### Scenario: A tick on an unedited mission
+- **WHEN** an admin ticks `reviewedCopy` on a mission with no override
+- **THEN** a row is created carrying only that flag
+- **AND** the merged bank is unchanged, and the mission is not listed as edited
+
+#### Scenario: Unticking the last flag
+- **WHEN** an admin unticks the only flag on a mission with no content edit
+- **THEN** the override document is deleted and the mission returns to untouched

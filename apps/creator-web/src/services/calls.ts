@@ -476,6 +476,9 @@ export interface MissionBankOverrideRow {
   difficulty?: number;
   minAge?: number | null;
   transitMinutes?: number | null;
+  /** Curation bookkeeping, not content — see lib/missionBankOverlay.ts. */
+  reviewedCopy?: boolean;
+  verifiedSetup?: boolean;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -499,6 +502,8 @@ export const setMissionBankOverride = callable<
     difficulty?: number;
     minAge?: number | null;
     transitMinutes?: number | null;
+    reviewedCopy?: boolean;
+    verifiedSetup?: boolean;
   },
   { ok: boolean; key: string; override: MissionBankOverrideRow }
 >('setMissionBankOverride');

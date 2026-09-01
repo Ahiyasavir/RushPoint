@@ -28,7 +28,7 @@
 //      without a bookend at each end, and this read is the last place that can
 //      stop one bad row turning "compose one for me" into a permanent dead end.
 import type { TaskBankEntry } from '../taskBank';
-import { isBankTagId, type BankTagId } from '../bankTags';
+import { isBankTagId, withDifficultyBand, type BankTagId } from '../bankTags';
 
 /**
  * One admin edit, as stored at `missionBankOverrides/{key}`.
@@ -51,6 +51,38 @@ export interface MissionBankOverride {
   difficulty?: number;
   minAge?: number | null;
   transitMinutes?: number | null;
+
+  // ── Curation bookkeeping, NOT content ─────────────────────────────────────
+  //
+  // Two independent things an admin can say about a mission while working
+  // through 103 of them, and they are deliberately separate because they are
+  // checked by different people at different moments:
+  //
+  //   • `reviewedCopy`    — the words have been read: title, instructions, tone.
+  //   • `verifiedSetup`   — the whole mission has been stood up for real,
+  //                         including its Quick Setup prompts and whatever the
+  //                         creator is asked to bring or arrange.
+  //
+  // Neither touches what a player is offered, so `applyBankOverrides` ignores
+  // both. They exist so a curation pass can be resumed rather than restarted,
+  // which is the actual problem after an evening of editing.
+  reviewedCopy?: boolean;
+  verifiedSetup?: boolean;
+}
+
+/**
+ * Does this row change what a PLAYER sees, as opposed to only recording that
+ * somebody has looked at the mission?
+ *
+ * The page needs the distinction: a mission that has been ticked as reviewed but
+ * never edited is not an "edited" mission, and showing it as one would make the
+ * edited filter useless within a single curation pass.
+ */
+export function hasContentEdit(o: MissionBankOverride | null | undefined): boolean {
+  if (!o) return false;
+  return o.deleted === true
+    || o.title !== undefined || o.description !== undefined || o.tags !== undefined
+    || o.difficulty !== undefined || o.minAge !== undefined || o.transitMinutes !== undefined;
 }
 
 /** What `applyBankOverrides` returns: the effective bank, plus what it refused. */
@@ -63,6 +95,12 @@ export interface BankOverlayResult {
    * believes they deleted.
    */
   refusedDeletions: string[];
+  /**
+   * Keys whose `start`/`finish` tag was put BACK because removing it would have
+   * left the composer with no opener or no finale. Same guard as
+   * `refusedDeletions`, for the quieter of the two ways to empty a pool.
+   */
+  restoredBookends: string[];
 }
 
 /** The fields the admin page may change. Anything else is authoring, not editing. */
@@ -155,6 +193,12 @@ export function normalizeBankOverride(raw: unknown): MissionBankOverride | null 
     if (transit !== undefined) { out.transitMinutes = transit; hasField = true; }
   }
 
+  // Only `true` is stored. A false tick is the absence of a tick, and keeping
+  // `false` around would leave a row that marks a mission as touched while
+  // saying nothing about it.
+  if (raw.reviewedCopy === true) { out.reviewedCopy = true; hasField = true; }
+  if (raw.verifiedSetup === true) { out.verifiedSetup = true; hasField = true; }
+
   return hasField ? out : null;
 }
 
@@ -181,22 +225,48 @@ export function applyBankOverrides(
     if (row) byKey.set(row.key, row);
   }
 
-  // ─── Pass 1: which deletions may actually be honoured ──────────────────────
+  // ─── Pass 1: keep a bookend at each end, whatever the rows say ─────────────
   //
-  // Decided over the WHOLE bank before anything is removed, so two rows that are
-  // each individually harmless cannot combine into an empty pool. When a pool
-  // would empty, every deletion in that pool is refused rather than arbitrarily
-  // keeping whichever entry happened to come first — the admin gets an honest
-  // "this would break the composer", not a silent partial result.
+  // The composer cannot build a game without a `start` mission and a `finish`
+  // one, so this pass decides over the WHOLE bank before anything is applied —
+  // two rows that are each individually harmless must not combine into an empty
+  // pool. When a pool would empty, every row that emptied it is refused rather
+  // than arbitrarily keeping whichever entry came first: the admin gets an
+  // honest "this would break the composer", not a silent partial result.
+  //
+  // TWO ways to empty a pool, and the second one is easy to miss. Deleting the
+  // last opener is the obvious one. UNTAGGING it is the quiet one — a tag
+  // override replaces the whole set, so an admin re-tagging the last `start`
+  // mission for its content (which is exactly what happened to open-team-motto,
+  // moved from `start` to `finish` in the first editing pass) strands the
+  // composer just as completely, with nothing marked deleted anywhere.
   const refused = new Set<string>();
+  const restored = new Set<string>();
   for (const tag of REQUIRED_BOOKENDS) {
-    const holders = source.filter((e) => tagsAfter(e, byKey.get(e.key)).includes(tag));
-    if (holders.length === 0) continue; // the source bank has none; not this module's problem
-    const survivors = holders.filter((e) => byKey.get(e.key)?.deleted !== true);
+    // Holders in the AUTHORED bank: what the pool would be with no rows at all.
+    const sourceHolders = source.filter((e) => Array.isArray(e.tags) && e.tags.includes(tag));
+    if (sourceHolders.length === 0) continue; // the bank never had one; not this module's problem
+    // Holders that survive both kinds of edit.
+    const survivors = source.filter((e) => {
+      const o = byKey.get(e.key);
+      return o?.deleted !== true && tagsAfter(e, o).includes(tag);
+    });
     if (survivors.length > 0) continue;
-    for (const e of holders) {
-      if (byKey.get(e.key)?.deleted === true) refused.add(e.key);
+    for (const e of sourceHolders) {
+      const o = byKey.get(e.key);
+      if (o?.deleted === true) refused.add(e.key);
+      if (!tagsAfter(e, o).includes(tag)) restored.add(e.key);
     }
+  }
+  /** Bookend tags that must be put back on a given key, because the pool emptied. */
+  const restoreTags = new Map<string, BankTagId[]>();
+  for (const key of restored) {
+    const e = source.find((x) => x.key === key);
+    if (!e) continue;
+    const o = byKey.get(key);
+    restoreTags.set(key, REQUIRED_BOOKENDS.filter(
+      (t) => Array.isArray(e.tags) && e.tags.includes(t) && !tagsAfter(e, o).includes(t),
+    ));
   }
 
   // ─── Pass 2: apply ─────────────────────────────────────────────────────────
@@ -206,10 +276,38 @@ export function applyBankOverrides(
     if (!override) { entries.push(entry); continue; }
     if (override.deleted === true && !refused.has(entry.key)) continue;
 
+    // A row that only carries curation ticks says nothing about the mission's
+    // content, so it must be a true no-op here — not even the tag repairs below.
+    // Otherwise ticking "I have read this one" would quietly rewrite the
+    // mission's tags, which is exactly the kind of invisible change this module
+    // exists to prevent.
+    if (!hasContentEdit(override)) { entries.push(entry); continue; }
+
     const next: TaskBankEntry = { ...entry };
 
     const tags = tagsOf(override.tags);
     if (tags) next.tags = tags;
+
+    // Put back a bookend tag whose removal would have emptied its pool (pass 1).
+    for (const tag of restoreTags.get(entry.key) ?? []) {
+      if (!next.tags.includes(tag)) next.tags = [...next.tags, tag];
+    }
+
+    // `camera` is DERIVED, not picked. It means "this mission is handed in as a
+    // photo or a video", which is a property of the mission's task type — and the
+    // task type is the one thing the admin editor cannot change (there is no
+    // `build()` behind an override). An admin who drops it, or adds it to a
+    // mission that submits a typed answer, is editing a fact rather than an
+    // opinion, so the source entry stays authoritative in both directions.
+    //
+    // Without this the source fix that added `camera` to eleven missions would
+    // have been invisible for exactly the ones an admin had already re-tagged:
+    // a tag override REPLACES the set, so the-hidden-key would have kept coming
+    // back camera-less however many times the bank was corrected.
+    const sourceHasCamera = Array.isArray(entry.tags) && entry.tags.includes('camera');
+    const nextHasCamera = next.tags.includes('camera');
+    if (sourceHasCamera && !nextHasCamera) next.tags = [...next.tags, 'camera'];
+    else if (!sourceHasCamera && nextHasCamera) next.tags = next.tags.filter((t) => t !== 'camera');
 
     const difficulty = difficultyOf(override.difficulty);
     if (difficulty !== undefined) next.difficulty = difficulty;
@@ -225,6 +323,20 @@ export function applyBankOverrides(
       const transit = nonNegative(override.transitMinutes);
       if (transit !== undefined) next.transitMinutes = transit;
     }
+
+    // The band tag (`easy`/`medium`/`hard`) and the number are ONE fact written
+    // twice, so the merge re-derives the band from whatever difficulty this
+    // entry ended up with rather than trusting the two independent controls the
+    // admin form offers. The first real editing pass drifted them apart twice in
+    // one day — a mission moved to 8 and left tagged `medium`, another moved to
+    // 4 and left tagged `easy` — and neither is visible anywhere: the composed
+    // game paces off the number while the creator filters on the tag.
+    //
+    // Only entries that carry an override are re-banded. The authored bank is
+    // already a fixed point of this repair (scripts/test-task-bank-tag-laws.ts
+    // asserts exactly that), so touching untouched entries would allocate a new
+    // array per mission per compose for nothing.
+    next.tags = withDifficultyBand(next.tags, next.difficulty);
 
     // The built mission. `build` stays a FACTORY — the composer mints a fresh
     // Task with a fresh id per use, and a patched copy would break the no-reuse
@@ -247,5 +359,9 @@ export function applyBankOverrides(
     entries.push(next);
   }
 
-  return { entries, refusedDeletions: source.map((e) => e.key).filter((k) => refused.has(k)) };
+  return {
+    entries,
+    refusedDeletions: source.map((e) => e.key).filter((k) => refused.has(k)),
+    restoredBookends: source.map((e) => e.key).filter((k) => restored.has(k)),
+  };
 }

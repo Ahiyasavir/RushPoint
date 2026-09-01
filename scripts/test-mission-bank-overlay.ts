@@ -12,7 +12,7 @@
 //   2. It cannot break the bank's own invariants. scripts/test-task-bank.ts enforces
 //      entry.difficulty === entry.build().difficulty; an override that patched only
 //      one of the two would be a UI that ships a mission the pure suite would reject.
-import { applyBankOverrides, normalizeBankOverride } from '../apps/creator-web/src/lib/missionBankOverlay';
+import { applyBankOverrides, normalizeBankOverride, hasContentEdit } from '../apps/creator-web/src/lib/missionBankOverlay';
 import type { MissionBankOverride } from '../apps/creator-web/src/lib/missionBankOverlay';
 import type { TaskBankEntry } from '../apps/creator-web/src/taskBank';
 import type { Task } from '../packages/shared/src';
@@ -113,6 +113,39 @@ console.log('\nadmin-editable-mission-bank — applyBankOverrides');
   ok('both openers survive', keys(r.entries).includes('opener') && keys(r.entries).includes('opener-2'));
 }
 
+// ── 3b. The QUIET way to empty a bookend pool: untagging, not deleting ───────
+//
+// A tag override replaces the whole set, so re-tagging the last `start` mission
+// for its content strands the composer exactly as completely as deleting it —
+// and nothing is marked deleted anywhere. This is not hypothetical: the first
+// operator pass moved open-team-motto from `start` to `finish`.
+{
+  const r = applyBankOverrides(bank(), [{ key: 'opener', tags: ['youth', 'finish'] }]);
+  ok('the last opener keeps its `start` tag', find(r.entries, 'opener').tags.includes('start'));
+  eqJson('and the rescue is reported', r.restoredBookends, ['opener']);
+  ok('the rest of the tag edit still lands',
+    find(r.entries, 'opener').tags.includes('finish'));
+}
+{
+  // With a spare opener the re-tag is honoured in full: the guard is a floor,
+  // not a veto on ever moving a mission between ends of the game.
+  const b = [...bank(), entry({ key: 'opener-2', tags: ['start', 'youth'] })];
+  const r = applyBankOverrides(b, [{ key: 'opener', tags: ['youth', 'finish'] }]);
+  ok('one of two openers may be re-tagged', !find(r.entries, 'opener').tags.includes('start'));
+  eqJson('nothing rescued', r.restoredBookends, []);
+}
+{
+  // Deleting one opener while untagging the other empties the pool by two
+  // different routes at once — the guard has to see them together.
+  const b = [...bank(), entry({ key: 'opener-2', tags: ['start', 'youth'] })];
+  const r = applyBankOverrides(b, [
+    { key: 'opener', deleted: true },
+    { key: 'opener-2', tags: ['youth', 'action'] },
+  ]);
+  const openers = r.entries.filter((e) => e.tags.includes('start')).map((e) => e.key);
+  ok('an opener survives a mixed deletion + untag', openers.length > 0, JSON.stringify(openers));
+}
+
 // ── 4. Title and description patch the BUILT mission ──────────────────────────
 {
   const r = applyBankOverrides(bank(), [{ key: 'middle-a', title: 'כותרת חדשה', description: 'תיאור חדש' }]);
@@ -145,14 +178,68 @@ for (const bad of [0, 11, -3, 4.5, NaN, Infinity, '7' as unknown as number]) {
   eq('  …and the built copy still agrees', e.build().difficulty, 7);
 }
 
+// ── 5b. The band tag follows the number, whichever of the two was edited ─────
+//
+// The admin form offers `difficulty` and the tag list as independent controls,
+// and the first real editing pass drifted them apart twice in one day. Neither
+// drift is visible: the composed game paces off the number while the creator
+// filters on the tag, so the mission just lies to one of them.
+{
+  const b = bank();
+  b[1] = { ...b[1], tags: ['youth', 'camera', 'easy'], difficulty: 2 };
+  const r = applyBankOverrides(b, [{ key: 'middle-a', difficulty: 9 }]);
+  const e = find(r.entries, 'middle-a');
+  eqJson('raising the difficulty re-bands the tags', e.tags, ['youth', 'camera', 'hard']);
+}
+{
+  // The reverse: an admin who hand-picks a band tag that contradicts the number
+  // does not get to ship it either.
+  const b = bank();
+  b[1] = { ...b[1], tags: ['youth', 'easy'], difficulty: 2 };
+  const r = applyBankOverrides(b, [{ key: 'middle-a', tags: ['youth', 'hard'] }]);
+  eqJson('a hand-picked band that contradicts the number is corrected',
+    find(r.entries, 'middle-a').tags, ['youth', 'easy']);
+}
+{
+  // An entry with NO override is left untouched — the authored bank is already a
+  // fixed point of the repair, so re-banding it would allocate for nothing.
+  const b = bank();
+  b[2] = { ...b[2], tags: ['youth', 'action', 'medium'] };
+  const r = applyBankOverrides(b, [{ key: 'middle-a', title: 'x' }]);
+  ok('an untouched entry keeps its exact tag array', find(r.entries, 'middle-b').tags === b[2].tags);
+}
+
+// ── 5c. `camera` is pinned to the authored entry, in both directions ─────────
+//
+// It means "handed in as a photo or a video" — the task type, which no override
+// can change. A tag override REPLACES the set, so without this the source fix
+// that added `camera` to eleven missions would stay invisible for exactly the
+// missions an admin had already re-tagged.
+{
+  const b = bank();
+  b[1] = { ...b[1], tags: ['youth', 'camera'] };
+  const r = applyBankOverrides(b, [{ key: 'middle-a', tags: ['youth', 'action'] }]);
+  ok('an override cannot drop `camera` from a photo mission',
+    find(r.entries, 'middle-a').tags.includes('camera'));
+}
+{
+  const b = bank();
+  b[1] = { ...b[1], tags: ['youth'] };          // authored without `camera`
+  const r = applyBankOverrides(b, [{ key: 'middle-a', tags: ['youth', 'camera'] }]);
+  ok('an override cannot add `camera` to a mission that was not authored with it',
+    !find(r.entries, 'middle-a').tags.includes('camera'));
+}
+
 // ── 6. Tags — closed vocabulary, invalid members dropped, never emptied ───────
 {
   const r = applyBankOverrides(bank(), [{ key: 'middle-a', tags: ['camera', 'thinking'] }]);
-  eqJson('valid tags replace the source set', find(r.entries, 'middle-a').tags, ['camera', 'thinking']);
+  // …plus the band tag the entry's own difficulty implies (see 5b): an edited
+  // entry always leaves the merge carrying exactly one, correct, band.
+  eqJson('valid tags replace the source set', find(r.entries, 'middle-a').tags, ['camera', 'thinking', 'medium']);
 }
 {
   const r = applyBankOverrides(bank(), [{ key: 'middle-a', tags: ['camera', 'not-a-real-tag', 'camera'] }]);
-  eqJson('unknown tags dropped, duplicates collapsed', find(r.entries, 'middle-a').tags, ['camera']);
+  eqJson('unknown tags dropped, duplicates collapsed', find(r.entries, 'middle-a').tags, ['camera', 'medium']);
 }
 {
   const r = applyBankOverrides(bank(), [{ key: 'middle-a', tags: [] }]);
@@ -230,6 +317,43 @@ const junk: unknown[] = [
   const n = normalizeBankOverride({ key: 'a', minAge: null, transitMinutes: null });
   eqJson('explicit nulls survive normalization — they mean "clear this"',
     n, { key: 'a', minAge: null, transitMinutes: null });
+}
+
+// ── 10. Curation flags are BOOKKEEPING, never content ────────────────────────
+//
+// `reviewedCopy` and `verifiedSetup` record that a person has looked at a
+// mission. They must persist (a pass over 103 missions has to be resumable) and
+// they must not change one thing a player is offered.
+{
+  const r = applyBankOverrides(bank(), [{ key: 'middle-a', reviewedCopy: true, verifiedSetup: true }]);
+  const e = find(r.entries, 'middle-a');
+  eqJson('a flag-only row leaves the bank identical', keys(r.entries), keys(bank()));
+  eq('…the title is untouched', e.build().title, 'title-middle-a');
+  eqJson('…the tags are untouched', e.tags, ['youth', 'camera']);
+  eq('…the difficulty is untouched', e.difficulty, 5);
+}
+{
+  // But it IS a storable row: refusing it would mean the tick could not be saved
+  // at all for a mission nobody has edited, which is most of them.
+  eqJson('a flag-only row survives normalization',
+    normalizeBankOverride({ key: 'a', reviewedCopy: true }), { key: 'a', reviewedCopy: true });
+  eqJson('both flags at once', normalizeBankOverride({ key: 'a', reviewedCopy: true, verifiedSetup: true }),
+    { key: 'a', reviewedCopy: true, verifiedSetup: true });
+  // Only `true` is stored — an untick is the ABSENCE of the field, so `false`
+  // must not keep a row alive that says nothing.
+  eq('an explicit false is not a reason to keep the row',
+    normalizeBankOverride({ key: 'a', reviewedCopy: false }), null);
+  eq('a non-boolean flag is ignored', normalizeBankOverride({ key: 'a', verifiedSetup: 'yes' }), null);
+}
+
+// ── 11. hasContentEdit — "edited" means the PLAYER sees something different ───
+{
+  ok('a flag-only row is not an edit', !hasContentEdit({ key: 'a', reviewedCopy: true, verifiedSetup: true }));
+  ok('a title change is an edit', hasContentEdit({ key: 'a', title: 'x' }));
+  ok('a deletion is an edit', hasContentEdit({ key: 'a', deleted: true }));
+  ok('a cleared optional number is an edit', hasContentEdit({ key: 'a', minAge: null }));
+  ok('a tag change is an edit', hasContentEdit({ key: 'a', tags: ['camera'] }));
+  ok('no row at all is not an edit', !hasContentEdit(undefined) && !hasContentEdit(null));
 }
 
 console.log(failures === 0

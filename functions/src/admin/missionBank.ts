@@ -52,6 +52,10 @@ interface StoredOverride {
   difficulty?: number;
   minAge?: number | null;
   transitMinutes?: number | null;
+  /** Curation bookkeeping — the words have been read. Never affects the merge. */
+  reviewedCopy?: boolean;
+  /** Curation bookkeeping — the whole mission, Quick Setup included, was stood up. */
+  verifiedSetup?: boolean;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -132,17 +136,27 @@ export const setMissionBankOverride = loggedCallable('setMissionBankOverride', a
     patch.difficulty = body.difficulty;
   }
 
+  // Only `true` is stored: an untick is the absence of the field, so a row never
+  // survives just to say "nobody has looked at this yet", which is the default.
+  for (const flag of ['reviewedCopy', 'verifiedSetup'] as const) {
+    if (body[flag] === true) patch[flag] = true;
+  }
+
   for (const field of ['minAge', 'transitMinutes'] as const) {
     const v = body[field];
     if (v === null) patch[field] = null;
     else if (typeof v === 'number' && Number.isFinite(v) && v >= 0) patch[field] = v;
   }
 
-  // A row carrying nothing but bookkeeping would be indistinguishable from an
-  // unedited mission to the merge, while still showing as "edited" in the admin
-  // list. Refuse it rather than storing a lie.
-  const meaningful = ['deleted', 'title', 'description', 'tags', 'difficulty', 'minAge', 'transitMinutes']
-    .some((f) => f in patch);
+  // A row has to SAY something. `key` plus the two timestamps is not an edit and
+  // not a curation note — it would be a document that marks a mission as touched
+  // while carrying no statement about it at all.
+  const meaningful = [
+    'deleted', 'title', 'description', 'tags', 'difficulty', 'minAge', 'transitMinutes',
+    // A row that ONLY records "I have read this one" is meaningful: it is the
+    // whole point of being able to resume a curation pass over 103 missions.
+    'reviewedCopy', 'verifiedSetup',
+  ].some((f) => f in patch);
   if (!meaningful) {
     throw new functions.https.HttpsError('invalid-argument', 'nothing to store for this mission');
   }

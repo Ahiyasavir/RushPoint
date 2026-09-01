@@ -32,18 +32,27 @@ import {
   type MissionBankOverrideRow,
 } from '../services/calls';
 import { TASK_BANK, type TaskBankEntry } from '../taskBank';
-import { applyBankOverrides } from '../lib/missionBankOverlay';
+import { applyBankOverrides, hasContentEdit } from '../lib/missionBankOverlay';
 import { invalidateMissionBank } from '../lib/missionBank';
-import { BANK_TAG_IDS, bankTagLabel, type BankTagId } from '../bankTags';
+import {
+  BANK_TAG_IDS, bankTagLabel, difficultyBandFor, isDifficultyTagId, withDifficultyBand,
+  type BankTagId,
+} from '../bankTags';
 import { isAdminClaim } from '../lib/adminGate';
-import { Badge, Button, Card, EmptyState, Input, Label, MultiChipRow, Skeleton, Textarea } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, Label, MultiChipRow, Select, Skeleton, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { useLanguage, useT } from '../components/LanguageContext';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 
 type GateState = 'checking' | 'denied' | 'allowed';
-type Filter = 'all' | 'edited' | 'deleted';
+type Filter = 'all' | 'edited' | 'deleted' | 'unreviewed' | 'unverified';
+/**
+ * Curation order. `bank` is the authored order, which carries meaning (bookends,
+ * families); the other two pull the unfinished work to the top so a pass over 103
+ * missions can be resumed where it stopped instead of scrolled for.
+ */
+type SortMode = 'bank' | 'unreviewedFirst' | 'unverifiedFirst';
 
 /** The editable state of ONE mission, as the form holds it. */
 interface Draft {
@@ -75,6 +84,22 @@ function draftFrom(entry: TaskBankEntry): Draft {
   };
 }
 
+/**
+ * The tags an admin may pick by hand.
+ *
+ * Two groups are deliberately absent, both for the same reason: they restate a
+ * structural fact rather than an opinion, so offering them as free controls only
+ * creates ways for the mission to contradict itself.
+ *
+ *   • `easy`/`medium`/`hard` — one fact with the 1-10 difficulty. Offering both
+ *     is what let a mission ship at difficulty 8 still tagged `medium`. Derived
+ *     on save (`withDifficultyBand`) and shown read-only beside the number.
+ *   • `camera` — means "handed in as a photo or a video", i.e. the task type,
+ *     which an override cannot change at all. The overlay keeps it pinned to the
+ *     authored entry in both directions.
+ */
+const PICKABLE_TAG_IDS = BANK_TAG_IDS.filter((t) => !isDifficultyTagId(t) && t !== 'camera');
+
 /** A finite non-negative number, or null for "clear this field". */
 function optionalNumber(raw: string): number | null {
   const t = raw.trim();
@@ -98,6 +123,7 @@ export default function AdminMissionBankPage() {
   const [failed, setFailed] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [sort, setSort] = useState<SortMode>('bank');
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -151,16 +177,24 @@ export default function AdminMissionBankPage() {
   const merged = useMemo(() => applyBankOverrides(TASK_BANK, overrides ?? []), [overrides]);
   const liveKeys = useMemo(() => new Set(merged.entries.map((e) => e.key)), [merged]);
   const refused = useMemo(() => new Set(merged.refusedDeletions), [merged]);
+  // A bookend tag the merge had to put back, because removing it would have left
+  // the composer with no opener or no finale (the quiet twin of a refused delete).
+  const restored = useMemo(() => new Set(merged.restoredBookends), [merged]);
 
   // Rows are driven by the AUTHORED bank, not by the merged one: a deleted
   // mission still has to appear here, or it could never be put back.
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return TASK_BANK.filter((entry) => {
+    const matched = TASK_BANK.filter((entry) => {
       const override = byKey.get(entry.key);
       const deleted = override?.deleted === true && !refused.has(entry.key);
-      if (filter === 'edited' && !override) return false;
+      // `edited` means the CONTENT changed. A mission that has only been ticked
+      // as reviewed is not an edit, and counting it as one would make this filter
+      // useless the moment a curation pass starts.
+      if (filter === 'edited' && !hasContentEdit(override)) return false;
       if (filter === 'deleted' && !deleted) return false;
+      if (filter === 'unreviewed' && override?.reviewedCopy === true) return false;
+      if (filter === 'unverified' && override?.verifiedSetup === true) return false;
       if (!q) return true;
       const built = entry.build();
       const title = override?.title ?? built.title ?? '';
@@ -168,7 +202,66 @@ export default function AdminMissionBankPage() {
         .join(' ').toLowerCase();
       return haystack.includes(q);
     });
-  }, [byKey, filter, query, refused]);
+    if (sort === 'bank') return matched;
+    // A STABLE partition, not a comparator over booleans: within each half the
+    // authored order survives, so the list does not reshuffle under the admin as
+    // they tick things off.
+    const flag = sort === 'unreviewedFirst' ? 'reviewedCopy' : 'verifiedSetup';
+    const done = (e: TaskBankEntry) => byKey.get(e.key)?.[flag] === true;
+    return [...matched.filter((e) => !done(e)), ...matched.filter(done)];
+  }, [byKey, filter, query, refused, sort]);
+
+  /** How far the curation pass has actually got. */
+  const progress = useMemo(() => ({
+    reviewed: TASK_BANK.filter((e) => byKey.get(e.key)?.reviewedCopy === true).length,
+    verified: TASK_BANK.filter((e) => byKey.get(e.key)?.verifiedSetup === true).length,
+  }), [byKey]);
+
+  /**
+   * Tick or untick one curation flag.
+   *
+   * The whole row travels, because `setMissionBankOverride` REPLACES the stored
+   * document — sending only the flag would silently discard the content edit that
+   * is usually sitting right beside it. When nothing is left to say (no content
+   * edit and no other flag), the row is cleared rather than kept as an empty
+   * husk, so unticking really does return the mission to untouched.
+   */
+  async function setFlag(entry: TaskBankEntry, flag: 'reviewedCopy' | 'verifiedSetup', on: boolean) {
+    const existing = byKey.get(entry.key);
+    const other = flag === 'reviewedCopy' ? 'verifiedSetup' : 'reviewedCopy';
+    const otherOn = existing?.[other] === true;
+    setBusyKey(entry.key);
+    try {
+      if (!on && !otherOn && !hasContentEdit(existing)) {
+        await clearMissionBankOverride({ key: entry.key });
+      } else {
+        const live = merged.entries.find((e) => e.key === entry.key) ?? entry;
+        const built = live.build();
+        await setMissionBankOverride({
+          key: entry.key,
+          ...(existing?.deleted === true ? { deleted: true } : {}),
+          ...(hasContentEdit(existing)
+            ? {
+              title: built.title ?? undefined,
+              description: built.description ?? undefined,
+              tags: live.tags,
+              difficulty: live.difficulty,
+              minAge: live.minAge ?? null,
+              transitMinutes: live.transitMinutes ?? null,
+            }
+            : {}),
+          ...(otherOn ? { [other]: true } : {}),
+          ...(on ? { [flag]: true } : {}),
+        });
+      }
+      await load();
+    } catch (e) {
+      console.error('[adminMissionBank] setFlag failed:', e);
+      toast.error(e instanceof Error && e.message ? e.message : m.saveFailed);
+    } finally {
+      setBusyKey(null);
+    }
+  }
 
   function openEditor(entry: TaskBankEntry) {
     // Seeded from the MERGED entry, so the form opens on what is live today, not
@@ -198,10 +291,15 @@ export default function AdminMissionBankPage() {
         ...(existing?.deleted === true ? { deleted: true } : {}),
         title,
         description,
-        tags: draft.tags,
+        // The band tag is derived, never typed — see PICKABLE_TAG_IDS.
+        tags: withDifficultyBand(draft.tags, draft.difficulty),
         difficulty: draft.difficulty,
         minAge: optionalNumber(draft.minAge),
         transitMinutes: optionalNumber(draft.transitMinutes),
+        // Carried, not re-asserted: a content edit must not silently untick the
+        // curation flags sitting on the same replaced document.
+        ...(existing?.reviewedCopy === true ? { reviewedCopy: true } : {}),
+        ...(existing?.verifiedSetup === true ? { verifiedSetup: true } : {}),
       });
       setEditingKey(null);
       setDraft(null);
@@ -224,9 +322,15 @@ export default function AdminMissionBankPage() {
     setBusyKey(entry.key);
     try {
       const existing = byKey.get(entry.key);
-      if (!deleted && existing && !existing.title && !existing.description
-          && !existing.tags && existing.difficulty === undefined
-          && existing.minAge === undefined && existing.transitMinutes === undefined) {
+      const flags = {
+        ...(existing?.reviewedCopy === true ? { reviewedCopy: true as const } : {}),
+        ...(existing?.verifiedSetup === true ? { verifiedSetup: true as const } : {}),
+      };
+      const onlyTheDeletion = !existing?.title && !existing?.description
+        && !existing?.tags && existing?.difficulty === undefined
+        && existing?.minAge === undefined && existing?.transitMinutes === undefined
+        && Object.keys(flags).length === 0;
+      if (!deleted && existing && onlyTheDeletion) {
         // The row held nothing but the deletion, so putting the mission back is
         // the same act as resetting it. Leaving an empty row behind would mark an
         // untouched mission as "edited" forever.
@@ -244,6 +348,7 @@ export default function AdminMissionBankPage() {
           difficulty: live.difficulty,
           minAge: live.minAge ?? null,
           transitMinutes: live.transitMinutes ?? null,
+          ...flags,
         });
       }
       await load();
@@ -320,7 +425,7 @@ export default function AdminMissionBankPage() {
           placeholder={m.searchPlaceholder}
           aria-label={m.searchPlaceholder}
         />
-        {(['all', 'edited', 'deleted'] as const).map((f) => (
+        {(['all', 'edited', 'deleted', 'unreviewed', 'unverified'] as const).map((f) => (
           <button
             key={f}
             type="button"
@@ -330,11 +435,26 @@ export default function AdminMissionBankPage() {
               filter === f ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                 : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}
           >
-            {f === 'all' ? m.filterAll : f === 'edited' ? m.filterEdited : m.filterDeleted}
+            {f === 'all' ? m.filterAll
+              : f === 'edited' ? m.filterEdited
+                : f === 'deleted' ? m.filterDeleted
+                  : f === 'unreviewed' ? m.filterUnreviewed : m.filterUnverified}
           </button>
         ))}
+        <Select
+          className="max-w-[200px]"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortMode)}
+          aria-label={m.sortLabel}
+        >
+          <option value="bank">{m.sortBank}</option>
+          <option value="unreviewedFirst">{m.sortUnreviewedFirst}</option>
+          <option value="unverifiedFirst">{m.sortUnverifiedFirst}</option>
+        </Select>
         <span className="text-[13px] text-[--ink-3] ms-auto">
           {m.countLabel(rows.length, TASK_BANK.length)}
+          {' · '}
+          {m.progressLabel(progress.reviewed, progress.verified, TASK_BANK.length)}
         </span>
       </div>
 
@@ -359,7 +479,27 @@ export default function AdminMissionBankPage() {
                           {built.title}
                         </span>
                         {deleted && <Badge color="red">{m.deletedBadge}</Badge>}
-                        {!deleted && override && <Badge color="gold">{m.editedBadge}</Badge>}
+                        {!deleted && hasContentEdit(override) && <Badge color="gold">{m.editedBadge}</Badge>}
+                      </div>
+                      {/* The two curation ticks. Deliberately on the ROW rather than
+                          inside the editor: the point is to sweep a hundred missions
+                          without opening each one. */}
+                      <div className="flex flex-wrap items-center gap-4 mt-2">
+                        {([
+                          ['reviewedCopy', m.reviewedCopyLabel, m.reviewedCopyHint],
+                          ['verifiedSetup', m.verifiedSetupLabel, m.verifiedSetupHint],
+                        ] as const).map(([flag, label, hint]) => (
+                          <label key={flag} className="flex items-center gap-2 cursor-pointer" title={hint}>
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 accent-rp-fire"
+                              checked={override?.[flag] === true}
+                              disabled={busy}
+                              onChange={(ev) => void setFlag(entry, flag, ev.target.checked)}
+                            />
+                            <span className="text-[13px] text-[--ink-2]">{label}</span>
+                          </label>
+                        ))}
                       </div>
                       <p className="text-[13px] text-[--ink-3] mt-0.5 break-words">
                         {m.keyLabel}: {entry.key}
@@ -374,6 +514,9 @@ export default function AdminMissionBankPage() {
                           a rule and a bug. */}
                       {refused.has(entry.key) && (
                         <p className="text-[13px] text-ink-fire mt-1">{m.refusedDeletion}</p>
+                      )}
+                      {restored.has(entry.key) && (
+                        <p className="text-[13px] text-ink-fire mt-1">{m.restoredBookend}</p>
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -418,7 +561,7 @@ export default function AdminMissionBankPage() {
                       <MultiChipRow
                         label={m.tagsLabel}
                         hint={m.tagsHint}
-                        options={BANK_TAG_IDS}
+                        options={PICKABLE_TAG_IDS}
                         values={draft.tags}
                         render={tagLabel}
                         onToggle={(tag) => setDraft({
@@ -436,6 +579,12 @@ export default function AdminMissionBankPage() {
                             value={String(draft.difficulty)}
                             onChange={(e) => setDraft({ ...draft, difficulty: Number(e.target.value) })}
                           />
+                          {/* Derived, not picked — the band and the number are one
+                              fact, so showing the consequence of the number here is
+                              what stops the two from being edited into a contradiction. */}
+                          <p className="text-[13px] text-[--ink-3] mt-1">
+                            {m.bandDerived(tagLabel(difficultyBandFor(draft.difficulty)))}
+                          </p>
                         </div>
                         <div>
                           <Label>{m.minAgeLabel}</Label>
