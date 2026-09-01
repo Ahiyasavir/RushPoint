@@ -2,39 +2,33 @@
   "title": "My story",
   "description": "Ahiya Savir, 17, from Jerusalem. How selling hummus in a small community bought a first robot, and how that turned into a platform for live mission races.",
   "headline": "I sold hummus to buy a robot",
-  "intro": "My name is Ahiya Savir. I am 17, I live in Jerusalem, and RushPoint did not come out of a strategy meeting. It came out of wanting to play a game that did not exist.",
+  "intro": "My name is Ahiya Savir, 17, from Jerusalem. RushPoint was not born in some flashy strategy meeting. It happened simply because I wanted to play something that did not exist out in the field.",
   "sections": [
     {
       "title": "Sansana, and hummus for a robot",
       "body": [
-        "I grew up in Sansana, a small community in the southern Hebron hills. It is the kind of place where you learn early that if a thing does not exist, you build it. That is where I started working with my hands, mostly with wood, and it never really left.",
-        "When I was young I decided I wanted a robot. I had no money for one, so I started selling hummus around the community. When I finally bought it, I found out the interesting part was not the motors, it was the code. That is how I learned to program.",
-        "At nine I wrote a children's book and published it. Looking back it is the same impulse: take something that exists only in your head and turn it into a thing other people can hold."
+        "I grew up in Sansana, a small community in the southern Hebron hills. Once you are actually out there, you learn fast that if something is missing, you simply build it. That is how I started working with wood and with my hands. When I wanted to get into robotics, my parents taught me to earn the money myself. I started selling hummus around the community. When I finally could buy one, I found out the part that mattered just as much as building it was the code that runs it. That is how I learned to program."
       ]
     },
     {
       "title": "Three years in Boston",
       "body": [
-        "Then we moved to Boston for three years. I led a robotics team in a youth league there, and learned my first serious programming language. It was the first time I built something that had to work against a deadline and against other people, rather than only against myself.",
-        "I did a lot of sport alongside it. I ran a half marathon, played on the basketball and wrestling teams, and started training calisthenics. That sounds like a separate hobby, but it is the same story: in training and in code alike, you only find out what actually works once you go out and try it."
+        "We lived in Boston for three years. I led a robotics team there and learned my first real programming language. It was the first time I built something together with other people, against a tight schedule. Alongside that I got heavily into sports. I ran a half marathon, played basketball, trained in wrestling and started calisthenics. In the end, sports and code carry the same idea: you only find out what actually works once you go out there and try."
       ]
     },
     {
       "title": "Back to Jerusalem",
       "body": [
-        "At 15 I came back to Israel and moved in with my grandparents so I could attend Himmelfarb high school in Jerusalem. I am on the advanced mechatronics track, alongside advanced maths, physics and English.",
-        "At school I lead the mechanical team on our robotics squad. I design on the computer, machine parts, and build drivetrains and mechanisms. I am also a youth leader in Bnei Akiva, and that is where I really understood how hard it is to run a good activity for a large group."
+        "At 15 I moved back to Israel and in with my grandparents in Jerusalem to study at Himmelfarb. I am on the mechatronics track, alongside physics and maths, and I lead the mechanical team on our robotics squad. Alongside that I was a youth leader in Bnei Akiva, and that is where I really felt how hard it is to run a good activity for a large group without everything falling apart."
       ]
     },
     {
       "title": "Why I built RushPoint",
       "body": [
-        "The idea did not come from a market or a competitor analysis. It came from trying to run a real mission race and watching how fast it broke. Judges who have to stand at stations, paper that gets wet, one team queueing while everybody else is moving, and scores worked out at the end of the night from somebody's handwriting.",
-        "What I wanted was a platform where anyone could build a genuine mission race across real places and run it without a whole crew. I could not find one, so I built it.",
-        "The part that mattered most to me was that it had to work equally well for three completely different audiences. A game a ten year old gets excited about, that a youth group takes seriously, and that adults on a team day do not feel is childish. It is the same engine underneath; the only difference is the missions you write."
+        "When I tried to run a real mission race, I watched everything fall apart fast. Papers that got messy, stations you had to keep walking to and checking every second, and teams just standing around bored. I wanted a simple tool that lets anyone run a smooth field game without needing a production crew. It mattered to me that it would work for everyone: young kids, youth groups and adults alike, because it is the same engine underneath, and only the missions change."
       ]
     }
   ],
-  "closing": "I am still at school, so most of the development happens in evenings and at weekends. That means everything in the platform is there because somebody actually needed it outside, not because there was a gap on a product roadmap. If you are running a game and something is missing, write to me. I read all of it.",
+  "closing": "Since I am still in high school, I do most of the work in evenings and on weekends. I try hard to keep my time focused, so every tool that goes into the system exists because someone actually needed it out there. If you are running a game and something is missing, write to me. I read every message.",
   "action": "Build a game"
 }
