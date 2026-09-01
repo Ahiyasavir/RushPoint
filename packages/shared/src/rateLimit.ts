@@ -191,6 +191,14 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   setGameTemplateFlag: { max: 30, windowMs: MIN },
   listGameTemplates: { max: 60, windowMs: MIN },
   listAdminTemplates: { max: 60, windowMs: MIN }, // admin console poll of its own template list
+
+  // Admin editing of the smart-build mission bank (change: admin-editable-mission-bank).
+  // Same posture as the template admin buckets above: a human working through a
+  // list of 89 missions, one at a time. The list call is the more generous of the
+  // three because every mutation ends in a reload.
+  listMissionBankOverrides: { max: 60, windowMs: MIN },
+  setMissionBankOverride: { max: 60, windowMs: MIN },
+  clearMissionBankOverride: { max: 60, windowMs: MIN },
   createGameFromTemplate: { max: 20, windowMs: MIN }, // writes a whole new game per call
   getRunHeatmap: { max: 30, windowMs: MIN }, // aggregates every location ping in a run
   getRunSurveyResults: { max: 30, windowMs: MIN },

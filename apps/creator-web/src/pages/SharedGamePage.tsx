@@ -70,6 +70,9 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
 
   const [launched, setLaunched] = useState<LaunchedRun | null>(null);
+  // Which stage is being read. A game has 14 of them here; the rail is how you
+  // get to stage 9 without scrolling past the other eight.
+  const [openStage, setOpenStage] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -144,6 +147,9 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
   // A whole game can be locationless. Rendering a full-height map with an apology
   // inside it spends the most expensive space on the page saying "nothing here".
   const showRoute = hasMappedMission(game);
+  // Clamped rather than trusted: a link re-read after the game lost a stage must
+  // not render a blank page.
+  const openStageData = stages[Math.min(openStage, Math.max(stages.length - 1, 0))];
 
   return (
     <div className="max-w-3xl mx-auto pb-16">
@@ -194,15 +200,38 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
         </section>
       )}
 
-      {/* ── The game itself, top to bottom ──
-          Everything is on the page. There is no selection state and nothing to
-          click: this is a document somebody was sent to READ (and often to
-          print), and a game with 34 missions behind a detail panel is 34 clicks
-          that nobody makes — which is exactly how a link that DOES carry the
-          station codes reads as one that does not. */}
-      {stages.map((stage, i) => (
-        <StageSection key={stage.id} stage={stage} index={i} revealed={game.answersRevealed} />
-      ))}
+      {/* ── The game, one stage at a time ──
+          Two things were wrong with the two layouts this has had, and the fix is
+          neither of them.
+            · A stage rail plus a mission DETAIL PANEL meant a click per mission:
+              34 clicks nobody makes, which is how a link that really did carry
+              every station code read as a link that carried none.
+            · Every stage open at once meant one endless scroll with no way to
+              get to stage 9.
+          So: the stage rail navigates (one click, and the stages stay in order and
+          in view), and inside the chosen stage every mission is fully written out.
+          Choosing WHERE to read costs a click; reading does not. */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {stages.map((st, i) => (
+          <button
+            key={st.id}
+            onClick={() => setOpenStage(i)}
+            aria-current={i === openStage ? 'true' : undefined}
+            className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+              i === openStage
+                ? 'border-rp-fire/60 bg-rp-fire/10 text-ink-fire font-medium'
+                : 'border-[--rp-border] text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'
+            }`}
+          >
+            <span className="text-[--ink-3] me-1.5">{i + 1}</span>
+            {st.title || g.stage({ n: i + 1 })}
+          </button>
+        ))}
+      </div>
+
+      {openStageData && (
+        <StageSection stage={openStageData} index={openStage} revealed={game.answersRevealed} />
+      )}
 
       <footer className="mt-10 text-center text-xs text-[--ink-3]">{g.poweredBy}</footer>
     </div>

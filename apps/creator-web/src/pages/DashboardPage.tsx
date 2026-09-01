@@ -14,7 +14,10 @@ import { peekTemplates, fetchTemplates } from '../lib/templateCache';
 import { composeGame, previewShape, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
 import SmartBuildReveal, { type RevealStage } from '../components/SmartBuildReveal';
 import { readRecentPicks, recordRecentPicks } from '../lib/recentBankPicks';
-import { TASK_BANK } from '../taskBank';
+// The bank the composer draws from is `taskBank.ts` MERGED with the admin's
+// edits and deletions (change: admin-editable-mission-bank). loadMissionBank()
+// fails open to the authored bank, so composing never depends on that read.
+import { loadMissionBank } from '../lib/missionBank';
 import NewGameWizard, { type WizardSubmission, type WizardTemplate } from '../components/NewGameWizard';
 import { Badge, Button, Card, EmptyState, Input, Label, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
@@ -495,8 +498,13 @@ export default function DashboardPage() {
       // from this exact seed. Composing under a different stream would hand them a
       // different shape from the one they watched being built — the specific lie
       // this change exists to make impossible (change: smart-build-delight).
+      // ONE bank for this whole composition: the compose call below and the
+      // `previewShape` further down must be handed the SAME entries, or the
+      // reveal would report planned slots against a different pool than the one
+      // the game was actually built from.
+      const bank = await loadMissionBank();
       const result = composeGame(
-        TASK_BANK,
+        bank,
         plan.composerAnswers,
         composerCopy,
         seededRng(plan.composerSeed),
@@ -560,7 +568,7 @@ export default function DashboardPage() {
         // watched accumulate, so the reveal can show which planned slots the
         // composer could not fill instead of quietly shipping a shorter stage.
         const planned = previewShape(
-          TASK_BANK,
+          bank,
           plan.composerAnswers,
           plan.composerSeed,
           readRecentPicks(user?.uid),

@@ -88,9 +88,25 @@ services:
       OAUTH_ALLOWED_ORIGINS: "https://www.rush-point.com,https://rushpoint-marketing.web.app"
       VPS_UPLOAD_ORIGIN: "https://api.rush-point.com"
       UPLOAD_DIR: "/data/uploads"
+      # The run's GPS movement track, on THIS machine's disk instead of Firestore
+      # (change: vps-track-storage). Set = the track is recorded here at FULL fidelity
+      # (every ping) and costs nothing against the Spark write quota; UNSET = the track
+      # goes to Firestore distance-sampled, exactly as before.
+      #
+      # ⚠️ Only ever set this where the API runs as ONE process with a stable local disk —
+      # i.e. here. The emulator and real Cloud Functions must leave it unset: appends from a
+      # second process would interleave in the same file, and the per-run write queue in
+      # functions/src/trackStore.ts cannot see across processes.
+      #
+      # This is analytics data (the post-run heatmap), NOT scoring — losing it costs a view,
+      # never a game outcome, which is why local disk is an acceptable home for it.
+      RUSHPOINT_TRACK_DIR: "/data/tracks"
     volumes:
       - ./service-account.json:/secrets/service-account.json:ro
       - ./uploads:/data/uploads
+      # Must be a PERSISTED volume, not container-local: an unmounted path would silently
+      # discard every run's track on the next container rebuild.
+      - ./tracks:/data/tracks
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s

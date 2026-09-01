@@ -29,6 +29,9 @@ import {
   ANSWER_LOG_RETENTION_DAYS, stripAnswerLogsFromStages, type RunStageRecord,
 } from '@rushpoint/shared';
 import { deleteDocsInChunks } from '../batchUtil';
+// The movement track also lives on the VPS disk when configured; retention must reach it too
+// or the 90-day promise would hold in Firestore and quietly fail on disk (change: vps-track-storage).
+import { trackStore } from '../trackStore';
 import { runPhotoPrefix } from '../storagePaths';
 // Pure, total, fail-closed prune eligibility (change: run-retention-completeness).
 import {
@@ -94,6 +97,12 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   //    PII_BULK_SUBCOLLECTIONS covers teamLocations, the append-only movement track
   //    (locationTrack), capture zones, the live photo feed, and — critically — the
   //    `alerts` subcollection whose SOS/safe_zone_breach docs carry raw lat/lng.
+  //    The same track is ALSO purged from the VPS's local disk when that is where it was
+  //    recorded. Called unconditionally and best-effort: for a Firestore-mode run it resolves
+  //    to "no such file" and costs nothing, so retention does not have to know which mode
+  //    recorded the run — and cannot get that judgement wrong.
+  await trackStore.delete({ ownerUid, gameId, runId });
+
   const bulkRefs: FirebaseFirestore.DocumentReference[] = [];
   for (const sub of PII_BULK_SUBCOLLECTIONS) {
     const snap = await db.collection(`${runPath}/${sub}`).get();

@@ -18,7 +18,7 @@
 //
 // No emulator.  npx tsx scripts/test-heatmap-sampling-fidelity.ts
 import { buildMovementDensity } from '../packages/shared/src/movementHeatmap';
-import { shouldRetainTrackPoint } from '../packages/shared/src/locationPingEconomy';
+import { shouldRetainTrackPoint, sampleTrackByDistance } from '../packages/shared/src/locationPingEconomy';
 
 let passed = 0;
 let failed = 0;
@@ -150,6 +150,53 @@ const cellKey = (c: { lat: number; lng: number }) => `${c.lat.toFixed(5)}:${c.ln
   ok(idleShare(retainedCells) < idleShare(perPingCells),
     `idling occupies a smaller share of the map after sampling ` +
     `(${(idleShare(perPingCells) * 100).toFixed(0)}% → ${(idleShare(retainedCells) * 100).toFixed(0)}%)`);
+}
+
+// ── DISK MODE (change: vps-track-storage) must not reintroduce the distortion ──
+{
+  // The VPS stores the track at FULL fidelity — one point per ping — because a local write
+  // costs no Firestore quota. That is better raw data and WORSE input to this aggregator:
+  // counting points per cell makes an idle spot the hottest cell, which is the very defect
+  // the distance rule exists to prevent. getRunHeatmap therefore samples on READ, and this
+  // asserts the two modes end up equivalent rather than merely both producing a map.
+  //
+  // This test exists because the smoke run caught the unsampled version doing exactly the
+  // wrong thing: pointCount went 3 -> 6 while the team stood still.
+  const perTeamPing: Array<{ lat: number; lng: number; teamId: string }> = [];
+  for (let team = 0; team < 30; team++) {
+    const id = `t${team}`;
+    for (let i = 0; i < 30; i++) perTeamPing.push({ ...north(i % 2 === 0 ? 12 : -12), teamId: id });
+    for (let i = 0; i < 40; i++) perTeamPing.push({ ...north(200 + 28 * i), teamId: id });
+  }
+
+  const rawCells = buildMovementDensity(perTeamPing);
+  const sampledCells = buildMovementDensity(sampleTrackByDistance(perTeamPing));
+
+  const isIdleCell = (c: { lat: number }) => Math.abs(c.lat - BASE.lat) < 0.0006;
+  const idleVsTypical = (cells: typeof rawCells) => {
+    const idle = cells.filter(isIdleCell).reduce((s2, c) => s2 + c.weight, 0);
+    const moving = cells.filter((c) => !isIdleCell(c)).map((c) => c.weight).sort((a, b) => a - b);
+    return idle / Math.max(1, moving.length ? moving[Math.floor(moving.length / 2)] : 1);
+  };
+
+  ok(idleVsTypical(rawCells) > 10,
+    `unsampled disk track WOULD distort: idle cell is ${idleVsTypical(rawCells).toFixed(1)}x typical`);
+  ok(idleVsTypical(sampledCells) <= 1.5,
+    `read-time sampling fixes it: idle cell is ${idleVsTypical(sampledCells).toFixed(1)}x typical`);
+
+  // Sampling is PER TEAM: two teams standing near each other have not travelled between
+  // one another's fixes, so one team's point must never satisfy another team's distance rule.
+  const twoTeams = [
+    { ...north(0), teamId: 'a' }, { ...north(0), teamId: 'b' },
+    { ...north(5), teamId: 'a' }, { ...north(5), teamId: 'b' },
+  ];
+  ok(sampleTrackByDistance(twoTeams).length === 2,
+    'each team keeps exactly its own first point — teams do not sample each other');
+
+  // Points with no teamId are one anonymous sequence, not dropped.
+  ok(sampleTrackByDistance([{ ...north(0) }, { ...north(500) }]).length === 2,
+    'points without a teamId are still sampled, never discarded');
+  ok(sampleTrackByDistance([]).length === 0, 'an empty track samples to empty');
 }
 
 // ── Prune-safety is unchanged ───────────────────────────────────────────────

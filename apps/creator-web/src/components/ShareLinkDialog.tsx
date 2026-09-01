@@ -18,7 +18,9 @@ import { dialog } from './dialog';
 import { toast } from './toast';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
-import { createGameShareLink, listGameShareLinks, revokeGameShareLink } from '../services/calls';
+import {
+  createGameShareLink, listGameShareLinks, revokeGameShareLink, updateGameShareLink,
+} from '../services/calls';
 import { sharedGamePath } from '../lib/publicCreatorPath';
 
 type LinkRow = GameShareLink & { refusal?: ShareLinkRefusal | null };
@@ -83,6 +85,18 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
       toast.error(message.includes('active share links') ? s.limitReached : s.error);
     }
   });
+
+  // Per-link, so one row's toggle does not disable the others (the same reason
+  // the revoke action is keyed).
+  const update = useAsyncAction(async (
+    token: string,
+    patch: { allowCopy?: boolean; revealAnswers?: boolean; allowLaunch?: boolean },
+  ) => {
+    try {
+      await updateGameShareLink({ token, ...patch });
+      await reload();
+    } catch { toast.error(s.error); }
+  }, (token) => token);
 
   const revoke = useAsyncAction(async (token: string) => {
     const ok = await dialog.confirm(`${s.confirmRevokeTitle}\n\n${s.confirmRevokeBody}`, s.revoke, true);
@@ -242,6 +256,30 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
                         {s.expiresOn({ date: new Date(link.expiresAt).toLocaleDateString() })}
                       </div>
                     )}
+
+                    {/* What THIS link allows, changeable in place. A link is a URL
+                        somebody already has: "let them start a run too" must not
+                        mean minting a second one and chasing whoever holds the
+                        first. Every link made before the launch permission existed
+                        gets it here too. */}
+                    <div className="flex flex-wrap gap-3 mb-2 text-xs">
+                      {([
+                        ['allowCopy', s.stateAllowCopy, link.allowCopy === true],
+                        ['revealAnswers', s.stateAnswers, link.revealAnswers === true],
+                        ['allowLaunch', s.stateLaunchOn, link.allowLaunch === true],
+                      ] as const).map(([field, label, on]) => (
+                        <label key={field} className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={update.isBusy(link.token)}
+                            onChange={(e) => void update.run(link.token, { [field]: e.target.checked })}
+                          />
+                          <span className={on ? 'text-[--ink-1]' : 'text-[--ink-3]'}>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+
                     <div className="flex flex-wrap gap-2">
                       <Button variant="subtle" className="text-xs min-h-0 py-1.5" onClick={() => void copyLink(link.token)}>
                         {copiedToken === link.token ? s.copied : s.copyLink}

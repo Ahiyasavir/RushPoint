@@ -298,12 +298,23 @@ export default function AdminTemplatesPage() {
         </div>
       </div>
 
-      <button
-        onClick={() => nav('/admin/users')}
-        className="text-xs font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2"
-      >
-        {at.toUsersLink}
-      </button>
+      {/* The mission bank is a DIFFERENT system from the templates above (it is
+          what "compose one for me" draws from), and this tab is where people come
+          looking for it. */}
+      <div className="flex flex-wrap items-center gap-4">
+        <button
+          onClick={() => nav('/admin/users')}
+          className="text-xs font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2"
+        >
+          {at.toUsersLink}
+        </button>
+        <button
+          onClick={() => nav('/admin/mission-bank')}
+          className="text-xs font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2"
+        >
+          {at.toMissionBankLink}
+        </button>
+      </div>
 
       {failed && (
         <p className="text-sm text-ink-alert" role="alert">

@@ -177,6 +177,49 @@ export function shouldWritePin(opts: {
   }
 }
 
+/**
+ * Distance-sample a full-fidelity track down to what a MOVEMENT heatmap should be built from.
+ *
+ * ⚠️ WHY THIS EXISTS, AND WHY THE HEATMAP MUST NOT SKIP IT. `buildMovementDensity` counts
+ * points per grid cell, so a track that keeps a point per PING makes the places teams stood
+ * STILL — at a task, in a queue — the hottest cells on the map, at >10x a typical moving cell.
+ * A movement heatmap then reports the opposite of movement. That is a documented defect, not a
+ * matter of taste.
+ *
+ * The Firestore path avoids it by sampling on WRITE (it has to: a write costs quota). A track
+ * stored somewhere writes are free is kept at full fidelity instead — which is strictly better
+ * raw data, and strictly WORSE input to feed this aggregator untouched. So the sampling moves
+ * to read time and the distortion stays fixed in both modes.
+ *
+ * Sampling is per TEAM, over that team's own points in the order they were recorded: two teams
+ * standing 5 m apart have not "travelled" between each other's fixes. Points with no teamId are
+ * treated as one anonymous sequence rather than dropped.
+ *
+ * Pure and total; a malformed point is skipped, never thrown on.
+ */
+export function sampleTrackByDistance<T extends { lat: number; lng: number; teamId?: string }>(
+  points: readonly T[],
+  opts: { retentionMeters?: number } = {},
+): T[] {
+  const out: T[] = [];
+  const lastByTeam = new Map<string, { lat: number; lng: number }>();
+
+  for (const p of points ?? []) {
+    if (!p || !usableCoord(p.lat, p.lng)) continue;
+    const key = typeof p.teamId === 'string' && p.teamId.length > 0 ? p.teamId : '';
+    const verdict = shouldRetainTrackPoint({
+      fix: { lat: p.lat, lng: p.lng },
+      lastRetained: lastByTeam.get(key) ?? null,
+      retentionMeters: opts.retentionMeters,
+    });
+    if (verdict.retain) {
+      out.push(p);
+      lastByTeam.set(key, { lat: p.lat, lng: p.lng });
+    }
+  }
+  return out;
+}
+
 export interface TrackRetentionVerdict {
   retain: boolean;
   reason: 'no-reference' | 'unusable-input' | 'travelled' | 'too-close';

@@ -13,6 +13,9 @@ import { loggedCallable, logBestEffort } from '../obs/log';
 import { enforceRateLimit } from '../rateLimitStore';
 import { db, docCachePolicy } from '../firebase';
 import { cachedGetDoc, cachedGetCollection } from '../docCache';
+// Full-fidelity movement track on the VPS disk when configured; getRunHeatmap falls back to
+// the Firestore locationTrack collection when there is no disk file (change: vps-track-storage).
+import { trackStore } from '../trackStore';
 import { getLocationFreshness } from './locationFreshnessCache';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -49,6 +52,7 @@ import {
   composeRunSummary,
   type RunSummary,
   buildMovementDensity,
+  sampleTrackByDistance,
   mergePlayerResult,
   emptyProfile,
   type PlayerProfile,
@@ -3269,13 +3273,37 @@ export const getRunHeatmap = loggedCallable('getRunHeatmap', async (data, contex
   const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
   const run = runSnap.exists ? (runSnap.data() as Run) : null;
 
-  const trackSnap = await db
-    .collection(`users/${c.ownerUid}/games/${c.gameId}/runs/${c.runId}/locationTrack`)
-    .get();
-  const points = trackSnap.docs.map((d) => {
-    const p = d.data() as { lat: number; lng: number };
-    return { lat: p.lat, lng: p.lng };
-  });
+  // The track lives on the VPS's own disk when that is configured (change: vps-track-storage),
+  // where it is recorded at FULL fidelity rather than distance-sampled. A null result means no
+  // disk file exists for this run — a run recorded before that shipped, or any deployment
+  // without a stable local disk (the emulator, real Cloud Functions) — so fall back to
+  // Firestore, which is unchanged. The two are never merged: a run is recorded wholly in one
+  // mode, because the mode is a deployment fact and cannot change mid-run.
+  //
+  // Note the fallback turns on null, NOT on emptiness: a disk-mode run that has taken no pings
+  // yet legitimately reads back [], and re-reading Firestore for it would be a wasted read.
+  //
+  // ⚠️ THE DISK TRACK IS SAMPLED HERE, ON READ. It is stored at full fidelity (one point per
+  // ping), and feeding that to buildMovementDensity untouched would recreate the exact defect
+  // the distance rule exists to prevent: the aggregator counts points per cell, so the places
+  // teams STOOD STILL become the hottest cells and a movement heatmap reports the opposite of
+  // movement. The Firestore path samples on WRITE because a write costs quota; the disk path
+  // keeps the raw data and samples HERE instead. Both feed the aggregator the same shape,
+  // which is what keeps the two modes' heatmaps comparable rather than merely both present.
+  let points = await trackStore.read({ ownerUid: c.ownerUid, gameId: c.gameId, runId: c.runId })
+    .then((pts) => (pts
+      ? sampleTrackByDistance(pts).map((p) => ({ lat: p.lat, lng: p.lng }))
+      : null));
+
+  if (points === null) {
+    const trackSnap = await db
+      .collection(`users/${c.ownerUid}/games/${c.gameId}/runs/${c.runId}/locationTrack`)
+      .get();
+    points = trackSnap.docs.map((d) => {
+      const p = d.data() as { lat: number; lng: number };
+      return { lat: p.lat, lng: p.lng };
+    });
+  }
 
   return {
     title: game?.branding?.name ?? game?.title ?? 'RushPoint',

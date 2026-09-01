@@ -70,6 +70,11 @@ export const listGameShareLinks = callable<
   { gameId: string },
   { links: (GameShareLink & { refusal: ShareLinkRefusal | null })[] }
 >('listGameShareLinks');
+// Change what a link ALREADY SENT is allowed to do. Omitted flags are untouched.
+export const updateGameShareLink = callable<
+  { token: string; allowCopy?: boolean; revealAnswers?: boolean; allowLaunch?: boolean },
+  { link: GameShareLink }
+>('updateGameShareLink');
 export const revokeGameShareLink = callable<{ token: string }, { ok: boolean; revokedAt: string }>('revokeGameShareLink');
 export const getSharedGame = publicCallable<
   { token: string },
@@ -450,6 +455,59 @@ export const listAdminTemplates = callable<
   Record<string, never>,
   { games: Game[] }
 >('listAdminTemplates');
+
+// ─── Mission-bank overrides (change: admin-editable-mission-bank) ──────────────
+//
+// The smart-build mission bank itself is static content in `src/taskBank.ts`.
+// These three callables move only the DELTAS an admin has made from
+// /admin/mission-bank: one row per mission that has been edited or deleted.
+// All three are admin-only server-side (`assertAdmin`), and the two mutations
+// leave an auditLogs record — they change what every creator is offered.
+//
+// Reading the rows for the COMPOSER does not go through here: the merge happens
+// in the browser and reads the collection directly (see lib/missionBank.ts).
+// This list call exists for the admin's own editing view.
+export interface MissionBankOverrideRow {
+  key: string;
+  deleted?: boolean;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  difficulty?: number;
+  minAge?: number | null;
+  transitMinutes?: number | null;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export const listMissionBankOverrides = callable<
+  Record<string, never>,
+  { overrides: MissionBankOverrideRow[] }
+>('listMissionBankOverrides');
+
+// One call carries the WHOLE edited state of that mission. An absent optional
+// field means "leave the source value alone"; an explicit `null` on minAge /
+// transitMinutes means "clear it". The distinction is load-bearing because the
+// callable transport collapses `undefined` to `null` on the wire.
+export const setMissionBankOverride = callable<
+  {
+    key: string;
+    deleted?: boolean;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    difficulty?: number;
+    minAge?: number | null;
+    transitMinutes?: number | null;
+  },
+  { ok: boolean; key: string; override: MissionBankOverrideRow }
+>('setMissionBankOverride');
+
+/** Discard an edit and return the mission to the content authored in taskBank.ts. */
+export const clearMissionBankOverride = callable<
+  { key: string },
+  { ok: boolean; key: string; cleared: boolean }
+>('clearMissionBankOverride');
 
 // Contact messages sent from the marketing site (change: marketing-site). Admin only
 // and audit logged server-side: every document holds the name and email address of

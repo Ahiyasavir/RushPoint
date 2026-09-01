@@ -104,6 +104,17 @@ export const PRIVILEGED_CALLABLES = {
     + 'lets an operator purge the whole trash immediately.',
   backfillPublicTaskCoordinatesNow:
     'Bulk-rewrites documents in the world-readable publicTasks collection.',
+  setMissionBankOverride:
+    'Rewrites one mission of the smart-build bank for EVERY creator on the platform, or takes it '
+    + 'out of the pool entirely. It is a platform-wide content change made by one person outside '
+    + 'any review, and the previous content is gone the moment it is overwritten — the audit row '
+    + 'carrying the before/after state is the only way "who changed this mission, when, and from '
+    + 'what" stays answerable.',
+  clearMissionBankOverride:
+    'The counterpart of setMissionBankOverride: discards an edit and returns a mission to its '
+    + 'authored content, platform-wide. Reverting an edit somebody else made has to leave a trail '
+    + 'for '
+    + 'the same reason making it did.',
   createGameShareLink:
     'Mints a credential that lets anybody holding it read an UNPUBLISHED game in full. That is '
     + 'a disclosure of private content, and the only way to answer "who opened this game up, '
@@ -114,6 +125,11 @@ export const PRIVILEGED_CALLABLES = {
     + 'on the strength of a link the owner handed out. The owner is not present when it happens '
     + 'and it consumes whatever a launch costs them, so "who started this run on my game, when, '
     + 'and through which link" has to stay answerable afterwards.',
+  updateGameShareLink:
+    'Widens what a link somebody ALREADY HOLDS is allowed to do — up to and including '
+    + 'letting them start runs in the owner account. The grant is invisible from the outside '
+    + '(the URL does not change), so the record of who widened which link, and when, is the '
+    + 'only account of it that exists.',
   revokeGameShareLink:
     'The counterpart of createGameShareLink: it withdraws read access somebody may be relying '
     + 'on. Both ends of a disclosure decision belong in the same trail, or the trail only ever '

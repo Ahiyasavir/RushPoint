@@ -835,7 +835,8 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   edit here: **the last-fix state lives in an in-process `Map`** (`functions/src/lastFixStore.ts`,
   modelled on `rateLimitStore.ts`) — reading `teamLocations` to decide whether to write
   `teamLocations` would add back the read the change exists to remove, so this is now the **third**
-  module depending on the API running as ONE process (with `docCache.ts` and `rateLimitStore.ts`;
+  module depending on the API running as ONE process (with `docCache.ts`, `rateLimitStore.ts`,
+  `runs/locationFreshnessCache.ts` and `trackStore.ts`;
   see the single-process entry above). **Significance is judged against the fix's own accuracy
   radius**, not a fixed metre threshold — a stationary phone with 20 m accuracy jitters 10–30 m, so
   a flat 15 m rule would be defeated by noise; this mirrors what `safeZone.ts` already does for
@@ -855,6 +856,27 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   writes for runs that never open the heatmap — it needs a `Game` setting, Builder UI, i18n and a
   `BUILDER_EDITABLE_FIELDS` entry, which is why it was left out here rather than half-built
   (design D4 of `spark-tier-location-load`).
+- **The distance sampling above exists ONLY to buy Firestore write quota — so where writes are
+  free, it is skipped entirely** (change: `vps-track-storage`). `functions/src/trackStore.ts`
+  appends the track to the VPS's own disk as one JSONL file per run when `RUSHPOINT_TRACK_DIR` is
+  set, recording EVERY ping; `getRunHeatmap` prefers that file and falls back to the Firestore
+  `locationTrack` collection when there is none. **But full fidelity is a WRITE-side decision
+  only** — `getRunHeatmap` runs `sampleTrackByDistance` (per team) before the points reach
+  `buildMovementDensity`. Skipping that reproduces the idle-cell distortion above exactly: a
+  smoke run with disk storage on measured `pointCount` going 3 → 6 while the team stood still.
+  More data is better raw material and worse input to an aggregator that counts points per cell.
+  Four things about it are load-bearing:
+  **(1)** `read()` returns `null` for "no file" but `[]` for "file exists and is empty" — the
+  fallback turns on `null`, so conflating the two would make a fresh disk-mode run look like a
+  legacy Firestore one and re-read Firestore for it. **(2)** Appends are serialised through a
+  per-run promise chain, NOT left to `fs.appendFile`'s POSIX atomicity: that guarantee only holds
+  below `PIPE_BUF`, and one added field on a track point could cross it silently. **(3)** The env
+  var must stay UNSET under the emulator and real Cloud Functions — this is the FIFTH module
+  resting on the single-process precondition (with `docCache.ts`, `rateLimitStore.ts`,
+  `lastFixStore.ts`, `runs/locationFreshnessCache.ts`) and the only one whose multi-process failure
+  is **corruption** rather than staleness. `pruneRunPII` deletes the disk file alongside the
+  Firestore sweep, unconditionally, so the 90-day promise holds in whichever mode recorded the run.
+  Pinned by `scripts/test-track-store.ts`.
 - **`enforceRateLimit` no longer persists anything.** It used to run a Firestore transaction (1
   read + 1 WRITE) on EVERY rate-limited callable — ~1,516 of each in nine minutes of one 29-person
   run, against a 50,000-read / 20,000-write daily quota, which is how the 2026-08-26 exam run hit

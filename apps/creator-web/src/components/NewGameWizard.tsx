@@ -152,39 +152,47 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
                 recommended path and carries the accent alone; the other two are
                 neutral peers. On a phone they stack, on a wide screen they sit
                 side by side. */}
-            {/* Icon + title share a row, and the body is clamped to one line
-                (change: smart-build-wizard-no-scroll) — three stacked cards at
-                80-90px each is what pushed this screen into a scroll on a phone,
-                where the grid has no room to go to 3 columns. A card here only
-                needs to be recognisable, not read in full; the real explanation
-                lives in the questionnaire that follows. */}
+            {/* NOTHING here is truncated, on purpose. This used to `truncate` the
+                titles and `line-clamp-1` the bodies (change:
+                smart-build-wizard-no-scroll) to keep three stacked cards short
+                enough not to scroll on a phone. It worked on the phone and read
+                badly everywhere else: at three columns the widest card is ~200px,
+                so the recommended card rendered as "שנרכיב לכם מ…" with its body
+                cut mid-word — the creator was being asked to choose between three
+                options they could not finish reading.
+                The height is bought back from the COPY instead (i18n `smartBody`
+                / `guidedBody` are two clauses, not three), which shortens the
+                cards in every layout rather than hiding text in one of them.
+                `items-start` so a title that does wrap still aligns with its
+                icon; `break-words` so a long single word cannot overflow the
+                card instead of being clipped by it. */}
             <div className="grid gap-2 sm:grid-cols-3">
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'smart_build' })}
                 className="text-start rounded-xl border-2 border-rp-fire bg-rp-fire/5 p-2.5 hover:bg-rp-fire/10 transition-colors disabled:opacity-40">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-start gap-1.5">
                   <span className="text-lg leading-none shrink-0">🧠</span>
-                  <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.smartTitle}</span>
+                  <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{w.smartTitle}</span>
                   <span className="ms-auto shrink-0 rounded-full bg-rp-fire/15 text-ink-fire text-[12px] font-medium px-1.5 py-0.5">
                     {w.smartRecommended}
                   </span>
                 </div>
-                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.smartBody}</div>
+                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug break-words">{w.smartBody}</div>
               </button>
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'guided' })}
                 className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-start gap-1.5">
                   <span className="text-lg leading-none shrink-0">📖</span>
-                  <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.guidedTitle}</span>
+                  <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{w.guidedTitle}</span>
                 </div>
-                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.guidedBody}</div>
+                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug break-words">{w.guidedBody}</div>
               </button>
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'scratch' })}
                 className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-start gap-1.5">
                   <span className="text-lg leading-none shrink-0">📄</span>
-                  <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.scratchTitle}</span>
+                  <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{w.scratchTitle}</span>
                 </div>
-                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.scratchBody}</div>
+                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug break-words">{w.scratchBody}</div>
               </button>
             </div>
             <button type="button" onClick={() => dispatch({ type: 'back' })}

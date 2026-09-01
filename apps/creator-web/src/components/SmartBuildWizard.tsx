@@ -10,7 +10,7 @@
 // leaking into the product, and `bankTagLabel` returns '' for an unknown id
 // rather than falling back to the id itself, so that leak cannot happen even by
 // accident.
-import { useMemo, useReducer } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 // `ChipRow` and `RatingRow` are deliberately still here. The card grid is for
 // questions whose options are KINDS of thing — an occasion, an audience, a place,
 // a difficulty — where a picture carries meaning. `people` and `duration` are
@@ -40,7 +40,12 @@ import {
   smartBuildReducer,
 } from '../lib/smartBuildWizard';
 import { previewComposition, previewShape, type ComposerAnswers } from '../lib/composeGame';
-import { TASK_BANK } from '../taskBank';
+import type { TaskBankEntry } from '../taskBank';
+// The bank with the admin's edits applied (change: admin-editable-mission-bank).
+// `missionBankNow()` is whatever the last successful load produced — the
+// authored bank on a cold mount — so the first render never waits, and the
+// load below corrects the previews in place.
+import { loadMissionBank, missionBankNow } from '../lib/missionBank';
 
 export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKeys }: {
   busy?: boolean;
@@ -67,6 +72,15 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
 
   const a = state.answers;
 
+  // The previews below must draw from the SAME pool the composer will, or a
+  // creator is shown a plan built from missions an admin has since edited away.
+  const [bank, setBank] = useState<TaskBankEntry[]>(missionBankNow);
+  useEffect(() => {
+    let cancelled = false;
+    void loadMissionBank().then((entries) => { if (!cancelled) setBank(entries); });
+    return () => { cancelled = true; };
+  }, []);
+
   // Passed to BOTH the preview and (via onFinish) the composer — see the prop's
   // own note for why defaulting this to empty on one side only is a real bug.
   const recent = useMemo(
@@ -79,8 +93,8 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
   // number moves with every tap), and on the last screen it is the one fact
   // that makes the final tap an informed decision instead of an act of faith.
   const preview = useMemo(
-    () => previewComposition(TASK_BANK, smartBuildAnswers(state), recent),
-    [state, recent],
+    () => previewComposition(bank, smartBuildAnswers(state), recent),
+    [state, recent, bank],
   );
 
   // The SHAPE of that game — stages and empty slots — shown from the first
@@ -89,8 +103,8 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
   // watches accumulate is what they get. Carries no mission identity: the reveal
   // is where missions first appear.
   const shape = useMemo(
-    () => previewShape(TASK_BANK, smartBuildAnswers(state), state.seed, recent),
-    [state, recent],
+    () => previewShape(bank, smartBuildAnswers(state), state.seed, recent),
+    [state, recent, bank],
   );
 
   const tagLabel = (id: BankTagId): string => bankTagLabel(id, lang === 'en' ? 'en' : 'he');

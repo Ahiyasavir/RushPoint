@@ -249,11 +249,16 @@ check('D · the content scan reached a non zero number of fields', fieldsScanned
   // A user-visible label must therefore NOT be called `kind`, or it silently escapes this
   // check — which is exactly what happened when the playable demo first shipped its mission
   // labels under that name. Visible labels are `kindLabel`.
+  //
+  // `visual` joins them for the same reason (change: hero-photo-reveal): it selects which
+  // drawn illustration a hero-taste mission renders (e.g. `crosswalk-photo`) and is never
+  // shown to a visitor as text, so it must stay the same closed-enum value in both languages
+  // rather than being translated.
   // The `(\[\d+\])?` tail matters: tag arrays are visited element by element, so a path
   // reads `ideas[0].occasions[0]` and would not match an anchor that expects the key to be
   // last. Without it the exemption silently covered nothing for exactly the fields it was
   // added for.
-  const NOT_PROSE = /(^|\.)(src|poster|icon|kind|id|occasions|places)(\[\d+\])?$/;
+  const NOT_PROSE = /(^|\.)(src|poster|icon|kind|id|occasions|places|visual)(\[\d+\])?$/;
 
   for (const file of pageFiles) {
     const language = file.split('.')[1] as Language;

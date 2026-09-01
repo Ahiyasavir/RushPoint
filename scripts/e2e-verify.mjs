@@ -3969,6 +3969,14 @@ async function main() {
       await pH.call('updateLocation', { ...CH, lat, lng });
     }
 
+    // ⚠️ THIS SCENARIO IS ALSO THE FIRESTORE-FALLBACK GUARD (change: vps-track-storage).
+    // getRunHeatmap now prefers a VPS-local disk track and falls back to the Firestore
+    // locationTrack collection when there is no disk file. The emulator has no stable local
+    // disk and leaves RUSHPOINT_TRACK_DIR unset, so everything asserted here is the FALLBACK
+    // path — which is exactly what must keep working for runs recorded before that shipped and
+    // for any deployment without disk storage. If this scenario ever goes green because the
+    // disk path silently took over, the fallback has stopped being covered.
+    //
     // Owner reads the density; non-owner is refused.
     const heat = await creator.call('getRunHeatmap', { code: cH });
     check('heatmap: walked track retained → one point per ~100m travelled', (heat?.pointCount ?? 0) >= 3, JSON.stringify(heat?.pointCount));
@@ -7691,6 +7699,112 @@ async function main() {
   // A template is an ordinary Game flagged isTemplate: true, owned by whichever
   // admin authored it — the admin edits it with the same updateGame every
   // creator uses. These callables project/instantiate it for everyone else.
+  // ── Mission-bank overrides (change: admin-editable-mission-bank) ────────────
+  //
+  // The smart-build mission bank is NOT stored here: it is a static array in
+  // creator-web (`src/taskBank.ts`) and the composer merges it in the browser.
+  // What the server owns is the DELTA — one `missionBankOverrides/{key}` document
+  // per mission an admin has edited or removed. So the assertions below are about
+  // the three things the server is actually responsible for: who may write these
+  // rows, that a write replaces rather than accumulates, and that `null` really
+  // clears an optional field instead of being stored as a malformed value.
+  await scenario('mission bank overrides (admin edit · replace · clear)', async () => {
+    const key = `e2e-bank-${Date.now()}`;
+
+    // 1. AUTHZ. These rows decide what every creator on the platform is offered,
+    //    so an ordinary creator must not be able to read or write them, and a
+    //    participant certainly must not.
+    await expectError('listMissionBankOverrides: a non-admin creator is denied',
+      creator.call('listMissionBankOverrides', {}),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('setMissionBankOverride: a non-admin creator is denied',
+      creator.call('setMissionBankOverride', { key, title: 'nope' }),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('clearMissionBankOverride: a non-admin creator is denied',
+      creator.call('clearMissionBankOverride', { key }),
+      { codeIn: ['functions/permission-denied'] });
+
+    // 2. A row with no usable content is refused rather than stored: an empty
+    //    override is indistinguishable from an unedited mission to the merge,
+    //    while still showing as "edited" in the admin list.
+    await expectError('setMissionBankOverride: a row with nothing to store is refused',
+      platformAdmin.call('setMissionBankOverride', { key }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('setMissionBankOverride: a missing key is refused',
+      platformAdmin.call('setMissionBankOverride', { title: 'x' }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('setMissionBankOverride: a key that would address a subcollection is refused',
+      platformAdmin.call('setMissionBankOverride', { key: 'a/b', title: 'x' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // 3. A real edit round-trips.
+    const wrote = await platformAdmin.call('setMissionBankOverride', {
+      key, title: 'משימה ערוכה', description: 'הוראות חדשות',
+      tags: ['camera', 'teamwork'], difficulty: 8, minAge: 12, transitMinutes: 4,
+    });
+    check('setMissionBankOverride: stores the edit',
+      wrote?.ok === true && wrote?.override?.title === 'משימה ערוכה' && wrote?.override?.difficulty === 8,
+      JSON.stringify(wrote?.override));
+    check('setMissionBankOverride: records who edited it',
+      typeof wrote?.override?.updatedBy === 'string' && wrote.override.updatedBy.length > 0,
+      String(wrote?.override?.updatedBy));
+
+    const listed = await platformAdmin.call('listMissionBankOverrides', {});
+    const row = (listed?.overrides ?? []).find((o) => o.key === key);
+    check('listMissionBankOverrides: the edit is in the admin list', !!row, JSON.stringify(listed?.overrides?.length));
+    check('listMissionBankOverrides: the key is the document id',
+      row?.key === key, String(row?.key));
+
+    // 4. THE REPLACE RULE. One call carries the WHOLE edited state of a mission,
+    //    so a field the admin cleared has to DISAPPEAR from the document. A merge
+    //    write would leave the old minAge alive under a form that no longer shows
+    //    it — the mission would keep an age floor nobody could see or remove.
+    await platformAdmin.call('setMissionBankOverride', {
+      key, title: 'משימה ערוכה', tags: ['camera'], difficulty: 3,
+      minAge: null, transitMinutes: null,
+    });
+    const afterClear = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('setMissionBankOverride: an explicit null CLEARS the optional field',
+      afterClear?.minAge === null && afterClear?.transitMinutes === null,
+      JSON.stringify({ a: afterClear?.minAge, t: afterClear?.transitMinutes }));
+    check('setMissionBankOverride: a field left out of the new write is gone, not merged',
+      afterClear?.description === undefined, String(afterClear?.description));
+    check('setMissionBankOverride: the new values are stored',
+      afterClear?.difficulty === 3 && JSON.stringify(afterClear?.tags) === JSON.stringify(['camera']),
+      JSON.stringify({ d: afterClear?.difficulty, t: afterClear?.tags }));
+
+    // 5. Out-of-range values are dropped, not stored — the merge would ignore
+    //    them anyway, and a stored 99 would render in the admin form as if real.
+    await platformAdmin.call('setMissionBankOverride', { key, title: 'ok', difficulty: 99, minAge: -5 });
+    const bounded = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('setMissionBankOverride: an out-of-range difficulty is not stored',
+      bounded?.difficulty === undefined, String(bounded?.difficulty));
+    check('setMissionBankOverride: a negative minAge is not stored',
+      bounded?.minAge === undefined, String(bounded?.minAge));
+
+    // 6. A deletion is just a row with `deleted: true` — the mission itself still
+    //    exists in the bundle, which is what makes "put it back" one call.
+    await platformAdmin.call('setMissionBankOverride', { key, deleted: true });
+    const deleted = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('setMissionBankOverride: a deletion is stored as a flag',
+      deleted?.deleted === true, JSON.stringify(deleted));
+
+    // 7. Reset. Clearing an override that is already absent is a no-op, not an
+    //    error: two admins pressing reset is not a conflict.
+    const cleared = await platformAdmin.call('clearMissionBankOverride', { key });
+    check('clearMissionBankOverride: removes the row', cleared?.cleared === true, JSON.stringify(cleared));
+    const gone = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('clearMissionBankOverride: the mission is back to its authored content',
+      gone === undefined, JSON.stringify(gone));
+    const again = await platformAdmin.call('clearMissionBankOverride', { key });
+    check('clearMissionBankOverride: clearing an absent row is a no-op',
+      again?.ok === true && again?.cleared === false, JSON.stringify(again));
+  });
+
   await scenario('game templates', async () => {
     const unlockTask = (id, over = {}) => ({
       id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
@@ -11241,6 +11355,46 @@ async function main() {
     await expectError('an unauthenticated caller cannot start a run at all',
       linkVisitor.call('launchSharedRun', { token: launchToken }),
       { codeIn: ['functions/unauthenticated', 'functions/not-found'] });
+
+    // ---- Changing what an EXISTING link allows (updateGameShareLink) ---------
+    // A link is a URL somebody already holds. Without this, widening it means
+    // minting a second one and chasing whoever has the first, which in practice
+    // means creators grant everything up front -- the opposite of an opt-in.
+    const editable = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: false });
+    const editToken = editable?.link?.token;
+    check('a fresh link starts with launching refused',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowLaunch === false);
+
+    await creator.call('updateGameShareLink', { token: editToken, allowLaunch: true });
+    check('the owner can grant launching on a link already sent',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowLaunch === true);
+    check('...and the untouched permissions are left alone',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowCopy === false);
+
+    // An omitted flag means "not changing", never "set to false" -- the transport
+    // sends null for both undefined and an absent key.
+    await creator.call('updateGameShareLink', { token: editToken, revealAnswers: true });
+    const afterPartial = await linkVisitor.call('getSharedGame', { token: editToken });
+    check('a partial update does not silently revoke the other permissions',
+      afterPartial?.allowLaunch === true && afterPartial?.game?.answersRevealed === true,
+      JSON.stringify({ launch: afterPartial?.allowLaunch, answers: afterPartial?.game?.answersRevealed }));
+
+    await creator.call('updateGameShareLink', { token: editToken, allowLaunch: false });
+    check('a granted permission can be taken back',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowLaunch === false);
+    await expectError('a link whose launch permission was withdrawn refuses to start a run',
+      copier.call('launchSharedRun', { token: editToken }),
+      { codeIn: ['functions/not-found'] });
+
+    await expectError('a stranger cannot change what someone else link allows',
+      copier.call('updateGameShareLink', { token: editToken, allowLaunch: true }),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('an update naming no permission at all is refused',
+      creator.call('updateGameShareLink', { token: editToken }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('an update on a malformed token is refused',
+      creator.call('updateGameShareLink', { token: 'nope', allowLaunch: true }),
+      { codeIn: ['functions/invalid-argument'] });
 
     // The owner-side callables are owner-only at the door.
     await expectError('a stranger cannot mint a link for a game they do not own',

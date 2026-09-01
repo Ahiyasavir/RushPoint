@@ -53,6 +53,7 @@ import {
 export const AUDIT_SHARE_LINK_CREATED = 'game_share_link_created';
 export const AUDIT_SHARE_LINK_REVOKED = 'game_share_link_revoked';
 export const AUDIT_SHARE_LINK_LAUNCH  = 'game_share_link_run_launched';
+export const AUDIT_SHARE_LINK_UPDATED = 'game_share_link_updated';
 
 /** How many live links one game may hold. Bounded so the list stays reviewable. */
 export const MAX_SHARE_LINKS_PER_GAME = 20;
@@ -210,6 +211,65 @@ export const listGameShareLinks = loggedCallable('listGameShareLinks', async (da
     .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
 
   return { links };
+});
+
+
+// ─── updateGameShareLink ──────────────────────────────────────────────────────
+//
+// Change what an EXISTING link allows, without minting a new one.
+//
+// Not a convenience: a link is a URL somebody already has, often already sent.
+// Without this, "let them also start a run" means creating a second link and
+// chasing down everyone who holds the first — so the real behaviour would be
+// creators leaving the wider permission on from the start, which is the opposite
+// of what the opt-in was for. Every existing link also predates `allowLaunch` and
+// would otherwise be stuck without it forever.
+//
+// Only the three permissions are writable. The owner, the game, the token, the
+// counters and the timestamps are not: this must not become a second way to point
+// a live link at a different game.
+
+export const updateGameShareLink = loggedCallable('updateGameShareLink', async (data, context) => {
+  const uid = requireAuth(context);
+  const { token, allowCopy, revealAnswers, allowLaunch } = (data ?? {}) as {
+    token?: string; allowCopy?: boolean; revealAnswers?: boolean; allowLaunch?: boolean;
+  };
+  if (!isValidShareToken(token)) {
+    throw new functions.https.HttpsError('invalid-argument', 'token required');
+  }
+
+  const ref = db.doc(shareLinkPath(token));
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Share link not found');
+  const link = snap.data() as GameShareLink;
+  if (link.ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your share link');
+  }
+
+  // An omitted flag leaves that permission alone — the transport sends `null` for
+  // both `undefined` and an absent key, so anything that is not exactly a boolean
+  // means "not being changed", never "set to false".
+  const patch: Partial<GameShareLink> = {};
+  if (typeof allowCopy === 'boolean') patch.allowCopy = allowCopy;
+  if (typeof revealAnswers === 'boolean') patch.revealAnswers = revealAnswers;
+  if (typeof allowLaunch === 'boolean') patch.allowLaunch = allowLaunch;
+  if (Object.keys(patch).length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'nothing to change');
+  }
+
+  await ref.update(patch);
+
+  // Widening what a live link may do is a disclosure decision, exactly like
+  // creating one, so it belongs in the same trail.
+  await auditBestEffort({
+    operatorId: uid,
+    actionType: AUDIT_SHARE_LINK_UPDATED,
+    gameId: link.gameId,
+    newValue: Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(' '),
+    reason: 'share link permissions changed by owner',
+  });
+
+  return { link: { ...link, ...patch } };
 });
 
 

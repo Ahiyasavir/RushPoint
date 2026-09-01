@@ -282,6 +282,26 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── MISSION BANK OVERRIDES ───────────────────────────────────────────────
+    //    Admin edits to the smart-build mission bank (admin-editable-mission-bank).
+    //    One document per mission the admin has edited or deleted; absent for every
+    //    mission still at the content authored in creator-web's taskBank.ts.
+    //
+    //    READ is open to any signed-in user because the composer runs CLIENT-side:
+    //    "compose one for me" merges these rows over the static bank in the browser,
+    //    so every creator has to be able to read them. Nothing here is secret — it is
+    //    the same mission content the composer would hand them anyway.
+    //
+    //    WRITE is closed outright. These rows decide what EVERY creator is offered,
+    //    so they are admin-only through setMissionBankOverride /
+    //    clearMissionBankOverride, which enforce the claim server-side and leave an
+    //    auditLogs record. A rules-level admin check would be a second, weaker copy
+    //    of that boundary.
+    match /missionBankOverrides/{missionKey} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
     // ── RATE-LIMIT COUNTERS ──────────────────────────────────────────────────
     //    Per-uid callable rate-limit windows (callable-rate-limiting, #19).
     //    Server-write-only — clients can neither read nor write them.

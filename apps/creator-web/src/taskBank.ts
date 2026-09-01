@@ -444,6 +444,190 @@
 // there. When a young band comes out thin, reach for what the group itself can
 // supply before reaching for what the venue might.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES 33+ — added after a research pass (2026-09-01) that measured this bank
+// against the design literature it had never been checked against: escape-room
+// design (Nicholson's "Ask Why"; the Codex's 13 rules), puzzle-hunt construction
+// (MIT Mystery Hunt), cooperative board-game design (the quarterbacking
+// problem), pervasive and urban games (the Situationist dérive), heritage
+// interpretation (Tilden), orienteering course setting, and the two largest
+// public mission libraries (GooseChase, GISH).
+//
+// Rules 1-32 were each taught by one rejected mission. These were taught by
+// measuring the WHOLE bank against an outside standard, so each names the count
+// that indicts us rather than a single draft. Same contract though: a rule that
+// does not change what you would write does not belong here.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ─── 33. The one-person test: a mission one player can finish alone is not a
+//         team mission, it is a solo mission with an audience ─────────────────
+//
+// Cooperative game design has a name for what this causes — QUARTERBACKING: one
+// confident player takes over and everybody else quietly stops participating. It
+// is the defining defect of co-op design, and this bank is full of it.
+// "Photograph X" is one person with a phone. "What is the answer" is whoever
+// knows. "Record a video explaining Y" is whoever talks. The rest stand there.
+//
+// This explains the team-building research better than "some people are shy"
+// does: about half of participants report forced-fun activities as uncomfortable,
+// and the ones who disengage are disproportionately the analytical and the
+// introverted. They are not refusing to play. They have no job.
+//
+// THE TEST: can one member complete this alone while the others watch? If yes,
+// it is not a team mission.
+//
+// Four fixes that actually work, strongest first:
+//   • SPLIT THE INFORMATION — nobody can direct what they cannot see. This is
+//     why Hanabi cannot be quarterbacked at all. `silent-briefing` already does
+//     it and is the strongest team mission in the bank.
+//   • REQUIRE CONSENSUS as the gate, explicitly not a majority vote —
+//     `team-decision-drill`.
+//   • REQUIRE SIMULTANEITY so nobody can be delegated to — `human-letter`,
+//     `everyone-hidden`, `open-everyone-airborne`.
+//   • REQUIRE A DISTINCT CONTRIBUTION per member (one word each, one object
+//     each) so a missing member is visible in the result.
+// A mission that takes none of the four can still be a fine quick beat — it just
+// must not be counted as teamwork content when the bank is audited.
+//
+// ─── 34. A located mission PROVOKES curiosity about the place; it does not TEST
+//         you on it ─────────────────────────────────────────────────────────
+//
+// Two independent sources, one claim. Freeman Tilden, who founded heritage
+// interpretation: the chief aim is not instruction, but provocation. Scott
+// Nicholson's escape-room rule: ask why this puzzle would exist in this world at
+// all.
+//
+// A rejected design pass for this bank proposed "find the asset number stamped
+// on the lamp post and type it". Perfectly location-specific, perfectly
+// verifiable, and nobody would ever want that number — data entry wearing a
+// mission's clothes. Once you look for the shape it is everywhere: it is what
+// separates `count-the-shops` (a chore with a checkable answer) from
+// `school-then-and-now` (which changes what you see when you look up).
+//
+// The check is NOT "is the answer specific to this place". It is "does doing
+// this make the place more interesting than it was a minute ago". A mission that
+// only proves you stood somewhere is a geofence with extra typing.
+//
+// ─── 35. The stranger is a CO-STAR, not an audience ──────────────────────────
+//
+// The bank has a healthy number of stranger missions and every one of them casts
+// the stranger the same way: they watch (`youth-breaking-news`), they are
+// questioned (`thirty-second-interview`), or they are the subject
+// (`honest-compliment`). The stranger is a prop with a pulse.
+//
+// The best-loved missions in the largest public library run the other way — the
+// stranger DOES something with the team: gives a piggyback, races them 100m,
+// gets taught a dance move the team invented thirty seconds ago, joins the team
+// photo as though they had been on the team all along. That is the difference
+// between a performance and a meeting, and the meeting is what people are still
+// telling each other about a week later.
+//
+// Writing a stranger mission, ask what the stranger GETS TO DO. If the honest
+// answer is "stand there", rewrite it. (Rule 39 still applies — a stranger
+// mission is the highest social-risk thing this bank asks for.)
+//
+// ─── 36. "Find something genuinely rare" is a whole category, and it has to be
+//         PRICED ────────────────────────────────────────────────────────────
+//
+// The bank has zero of these. A rare-find mission — a coin from a named year, a
+// stranger who shares a teammate's name, two people who could pass for twins —
+// costs nothing to prepare, plays at any venue, verifies with one photo, and
+// produces the single best moment in a hunt: the shout when somebody actually
+// finds it. Luck plus hustle is a different engine from anything else here.
+//
+// It only works if the scoreboard admits it was harder. `pointValue` currently
+// runs 50-170 with almost everything between 90 and 130 — a spread too flat to
+// mean anything. The reference library prices its rarest find at 2.5x baseline.
+// A rare find that scores like a group selfie teaches players that hustling was
+// pointless.
+//
+// Rule 31 still binds: the thing has to be plausibly out there. "A coin from a
+// year the CREATOR picks" is safe precisely because the creator picks the year;
+// "a red vintage motorbike" is not.
+//
+// ─── 37. Give the team a DECISION, not only an instruction — and know which
+//         decisions this product can actually carry ──────────────────────────
+//
+// "A game is a series of interesting decisions" (Meier). Every mission in this
+// bank has exactly one path: read it, do it, submit. At no point does a team
+// choose, trade something off, or get to be wrong about STRATEGY rather than
+// execution.
+//
+// The obvious fix is the Amazing Race DETOUR — two missions, one physical and
+// one mental, of which a team may complete only one. The platform has the
+// mechanic (`Stage.exclusiveGroups`) and the composer deliberately does not emit
+// it: composeGame.ts lists "no exclusiveGroups" among the invariants that make
+// its output launch-valid by construction. So a Detour is a COMPOSER change with
+// its own validator work — NOT a pair of entries somebody adds to this file and
+// hopes will be paired. See rule 16 before designing around it.
+//
+// What a single entry CAN carry today, and what new missions should reach for:
+//   • a constraint the team CHOOSES and commits to before starting, where the
+//     harder choice is worth more and the copy says so;
+//   • a choice of target among several the creator listed;
+//   • a "bank it or keep going" beat, where continuing risks the time already
+//     spent.
+// The choice must be made BEFORE the outcome is known. Otherwise it is not a
+// decision, it is a preference.
+//
+// ─── 38. Home is a venue, not a fallback ─────────────────────────────────────
+//
+// This product is not only a city race. A family in a living room on a rainy
+// afternoon, a birthday party in a flat, siblings in a back yard — a real
+// audience running real events, and a mission written for them is a FIRST-CLASS
+// mission, not a degraded outdoor one. Sixteen of eighty-nine entries carry
+// `home`, and most of those arrived as birthday-party content rather than as a
+// considered band of its own.
+//
+// What a home mission needs, on top of every other rule here:
+//   • `home`, plus `fromAnywhere` (there is nowhere to walk to), plus honest
+//     audience tags — a living-room game is usually `kids` AND `mixed`, because
+//     the adults are playing too, not supervising.
+//   • Ingredients a home certainly holds — rule 31 is STRICTER indoors, because
+//     a flat has no fallback: a blanket, cutlery, a book, a phone torch, a
+//     chair, a mirror. Never "something a passer-by is carrying".
+//   • No assumed crowd, shop, sign or street. `crowded`, `cityCenter` and `mall`
+//     are not substitutes for `home`, and a mission tagged both usually means
+//     neither was thought about.
+//   • Noise, mess and breakage a flat can survive (rule 22 covers the byproduct;
+//     indoors it also covers the neighbours).
+// Rule 32 already found the shape that travels best: missions made of the
+// PLAYERS rather than of the venue work indoors and outdoors alike.
+//
+// ─── 39. Social risk needs a ramp, and the ramp belongs to the composer ──────
+//
+// Graduated-exposure research is unambiguous: people will attempt an
+// uncomfortable social act far more readily after two smaller ones, and refuse
+// it cold. Our entries carry no notion of social risk at all, so the composer
+// can open a game with "walk up to a stranger" — the mission most likely to be
+// silently skipped, placed exactly where a refusal sours everything after it.
+//
+// This is a composer-level gap, recorded here because the MISSION AUTHOR is the
+// one who knows the answer: when an entry asks a player to approach strangers or
+// to be looked at by them, say so in its comment. Until the composer scores it
+// the ordering has to be done by whoever curates a template — but the
+// information has to exist before anything can use it.
+//
+// ─── 40. The team must KNOW it is right before it submits, and the aha has to
+//         outweigh the grind ─────────────────────────────────────────────────
+//
+// Two rules from puzzle construction that this bank has so far satisfied by luck
+// rather than on purpose.
+//
+// SELF-VALIDATING: a solved puzzle should FEEL solved. If a team can enter a
+// plausible answer with no idea whether it is the one, every wrong attempt reads
+// as "the game is broken" rather than "we are not there yet". Numbers are the
+// worst offenders — "how many benches" has no click to it, which is why the
+// counting missions need generous tolerances and pinned wording (rule 8). A
+// word, a name, or a code read off a real object validates itself.
+//
+// AHA OVER GRIND: a puzzle is one insight plus some labour, and the fun is
+// entirely in the insight. Once a team knows HOW, finishing should take about
+// five minutes; past that the mission is charging them for work they have
+// already proved they can do. If the method is obvious and the remaining ten
+// minutes are execution, it is not a puzzle — price and tag it as the errand it
+// is.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -664,7 +848,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-winning-rap',
     sourceTemplateKey: 'youth-missions',
-    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'medium'],
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium'],
     difficulty: 5,
     build: () => anywhere({
       title: 'ראפ מנצח',
@@ -678,7 +862,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'youth-great-escape',
     sourceTemplateKey: 'youth-missions',
     family: 'freeze-frame',
-    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium'],
+    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium'],
     difficulty: 5,
     build: () => anywhere({
       title: 'המילוט הגדול',
@@ -696,7 +880,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // picked first. Everything that frames a literal start line is sited by
     // nature, so the placeless opener has to be a mission that works as an
     // icebreaker — which a human pyramid does better than most.
-    tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school'],
+    tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school'],
     difficulty: 5,
     build: () => anywhere({
       title: 'פירמידה אנושית',
@@ -710,7 +894,12 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-find-place-one',
     sourceTemplateKey: 'youth-missions',
-    family: 'photo-navigate',
+    // No longer familied with its old twin. The two were the SAME mission with
+    // the word "first"/"second" swapped, which is what `family` is for — but the
+    // twin has been rebuilt into `photo-vantage-point`, a genuinely different
+    // act (deduce where the CAMERA stood, not where the subject is). Two
+    // different mechanics must not be mutually exclusive: pairing them adds
+    // variety rather than repeating it (rule 12).
     tags: ['thinking', 'action', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach'],
     difficulty: 5,
     // A real leg of the route: the whole mission is getting there.
@@ -769,18 +958,42 @@ export const TASK_BANK: TaskBankEntry[] = [
   // which means going there and shooting it beforehand — real preparation, so
   // `needsSetup` (rule 18/30), not `noPrep` because there is no prop involved.
   {
-    key: 'youth-find-place-two',
+    // Was `youth-find-place-two`, which carried the SAME sentence as
+    // `youth-find-place-one` with "first" changed to "second" — two bank slots
+    // for one mission, held apart only by a `family`. Rebuilt into the mission
+    // the pair was pretending to be: the attached photo is shot FROM the target
+    // rather than OF it, so the team has to reason backwards from what is
+    // visible and at what angle to where the camera must have stood. Same
+    // geofence verification, a genuinely different act (rule 12), and it is
+    // harder than the original — hence difficulty 7 and `hard`.
+    key: 'photo-vantage-point',
     sourceTemplateKey: 'youth-missions',
-    family: 'photo-navigate',
-    tags: ['thinking', 'action', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach'],
-    difficulty: 5,
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor',
+      'youth', 'adults', 'corporate', 'mixed', 'hard',
+      'neighborhood', 'cityCenter', 'park', 'forest', 'beach', 'historic'],
+    difficulty: 7,
     transitMinutes: 8,
-    setup: [PLACE_IT, ATTACH_PHOTO],
+    setup: [
+      PLACE_IT,
+      {
+        // NOT the shared ATTACH_PHOTO: its prompt asks for a photo OF the spot,
+        // "one the team can recognise" — the exact opposite of what this mission
+        // needs. A step pointing at the right field with the wrong instruction
+        // is how `youth-hardest-question` shipped broken (rule 26).
+        field: 'media',
+        required: true,
+        prompt: 'עמדו בנקודה שסימנתם וצלמו משם החוצה, אל מה שרואים מהמקום. אל תצלמו את המקום עצמו.\n\nStand on the pin and shoot outwards, at the view FROM the spot. Do not photograph the spot itself.',
+      },
+    ],
     build: () => sited({
-      title: 'מצאו את המקום השני',
-      description: 'הביטו היטב בתמונה שצורפה למשימה, ונווטו אל המקום שהיא מציגה.',
+      title: 'מאיפה צולמה התמונה',
+      description: 'התמונה שצורפה לא מראה לאן ללכת. היא צולמה מהנקודה שאליה אתם צריכים להגיע. הסתכלו מה נראה בה, מה קרוב ומה רחוק ומאיזו זווית, והבינו איפה עמד מי שצילם. לכו לשם.',
       type: 'geofence',
-      estimatedMinutes: 5,
+      difficulty: 7,
+      estimatedMinutes: 7,
+      pointValue: 160,
+      hint: 'רמז: התחילו מהדבר הרחוק ביותר בתמונה, כי הוא מצמצם את הכיוון. אחר כך זוזו עד שהקרוב והרחוק מסתדרים זה מול זה בדיוק כמו בתמונה.',
+      hintPenalty: 25,
       // A public spot, not a shared object — any number of teams can arrive.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
@@ -812,7 +1025,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The placeless finale, for the same reason the pyramid is the placeless
     // opener. Building something together and photographing it is a real closing
     // beat, and it is the last mission of the source template's own final stage.
-    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school'],
+    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school'],
     difficulty: 5,
     build: () => anywhere({
       title: 'גאווה ישראלית',
@@ -912,12 +1125,19 @@ export const TASK_BANK: TaskBankEntry[] = [
     // opener, not despite one. Narrowed to the audience it actually suits.
     key: 'open-team-name',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere',
+    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'easy'],
     difficulty: 2,
     build: () => anywhere({
       title: 'שם וקריאת קרב',
-      description: 'בחרו שם לקבוצה והמציאו קריאת קרב באורך חמש שניות. צלמו את כולכם צועקים אותה ביחד. ככל שתתביישו פחות, כך ייצא טוב יותר.',
+      // Rule 33: the old version was "choose a name and a battle cry", which one
+      // loud member supplies while everyone else shouts along. Now every member
+      // contributes a word and the NAME contains all of them, so a member who
+      // did not take part is visible in the result rather than merely quiet in
+      // it. The old closing nudge ("the less embarrassed you are, the better it
+      // comes out") was also dropped: it pressures exactly the people the
+      // team-building research says already opt out.
+      description: 'בחרו שם לקבוצה כך: כל אחד מכם אומר מילה אחת, ומהמילים האלה אתם מרכיבים את השם. אחר כך המציאו קריאת קרב של חמש שניות, וצלמו את כולכם צועקים אותה יחד.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 3,
@@ -929,12 +1149,15 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The adults/corporate placeless opener open-team-name can no longer cover.
     key: 'open-team-motto',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere',
+    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
       'adults', 'corporate', 'mixed', 'easy'],
     difficulty: 2,
     build: () => anywhere({
       title: 'המוטו של הצוות',
-      description: 'שלושים שניות: הסכימו על משפט אחד שמתאר את הצוות שלכם היום, ואמרו אותו ביחד מול המצלמה. רציני, מצחיק או שניהם, זו החלטה שלכם.',
+      // Rule 33, same fix as `open-team-name`: "agree on one sentence" is
+      // something one person writes and the rest nod at. Sourcing the sentence
+      // from a word per member makes the agreement real work.
+      description: 'כל אחד מכם אומר מילה אחת שמתארת את הצוות היום. עכשיו הרכיבו מהמילים משפט אחד שכולכם עומדים מאחוריו, ואמרו אותו יחד מול המצלמה. רציני, מצחיק או שניהם, זו ההחלטה שלכם.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 3,
@@ -945,7 +1168,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'open-everyone-airborne',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+    tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'easy'],
     difficulty: 2,
     build: () => anywhere({
@@ -963,7 +1186,10 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'finish-one-word-each',
     sourceTemplateKey: 'authored',
-    tags: ['finish', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere',
+    // Same go-around-the-circle mechanic as `finish-what-we-didnt-know`, one
+    // word instead of one sentence — a game must never close on both (rule 12).
+    family: 'closing-round',
+    tags: ['finish', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
     difficulty: 3,
     build: () => anywhere({
@@ -979,7 +1205,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'finish-podium',
     sourceTemplateKey: 'authored',
-    tags: ['finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+    tags: ['finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'medium'],
     difficulty: 4,
     build: () => anywhere({
@@ -1017,7 +1243,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'human-letter',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere',
+    tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'youth', 'kids', 'corporate', 'medium'],
     difficulty: 4,
     build: () => anywhere({
@@ -1040,7 +1266,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // creator prep, so no `needsSetup`.
     key: 'silent-briefing',
     sourceTemplateKey: 'authored',
-    tags: ['teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere',
+    tags: ['teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 6,
     build: () => anywhere({
@@ -1096,7 +1322,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו רמז כללי לאזור, לא את המקום המדויק. אין סיכה במפה. לאירוע גדול, הכינו כמה מפתחות במקומות שונים.\n\nWrite a general area clue, not the exact spot. There\'s no pin on the map. For a big event, prepare several keys at different spots.',
+        // Two parts, because orienteering course setting says a findable point
+        // needs an ATTACK POINT (an obvious thing you navigate to first) and a
+        // COLLECTING FEATURE (something big just before it that says "you are
+        // close"). "Write a general area clue" produced neither, and a team with
+        // only an area either sweeps it or gives up.
+        prompt: 'רמז בשני חלקים: לאן ללכת קודם (משהו בולט), ומה יגיד להם שהם קרובים. לא המקום המדויק.\n\nA two part clue: where to head first (something obvious), and what tells them they are close. Not the exact spot.',
       },
       {
         field: 'description',
@@ -1125,7 +1356,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'ad-for-nothing',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+    tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 5,
     build: () => anywhere({
@@ -1142,7 +1373,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'frozen-genre',
     sourceTemplateKey: 'authored',
     family: 'freeze-frame',
-    tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+    tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'youth', 'adults', 'medium'],
     difficulty: 5,
     build: () => anywhere({
@@ -1164,7 +1395,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // effect is not.
     key: 'chain-reaction',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere',
+    tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 6,
     build: () => anywhere({
@@ -1415,7 +1646,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'one-colour-five-things',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
-    tags: ['camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere',
+    tags: ['camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home',
       'mall', 'office', 'school', 'neighborhood',
       'mixed', 'kids', 'youth', 'corporate', 'easy'],
     difficulty: 3,
@@ -1466,7 +1697,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'oldest-thing-here',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+    tags: ['thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
       'office', 'school', 'mall', 'neighborhood', 'cityCenter',
       'corporate', 'adults', 'mixed', 'medium', 'historic', 'educational'],
     difficulty: 4,
@@ -1494,7 +1725,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // 13 year old (or an adult) will actually commit to on camera.
     key: 'hero-walk',
     sourceTemplateKey: 'authored',
-    tags: ['action', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+    tags: ['action', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
       'park', 'school', 'forest', 'beach', 'neighborhood',
       'kids', 'youth', 'mixed', 'easy'],
     difficulty: 2,
@@ -1512,7 +1743,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'rainbow-hunt',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
-    tags: ['camera', 'teamwork', 'action', 'noPrep', 'fromAnywhere',
+    tags: ['camera', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home',
       'park', 'school', 'forest', 'beach', 'neighborhood',
       'kids', 'mixed', 'easy'],
     difficulty: 3,
@@ -1572,7 +1803,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'two-truths-one-lie',
     sourceTemplateKey: 'authored',
-    tags: ['teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'indoor',
+    tags: ['teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'office', 'mall', 'park', 'beach',
       'corporate', 'adults', 'youth', 'mixed', 'easy'],
     difficulty: 3,
@@ -1764,7 +1995,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'school-then-and-now',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere',
+    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
       'school', 'neighborhood', 'cityCenter',
       'kids', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'historic', 'educational'],
     difficulty: 4,
@@ -1783,7 +2014,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'forced-perspective',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere',
+    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
       'park', 'school', 'office', 'beach', 'mall', 'cityCenter',
       'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 4,
@@ -1800,7 +2031,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'everyone-hidden',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere',
+    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
       'park', 'forest', 'beach', 'neighborhood', 'school',
       'mixed', 'kids', 'youth', 'medium'],
     difficulty: 5,
@@ -1922,7 +2153,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'team-decision-drill',
     sourceTemplateKey: 'authored',
-    tags: ['teamwork', 'thinking', 'needsSetup', 'fromAnywhere', 'indoor',
+    tags: ['teamwork', 'thinking', 'needsSetup', 'fromAnywhere', 'home', 'indoor',
       'office', 'mall', 'park', 'school',
       'corporate', 'adults', 'medium', 'educational'],
     difficulty: 5,
@@ -2087,7 +2318,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // could not skip it any longer.
     key: 'best-moment-so-far',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
     difficulty: 2,
     build: () => anywhere({
@@ -2112,7 +2343,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // seconds of silence and call it done" from being the easy way out.
     key: 'soundscape',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'creative', 'noPrep', 'fromAnywhere',
+    tags: ['thinking', 'creative', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
     difficulty: 3,
     build: () => anywhere({
@@ -2147,7 +2378,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // composed game must never show both.
     family: 'ordering-quiz',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'crowded',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'crowded',
       'school', 'office', 'mall', 'park',
       'mixed', 'youth', 'adults', 'corporate', 'medium', 'educational'],
     difficulty: 6,
@@ -2194,7 +2425,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו רמז כללי לאזור שבו הקוד מוסתר, לא את המקום המדויק. אין סיכה על המפה.\n\nWrite a general clue to the area the code is hidden in, not the exact spot. There is no pin on the map.',
+        // Same two-part shape as the-hidden-key's clue, for the same reason.
+        prompt: 'רמז בשני חלקים: לאן ללכת קודם, ומה יגיד להם שהקוד ממש כאן. לא המקום המדויק.\n\nA two part clue: where to head first, and what tells them the code is right here. Not the exact spot.',
       },
       {
         // NOT the shared SET_CODE constant: its second half ("coordinate it in
@@ -2546,7 +2778,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'anagram-easy',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'kids', 'youth', 'mixed', 'easy'],
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'youth', 'mixed', 'easy'],
     difficulty: 3,
     build: () => anywhere({
       title: 'חידת האותיות הקצרה',
@@ -2564,7 +2796,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'anagram-medium',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'mixed', 'medium'],
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'mixed', 'medium'],
     difficulty: 5,
     build: () => anywhere({
       title: 'חידת האותיות',
@@ -2582,7 +2814,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'anagram-hard',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'adults', 'corporate', 'mixed', 'hard'],
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'adults', 'corporate', 'mixed', 'hard'],
     difficulty: 7,
     build: () => anywhere({
       title: 'חידת האותיות הארוכה',
@@ -2638,7 +2870,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // hunting, no scarcity, every team assembles their own copy.
     key: 'puzzle-code',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'adults', 'corporate', 'hard'],
+    tags: ['thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'home', 'adults', 'corporate', 'hard'],
     difficulty: 7,
     setup: [{
       field: 'answers',
@@ -2769,7 +3001,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // aloud usually hear it before they solve it.
     key: 'echo-riddle',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
     difficulty: 4,
     build: () => anywhere({
       title: 'חידת ההד',
@@ -2790,7 +3022,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // ambiguous the way a venue-dependent count could (rule 8/31).
     key: 'vault-combination-riddle',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'corporate', 'mixed', 'easy'],
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate', 'mixed', 'easy'],
     difficulty: 3,
     build: () => anywhere({
       title: 'פיצוח הכספת',
@@ -2814,7 +3046,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // as `echo-riddle`/`vault-combination-riddle` above.
     key: 'disarm-the-device',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
     difficulty: 5,
     build: () => anywhere({
       title: 'נטרול המנגנון',
@@ -2869,6 +3101,378 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 8,
       pointValue: 90,
       smart: upload(),
+    }),
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Written against rules 33-40, 2026-09-01
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // The trigger was a real composed game: a youth ACTION game for 14-17 year
+  // olds, five players, which ended on `birthday-wish` — "write a warm wish for
+  // the birthday kid". Nothing was broken. The bank held exactly FIVE finales
+  // for the entire product, one of them birthday-only, and `occasion` is a SOFT
+  // bonus by design (occasions.ts: "it lifts a favoured mission, it never
+  // excludes an unfavoured one"), so an occasion-specific mission is free to win
+  // any game whose audience tags it happens to match. A starved pool turns that
+  // from a theoretical wart into the ending of somebody's event.
+  //
+  // Five of the ten below are bookends for that reason. The other five are the
+  // categories rules 33-40 found missing entirely.
+
+  // ── Finales: the pool goes 5 → 8, and from one flavour to three ───────────
+  {
+    // The cinematic one. Rule 33: every member has their own beat (each peels
+    // off separately), so a member who did not participate is visible in the
+    // result rather than merely absent from it — and the clip is the thing a
+    // team actually keeps, which is what a finale is for.
+    key: 'finish-the-credits',
+    sourceTemplateKey: 'authored',
+    tags: ['finish', 'camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home',
+      'park', 'beach', 'forest', 'school', 'neighborhood', 'cityCenter',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'הקרדיטים',
+      description: 'צלמו את סצנת הסיום של הסרט שלכם: כל הקבוצה הולכת יחד מהמצלמה והלאה, לאט, בלי להסתכל אחורה. כל כמה שניות אחד מכם פורש הצידה ונעצר, עד שנשאר אחד. הוא מסתובב למצלמה ואומר משפט אחד לסיום.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+    }),
+  },
+  {
+    // The high-stakes one, and the finale a 14-17 action game was missing. Rule
+    // 37: the team CHOOSES the move before it knows whether it can land it five
+    // times in a row. Rule 33: it completes only when every member has done it,
+    // so nobody can be delegated to. Rule 17: the restart is what makes the bar
+    // cost something instead of decorating the copy.
+    key: 'finish-all-or-nothing',
+    sourceTemplateKey: 'authored',
+    tags: ['finish', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home',
+      'park', 'beach', 'school', 'neighborhood',
+      'mixed', 'kids', 'youth', 'adults', 'medium'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'כולם או אף אחד',
+      description: 'בחרו יחד פעולה פיזית אחת שכל אחד מכם מסוגל לעשות: קפיצה על רגל אחת, סיבוב שלם באוויר, מסירה מאחורי הגב. עכשיו כל הקבוצה מבצעת אותה בזה אחר זה ברצף אחד, בלי הפסקה ובלי חיתוך. מישהו פספס? חוזרים לראשון. צלמו את הריצה שהצליחה.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 8,
+      pointValue: 160,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+      hint: 'רמז: בחרו את הפעולה לפי החלש ביותר בקבוצה ולא לפי החזק. תנועה מרשימה שנופלת בניסיון החמישי שווה פחות מתנועה פשוטה שעוברת.',
+      hintPenalty: 20,
+    }),
+  },
+  {
+    // The warm one, and RECIPE's Reflection element — the bank closes games on
+    // performance and never on what the day actually was. Rule 33: each member
+    // speaks about a DIFFERENT member, so it cannot be delivered by whoever
+    // talks most. Familied with `finish-one-word-each`, which is the same
+    // go-around-the-circle mechanic with a shorter unit (rule 12).
+    key: 'finish-what-we-didnt-know',
+    sourceTemplateKey: 'authored',
+    family: 'closing-round',
+    tags: ['finish', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'הדבר שלא ידענו',
+      description: 'עמדו במעגל וצלמו. כל אחד בתורו אומר משפט אחד על מישהו אחר בקבוצה: דבר אחד שגילה עליו היום ולא ידע קודם. כל אחד מדבר פעם אחת, ועל כל אחד נאמר משהו.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 5,
+      pointValue: 100,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+    }),
+  },
+
+  // ── Openers: 6 → 8, and the first one that asks the team to decide ────────
+  {
+    // Every existing opener warms the group up; none asks it to DECIDE anything
+    // (rule 37). This is a real commitment made before any outcome is known, and
+    // consensus is the gate (rule 33) so the loudest member cannot supply it
+    // alone. The "something you give up" clause is rule 17: without it every
+    // team writes three rules it was going to follow anyway.
+    key: 'open-team-pact',
+    sourceTemplateKey: 'authored',
+    tags: ['start', 'teamwork', 'thinking', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'הסכם הצוות',
+      description: 'לפני שמתחילים: הסכימו על שלושה כללים שהקבוצה שלכם משחקת לפיהם היום. אחד מהם חייב להיות משהו שאתם מוותרים עליו, לא רק משהו שאתם עושים. כתבו אותם על מה שיש לכם (דף, היד, פתק בטלפון), כולם חותמים, וצלמו.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 5,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
+  {
+    // The placeless ACTION opener for teenagers, the exact band the composed
+    // game that triggered this pass was serving. Rule 33: one continuous shot
+    // with a fixed per-member unit, so five players produce a visibly different
+    // result from four.
+    key: 'open-one-take-intro',
+    sourceTemplateKey: 'authored',
+    tags: ['start', 'action', 'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home',
+      'park', 'school', 'neighborhood', 'beach', 'cityCenter',
+      'mixed', 'youth', 'kids', 'adults', 'medium'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'טייק אחד',
+      description: 'סרטון אחד רצוף, בלי חיתוכים: המצלמה עוברת מאחד לשני, וכל אחד בתורו אומר את שמו ועושה תנועה אחת משלו. מי שמצלם עובר ביניכם בלי לעצור. נגמר כשכולם היו.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 5,
+      pointValue: 100,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+      hint: 'רמז: סדרו את עצמכם בקו או בחצי מעגל לפני שמתחילים לצלם. רוב הטייקים נופלים כי המצלמה מחפשת את הבא בתור.',
+      hintPenalty: 15,
+    }),
+  },
+
+  // ── Rule 36: the bank's first rare finds, and its first prices above 170 ──
+  {
+    // Luck plus hustle — an engine nothing else in the bank runs on. Priced at
+    // 200 on purpose (rule 36): a rare find that scores like a group selfie
+    // teaches players that hustling was pointless. Rule 31 holds because any
+    // street with parked cars carries one within a few minutes, and a car park
+    // is near-certain.
+    key: 'rare-triple-plate',
+    sourceTemplateKey: 'authored',
+    family: 'rare-find',
+    tags: ['action', 'thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+      'neighborhood', 'cityCenter', 'mall',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'שלוש זהות',
+      description: 'מצאו רכב חונה שבלוחית הרישוי שלו מופיעה אותה ספרה שלוש פעמים לפחות. צלמו את הלוחית.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 9,
+      pointValue: 200,
+      smart: upload(),
+      hint: 'רמז: התפצלו לשני צדי הרחוב וסרקו לוחית אחרי לוחית. מגרש חניה שווה יותר מרחוב.',
+      hintPenalty: 25,
+    }),
+  },
+  {
+    // Rule 36 crossed with rule 35: the rare thing IS a person, so the stranger
+    // ends up in the photo as a participant rather than as a subject. Rule 39 —
+    // among the highest social-risk missions in the bank, and it must never open
+    // a game. The refusal line is the floor: a team that gets turned down has a
+    // stated next move instead of a stall.
+    key: 'namesake-stranger',
+    sourceTemplateKey: 'authored',
+    family: 'rare-find',
+    tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded',
+      'cityCenter', 'mall', 'neighborhood', 'beach',
+      'mixed', 'youth', 'adults', 'corporate', 'hard'],
+    difficulty: 7,
+    build: () => anywhere({
+      title: 'שם משותף',
+      description: 'מצאו אדם זר שקוראים לו בדיוק כמו אחד מכם. הציגו את עצמכם, ספרו לו למה אתם שואלים, וצלמו את שניהם יחד. מסרב? תודו לו ותמשיכו הלאה.',
+      type: 'photo',
+      difficulty: 7,
+      estimatedMinutes: 12,
+      pointValue: 220,
+      smart: upload(),
+      hint: 'רמז: במקום לשאול אדם אחד בכל פעם, שאלו קבוצות. שולחן בבית קפה או תור בקופה נותנים חמישה שמות בבת אחת.',
+      hintPenalty: 30,
+    }),
+  },
+
+  // ── Rule 35: the stranger finally gets something to do ────────────────────
+  {
+    // The rule's own worked example. Every other stranger mission here has them
+    // watching, answering or being photographed; this one only completes when
+    // the STRANGER performs. "Without you leading" is the self-validating clause
+    // (rule 40) — the team can see for itself whether it actually taught it.
+    key: 'teach-a-stranger',
+    sourceTemplateKey: 'authored',
+    tags: ['action', 'creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'crowded',
+      'cityCenter', 'mall', 'neighborhood', 'beach', 'park',
+      'mixed', 'youth', 'adults', 'corporate', 'medium'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'תלמידים לרגע',
+      description: 'המציאו עכשיו לחיצת יד או תנועת ניצחון משלכם, בת שלושה שלבים לפחות. לימדו אותה לאדם זר עד שהוא מבצע אותה נכון בעצמו, וצלמו אותו עושה אותה בלי שאתם מובילים.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 10,
+      pointValue: 170,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+      hint: 'רמז: שלוש תנועות פשוטות נלמדות בשלושים שניות. אם הזר מתבלבל, המצאתם משהו מסובך מדי — פשטו ותנסו שוב.',
+      hintPenalty: 20,
+    }),
+  },
+
+  // ── Rule 34: provocation with zero authoring cost ─────────────────────────
+  {
+    // The Situationist dérive — the constraint generates the experience, so the
+    // mission needs no pin, no prep and nothing planted, and still puts the team
+    // somewhere they would never have chosen. Tilden's provocation at its
+    // cheapest. Bounded to three turns AND a return leg on purpose: an unbounded
+    // drift would swallow the route it is embedded in.
+    key: 'drift-three-turns',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere',
+      'neighborhood', 'cityCenter', 'park',
+      'mixed', 'youth', 'adults', 'corporate', 'medium'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'שלוש פניות',
+      description: 'מכאן: פנייה ראשונה ימינה, אחר כך ראשונה שמאלה, אחר כך ראשונה ימינה שוב. עצרו בדיוק איפה שנגמרה השלישית. צלמו את מה שמולכם ואמרו במשפט אחד למה לא הייתם מגיעים לכאן לבד. ואז חזרו.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 9,
+      pointValue: 120,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+
+  // ── Rule 33: the mission the quiet member wins ────────────────────────────
+  {
+    // The bank had nothing where being careful beat being loud, which is exactly
+    // the population the team-building research says disengages. Self-validating
+    // by construction (rule 40): the camera pans to the real scene at the end,
+    // so the recall is checkable without the creator authoring a single answer —
+    // and that is what keeps it out of the saturated counting family.
+    key: 'the-witness',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home',
+      'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office',
+      'mixed', 'youth', 'adults', 'corporate', 'medium'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'העד',
+      description: 'אחד מכם מסתכל על מה שמולו בשקט מוחלט דקה שלמה, בלי לצלם ובלי לדבר. אחר כך הוא מסתובב עם הגב, והשאר מצלמים אותו מונה בקול כמה שיותר פרטים שהוא זוכר. בסוף הפנו את המצלמה למקום עצמו, כדי שאפשר יהיה לבדוק כמה הוא צדק.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 7,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+      hint: 'רמז: קל יותר לזכור לפי אזורים ולא לפי חפצים: שמאל, מרכז, ימין, ואז כל מה שמעל גובה העיניים.',
+      hintPenalty: 20,
+    }),
+  },
+
+  // ── The bank's first `pausesTimer` mission ────────────────────────────────
+  {
+    // `pausesTimer` is a real, shipped platform field that no entry had ever
+    // used, and this is a mission that justifies it rather than merely
+    // exercising it: under time pressure a team guesses, and guessing destroys
+    // the only thing a deduction puzzle is for. It is also the bank's only
+    // change of rhythm — one point where the race stops and the group argues.
+    // Rule 15: the puzzle is authored, with a real checkable answer, not a
+    // mechanic label.
+    key: 'thinking-room',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
+      'office', 'school', 'mall', 'park',
+      'mixed', 'youth', 'adults', 'corporate', 'hard'],
+    difficulty: 8,
+    build: () => anywhere({
+      title: 'חדר החשיבה',
+      description: 'השעון עצור עכשיו, אז אל תמהרו. לפניכם שמונה מטבעות שנראים זהים, אבל אחד מהם כבד מהשאר. יש לכם מאזני כפות בלבד, בלי משקולות. מה מספר השקילות הקטן ביותר שמבטיח שתמצאו את הכבד? אסור לחפש בגוגל — התווכחו עד שכולכם בטוחים.',
+      type: 'numeric',
+      difficulty: 8,
+      estimatedMinutes: 8,
+      pointValue: 180,
+      numericAnswer: 2,
+      numericTolerance: 0,
+      pausesTimer: true,
+      hint: 'רמז: אל תשקלו ארבעה מול ארבעה. נסו לחלק לשלוש קבוצות.',
+      hintPenalty: 30,
+    }),
+  },
+
+  // ── Rule 38: written FOR a living room, not merely tagged for one ─────────
+  //
+  // 56 entries carry `home`, but almost all of them are placeless missions that
+  // happen to work indoors. Only a handful were actually authored for a family
+  // on a sofa. These three are, and each one takes an ingredient a home is
+  // guaranteed to hold (rule 31 is stricter indoors: a flat has no fallback).
+  {
+    // The scavenger-hunt research names "recreate an old photo of yourselves"
+    // as one of the most loved prompts there is, and it is RECIPE's Reflection
+    // element — the only mission in the bank that reaches back into the players'
+    // own history. Rule 31: the old photo is already on somebody's phone.
+    // Rule 33: everyone who was in the original has to be in the remake, so the
+    // result shows who took part. Familied with the other two "reproduce a
+    // reference image with your bodies" missions (rule 12).
+    key: 'family-photo-remake',
+    sourceTemplateKey: 'authored',
+    family: 'recreate-famous-image',
+    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
+      'mixed', 'kids', 'youth', 'adults', 'medium'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'התמונה מלפני שנים',
+      description: 'חפשו בטלפונים תמונה ישנה שלכם, מלפני כמה שנים לפחות, שכמה מכם מופיעים בה. שחזרו אותה עכשיו: אותה תנוחה, אותו סידור, אותן הבעות. כל מי שהיה במקור חייב להיות גם בשחזור. החזיקו את התמונה הישנה בתוך הפריים, כדי שרואים את שתיהן יחד.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 8,
+      pointValue: 130,
+      smart: upload(),
+      hint: 'רמז: תמונה עם רקע פשוט קלה הרבה יותר לשחזור מתמונה בחוץ. חפשו משהו שצולם בבית.',
+      hintPenalty: 15,
+    }),
+  },
+  {
+    // The physical home mission, and un-quarterbackable by construction: the
+    // course is built together and then EVERY member runs it, so the video is
+    // as long as the team is. Rule 31: furniture and cushions are the one thing
+    // every living room certainly has. Rule 22: the byproduct is furniture out
+    // of place, so putting it back is in the copy the players read.
+    key: 'living-room-obstacle',
+    sourceTemplateKey: 'authored',
+    tags: ['action', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
+      'school', 'office',
+      'mixed', 'kids', 'youth', 'medium'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'מסלול המכשולים מהסלון',
+      description: 'בנו מסלול מכשולים מרהיטים, כריות ושמיכות: לפחות ארבע תחנות, אחת שעוברים מתחתיה ואחת שעוברים מעליה. כל אחד מכם עובר את המסלול כולו. צלמו את כל המעברים ברצף אחד. בסוף מחזירים את הרהיטים למקום.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 12,
+      pointValue: 140,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+      hint: 'רמז: בנו את המסלול סביב מה שכבר עומד במקום. להזיז ספה לוקח יותר זמן מכל המסלול.',
+      hintPenalty: 15,
+    }),
+  },
+  {
+    // The bank's first mission built on INFORMATION ASYMMETRY, which rule 33
+    // names as the strongest anti-quarterbacking fix there is and which nothing
+    // here had ever used. It is also the one mechanic the platform already
+    // supports and the bank ignored: a team's phones carry a `controllerUid`
+    // and only the controller may submit (`joinTeamAsDevice`), so "the one
+    // holding the phone is the one who cannot see" is a real division of
+    // labour rather than an honour rule. Deliberately NOT `needsSetup`: the
+    // object is chosen from whatever is in the room.
+    key: 'blind-describe',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
+      'office', 'school', 'mall',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'תארו לי בלי להגיד',
+      description: 'מי שמחזיק בטלפון מסתובב עם הגב ולא מציץ. השאר בוחרים חפץ אחד בחדר ומתארים אותו במילים בלבד: בלי להגיד מה זה, בלי להצביע, ובלי להשתמש במילה שקשורה למה שעושים איתו. מי שמחזיק בטלפון מנחש בקול. כשהוא צודק, הסתובבו וצלמו אותו מחזיק את החפץ.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 8,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+      hint: 'רמז: התחילו מצורה, גודל וחומר, ורק אחר כך מאיפה הוא נמצא בחדר. תיאור של השימוש אסור וממילא מסגיר מיד.',
+      hintPenalty: 20,
     }),
   },
 ];

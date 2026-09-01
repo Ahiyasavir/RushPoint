@@ -10,6 +10,9 @@ import { cachedGetDoc } from './docCache';
 // Ping economy (change: spark-tier-location-load): the pure write verdicts, plus the
 // in-process store that answers "what did we last write for this team" without a read.
 import { lastFixStore, lastFixKey } from './lastFixStore';
+// The movement track lives on the VPS disk when configured (change: vps-track-storage);
+// unset means this is inert and the Firestore path below runs exactly as before.
+import { trackStore } from './trackStore';
 import * as admin from 'firebase-admin';
 import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 // The recorded answer sheet (change: post-run-player-report) — every submission,
@@ -81,6 +84,10 @@ export { listPlatformUsers, recordEngagement, setUserNote } from './admin/index'
 export { submitContactMessage, listContactMessages } from './contact/index';
 // Admin-managed game templates (change: admin-manage-game-templates).
 export { setGameTemplateFlag, listAdminTemplates, listGameTemplates, createGameFromTemplate } from './admin/templates';
+// Admin edits to the smart-build mission bank (change: admin-editable-mission-bank).
+// The bank content itself stays in creator-web's taskBank.ts; these move only the
+// per-mission override rows the client-side composer merges over it.
+export { listMissionBankOverrides, setMissionBankOverride, clearMissionBankOverride } from './admin/missionBank';
 export {
   getWallet, getWalletStatus, purchaseCredits, subscribePro, claimReferral, stripeWebhook,
 } from './payments/index';
@@ -402,12 +409,31 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
   // aggregator bins onto a ~55m grid, so a point every 20s was far finer than its own
   // consumer's resolution — and time-sampling a *movement* heatmap grows a hot cell
   // wherever teams merely stood still, which is the opposite of what it should show.
-  const trackVerdict = shouldRetainTrackPoint({ fix: { lat, lng }, lastRetained: known?.track });
-  if (trackVerdict.retain) {
-    await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/locationTrack`)
-      .add({ teamId, lat, lng, at: now })
-      .catch(() => undefined); // track is best-effort; never fail the location update
-    lastFixStore.recordTrack(fixKey, { lat, lng }, nowMs);
+  //
+  // ...UNLESS the track lives on the VPS's own disk (change: vps-track-storage), in which case
+  // the sampling is skipped entirely and EVERY ping is recorded. The distance rule exists only
+  // to bound Firestore WRITE QUOTA; a local append costs nothing against it, so keeping the
+  // compromise there would be throwing away fidelity for no reason. Which mode is active is a
+  // deployment fact (RUSHPOINT_TRACK_DIR), never a per-run one, so a run is recorded wholly in
+  // one mode or wholly in the other and the two are never mixed.
+  if (trackStore.enabled) {
+    // NOT awaited, deliberately. Appends for one run are serialised through a single queue
+    // (see trackStore.ts), so awaiting here would put EVERY team in the run behind whichever
+    // disk write is currently in flight — and the safe-zone evaluation below sits after this
+    // point, so a stalled disk would delay breach detection for the whole field. With
+    // Firestore each team's `.add()` was independent and could not do that. The append is
+    // best-effort analytics that nothing in this response depends on, and `append` catches
+    // internally and never rejects, so letting it drain on its own is strictly safer.
+    // Ordering within the run is preserved by the queue regardless of who awaits it.
+    void trackStore.append({ ownerUid, gameId, runId }, { lat, lng, teamId, at: now });
+  } else {
+    const trackVerdict = shouldRetainTrackPoint({ fix: { lat, lng }, lastRetained: known?.track });
+    if (trackVerdict.retain) {
+      await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/locationTrack`)
+        .add({ teamId, lat, lng, at: now })
+        .catch(() => undefined); // track is best-effort; never fail the location update
+      lastFixStore.recordTrack(fixKey, { lat, lng }, nowMs);
+    }
   }
 
   // Safe-zone breach detection (safe-zone-boundary): server-side only. On a NEW

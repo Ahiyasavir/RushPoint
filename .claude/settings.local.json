@@ -16,7 +16,19 @@
       "Bash(grep -vE \"^[0-9]+:\\\\s*//\")",
       "Bash(npm run *)",
       "Bash(gcloud --version)",
-      "Bash(gh auth *)"
+      "Bash(gh auth *)",
+      "Bash(curl -s https://creator.rush-point.com/assets/index-*.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://creator.rush-point.com/)",
+      "Bash(node -e \"const p=require\\('./package.json'\\);for\\(const k of Object.keys\\(p.scripts\\)\\) if\\(/deploy|hosting/i.test\\(k\\)\\) console.log\\(k,'=',p.scripts[k]\\)\")",
+      "Bash(find /c/Users/savir -iname \"*YouCut*\" -o -iname \"*1786825250764*\" 2>/dev/null | head -50)",
+      "Bash(curl -s \"https://www.rush-point.com/he/\")",
+      "Bash(grep -o 'max-w-\\\\[18rem\\\\][^\"]*' /tmp_v.html)",
+      "Bash(grep -o 'class=\"[^\"]*max-w-\\\\[18rem\\\\][^\"]*\"' /tmp_v.html)",
+      "Bash(rm -f /tmp_v.html)",
+      "Bash(curl -s \"https://www.rush-point.com/he/story/\" -o /tmp_s.html -w \"status:%{http_code}\\\\n\")",
+      "Bash(grep -c \"נוצצת\" /tmp_s.html)",
+      "Bash(grep -c \"ספר ילדים\" /tmp_s.html)",
+      "Bash(rm -f /tmp_s.html)"
     ]
   }
 }
