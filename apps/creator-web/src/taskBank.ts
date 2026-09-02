@@ -1268,6 +1268,100 @@
 // Convert the intent into a criterion instead — the thing you wanted to reward
 // is almost always the thing you should have required.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES 61+ — the relatedness night. Rule 52 named three needs and said plainly
+// that relatedness is the one a field game is uniquely able to serve and the one
+// most often left on the floor. This is the audit of how badly, and what the
+// research says to do instead.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ─── 61. Closeness is built by ESCALATING reciprocal disclosure, and the game's
+//         timeline is the only ramp you will ever get ────────────────────────
+//
+// Aron's 1997 study is the cleanest result in this literature: pairs of STRANGERS
+// worked through thirty-six questions over about forty-five minutes and finished
+// reporting more closeness than many people report with lifelong friends. The
+// active ingredient is not the questions. It is that they ESCALATE — three sets
+// of rising intimacy, the first about an ordinary day, the last about naming good
+// qualities you see in the other person — and that every disclosure is answered
+// in kind.
+//
+// Forty-five minutes. A field game runs ninety to a hundred and eighty. This
+// product owns the exact vehicle that study needed and uses it for almost
+// nothing.
+//
+// Here is the bank's actual disclosure ladder, by position:
+//
+//     OPENERS   open-team-name, open-team-motto, open-one-take-intro
+//               Each person says a word, or their name and one movement. Perfect
+//               turn-taking, ZERO disclosure — which is exactly right for minute
+//               zero (see rule 63) and is a genuine bottom rung.
+//     MIDDLE    nothing. Not one mission in the body of a game asks a player to
+//               say anything true about themselves to the people they are
+//               playing with.
+//     FINISH    finish-what-we-didnt-know — "one sentence about somebody else in
+//               the group: a thing you found out about them today". That is
+//               Aron's third set almost word for word, and it is the best
+//               mission in this bank.
+//
+// A ladder with a bottom rung and a top rung and nothing between is not a ladder.
+// The single highest-value content work available to this bank is the missing
+// middle: two or three missions of mild, mid-game, mutual disclosure, so the
+// closing mission lands on a group that has been warming up for an hour instead
+// of on strangers being asked to be sincere on command.
+//
+// (best-moment-so-far was the clearest waste of the position it already holds: a
+// mid-game four-option poll about the shared experience, answered silently into
+// the app, where nobody heard anybody. It now asks each player to say their
+// moment out loud and why that one, before the team picks an answer together.
+// Same type, same data, one sentence, and the middle rung exists.)
+//
+// ─── 62. Reciprocity has to be STRUCTURAL — write the turn-taking into the
+//         instruction ───────────────────────────────────────────────────────
+//
+// Reciprocity is not a nice side effect of disclosure, it is the mechanism.
+// Dyads that took turns disclosing reported 2.3 times the liking of dyads where
+// disclosure ran one way. The explanation is an inference: if you tell me
+// something real, I conclude you trust me, so I answer in kind — and an
+// imbalance is actively uncomfortable rather than merely neutral.
+//
+// Which means "share something about yourself" is a broken instruction. It
+// produces one confident person talking and everybody else being an audience,
+// and the audience ends the mission slightly further away than it started.
+//
+// finish-what-we-didnt-know shows the fix, and it is entirely in the wording:
+// "each person speaks once, and something is said about each person". Two
+// clauses, and the mission can no longer be completed by its loudest member.
+// This is rule 33's one-person test arriving from the relatedness side: there,
+// the failure was one player doing the work; here it is one player receiving all
+// the attention.
+//
+// ─── 63. Match the depth to the minute, and remember a group is not a pair ───
+//
+// Two limits on everything above, both of which the openers already respect by
+// instinct.
+//
+// DEPTH IS CURVILINEAR IN TIME. Cozby's finding is that liking rises with
+// disclosure only up to an appropriate level and falls past it: too much too
+// soon reduces liking rather than increasing it. A mission asking a group of
+// teenagers to name something they admire in each other at minute five will be
+// refused, and refused in a way that poisons the next hour. The same sentence at
+// minute ninety, after they have done things together, is the best moment of the
+// day. The content is identical; only the position changed. This is rule 39's
+// social-risk ramp again, pointed inward at the team instead of outward at
+// strangers, and the same caveat applies: the composer cannot score for it yet,
+// so the author has to say in the entry's comment where in a game the mission
+// belongs.
+//
+// A GROUP IS NOT A PAIR. Aron's protocol is a dyad, and the disclosure research
+// is explicit that a public channel is harder — in front of an unspecified
+// audience people find it markedly more difficult to express liking and trust.
+// So do not simply scale a two-person question up to six. Ask for the version a
+// person can say standing in a circle: concrete, about something that happened
+// today, and bounded to one sentence. "Something I found out about you today" is
+// sayable in a circle. "What do you value most about me" is not, and asking for
+// it in public is how a good mission becomes the one everybody skips.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -1798,7 +1892,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       // Rule 33, same fix as `open-team-name`: "agree on one sentence" is
       // something one person writes and the rest nod at. Sourcing the sentence
       // from a word per member makes the agreement real work.
-      description: 'כל אחד מכם אומר מילה אחת שמתארת את הצוות היום. עכשיו הרכיבו מהמילים משפט אחד שכולכם עומדים מאחוריו, ואמרו אותו יחד מול המצלמה. רציני, מצחיק או שניהם, זו ההחלטה שלכם.',
+      description: 'כל אחד מכם אומר מילה אחת שמתארת את הצוות היום. עכשיו הרכיבו מהמילים משפט אחד שכולכם עומדים מאחוריו, ואמרו אותו יחד מול המצלמה.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 3,
@@ -2963,13 +3057,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     // could not skip it any longer.
     key: 'best-moment-so-far',
     sourceTemplateKey: 'authored',
-        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth',
       'adults', 'corporate', 'easy', 'forest', 'beach', 'park', 'neighborhood',
       'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
     difficulty: 2,
     build: () => anywhere({
       title: 'הרגע הכי טוב עד עכשיו',
-      description: 'עצרו לרגע: מה היה הרגע הכי כיף במשחק עד עכשיו? אין תשובה נכונה, רק הדעה שלכם.',
+      description: 'עצרו לרגע. כל אחד בתורו אומר בקול מה היה הרגע הכי כיף שלו במשחק עד עכשיו, ולמה דווקא הוא. אחרי שכולם דיברו, בחרו יחד את התשובה שהכי מתאימה לכם.',
       type: 'survey',
       difficulty: 2,
       estimatedMinutes: 2,
