@@ -2069,6 +2069,49 @@
 // say this about missions; a sequence deserves its own line because it is the
 // only type where failing one step means failing everything after it.
 //
+// ─── 78. `kids` + `youth` together is the strongest claim in this vocabulary,
+//         and it is the one nobody checks ─────────────────────────────────────
+//
+// Forty-two of these 103 missions carry BOTH tags. That is not a mild claim
+// about breadth. It says a ten-year-old and a fifteen-year-old will each find
+// this good, and the research this file has been assembling says those two want
+// opposite things:
+//
+//   • Rule 56: formal-operational reasoning — metaphor, analogy, the
+//     hypothetical — arrives around eleven. A ten-year-old does not have it.
+//   • Rule 51: the imaginary audience PEAKS between eleven and fifteen. A
+//     fifteen-year-old is doing arithmetic about who is watching.
+//   • Rule 32 says missions for ten-year-olds are made of the players; rule 43
+//     says teenagers refuse anything that treats them as younger.
+//
+// A mission claiming both ends must therefore clear two bars at once: demand
+// only CONCRETE operations, and carry a COVER — competence or a character — so
+// the older end is never asked to be cute. Most of the forty-two survive that
+// honestly, and it is worth seeing why, because it is the same answer every
+// time: a distance to beat, a letter that has to be readable from above, a line
+// ordered in silence, a tower that has to stand. Competence is what lets one
+// mission serve both ages, which is a more useful design instruction than any
+// amount of tone advice.
+//
+// THIS MATTERS COMMERCIALLY AND NOT ONLY THEORETICALLY. The birthday product
+// this bank serves is sold for ages 10 to 15 — a band that straddles both
+// boundaries exactly. Every mission in a 10-15 party game is making the double
+// claim whether its author thought about it or not.
+//
+// AND THE OPERATOR HAD ALREADY FOUND THE FAILURES BY INSTINCT, before any of
+// this was written down: open-team-name, silliest-walk and hero-walk are the
+// three he stripped `youth` from or deleted outright, and they are precisely the
+// three with no cover at either end. That is the best evidence available that
+// this rule describes something real rather than something invented.
+//
+// One was still standing: birthday-wish — write a warm wish and read it aloud in
+// unison — has no character and no skill, and it is the FINISHER of the birthday
+// product, which by rule 55 means it is the sentence a paid event compresses
+// into. Rewritten on the accept-all pattern (rule 68): each player writes one
+// line, every line goes in, and each reads their own. Nobody has to own the
+// sincerity alone, which is what made it unplayable at fifteen, and the wish is
+// better for being six voices instead of one chorus.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -4127,7 +4170,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 2,
     build: () => anywhere({
       title: 'איחול לחוגג/ת',
-      description: 'כתבו יחד איחול קצר וחם לחוגג/ת, וקראו אותו בקול, ביחד, מול המצלמה.',
+      description: 'כל אחד מכם כותב שורה אחת של איחול לחוגג/ת, וכל השורות נכנסות פנימה. עכשיו קראו את האיחול המלא מול המצלמה, שורה אחרי שורה, כל אחד את שלו.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 4,
