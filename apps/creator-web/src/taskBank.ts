@@ -1362,6 +1362,101 @@
 // sayable in a circle. "What do you value most about me" is not, and asking for
 // it in public is how a good mission becomes the one everybody skips.
 //
+// ─── 64. "Do your best" is the weakest instruction in the language. Name the
+//         target ─────────────────────────────────────────────────────────────
+//
+// Goal-setting theory is one of the most replicated results in applied
+// psychology, and its headline is exactly the sentence an author needs: a
+// SPECIFIC, DIFFICULT goal outperforms "do your best" by a wide margin — around
+// 16% on average across hundreds of studies spanning brainstorming, typing,
+// sales, air-traffic simulation and weight loss. Four mechanisms do the work.
+// A named target directs attention to the relevant thing and away from
+// everything else, mobilises effort, sustains persistence past the first
+// setback, and — the one that matters most for a creative mission — prompts
+// STRATEGY SEARCH. A team told to make a convincing advert stands there. A team
+// told the advert must contain the problem, a demonstration and the slogan
+// starts arguing about how to do the demonstration, which is the mission
+// actually beginning.
+//
+// The Hebrew disguises are what to watch for, because none of them look lazy:
+// משכנעת, יצירתי, מקורי, מרשים, כמה שיותר, ככל האפשר. Each reads as generosity —
+// as though naming a target would constrain the team — and each is in fact the
+// author declining to decide, and handing the team a mission with no shape.
+//
+// TWO THINGS FALL OUT OF THIS, and the second is why the rule earns its place
+// next to rule 60 rather than being a restatement of rule 20:
+//
+//   • A specific goal IS the self-checkable criterion rule 60 demands. The team
+//     can count three beats in their own video. They cannot count "convincing".
+//     One sentence solves both problems, which is why vague goals are expensive
+//     twice over.
+//   • Difficult, not merely specific. "Include one beat" is specific and does
+//     nothing. The performance gain comes from the target being a genuine
+//     stretch that the team still believes it can hit.
+//
+// Recorded with a confession, because it shows how easily this one arrives: the
+// phrase "פרסומת משכנעת" was written INTO this bank during the rules 41-50 pass,
+// by the same process that was busy fixing a different rule at the time. It
+// replaced a worse sentence and it felt like an improvement. It is a "do your
+// best" instruction. It has now been replaced by three named beats.
+//
+// ─── 65. Autonomy means a small set of comparable options, not an open field ─
+//
+// Rule 52 says to give the team a real decision. This is the size of it.
+//
+// Iyengar and Lepper's jam study is the canonical result: a tasting booth with
+// six varieties converted 40% of tasters into buyers; the same booth with
+// twenty-four converted 3%. More options, less action and less satisfaction with
+// whatever was chosen. Choice overload is worst under three conditions, and a
+// team standing on a street corner with a clock running satisfies all three at
+// once — the options are hard to compare, the choosers do not have settled
+// preferences, and they want to decide quickly.
+//
+// So "do whatever you like with it" does not deliver autonomy. It delivers
+// paralysis, then whatever the loudest member says, which is rule 33's failure
+// with extra steps. Two to four concrete alternatives is the shape that works,
+// and naming them costs nothing: finish-all-or-nothing offers hopping, a full
+// turn in the air, or a pass behind the back, and then says pick one. The team
+// spends its energy on doing rather than on scoping.
+//
+// This rule is a GUARD rather than a repair. The bank was audited against it and
+// came out clean — every choice currently offered is between one and three
+// options, and the one multiple-choice survey offers four. It is written down
+// because the obvious way to "fix" a mission that rule 52 marks as low-autonomy
+// is to throw it open, and that would make it worse, not better.
+//
+// ─── 66. A ladder's rungs must be different MECHANICS, or the composer will
+//         only ever place one of them ────────────────────────────────────────
+//
+// This one only appears when rules 48 and 61 are held together, and it kills the
+// obvious way of building the disclosure ladder.
+//
+// Rule 61 says relatedness needs escalation: several missions of rising
+// intimacy spread across the game. The natural way to write them is one mission
+// per depth using the same move — "say one thing about another person", light
+// version at minute thirty, deeper version at minute ninety. Rule 48 then
+// forbids exactly that, because two missions built on one mechanic are
+// duplicates however different their content, and `family` makes them mutually
+// exclusive inside a single composed game. Write the ladder that way and the
+// composer places precisely one rung of it, chosen at random. The ladder does
+// not degrade gracefully; it collapses to a single step.
+//
+// So the rungs have to escalate through different VERBS. Depth rises while the
+// mechanic changes underneath it:
+//
+//     state a fact about yourself     "the furthest place you have ever been"
+//     give an opinion about today     best-moment-so-far, now spoken aloud
+//     make a prediction about someone the group guesses, the person confirms
+//     make an observation about them  finish-what-we-didnt-know
+//
+// Four different things to DO, one rising line of intimacy, no two of them in
+// the same family. That is a ladder a composer can actually lay out end to end.
+//
+// The general form is worth keeping beyond disclosure: whenever a design calls
+// for a progression — social risk (rule 39), physical effort, difficulty — the
+// steps must differ in kind and not only in degree, because everything in this
+// system that prevents repetition works on kind.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -2100,7 +2195,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'פרסומת למוצר שלא קיים',
-      description: 'המציאו מוצר שלא קיים, תנו לו שם וסיסמה, וצלמו לו פרסומת משכנעת שכולכם משתתפים בה.',
+      description: 'המציאו מוצר שלא קיים ותנו לו שם וסיסמה. צלמו לו פרסומת שיש בה שלושה דברים: הבעיה שהמוצר פותר, הדגמה שלו בפעולה, והסיסמה בסוף. כולכם מופיעים בה.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -4109,7 +4204,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'העד',
-      description: 'אחד מכם מסתכל על מה שמולו בשקט מוחלט דקה שלמה, בלי לצלם ובלי לדבר. אחר כך הוא מסתובב עם הגב, והשאר מצלמים אותו מונה בקול כמה שיותר פרטים שהוא זוכר. בסוף הפנו את המצלמה למקום עצמו, כדי שאפשר יהיה לבדוק כמה הוא צדק.',
+      description: 'אחד מכם מסתכל על מה שמולו בשקט מוחלט דקה שלמה, בלי לצלם ובלי לדבר. אחר כך הוא מסתובב עם הגב, והשאר מצלמים אותו מונה בקול את הפרטים שהוא זוכר. המטרה: עשרה פרטים נכונים. בסוף הפנו את המצלמה למקום עצמו, כדי שאפשר יהיה לבדוק כמה הוא צדק.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 7,
