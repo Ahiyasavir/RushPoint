@@ -2512,7 +2512,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'חידת אימוג׳ים',
-      description: 'מצאתם את המקום שהאימוג׳ים רמזו עליו!',
+      description: 'פענחו את שורת האימוג׳ים ונווטו אל המקום שהיא מתארת: [הוראות ליוצר: כתבו כאן את שורת האימוג׳ים, אימוג׳י אחד לכל מילה].',
       type: 'geofence',
       difficulty: 8,
       estimatedMinutes: 5,
@@ -2588,7 +2588,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [PLACE_IT],
     build: () => sited({
       title: 'העצומה האבסורדית',
-      description: 'כתבו על דף: "מפסיקים את האבסורד: חותמים עכשיו על העצומה לביטול חובת הרישיון לרכיבה על חמורים ומחזירים את ההיגיון לרחובות!" אספו 30 חתימות מאנשים ברחוב, וצלמו את הדף.',
+      description: 'כתבו על דף: "מפסיקים את האבסורד: חותמים עכשיו על העצומה לביטול חובת הרישיון לרכיבה על חמורים ומחזירים את ההיגיון לרחובות!" אספו 15 חתימות מאנשים ברחוב, וצלמו את הדף.',
       type: 'photo',
       estimatedMinutes: 5,
       smart: upload(),
@@ -2679,7 +2679,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'הביטלס',
-      description: 'תשחזרו את תמונת מעבר החצייה של הביטלס.',
+      description: 'שחזרו את תמונת מעבר החצייה של הביטלס: כולכם חוצים בשורה אחת על מעבר חצייה, מרווחים שווים, כל אחד באמצע צעד. צלמו מהצד ומגובה המדרכה. רק כשהאור ירוק ובלי לעכב את התנועה.',
       type: 'photo',
       // Re-priced 2 → 6 (rule 75). Its own `recreate-famous-image` siblings are
       // statue-remake at 5 minutes and difficulty 3, and family-photo-remake at
@@ -2823,7 +2823,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'רוג׳ום',
-      description: 'בנו רוג׳ום: ערמו אבנים אחת על השנייה, מהגדולה לקטנה, עד שהוא עומד לבד. ככה מסמנים שביל ביער. צלמו אותו.',
+      description: 'בנו רוג׳ום: ערמו אבנים אחת על השנייה, מהגדולה לקטנה, עד שהוא עומד לבד. ככה מסמנים שביל ביער. צלמו אותו, ובסיום פזרו את האבנים בחזרה כדי לא לבלבל מי שיעבור כאן אחריכם.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -3501,7 +3501,10 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 5,
       estimatedMinutes: 3,
       pointValue: 100,
-      answers: ['הנילוס', 'נילוס'],
+      // Rule 19: the Nile/Amazon question genuinely has two defensible answers,
+      // and a mission that sends teams to ask strangers will collect both. Failing
+      // a team for the one their passer-by gave them is the defect that rule names.
+      answers: ['הנילוס', 'נילוס', 'אמזונס', 'האמזונס', 'אמזונאס'],
       choices: ['הנילוס', 'האמזונס', 'הירדן', 'המיסיסיפי'],
       hint: 'רמז: שאלו מישהו שנראה כאילו הוא אוהב גיאוגרפיה, או פשוט כמה אנשים.',
       hintPenalty: 15,
@@ -3779,7 +3782,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 8,
     build: () => anywhere({
       title: 'החידה שלא מוותרת',
-      description: 'יש לי ערים אבל בלי בתים, יערות בלי עצים, ומים בלי דגים. מה אני? אסור לחפש בגוגל. אם נתקעתם, תפסו אנשים ברחוב ותנו להם לנסות, עד שמישהו פותר.',
+      description: 'יש לי ערים אבל בלי בתים, יערות בלי עצים, ומים בלי דגים. מה אני? אסור לחפש בגוגל. אם נתקעתם, פנו לאנשים ברחוב ותנו להם לנסות, עד שמישהו פותר.',
       type: 'quiz',
       difficulty: 8,
       estimatedMinutes: 5,
@@ -4164,9 +4167,14 @@ export const TASK_BANK: TaskBankEntry[] = [
     // accountability here (rule 29).
     key: 'wheres-the-ball',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'action', 'noPrep', 'fromAnywhere',
+    tags: ['thinking', 'action', 'needsSetup', 'fromAnywhere',
       'home', 'kids', 'youth', 'mixed', 'medium'],
     difficulty: 4,
+    setup: [{
+      field: 'description',
+      required: false,
+      prompt: 'המשימה צריכה שלוש כוסות אטומות זהות וחפץ קטן לכל קבוצה. אפשר לחלק אותם מראש, או לכתוב כאן במה להשתמש במקום.\n\nThis one needs three identical opaque cups and a small object per team. Hand them out in advance, or write here what to use instead.',
+    }],
     build: () => anywhere({
       title: 'איפה הכדור',
       description: 'שחקו במשחק הכוסות: אחד מכם מניח חפץ קטן מתחת לאחת משלוש כוסות, מערבב לפחות חמש פעמים, והשאר מנחשים איפה הוא. שחקו שלושה סיבובים, ואשרו כאן שסיימתם.',
@@ -4712,7 +4720,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     minAge: 6,
     build: () => anywhere({
       title: 'המצודה מהסלון',
-      description: 'בנו מצודה משמיכות, כריות וכריות ספה. כל חברי הקבוצה חייבים להיכנס פנימה בבת אחת. צלמו את המצודה מבחוץ, ואת כולכם דחוסים בפנים.',
+      description: 'בנו מצודה משמיכות, כריות וכריות ספה. כל חברי הקבוצה חייבים להיכנס פנימה בבת אחת. צלמו את המצודה מבחוץ, ואת כולכם דחוסים בפנים. בסיום מחזירים את הכריות והשמיכות למקום.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 8,
