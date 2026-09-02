@@ -1878,13 +1878,56 @@
 // A rule that does none of those is a note, and notes belong in the comment on
 // the entry that taught them, where whoever edits that mission will meet it.
 //
-// TWO WARNINGS FOR THE NEXT PASS. Do not judge overlap by headings: this pass
-// proposed merging 20 into 64 because both titles say "specific beats generic",
-// and reading them showed 20 is about the specificity of a mission's SUBJECT
-// while 64 is about the GOAL handed to the team. Different axes, no overlap. And
-// the unexamined candidate is 33, 62 and 68 — three views of one idea that the
-// pre-flight already collapses into a single item, which is the tell. Read all
-// three before touching any.
+// DO NOT JUDGE OVERLAP BY HEADINGS. This pass proposed merging 20 into 64
+// because both titles say "specific beats generic", and reading them showed 20 is
+// about the specificity of a mission's SUBJECT while 64 is about the GOAL handed
+// to the team. Different axes, no overlap.
+//
+// AND A PRE-FLIGHT ITEM THAT MAPS TO SEVERAL RULES IS NOT EVIDENCE OF
+// REDUNDANCY. Rules 33, 62 and 68 were nominated for merging on exactly that
+// reasoning — item 2 of the pre-flight covers all three. Reading them showed
+// three different things being monopolised, with three different remedies and
+// three different literatures behind them: 33 is one player taking the WORK
+// (co-op design, quarterbacking), 62 is one player taking the ATTENTION
+// (disclosure reciprocity), 68 is one player taking the DECISION (Johnstone's
+// offer and block). Rule 62 says so itself in its last sentence. They stay.
+//
+// The lesson generalises and is the more useful half: one good checklist item
+// screens for several distinct defects, which is what makes it a good item.
+// Collapsing at the CHECK is correct; collapsing at the DIAGNOSIS would leave an
+// author knowing something is wrong and not which repair to reach for.
+//
+// ─── 75. An authored number is a claim, and a harvested one is somebody
+//         else's claim you have not read ───────────────────────────────────
+//
+// `estimatedMinutes` looks like documentation and is not. It feeds
+// `taskScoreSmart` and `computeSkillRatio`, so it decides whether a team reads as
+// fast or slow, and it feeds the composer's budget, so it decides how many
+// missions get packed into the duration a creator asked for. An estimate that is
+// wrong by a factor of four is a scoring bug and a pacing bug at the same time,
+// and it looks exactly like a correct one.
+//
+// This bank had two, and they were found by sorting a column rather than by
+// reading anything:
+//
+//     challenge-shampoo-pitch    2 minutes, difficulty 5. Find a willing
+//                                stranger, pitch, agree a price, take money,
+//                                explain the game, ask permission, film.
+//     challenge-beatles-crossing 2 minutes, difficulty 5. Its own family
+//                                siblings are 5 minutes at difficulty 3 and 8 at
+//                                difficulty 4.
+//
+// Both were harvested from the same source template, and both inherited its
+// number unexamined. That is the general case: a harvested entry arrives with
+// somebody else's estimate attached to content you have since rewritten, and
+// nothing in the pipeline ever re-reads it.
+//
+// SO: when a mission is harvested, adapted or substantially rewritten, RE-PRICE
+// IT, and calibrate against its neighbours rather than from imagination — the
+// bank's own `family` groups and its similar missions are the reference, and the
+// tag-law suite now prints the within-family spread so an outlier is visible.
+// Rule 45 governs the opposite direction (make the mission fit the number it was
+// given); this one is about the number never having been checked at all.
 //
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
@@ -2331,7 +2374,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       title: 'שיווק שמפו',
       description: 'בקופסה שקיבלתם יש שמפו. מכרו אותו לאדם זר בלפחות 10 שקלים, ספרו לו שזה חלק ממשחק, ובקשו רשות להצטלם איתו.',
       type: 'photo',
-      estimatedMinutes: 2,
+      // Re-priced 2 → 9 (rule 75). Harvested at 2 from the source template and
+      // never checked: this is find a willing stranger, pitch, agree a price,
+      // take money, explain the game, ask permission, film. Its neighbours are
+      // honest-compliment at 6 and teach-a-stranger at 10, and money changing
+      // hands puts it with the latter.
+      estimatedMinutes: 9,
       smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
     }),
   },
@@ -2354,7 +2402,11 @@ export const TASK_BANK: TaskBankEntry[] = [
       title: 'הביטלס',
       description: 'תשחזרו את תמונת מעבר החצייה של הביטלס.',
       type: 'photo',
-      estimatedMinutes: 2,
+      // Re-priced 2 → 6 (rule 75). Its own `recreate-famous-image` siblings are
+      // statue-remake at 5 minutes and difficulty 3, and family-photo-remake at
+      // 8 and difficulty 4. This one is difficulty 5, needs a real crossing and
+      // has to be timed against traffic, and was priced at a quarter of either.
+      estimatedMinutes: 6,
       smart: upload(),
     }),
   },

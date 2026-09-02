@@ -224,7 +224,55 @@ console.log('\n── 7. public photography asks permission (rule 71) ───�
     ASKS_PERMISSION.test('בקשו ממנו רשות לצלם אותו למשחק'));
 }
 
-// ── 8. Composition mix — REPORTED, never asserted (rule 54) ──────────────────
+// ── 8. Within-family minute spread — REPORTED, never asserted (rule 75) ──────
+//
+// `estimatedMinutes` feeds taskScoreSmart and computeSkillRatio, so it decides
+// whether a team reads as fast or slow, and it feeds the composer's budget, so it
+// decides how many missions fit the duration a creator asked for. A wrong one is
+// a scoring bug and a pacing bug at once, and looks exactly like a right one.
+//
+// Two were found by sorting this column: both harvested from the same source
+// template, both carrying its number unexamined, both off by a factor of three or
+// four. A `family` is the bank's own statement that two missions are near
+// duplicates, so a wide spread inside one is the cheapest available signal that
+// somebody's estimate was never re-read. Reported rather than asserted — the
+// right value is a judgement, and rule 52's failed screen is the standing warning
+// about gating on those.
+console.log('\n── 8. minutes spread within each family (informational, rule 75) ──');
+{
+  const families = new Map<string, { key: string; est: number; diff: number }[]>();
+  for (const e of TASK_BANK) {
+    if (!e.family) continue;
+    const t = e.build();
+    families.set(e.family, [
+      ...(families.get(e.family) ?? []),
+      { key: e.key, est: t.estimatedMinutes ?? 0, diff: e.difficulty },
+    ]);
+  }
+  const flagged: string[] = [];
+  for (const [family, members] of [...families.entries()].sort()) {
+    const ests = members.map((m) => m.est);
+    const lo = Math.min(...ests), hi = Math.max(...ests);
+    const ratio = lo > 0 ? hi / lo : Infinity;
+    const line = members.map((m) => `${m.key}:${m.est}m/d${m.diff}`).join('  ');
+    console.log(`  ${family.padEnd(22)} ${lo}-${hi}m  x${ratio.toFixed(1)}  ${line}`);
+    if (ratio >= 3) flagged.push(`${family} (x${ratio.toFixed(1)})`);
+  }
+  console.log(flagged.length
+    ? `  → worth a look, spread of 3x or more: ${flagged.join(', ')}`
+    : '  → no family spans 3x or more');
+
+  // The denominator, because a check that reports "nothing found" without saying
+  // how much it looked at is indistinguishable from one that looked at nothing.
+  // This is also the blind spot: challenge-shampoo-pitch was one of the two
+  // mis-priced missions and has no family, so this report would never have seen
+  // it. Families are the cheap signal, not a complete one.
+  const inFamily = TASK_BANK.filter((e) => e.family).length;
+  console.log(`  → covers ${inFamily} of ${TASK_BANK.length} missions`
+    + ` (${families.size} families); the rest have no sibling to compare against`);
+}
+
+// ── 9. Composition mix — REPORTED, never asserted (rule 54) ──────────────────
 //
 // Distinctiveness is relational: the peak of a composed game is whatever differs
 // from its neighbours, so a pool where three missions in five are the same kind
@@ -232,7 +280,7 @@ console.log('\n── 7. public photography asks permission (rule 71) ───�
 // call and this suite does not pretend otherwise — but drifting further without
 // anyone noticing should not be possible, and a count with its denominator
 // printed is the cheapest way to make it visible.
-console.log('\n── 8. composition mix (informational, rule 54) ────────────');
+console.log('\n── 9. composition mix (informational, rule 54) ────────────');
 {
   const byType = new Map<string, number>();
   for (const e of TASK_BANK) {
