@@ -1992,6 +1992,56 @@
 // had a checkable answer hiding in it, and some other type would have handed them
 // feedback for free instead of making rule 60 ask you to fake it in prose.
 //
+// ─── 77. A mission that can strand a team does not only fail itself — it taxes
+//         the next one ────────────────────────────────────────────────────────
+//
+// FIRST, THE HONEST VERSION OF THE RESEARCH, because the pop-psychology version
+// is the one everybody reaches for and it does not hold. The Zeigarnik effect —
+// unfinished tasks are remembered better — is one of psychology's weaker
+// replications: a 2025 meta-analysis across ninety-eight years of attempts found
+// a pooled ratio of 0.99 and an effect size of 0.15, i.e. essentially nothing.
+// Do not justify a multi-step mission by saying open loops are memorable.
+//
+// TWO NEIGHBOURING FINDINGS DID SURVIVE, and they are the ones that matter here.
+// People RESUME interrupted tasks about two thirds of the time, well above
+// chance, across children and adults and ninety years of methods (Ovsiankina).
+// And attention leaves a residue: when you switch away from an unfinished task,
+// part of your attention stays behind and performance on the NEXT task suffers,
+// worst when the first was abandoned under time pressure. A field game is
+// nothing but a timed sequence of tasks, so a mission that strands a team is not
+// a self-contained failure — it degrades whatever the composer routes them to
+// next, and the team will keep half-thinking about it.
+//
+// WHICH MAKES THE `sequence` TYPE THE SHARPEST EDGE IN THIS BANK, because a
+// sequence is the one place a player cannot go round an obstacle: the steps are
+// ordered and the mission does not complete until the last one does. And both of
+// this bank's two sequence missions shipped with a step nobody could clear:
+//
+//     disarm-the-device      step 2 asked the team to type "the secret code
+//                            word" against answer "פרוטוקול" — a word that
+//                            appears nowhere in the mission, in no hint, in no
+//                            media and in no Quick Setup prompt. It was
+//                            unsolvable as authored, in a `noPrep` entry whose
+//                            own comment boasted that every step was "fixed,
+//                            fully self-contained content". Fixed by putting the
+//                            code word in the briefing, which is what made the
+//                            fiction work in the first place; difficulty
+//                            re-priced 5 → 3 accordingly (rule 75), since what
+//                            remains is doing three things in the right order.
+//     team-decision-drill    step 2 reads "type the following word" and no word
+//                            follows. Its required Quick Setup step tells the
+//                            creator to replace the ANSWER and never mentions the
+//                            prompt, so the sentence stays dangling however
+//                            carefully the creator follows instructions. Now it
+//                            asks a question the team can actually answer, and
+//                            the setup prompt says to edit both halves.
+//
+// So: for every step with an answer, name where the player learns it. If the
+// answer is not in the prompt, the description, a hint, attached media or a
+// required Quick Setup field, the step is a wall. Rules 19 and 40 both already
+// say this about missions; a sequence deserves its own line because it is the
+// only type where failing one step means failing everything after it.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -3549,7 +3599,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 140,
       steps: [
         { id: uuid(), prompt: 'הוציאו את כל מה שיש לכם בכיסים ובתיקים. בחרו פה אחד את הפריט האחד שהכי יעזור לצוות בשעה הקרובה. אשרו כשכולם מסכימים.' },
-        { id: uuid(), prompt: 'הקלידו את המילה הבאה.', answer: '' },
+        { id: uuid(), prompt: 'מהו הערך האחד שהצוות שלנו באמת מתנהל לפיו? הסכימו עליו פה אחד והקלידו אותו.', answer: '' },
         { id: uuid(), prompt: 'החליטו פה אחד מי מכם מוביל את המשימה הבאה, ואמרו בקול למה דווקא הוא. אשרו לסיום.' },
       ],
     }),
@@ -4432,20 +4482,26 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The bank's `sequence` type had exactly ONE representative
     // (team-decision-drill) across 87 entries before this one — and that entry
     // needs a required setup step (a real value to arrive at), so there was no
-    // zero-prep sequence mission at all. This one needs nothing from the
-    // creator: every step is fixed, fully self-contained content, same source
-    // as `echo-riddle`/`vault-combination-riddle` above.
+    // zero-prep sequence mission at all. This one needs nothing from the creator.
+    //
+    // It also shipped UNSOLVABLE and stayed that way (rule 77): step 2 demanded a
+    // secret code word that appeared nowhere — not in the prompt, the
+    // description, a hint, media or a setup field — in a `sequence`, the one type
+    // where a wall on one step blocks every step after it. The briefing now
+    // carries the word, which is what the fiction wanted anyway, and the
+    // difficulty is re-priced from 5 to 3 (rule 75): what is left is doing three
+    // things in the right order.
     key: 'disarm-the-device',
     sourceTemplateKey: 'authored',
-        tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults',
-      'corporate', 'mixed', 'medium', 'forest', 'beach', 'park', 'neighborhood',
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults',
+      'corporate', 'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood',
       'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 5,
+    difficulty: 3,
     build: () => anywhere({
       title: 'נטרול המנגנון',
-      description: 'שלושה סוכנים לפניכם נכשלו כאן. בצעו את שלושת השלבים בדיוק לפי הסדר, בלי טעויות.',
+      description: 'שלושה סוכנים לפניכם נכשלו כאן. מילת הקוד לנטרול היא "פרוטוקול". בצעו את שלושת השלבים בדיוק לפי הסדר, בלי טעויות.',
       type: 'sequence',
-      difficulty: 5,
+      difficulty: 3,
       estimatedMinutes: 4,
       pointValue: 120,
       steps: [
