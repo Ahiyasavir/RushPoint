@@ -10,7 +10,7 @@ import GamePlanner from '~/components/widgets/GamePlanner.astro';
 import FAQs from '~/components/widgets/FAQs.astro';
 import { Icon } from 'astro-icon/components';
 
-import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
+import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, PLAYER_ORIGIN, type Language } from '~/utils/i18n';
 import { landingPageUrl, mediaLabels, CREATOR_BUILD_URL } from '~/navigation';
 import { pageContent } from '~/utils/pages';
 import Media from '~/components/Media.astro';
@@ -64,7 +64,7 @@ const metadata = {
     subhead={t.subhead}
     trust={t.heroTrust}
     challenge={t.heroChallenge}
-    join={{ prompt: t.heroJoinPrompt, action: t.heroJoinAction, href: 'https://rush-point.com/' }}
+    join={{ prompt: t.heroJoinPrompt, action: t.heroJoinAction, href: `${PLAYER_ORIGIN}/` }}
     clip={t.heroClip}
     taste={t.heroTaste}
     actions={[

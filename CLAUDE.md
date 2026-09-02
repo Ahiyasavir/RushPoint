@@ -915,6 +915,24 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   creator-web already uses to reverse zinc). `scripts/test-marketing-theme.ts` reads the brand
   OUT of `apps/*/tailwind.config.js` and `creator-web/src/index.css` rather than restating it, so
   changing the brand in one place and not the other fails.
+- **Which host serves which app is NOT guessable from the app names** (change: marketing-to-apex,
+  2026-09-01). `rush-point.com` is the **marketing site**; the participant app is
+  `player.rush-point.com`; `www.` 301s to the apex. It was the other way round until this change,
+  so any doc, memory or habit that says "the apex is play-web" is stale. The origins are declared
+  ONCE each — `CANONICAL_PLAY_URL` / `CANONICAL_MARKETING_URL`
+  (`packages/shared/src/canonicalHosts.ts`) for the apps, `PLAYER_ORIGIN` / `SITE_ORIGIN`
+  (`apps/marketing/src/utils/i18n.ts`) for the marketing site — and
+  `scripts/test-canonical-hosts.ts` pins all three and fails if two ever name the same host.
+  **The apps' `.env` files override those constants** (`VITE_PLAY_URL`), so a host move that edits
+  only the constant ships nothing; see the `.env.local` entry above for the same class of trap.
+  Four things outside the repo carry this and no gate can see any of them: the Firebase Hosting
+  custom-domain assignment, the Cloudflare records, **Authentication → Authorized domains** (a
+  missing entry there locks every participant out of anonymous sign-in), and `ALLOWED_ORIGINS` on
+  the VPS (a missing entry makes every callable 403 while the app looks healthy). The Play Store
+  TWA is bound to its host by Digital Asset Links, which is why the apex still serves a copy of
+  `assetlinks.json` and why `apps/marketing/src/components/common/PlayerDeepLink.astro` forwards
+  `?code=` / `?game=` / `?board=` / `?staff` to the participant host: every link minted before the
+  move, printed QR codes included, still arrives at the apex.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

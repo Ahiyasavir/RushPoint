@@ -8,7 +8,7 @@
  *
  * Change: marketing-site.
  */
-import { pagePath, otherLanguage, LANGUAGE_NAME, type Language } from './utils/i18n';
+import { pagePath, otherLanguage, LANGUAGE_NAME, PLAYER_ORIGIN, type Language } from './utils/i18n';
 
 /** Where a reader goes to actually use the product. */
 const CREATOR_APP = 'https://creator.rush-point.com';
@@ -28,9 +28,6 @@ const CREATOR_APP = 'https://creator.rush-point.com';
  * six chances for one of them to quietly lose it.
  */
 export const CREATOR_BUILD_URL = `${CREATOR_APP}/?start=game`;
-/** The participant origin, which also serves the occasion landing pages. */
-const PLAY_ORIGIN = 'https://rush-point.com';
-
 /**
  * The occasion landing pages (change: seo-landing-pages). Linking to them is a
  * requirement, not decoration: without it the two page sets are islands that
@@ -38,7 +35,7 @@ const PLAY_ORIGIN = 'https://rush-point.com';
  * link, so a Hebrew reader is not handed an English destination.
  */
 export const landingPageUrl = (language: Language, slug = ''): string =>
-  slug === '' ? `${PLAY_ORIGIN}/${language}/` : `${PLAY_ORIGIN}/${language}/${slug}/`;
+  slug === '' ? `${PLAYER_ORIGIN}/${language}/` : `${PLAYER_ORIGIN}/${language}/${slug}/`;
 
 interface Copy {
   home: string;
@@ -174,7 +171,7 @@ export const headerData = (language: Language, counterpartHref?: string) => {
       // product exists, so "build" is the emphasised one; but a participant who
       // followed a link here and just wants to enter a code must not have to
       // read a marketing page to find the way in.
-      { text: t.joinGame, href: `${PLAY_ORIGIN}/`, variant: 'tertiary' as const, target: '_blank' },
+      { text: t.joinGame, href: `${PLAYER_ORIGIN}/`, variant: 'tertiary' as const, target: '_blank' },
       { text: t.startBuilding, href: CREATOR_BUILD_URL, target: '_blank' },
     ],
   };
@@ -196,8 +193,8 @@ export const footerData = (language: Language) => {
       {
         title: t.legal,
         links: [
-          { text: t.terms, href: `${PLAY_ORIGIN}/terms` },
-          { text: t.privacy, href: `${PLAY_ORIGIN}/privacy` },
+          { text: t.terms, href: `${PLAYER_ORIGIN}/terms` },
+          { text: t.privacy, href: `${PLAYER_ORIGIN}/privacy` },
         ],
       },
     ],

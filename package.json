@@ -43,7 +43,7 @@
         "upload:check:local": "node scripts/check-upload-health.mjs --origin http://127.0.0.1:8080 --skip-auth",
         "play:assets": "node scripts/gen-play-assets.mjs",
         "play:screenshots": "node scripts/gen-play-screenshots.mjs",
-        "play:twa:init": "npx @bubblewrap/cli init --manifest https://rush-point.com/manifest.webmanifest",
+        "play:twa:init": "npx @bubblewrap/cli init --manifest https://player.rush-point.com/manifest.webmanifest",
         "postplay:twa:init": "node scripts/patch-twa-target-sdk.mjs",
         "preplay:twa:build": "node scripts/patch-twa-target-sdk.mjs",
         "play:twa:build": "npx @bubblewrap/cli build",

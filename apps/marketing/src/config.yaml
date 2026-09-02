@@ -3,7 +3,12 @@ site:
   # The ONE origin declaration. scripts/lib/marketingSite.ts carries the same
   # value for the test lane, and scripts/test-marketing-output.ts asserts the
   # built output agrees with it. Moving the site is a change HERE plus DNS.
-  site: 'https://www.rush-point.com'
+  #
+  # The APEX as of 2026-09-01 (change: marketing-to-apex). This site took the bare
+  # domain from the participant app, which moved to player.rush-point.com; www.
+  # now 301s here. Astro's sitemap and permalinks read this value, NOT the
+  # SITE_ORIGIN constant in src/utils/i18n.ts, so both have to say the same thing.
+  site: 'https://rush-point.com'
   base: '/'
   # TRUE, matching pagePath() in src/utils/i18n.ts. With false the sitemap listed
   # /he while the canonical said /he/, so every sitemap entry pointed at a URL
@@ -75,7 +80,14 @@ apps:
 analytics:
   vendors:
     googleAnalytics:
-      id: null # or "G-XXXXXXXXXX"
+      # NOT the source of truth, and deliberately left unset.
+      #
+      # This key was `null` while the site was live, so the vendored Analytics
+      # component rendered nothing and the marketing site shipped untagged. The
+      # measurement ids now live in src/components/common/Analytics.astro beside the
+      # privacy hardening they are configured with, matching play-web and creator-web,
+      # and scripts/test-analytics-gate.ts pins all three to the shared constants.
+      id: null
 
 ui:
   theme: 'system' # Values: "system" | "light" | "dark" | "light:only" | "dark:only"

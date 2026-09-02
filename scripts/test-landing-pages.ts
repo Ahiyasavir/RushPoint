@@ -615,15 +615,25 @@ check('H · the language scan actually reached the copy', copyScanned >= 100,
   // The other direction. The marketing site's navigation is the surface that
   // carries it; reading the built output would make this test depend on that
   // build having run, which the pure lane cannot assume.
+  //
+  // Two files, because the site names the participant origin ONCE (in utils/i18n,
+  // beside SITE_ORIGIN and API_ORIGIN) and navigation imports it. Asserting the
+  // literal sits in navigation.ts would be asserting a duplication we deliberately
+  // removed, and would fail the moment the origin is centralised — which is what it
+  // did when the participant app moved off the apex (change: marketing-to-apex).
   const navSource = join(ROOT, 'apps', 'marketing', 'src', 'navigation.ts');
-  if (existsSync(navSource)) {
+  const originSource = join(ROOT, 'apps', 'marketing', 'src', 'utils', 'i18n.ts');
+  if (existsSync(navSource) && existsSync(originSource)) {
     const nav = readFileSync(navSource, 'utf8');
+    const origins = readFileSync(originSource, 'utf8');
+    check('L · the marketing site declares the landing origin',
+      origins.includes(LANDING_ORIGIN), LANDING_ORIGIN);
     check('L · the marketing site links back to the landing pages',
-      nav.includes(LANDING_ORIGIN) && /landingPageUrl/.test(nav),
-      LANDING_ORIGIN);
+      /landingPageUrl/.test(nav) && /PLAYER_ORIGIN/.test(nav),
+      'navigation.ts builds landingPageUrl from PLAYER_ORIGIN');
   } else {
     check('L · the marketing site links back to the landing pages', false,
-      `${navSource} is absent`);
+      `${navSource} or ${originSource} is absent`);
   }
 }
 

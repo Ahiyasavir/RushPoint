@@ -36,13 +36,18 @@
 /**
  * The origin these pages are served from.
  *
- * The apex, not the creator console. It carries the brand, and its robots.txt already
- * answers `Allow: /`, whereas the console's crawl rules deliberately allow only `/$`,
+ * The participant host, because that is where the files physically live: they are
+ * real files under `apps/play-web/public/`, and play-web moved off the apex when the
+ * marketing site took it (change: marketing-to-apex). Its robots.txt answers
+ * `Allow: /`, whereas the console's crawl rules deliberately allow only `/$`,
  * `/privacy` and `/terms` because everything else there is behind authentication.
- * Threading marketing pages through that allow-list would weaken a rule that is
- * currently crisp, to host them on the subdomain with the least brand recognition.
+ *
+ * The old apex URLs are 301'd here from the marketing site (`firebase.json`), so
+ * nothing already indexed dies. Moving these pages INTO the marketing app was the
+ * obvious alternative and does not work: their index is `/he/`, which is the
+ * marketing home's own path, so the two would collide.
  */
-export const LANDING_ORIGIN = 'https://rush-point.com';
+export const LANDING_ORIGIN = 'https://player.rush-point.com';
 
 /** Where the call to action sends a creator: the console's logged out landing page. */
 export const CREATOR_ORIGIN = 'https://creator.rush-point.com';
@@ -56,7 +61,7 @@ export const CREATOR_ORIGIN = 'https://creator.rush-point.com';
  * in the SAME language as the page carrying the link, so a Hebrew reader is not
  * handed an English page.
  */
-export const MARKETING_ORIGIN = 'https://www.rush-point.com';
+export const MARKETING_ORIGIN = 'https://rush-point.com';
 
 const MARKETING_LABEL: Record<LandingLanguage, string> = {
   he: 'על RushPoint',

@@ -4,77 +4,77 @@
      the generator, and asserts the URL set matches the pages that actually exist. -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://rush-point.com/</loc>
+    <loc>https://player.rush-point.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/privacy</loc>
+    <loc>https://player.rush-point.com/privacy</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/terms</loc>
+    <loc>https://player.rush-point.com/terms</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/he/</loc>
+    <loc>https://player.rush-point.com/he/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/he/yom-huledet/</loc>
+    <loc>https://player.rush-point.com/he/yom-huledet/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/he/bar-mitzva/</loc>
+    <loc>https://player.rush-point.com/he/bar-mitzva/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/he/hatuna/</loc>
+    <loc>https://player.rush-point.com/he/hatuna/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/he/gibush-tzevet/</loc>
+    <loc>https://player.rush-point.com/he/gibush-tzevet/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/he/tnuat-noar/</loc>
+    <loc>https://player.rush-point.com/he/tnuat-noar/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/en/</loc>
+    <loc>https://player.rush-point.com/en/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/en/yom-huledet/</loc>
+    <loc>https://player.rush-point.com/en/yom-huledet/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/en/bar-mitzva/</loc>
+    <loc>https://player.rush-point.com/en/bar-mitzva/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/en/hatuna/</loc>
+    <loc>https://player.rush-point.com/en/hatuna/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/en/gibush-tzevet/</loc>
+    <loc>https://player.rush-point.com/en/gibush-tzevet/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://rush-point.com/en/tnuat-noar/</loc>
+    <loc>https://player.rush-point.com/en/tnuat-noar/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>

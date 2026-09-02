@@ -19,7 +19,7 @@ function check(label: string, cond: boolean, detail = ''): void {
   if (!cond) failures++;
 }
 
-const ORIGIN = 'https://www.rush-point.com';
+const ORIGIN = 'https://rush-point.com';
 const REDIRECT = 'https://api.rush-point.com/oauth/callback';
 
 // A minimal Express-shaped response recorder.

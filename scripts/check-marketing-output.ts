@@ -111,7 +111,7 @@ const OUR_HOST_PATTERN = /https?:\/\/[a-z0-9.-]*(?:rush-point\.com|rushpoint[a-z
 const SIBLING_ORIGINS = [
   'https://creator.rush-point.com',
   'https://api.rush-point.com',
-  'https://rush-point.com',
+  'https://player.rush-point.com',
 ];
 
 const isSelfUrl = (url: string): boolean =>

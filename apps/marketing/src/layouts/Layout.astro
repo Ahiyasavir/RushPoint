@@ -4,6 +4,7 @@ import '~/assets/styles/tailwind.css';
 import { Font } from 'astro:assets';
 
 import CommonMeta from '~/components/common/CommonMeta.astro';
+import PlayerDeepLink from '~/components/common/PlayerDeepLink.astro';
 import Favicons from '~/components/Favicons.astro';
 import CustomStyles from '~/components/CustomStyles.astro';
 import ApplyColorMode from '~/components/common/ApplyColorMode.astro';
@@ -42,6 +43,15 @@ const textDirection = DIRECTION[language];
 <html lang={language} dir={textDirection} class="2xl:text-[20px]">
   <head>
     <CommonMeta />
+    {
+      /*
+        Immediately after <meta charset> (which CommonMeta carries) and before the
+        analytics tag: this can send a visitor to the participant app, and a
+        page_view recorded first would be a view of a page they never saw. See the
+        component for why the apex receives player links at all.
+      */
+    }
+    <PlayerDeepLink />
     <Favicons />
     {/*
       Body face is preloaded because it sets the first paragraph a reader sees;

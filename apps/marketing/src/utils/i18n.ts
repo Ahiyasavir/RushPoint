@@ -10,7 +10,7 @@
  */
 
 /** No trailing slash. Every derived URL appends its own leading slash. */
-export const SITE_ORIGIN = 'https://www.rush-point.com';
+export const SITE_ORIGIN = 'https://rush-point.com';
 
 /**
  * Where the contact form posts. The self hosted API, the same one the two apps
@@ -23,6 +23,16 @@ export const SITE_ORIGIN = 'https://www.rush-point.com';
  * healthy. That is a VPS step, not a build step, and it is in DEPLOY.md.
  */
 export const API_ORIGIN = 'https://api.rush-point.com';
+
+/**
+ * The participant app (change: marketing-to-apex).
+ *
+ * This site took the apex, so the player app answers on its own subdomain now.
+ * Declared here with the other origins rather than inline at each link, for the
+ * same reason API_ORIGIN is: a host spelled inline is a host nobody finds when it
+ * moves, and this one just moved.
+ */
+export const PLAYER_ORIGIN = 'https://player.rush-point.com';
 
 /** The two languages the site publishes, in the order menus should offer them. */
 export const LANGUAGES = ['he', 'en'] as const;

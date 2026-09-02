@@ -58,10 +58,25 @@ Recorded here because it was not written down anywhere and the records are NOT u
 
 | Hostname | Serves | Records | Cloudflare |
 |---|---|---|---|
-| `rush-point.com` | participant app (play-web) | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
+| `rush-point.com` | **marketing site** (`apps/marketing`) | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `www.rush-point.com` | 301 → apex | Cloudflare addresses | proxied |
+| `player.rush-point.com` | **participant app** (play-web) | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `creator.rush-point.com` | creator console | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `api.rush-point.com` | self-hosted API (VPS) | see `deploy/CLOUDFLARE.md` | proxied |
+
+> ⚠️ **The apex and the participant app swapped places** (change: marketing-to-apex).
+> `rush-point.com` served play-web until 2026-09-01; the participant app now answers on
+> `player.rush-point.com`, and the apex is the marketing site. Three things carry the
+> weight of that move and are easy to miss:
+> 1. `player.rush-point.com` must be in **Authentication → Settings → Authorized domains**,
+>    or anonymous sign-in fails and no participant can join. Nothing else reports this.
+> 2. `ALLOWED_ORIGINS` on the VPS must include `https://player.rush-point.com` (§below),
+>    or every callable answers 403 while the app itself looks perfectly healthy.
+> 3. The Play Store TWA (`com.rushpoint.app`) verifies Digital Asset Links against the
+>    host in `twa-manifest.json`. Installed builds older than versionCode 5 still open the
+>    apex, which is why `apps/marketing/public/.well-known/assetlinks.json` exists and why
+>    the marketing layout carries `PlayerDeepLink.astro` — it forwards `?code=`, `?game=`,
+>    `?board=` and `?staff` links to the participant host.
 
 `199.36.158.100` / `2620:0:890::100` are Firebase Hosting's own published custom-domain records,
 so a Firebase-served host should carry **both**.
@@ -440,7 +455,7 @@ invocation · `RUSHPOINT_BACKFILL_PROJECT` as an alternative to `--project` (it 
 
 ---
 
-## 12. Runbook — the marketing site (`www.rush-point.com`)
+## 12. Runbook — the marketing site (`rush-point.com`)
 
 The site at `apps/marketing` is static output on its own Hosting target. Everything in this
 section is **off-site configuration**: it cannot be done from the repository, no gate can
@@ -473,7 +488,9 @@ npm run marketing:build && firebase deploy --only hosting:marketing
 | Step | Where | What stays broken until it is done |
 |---|---|---|
 | A Hosting site named `rushpoint-marketing` exists in the Firebase console | Firebase → Hosting → Add another site | `firebase deploy` fails with a message about **targets**, not about anything you just changed. `.firebaserc` already maps the `marketing` target to that name. |
-| `www.rush-point.com` is added as a custom domain on that site, and its DNS records are in place | Firebase Hosting → custom domain, then the registrar | The site is live only at its `*.web.app` address. Every canonical, every hreflang entry and every sitemap URL says `www.rush-point.com`, so until DNS resolves, a crawler is being pointed at a host that does not answer, and **the site looks perfectly fine to you** because you are visiting the other address. |
+| `rush-point.com` (the APEX) is added as a custom domain on that site, and its DNS records are in place | Firebase Hosting → custom domain, then the registrar | The site is live only at its `*.web.app` address. Every canonical, every hreflang entry and every sitemap URL says `rush-point.com`, so until DNS resolves, a crawler is being pointed at a host that does not answer, and **the site looks perfectly fine to you** because you are visiting the other address. |
+| The apex is **released from the `rushpoint-play` site first** — a custom domain belongs to one Hosting site at a time | Firebase Hosting → the `rushpoint-play` site → remove `rush-point.com` | Firebase refuses to attach the domain here and says it is already in use, naming the other site. Do this only after `player.rush-point.com` is serving play-web, or there is a window with no participant app at all. |
+| `www.rush-point.com` is set to **redirect to the apex** | Firebase Hosting → custom domain → redirect | Two live copies of the same site on two hosts, splitting every search signal between them. |
 
 ### C. The contact form: allow the site's origin on the API ⚠
 
@@ -504,7 +521,7 @@ ssh root@31.70.107.184
 Then edit `ALLOWED_ORIGINS` in the API's environment so it contains, comma separated:
 
 ```
-https://creator.rush-point.com,https://rush-point.com,https://www.rush-point.com
+https://creator.rush-point.com,https://rush-point.com,https://www.rush-point.com,https://player.rush-point.com
 ```
 
 **What stays broken until it is done:** every contact submission comes back `403` with
@@ -608,7 +625,7 @@ curl -sI https://api.rush-point.com/oauth | head -1
 
 `302` means configured (it is redirecting to GitHub). `503` means the API still has no
 client id or secret — the restart did not pick up `api.env`. Then open
-`https://www.rush-point.com/admin/` (or `https://rushpoint-marketing.web.app/admin/` before
+`https://rush-point.com/admin/` (or `https://rushpoint-marketing.web.app/admin/` before
 the DNS cutover in §B) and sign in: a successful sign in closes the popup and lands on the
 post list.
 
@@ -649,7 +666,7 @@ should not be confused with each other: the runbook above is config, this list i
 | ✅ | `CONTACT_NOTIFY_TO` set (§D) |
 | ❌ | **18 commits of `topographic-maps` deployed to the VPS.** It is on `main`, which predates the marketing site, the contact form, and everything in this file past section 11. `submitContactMessage` 404s: the callable does not exist yet on the running server. |
 | ❌ | `firestore.rules` deployed. `main`'s copy has no `contactMessages` rule at all — not open, not closed, simply absent, which Firestore treats as denied by default, but it is untested drift rather than the deliberate `allow read, write: if false` this repository ships. |
-| ❌ | The `rushpoint-marketing` Hosting site + `www.rush-point.com` DNS (§B) — not checked in this pass. |
+| ❌ | The `rushpoint-marketing` Hosting site + the apex DNS (§B) — not checked in this pass. |
 | ❌ | The GitHub OAuth **app** for the CMS, and its two values in `api.env` (§E). The token exchange **endpoint** is now in the repository and ships with the deploy above; what remains is one GitHub form and one restart. Optional — the site works without it. |
 
 To close the code gap: merge or fast-forward `main` to `topographic-maps` (or deploy

@@ -11,4 +11,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://rush-point.com/sitemap.xml
+Sitemap: https://player.rush-point.com/sitemap.xml

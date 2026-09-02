@@ -1,0 +1,35 @@
+---
+import { PLAYER_ORIGIN } from '~/utils/i18n';
+---
+
+<script is:inline define:vars={{ playerOrigin: PLAYER_ORIGIN }}>
+  // Deep link rescue for the apex (change: marketing-to-apex).
+  //
+  // The apex used to serve the PARTICIPANT app. It now serves this site, so every
+  // link minted before the move points here: printed QR codes, join links shared in
+  // WhatsApp, bookmarks, and — until the v5 build clears review — every installed
+  // copy of the Play Store app, whose Digital Asset Links scope is still the apex.
+  //
+  // Firebase Hosting redirects match the PATH only, so the query string ones cannot
+  // be expressed in firebase.json. They are the ones that matter: a join link is
+  // `?code=`, a teaser is `?game=`, a public board is `?board=`, staff is `?staff`.
+  // Without this, all four land on a marketing page with no way forward, and the
+  // person holding the link concludes the game is broken.
+  //
+  // Runs inline in <head>, immediately after <meta charset>, and before the
+  // analytics tag: a redirect that ran later would record a page_view against a
+  // page the visitor was never meant to see. `location.replace`, not `assign`, so
+  // the marketing URL never enters history and Back does not bounce.
+  //
+  // Deliberately NOT a catch-all on "/" — the bare apex is this site's own front
+  // door, which is the entire point of the move.
+  (function () {
+    const params = new URLSearchParams(window.location.search);
+    const isPlayerLink =
+      params.has('code') || params.has('game') || params.has('board') || params.has('staff');
+
+    if (isPlayerLink) {
+      window.location.replace(playerOrigin + '/' + window.location.search + window.location.hash);
+    }
+  })();
+</script>

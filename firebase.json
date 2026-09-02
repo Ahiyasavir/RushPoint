@@ -33,7 +33,31 @@
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
       "cleanUrls": false,
       "trailingSlash": true,
-      "redirects": [{ "source": "/", "destination": "/he/", "type": 302 }]
+      "redirects": [
+        { "source": "/", "destination": "/he/", "type": 302 },
+        { "source": "/terms", "destination": "https://player.rush-point.com/terms", "type": 301 },
+        { "source": "/privacy", "destination": "https://player.rush-point.com/privacy", "type": 301 },
+        { "source": "/he/bar-mitzva", "destination": "https://player.rush-point.com/he/bar-mitzva/", "type": 301 },
+        { "source": "/he/bar-mitzva/", "destination": "https://player.rush-point.com/he/bar-mitzva/", "type": 301 },
+        { "source": "/he/gibush-tzevet", "destination": "https://player.rush-point.com/he/gibush-tzevet/", "type": 301 },
+        { "source": "/he/gibush-tzevet/", "destination": "https://player.rush-point.com/he/gibush-tzevet/", "type": 301 },
+        { "source": "/he/hatuna", "destination": "https://player.rush-point.com/he/hatuna/", "type": 301 },
+        { "source": "/he/hatuna/", "destination": "https://player.rush-point.com/he/hatuna/", "type": 301 },
+        { "source": "/he/tnuat-noar", "destination": "https://player.rush-point.com/he/tnuat-noar/", "type": 301 },
+        { "source": "/he/tnuat-noar/", "destination": "https://player.rush-point.com/he/tnuat-noar/", "type": 301 },
+        { "source": "/he/yom-huledet", "destination": "https://player.rush-point.com/he/yom-huledet/", "type": 301 },
+        { "source": "/he/yom-huledet/", "destination": "https://player.rush-point.com/he/yom-huledet/", "type": 301 },
+        { "source": "/en/bar-mitzva", "destination": "https://player.rush-point.com/en/bar-mitzva/", "type": 301 },
+        { "source": "/en/bar-mitzva/", "destination": "https://player.rush-point.com/en/bar-mitzva/", "type": 301 },
+        { "source": "/en/gibush-tzevet", "destination": "https://player.rush-point.com/en/gibush-tzevet/", "type": 301 },
+        { "source": "/en/gibush-tzevet/", "destination": "https://player.rush-point.com/en/gibush-tzevet/", "type": 301 },
+        { "source": "/en/hatuna", "destination": "https://player.rush-point.com/en/hatuna/", "type": 301 },
+        { "source": "/en/hatuna/", "destination": "https://player.rush-point.com/en/hatuna/", "type": 301 },
+        { "source": "/en/tnuat-noar", "destination": "https://player.rush-point.com/en/tnuat-noar/", "type": 301 },
+        { "source": "/en/tnuat-noar/", "destination": "https://player.rush-point.com/en/tnuat-noar/", "type": 301 },
+        { "source": "/en/yom-huledet", "destination": "https://player.rush-point.com/en/yom-huledet/", "type": 301 },
+        { "source": "/en/yom-huledet/", "destination": "https://player.rush-point.com/en/yom-huledet/", "type": 301 }
+      ]
     }
   ],
   "emulators": {
