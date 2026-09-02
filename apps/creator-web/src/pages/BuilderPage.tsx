@@ -234,7 +234,11 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
         else e.currentTarget.textContent = title || fallback;
       }}
       data-qs-field="game.title"
-      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[12ch] sm:max-w-[14ch] lg:max-w-[18ch] xl:max-w-[26ch] 2xl:max-w-[34ch] whitespace-nowrap overflow-hidden text-ellipsis"
+      // Phone: `flex-1` with no cap, because the header row no longer has a tab
+      // strip to leave room for (change: builder-mobile-simplification) and a
+      // 12ch cap on a one-line bar rendered the game's name as "מש…". From `sm`
+      // the caps come back — there the strip is real and the title must yield.
+      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire flex-1 sm:flex-none min-w-[6ch] max-w-none sm:max-w-[14ch] lg:max-w-[18ch] xl:max-w-[26ch] 2xl:max-w-[34ch] whitespace-nowrap overflow-hidden text-ellipsis"
     >
       {title || fallback}
     </h2>
@@ -993,11 +997,18 @@ export default function BuilderPage() {
       {/* ── Persistent shell header bar: logo · back · title · save · tabs · launch.
           This is the only header in the Builder (the global app nav is hidden),
           so the workspace gets the full viewport height. ── */}
-      {/* Below `sm` the bar wraps: the controls stay on the first line and the tab
-          strip drops to its own full-width line (`order-last basis-full`) instead
-          of being squeezed to zero. At `sm` and up every class below restores
-          today's exact single-row geometry. */}
-      <header className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 px-2 py-1.5 sm:gap-x-3 sm:px-4 sm:py-0 min-h-14 sm:h-14 border-b border-[--rp-border] bg-[--surface-1]">
+      {/* ONE line at every width (change: builder-mobile-simplification).
+          It used to `flex-wrap` with the tab strip forced onto its own full-width
+          line, which on a 390px phone produced THREE rows — controls, the overflow
+          trigger that no longer fit beside them, then the tabs — roughly 120px of
+          chrome above a canvas that had ~240px left for missions. Wrapping is now
+          impossible by construction (`flex-nowrap` everywhere) and the row is made
+          to fit instead, by moving things out rather than by squeezing them:
+          the tab strip becomes a bottom bar on a phone (BuilderTabBar, below), the
+          duplicate save button is dropped (it is already in the overflow menu), and
+          readiness folds into the launch button. What is left is five controls:
+          back · title · save dot · more · launch. */}
+      <header className="shrink-0 flex flex-nowrap items-center gap-x-1.5 px-2 py-1.5 sm:gap-x-3 sm:px-4 sm:py-0 h-14 border-b border-[--rp-border] bg-[--surface-1]">
         <button onClick={() => { void leaveToGames(); }} aria-label={b.backToGames} className="flex items-center justify-center gap-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
           <span className="text-sm leading-none">←</span> <span className="hidden sm:inline">{b.backToGames}</span>
         </button>
@@ -1027,7 +1038,11 @@ export default function BuilderPage() {
             and of whatever the current tab/focus state is. `save()` itself is a
             safe no-op when nothing changed, so this can never do harm; it exists
             purely so a creator who is unsure whether autosave "caught up" has one
-            button that unconditionally tries again right now. */}
+            button that unconditionally tries again right now.
+            Desktop only: the phone overflow menu below already carries this exact
+            action, so at 390px it was paying for header width TWICE and it was one
+            of the six controls that pushed the bar onto a second line. */}
+        {!isMobile && (
         <button
           onClick={() => { void save(); }}
           disabled={status === 'saving'}
@@ -1036,6 +1051,7 @@ export default function BuilderPage() {
         >
           {b.saveNow}
         </button>
+        )}
 
         {/* Past runs (change: post-run-player-report). The Builder is where a
             creator sits when they wonder how the last group did with a mission
@@ -1135,8 +1151,16 @@ export default function BuilderPage() {
           }}
         />
 
-        {/* Centered tab strip */}
-        <nav role="tablist" data-tour="builder-tabs" className="flex-1 basis-full sm:basis-0 order-last sm:order-none min-w-0 flex items-center justify-center gap-1 overflow-x-auto">
+        {/* Centered tab strip. Desktop only — on a phone the same tablist renders
+            as <BuilderTabBar> at the BOTTOM of the shell (change:
+            builder-mobile-simplification). Moving between Build, Preview and
+            Settings is the most frequent action in this screen and it was living
+            in the least reachable pixels on a 6.7" phone; at the bottom it is in
+            the thumb zone and it stops competing with the launch button for the
+            one header row. `data-tour="builder-tabs"` travels with whichever one
+            is mounted, so the guided tour still finds exactly one anchor. */}
+        {!isMobile && (
+        <nav role="tablist" data-tour="builder-tabs" className="flex-1 min-w-0 flex items-center justify-center gap-1 overflow-x-auto">
           {visibleTabIds.map((id) => (
             <button
               key={id}
@@ -1152,12 +1176,18 @@ export default function BuilderPage() {
             </button>
           ))}
         </nav>
+        )}
 
         {/* Readiness, beside the launch controls: everything that would refuse a
             launch, listed at once, before a launch is attempted. */}
         <ReadinessPanel
           issues={readiness}
           open={readinessOpen}
+          // On a phone the trigger is gone and the LAUNCH button carries the
+          // state instead (change: builder-mobile-simplification) — the popover
+          // still mounts here, anchored to this zero-width slot, so the list and
+          // its navigate-to-the-offender behaviour are unchanged.
+          showTrigger={!isMobile}
           onToggle={() => setReadinessOpen((o) => !o)}
           onActivate={(issue) => {
             setReadinessOpen(false);
@@ -1173,18 +1203,51 @@ export default function BuilderPage() {
             launchable?" and "have I filled in what this template asked for?" — and a
             creator working through a template needs both in one place. Renders
             nothing at all for a game with no setup steps. */}
-        <QuickSetupPill
-          remaining={qsOutstanding.length}
-          total={qsSteps.length}
-          onResume={() => dispatchQs({ type: 'resume' })}
-        />
+        {/* Desktop header only (change: builder-mobile-simplification). Measured
+            on a 375px phone the bar had ~56px of free width and the game's own
+            NAME was the thing being squeezed into it — "משחק ללא שם" rendered as
+            "מש…", which identifies nothing. This pill is a resume door, and on a
+            phone the flow already announces itself far more loudly than a 48px
+            chip: the welcome card, the floating step bar and the launch-refusal
+            dialog are all full-width surfaces. Giving its width to the title is
+            the better trade at that size. */}
+        {!isMobile && (
+          <QuickSetupPill
+            remaining={qsOutstanding.length}
+            total={qsSteps.length}
+            onResume={() => dispatchQs({ type: 'resume' })}
+          />
+        )}
 
         {/* The SECONDARY launch (a rehearsal run) collapses into the menu on a
             phone; the PRIMARY launch always stays on the bar. */}
         {!isMobile && (
           <Button variant="ghost" loading={launching} onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
         )}
-        <Button onClick={() => saveAndLaunch(false)} loading={launching} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
+        {/* The primary launch. On a phone it ALSO carries readiness (change:
+            builder-mobile-simplification): with blockers outstanding it turns amber,
+            shows their count and opens the readiness list instead of attempting a
+            launch that `saveAndLaunch` would refuse anyway. One control, the same
+            guarantee — a creator still cannot launch past an unmet requirement, and
+            the refusal now arrives as the list of what to fix rather than as an
+            error after the fact. At desktop widths the separate readiness pill is
+            still there, so nothing changes. */}
+        {isMobile && readiness.length > 0 ? (
+          <button
+            type="button"
+            data-tour="builder-launch"
+            onClick={() => setReadinessOpen((o) => !o)}
+            aria-expanded={readinessOpen}
+            aria-label={b.readinessAria(readiness.length)}
+            className="shrink-0 inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg border border-rp-amber/60 bg-rp-amber/10 text-ink-amber text-sm font-semibold transition-colors hover:bg-rp-amber/20"
+          >
+            <span aria-hidden>⚠</span>
+            <span>{b.launchRun}</span>
+            <span aria-hidden className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rp-amber text-white text-[12px] font-bold leading-none tabular-nums">{readiness.length}</span>
+          </button>
+        ) : (
+          <Button onClick={() => saveAndLaunch(false)} loading={launching} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
+        )}
 
         {/* Phone width: ONE menu holding every secondary header control. Back,
             title, save status, tabs, readiness and the primary launch stay on the
@@ -1193,9 +1256,13 @@ export default function BuilderPage() {
         {isMobile && (
           <div className="shrink-0">
             <OverflowMenu
-              label={b.headerMoreMenu}
+              // Icon-only trigger on a phone: the word "עוד" cost ~13px of a row
+              // whose scarcest resource is the game title beside it, and ⋯ is the
+              // one glyph a menu can wear without a label. `ariaLabel` is unchanged,
+              // so the accessible name still says what it opens.
+              label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
               ariaLabel={b.headerMoreMenuAria}
-              triggerClassName="min-h-[44px] px-3 rounded-lg text-sm gap-1"
+              triggerClassName="min-h-[44px] w-11 justify-center rounded-lg text-lg leading-none"
             >
               <button
                 role="menuitem"
@@ -1292,8 +1359,17 @@ export default function BuilderPage() {
           creator can go live but has no obvious signal they are done. One line,
           dismissible, right under the launch controls. It reuses the readiness
           ready title and never shows once the game has a run or the creator
-          dismisses it. */}
-      {!readyNudgeDismissed && readiness.length === 0 && (game.playCount ?? 0) === 0 && (
+          dismisses it.
+          NOT SHOWN AT ALL on a phone (change: builder-mobile-simplification). On
+          844px of screen it wrapped to three lines and spent ~145px saying that
+          nothing is wrong — the single largest thing on a canvas that had ~240px
+          left for actual missions, and the creator had to dismiss it every session
+          to get that space back. Nothing is lost: readiness is folded into the
+          launch button at that width, so a ready game is exactly the game whose
+          launch button is the ordinary orange one, and an unready game's button is
+          amber with the count. The banner survives on desktop, where the row it
+          occupies is not competing with anything. */}
+      {!isMobile && !readyNudgeDismissed && readiness.length === 0 && (game.playCount ?? 0) === 0 && (
         <div
           role="status"
           className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-go/40 bg-rp-go/10 px-4 py-2 text-xs text-[--ink-1]"
@@ -1351,7 +1427,63 @@ export default function BuilderPage() {
           </Card>
         )}
       </div>
+
+      {/* Phone-width tab bar. A flex CHILD of the shell, not a fixed overlay: the
+          shell is already a full-height flex column, so a sibling row is laid out
+          around rather than painted over — no z-index to lose against the mission
+          sheet, and no phantom padding to keep in sync with its height. */}
+      {isMobile && (
+        <BuilderTabBar
+          tabs={visibleTabIds}
+          active={activeTab}
+          label={TAB_LABEL}
+          onSelect={(id) => { void save(); setTab(id); if (id === 'preview' && gameId) markGamePreviewed(gameId); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Phone tab bar (change: builder-mobile-simplification) ────────────────────
+// The header's tab strip, moved to the thumb zone. Same roles, same labels, same
+// handler — only the position and the touch target change. Icons are decorative
+// and paired with their word, never on their own: a builder's three surfaces are
+// not conventional enough for a glyph alone to name them.
+const BUILDER_TAB_ICON: Record<BuilderTab, string> = {
+  build: '🧩', preview: '👁', settings: '⚙', analytics: '📊',
+};
+
+function BuilderTabBar({ tabs, active, label, onSelect }: {
+  tabs: readonly BuilderTab[];
+  active: BuilderTab;
+  label: Record<BuilderTab, string>;
+  onSelect: (id: BuilderTab) => void;
+}) {
+  return (
+    <nav
+      role="tablist"
+      data-tour="builder-tabs"
+      // pb-[env(safe-area-inset-bottom)] so the row clears a gesture bar rather
+      // than sitting under it on a device that has one.
+      className="shrink-0 flex items-stretch gap-1 border-t border-[--rp-border] bg-[--surface-1] px-1 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]"
+    >
+      {tabs.map((id) => {
+        const on = active === id;
+        return (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={on}
+            onClick={() => onSelect(id)}
+            className={`flex-1 min-w-0 min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
+              on ? 'bg-rp-fire/10 text-ink-fire' : 'text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1]'}`}
+          >
+            <span aria-hidden className="text-base leading-none">{BUILDER_TAB_ICON[id]}</span>
+            <span className="text-[12px] font-medium truncate max-w-full px-1">{label[id]}</span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -1363,8 +1495,15 @@ export default function BuilderPage() {
 // `issues` is a PROP, not re-derived here (change: builder-readiness-autoopen):
 // the parent already computed it under a useMemo, and computing it again made the
 // same walk run twice per render for no gain.
-function ReadinessPanel({ issues, open, onToggle, onActivate }: {
+// `showTrigger` false (phone width, change: builder-mobile-simplification) renders
+// the popover WITHOUT its own pill: the launch button in the header opens it, so a
+// second control saying the same thing would be one more thing to read on the row
+// this change exists to shorten. The wrapper still renders, zero-width, because the
+// popover positions against it — hiding the whole component would take the list
+// with it, and the list is the part that matters.
+function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true }: {
   issues: ReadinessIssue[]; open: boolean; onToggle: () => void; onActivate: (issue: ReadinessIssue) => void;
+  showTrigger?: boolean;
 }) {
   const b = useT().builder;
   const ISSUE_LABEL: Record<ReadinessCode, string> = {
@@ -1379,6 +1518,7 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
   };
   return (
     <div className="relative shrink-0">
+      {showTrigger && (
       <button
         type="button"
         onClick={onToggle}
@@ -1393,6 +1533,7 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
         <span className="hidden 2xl:inline">{b.readinessTitle}</span>
         {issues.length > 0 && <Badge color="gold">{b.readinessCount(issues.length)}</Badge>}
       </button>
+      )}
 
       {open && (
         <div className="absolute z-50 end-0 top-full mt-1 w-[22rem] max-w-[calc(100vw-1.5rem)] rounded-xl border border-[--rp-border] bg-[--surface-1] shadow-soft">
@@ -2343,6 +2484,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quickSetupFocus?.nonce]);
 
+  // Phone width: the stage header collapses into the rail pill and the ⚙ settings
+  // pane (change: builder-mobile-simplification). Declared with the other hooks,
+  // above every early return this component has, so the hook order is fixed —
+  // the rules-of-hooks lane exists because of exactly this mistake.
+  const isMobile = useIsMobile();
+
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
     // gets the full height and never clips, and the page never scrolls.
@@ -2351,8 +2498,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           The hierarchy was never labelled on screen — a creator inferred which
           stage was open and which mission they were editing purely from
           rail-vs-canvas layout position. Live-derived off state the Builder
-          already holds; no new Firestore read. */}
-      {breadcrumbText && (
+          already holds; no new Firestore read.
+          Desktop only (change: builder-mobile-simplification): on a phone the
+          stage rail's ACTIVE pill already reads "שלב 1 · חימום", so the breadcrumb
+          repeated it one line above in a paler colour. */}
+      {breadcrumbText && !isMobile && (
         <div
           className="shrink-0 px-1 text-xs font-medium text-[--ink-3] truncate"
           data-tour="builder-breadcrumb"
@@ -2405,7 +2555,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           <>
             <div className="shrink-0 space-y-2">
             {/* Title row — the calm centre of the stage at rest: just the name,
-                the finale toggle on the last stage, and delete. */}
+                the finale toggle on the last stage, and delete.
+                Desktop only (change: builder-mobile-simplification). On a phone
+                this cost 56px to restate a name the active rail pill already
+                shows, and it did it with an always-live <input>, which on a touch
+                screen is a tap magnet that opens the keyboard by accident — with a
+                bare red ✕ that destroys the whole stage sitting right beside it.
+                Renaming, the finale toggle and delete all moved INTO the ⚙ stage
+                settings pane, one deliberate tap away, where delete can also carry
+                its own heading rather than being a loose glyph. */}
+            {!isMobile && (
             <div className="flex items-center gap-2">
               <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
@@ -2419,6 +2578,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                   onClick={() => void confirmRemoveStage(activeStage)}>✕</button>
               )}
             </div>
+            )}
 
             {/* ── Settings bar (change: wave-k stage-editor-redesign) ──────────
                 ONE thin row: a single "stage settings" affordance plus at-rest
@@ -2564,7 +2724,14 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 onMoveToStage={(taskId, toStageId) => moveTaskToStage(activeStage.id, taskId, toStageId)}
               />
             </div>
-            <div className="flex gap-2 shrink-0">
+            {/* `mb-12` on a phone keeps this row clear of <ActiveRunBar>, which is
+                a `fixed … bottom-20 start-4` pill and therefore floats over
+                whatever the canvas's last row happens to be. It only ever appears
+                while a run is live, but when it does it landed squarely on "add a
+                mission" — and the canvas reclaiming ~350px (change:
+                builder-mobile-simplification) is exactly what pushed this row down
+                to meet it. */}
+            <div className="flex gap-2 shrink-0 mb-12 sm:mb-0">
               <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
               <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
             </div>
@@ -2607,6 +2774,15 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           onUpdateStage={(p) => updateStage(activeStage.id, p)}
           onOpenGroups={() => setGroupsOpen(true)}
           onClose={() => setSettingsOpen(false)}
+          // Phone only: the name, the finale toggle and delete moved off the
+          // canvas into this pane (change: builder-mobile-simplification). Passing
+          // `undefined` at desktop widths is what keeps that section from appearing
+          // twice — the canvas still owns them there.
+          identity={isMobile ? {
+            isLastStage: game.stages[game.stages.length - 1]?.id === activeStage.id,
+            canDelete: game.stages.length > 1,
+            onDelete: () => { setSettingsOpen(false); void confirmRemoveStage(activeStage); },
+          } : undefined}
         />
       )}
 
@@ -2621,7 +2797,19 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           reserveTop={!!qsOverlayActive}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
           onRemove={editingStage.tasks.length > 1
-            ? () => {
+            ? async () => {
+                // ASK FIRST (change: builder-mobile-simplification). This was the
+                // only destructive control in the Builder that fired straight into
+                // the delete — and it lived in the editor's footer between "back"
+                // and "next", so a mis-tap aimed at navigation destroyed a mission
+                // the creator had just written. Same posture as confirmRemoveStage,
+                // deleteGame and skipTaskForTeam: name the thing, then act.
+                const ok = await dialog.confirm(
+                  b.deleteTaskConfirm(editingTask.title?.trim() || b.untitledTask),
+                  b.deleteTask,
+                  true,
+                );
+                if (!ok) return;
                 // Also strip the removed task's id from any sibling's prerequisite
                 // gate (unlockable-tasks) — a dangling id would fail save-time
                 // validation and wedge the autosave.
@@ -2774,18 +2962,46 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
 // under it hides the very instruction the creator opened the editor to read),
 // the sheet steps its OWN top edge down by the overlay's rough height only while
 // one is actually up, so both stay fully visible and fully usable at once.
+// Below `lg` it is a BOTTOM SHEET, not a full-height side sheet (change:
+// builder-mobile-simplification). The side shape was already `min(100vw, 32rem)`
+// wide on a phone — a full-screen modal wearing a side-sheet costume — but it kept
+// the side sheet's `top-0 bottom-0` anchoring, so when the keyboard came up the
+// panel stayed as tall as the pre-keyboard viewport and its footer (`הבא`, save,
+// delete) was pushed under the keyboard: the primary action disappeared at exactly
+// the moment it was needed. Anchoring to the BOTTOM edge and capping the height in
+// `dvh` puts the footer immediately above the keyboard instead, and the body — the
+// only part that scrolls — absorbs the height the keyboard takes.
+//
+// `reserveTop` (change: quick-setup-mobile-visibility): the floating הקמה מהירה
+// bar/card is a fixed z-50 element pinned near the phone's top edge — same corner
+// as this sheet's own z-40. Rather than fight over who paints on top (either
+// answer disturbs the other: over it hides the mission editor's own tab row,
+// under it hides the very instruction the creator opened the editor to read), the
+// sheet gives up HEIGHT while one is up, so both stay fully visible and fully
+// usable at once. It used to do that by stepping its top edge down; a bottom sheet
+// expresses the same reservation as a shorter cap.
+//
+// The mobile height is DEFINITE (`h-[88dvh]`), not a max: the editor inside is a
+// flex column whose body is meant to be the only scroller, and `h-full` against an
+// `h-auto` parent resolves to `auto` — so the column stopped constraining anything,
+// the body grew instead of scrolling, and the footer fell 360px below the sheet.
+// A fixed height also means the sheet is the same size every time it opens, which
+// on a phone is worth more than sizing to content.
 function SlidePanel({ shown, children, reserveTop }: { shown: boolean; children: ReactNode; reserveTop?: boolean }) {
   return (
     <aside
-      className={`shrink-0 self-stretch h-full max-lg:h-auto overflow-hidden transition-[width] duration-200 ease-out
-        max-lg:fixed max-lg:bottom-0 max-lg:end-0 max-lg:z-40 max-lg:!w-[min(100vw,32rem)] max-lg:p-2 max-lg:shadow-soft
-        ${reserveTop ? 'max-lg:top-32' : 'max-lg:top-0'}`}
+      className={`shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out
+        max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-auto max-lg:z-40
+        max-lg:!w-full max-lg:p-0 max-lg:shadow-soft
+        ${reserveTop ? 'max-lg:h-[62dvh]' : 'max-lg:h-[88dvh]'}`}
       style={{ width: shown ? 'min(500px, calc(100vw - 1.5rem))' : 0 }}
     >
       <div
         style={{ willChange: 'transform', width: 'min(500px, calc(100vw - 1.5rem))' }}
-        className={`h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden max-lg:!w-full
-          transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden
+          max-lg:!w-full max-lg:h-full max-lg:rounded-b-none max-lg:rounded-t-2xl max-lg:border-b-0
+          transition-transform duration-200 ease-out
+          ${shown ? 'translate-x-0 max-lg:translate-y-0' : 'translate-x-full max-lg:translate-x-0 max-lg:translate-y-full'}`}
       >
         {children}
       </div>
@@ -2798,13 +3014,16 @@ function SlidePanel({ shown, children, reserveTop }: { shown: boolean; children:
 // task editor. Holds every advanced control (completion count, timed release,
 // exclusive groups entry, chapter story) — each offered only when it applies to
 // this stage. Presentation only; all state still flows through `onUpdateStage`.
-function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, onOpenGroups, onClose }: {
+function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, onOpenGroups, onClose, identity }: {
   stage: Stage;
   settings: StageSettingsState;
   effectiveGroups: string[][];
   onUpdateStage: (p: Partial<Stage>) => void;
   onOpenGroups: () => void;
   onClose: () => void;
+  /** Present at phone width only: the stage's name, finale flag and delete, which
+   *  the canvas no longer shows there (change: builder-mobile-simplification). */
+  identity?: { isLastStage: boolean; canDelete: boolean; onDelete: () => void };
 }) {
   const b = useT().builder;
   const m = stage.tasks.length;
@@ -2844,6 +3063,32 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto pe-0.5 space-y-3.5">
+          {/* Phone: the stage's own name, first — it is the thing a creator opens
+              this pane to change most often, and it is the one control the canvas
+              gave up. Same `onUpdateStage` path as before, so the field is still a
+              plain live edit feeding the Builder's autosave. */}
+          {identity && (
+            <SettingRow icon="🏷️" title={b.stageTitlePlaceholder}>
+              <Input
+                value={stage.title}
+                onChange={(e) => onUpdateStage({ title: e.target.value })}
+                placeholder={b.stageTitlePlaceholder}
+                aria-label={b.stageTitlePlaceholder}
+                dir="auto"
+              />
+              {identity.isLastStage && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-[--ink-2]">
+                  <input
+                    type="checkbox"
+                    checked={!!stage.isFinal}
+                    onChange={(e) => onUpdateStage({ isFinal: e.target.checked })}
+                  />
+                  {b.finalLabel}
+                </label>
+              )}
+            </SettingRow>
+          )}
+
           <p className="text-xs text-[--ink-3]">{b.stageSettingsIntro}</p>
 
           {/* Task completion — how many of the pool a team must finish */}
@@ -2942,6 +3187,22 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 
           {/* Chapter story — the existing sub-disclosure. */}
           <StageStory stage={stage} onChange={(n) => onUpdateStage({ narrative: n })} />
+
+          {/* Phone: delete, LAST and clearly separated. It used to be a bare red ✕
+              beside the stage's own title field on the canvas — a destructive
+              action one mis-tap from a text input, wearing no label. It still goes
+              through `confirmRemoveStage`, which names what it will take. */}
+          {identity?.canDelete && (
+            <div className="pt-1 border-t border-[--rp-border]">
+              <button
+                type="button"
+                onClick={identity.onDelete}
+                className="mt-2.5 w-full min-h-[44px] rounded-lg border border-rp-alert/40 text-ink-alert text-sm font-medium hover:bg-rp-alert/10 transition-colors"
+              >
+                {b.deleteStage}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </SlidePanel>

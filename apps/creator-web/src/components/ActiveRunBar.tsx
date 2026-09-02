@@ -8,6 +8,7 @@ import { toast } from './toast';
 import { finalizeRun } from '../services/calls';
 import { useLiveRuns } from '../hooks/useLiveRuns';
 import { barMode, runConsolePath, selectFeaturedRun, shouldShowBar } from '../hooks/liveRunsPolling';
+import { useIsMobile } from '../hooks/useMediaQuery';
 
 // Persistent floating control bar for a creator's live run (docs/wave-a/active-run-bar.md).
 // Mounted app-wide as a sibling of DialogHost/ToastHost so it survives route changes:
@@ -26,6 +27,7 @@ export default function ActiveRunBar() {
   const { runs, refresh } = useLiveRuns();
   const [ending, setEnding] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const isMobile = useIsMobile();
 
   const featured = selectFeaturedRun(runs);
   const mode = barMode(pathname);
@@ -58,6 +60,17 @@ export default function ActiveRunBar() {
   }
 
   // ── Collapsed pill (Builder) ──
+  // Not rendered at phone width (change: builder-mobile-simplification). It is a
+  // `fixed z-30` element, but the Builder lives inside `<main class="relative
+  // z-10">`, so its own sheets — which declare z-40 — can never paint above this
+  // pill however high they set it: the whole subtree competes at z-10. On a phone
+  // the Builder's bottom edge is now the tab bar, the add-mission tiles and the
+  // mission sheet, and the pill landed on all three. Hiding it here costs a
+  // creator nothing they cannot see elsewhere: on every OTHER route the phone
+  // still gets the full bar (`mode === 'full'`), so they are told about a live run
+  // the moment they leave the editor, and the run console is a tap away from the
+  // dashboard. Desktop is unchanged — there the pill sits in an empty corner.
+  if (mode === 'compact' && isMobile) return null;
   if (mode === 'compact' && !expanded) {
     return (
       <button

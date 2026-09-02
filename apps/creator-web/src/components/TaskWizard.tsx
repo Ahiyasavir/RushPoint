@@ -32,6 +32,8 @@ import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { uploadTaskMedia } from '../services/firebase';
 import { useT } from './LanguageContext';
+import { useIsMobile } from '../hooks/useMediaQuery';
+import { OverflowMenu } from './OverflowMenu';
 import LocationStep from './LocationStep';
 import RichTooltip from './RichTooltip';
 import QuizChoicesEditor from './QuizChoicesEditor';
@@ -108,6 +110,10 @@ export default function TaskWizard({
 }) {
   const t = useT();
   const b = t.builder;
+  // Phone width: the step tabs collapse to their numerals except the active one
+  // (change: builder-mobile-simplification). Declared with the other top-level
+  // hooks, above every conditional in this component.
+  const isMobile = useIsMobile();
   const [step, setStep] = useState<WizardStep>(1);
   // Which validation messages may be shown. Lives here and resets on mount (the
   // panel is keyed by task id), because the persistent, game wide record of what
@@ -187,7 +193,13 @@ export default function TaskWizard({
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Step tabs (single line) + close — one compact row, no separate title bar. */}
+      {/* Step tabs (single line) + close — one compact row, no separate title bar.
+          On a phone only the ACTIVE step spells its name (change:
+          builder-mobile-simplification): three equal thirds of a 390px row left
+          each label ~70px, so the third step read "…ביצוע ותו" — a truncated tab is
+          a tab that has stopped naming anything. The other two collapse to their
+          number, which is what the row was already using as their primary mark,
+          and the active one takes the space they give up. */}
       <div className="flex items-center gap-1.5 pb-2 shrink-0">
         <div role="tablist" className="flex gap-1.5 flex-1 min-w-0">
         {/* Tabs and bodies both read WIZARD_STEP_ORDER, so a tab and the body
@@ -195,17 +207,45 @@ export default function TaskWizard({
         {WIZARD_STEP_ORDER.map((key, i) => {
           const s = (i + 1) as WizardStep;
           const active = s === step; const done = s < step;
-          return (
+            // The label is always in the accessible name, so collapsing the
+            // inactive tabs to a numeral never costs a screen-reader user the
+            // step's identity.
+            const nameOnly = isMobile && !active;
+            return (
             <button key={key} role="tab" aria-selected={active} onClick={() => setStep(s)}
-              className={`flex-1 min-w-0 rounded-lg border px-2 py-1.5 flex items-center justify-center gap-1.5 transition-colors ${
+              aria-label={nameOnly ? STEP_LABEL[key] : undefined}
+              className={`min-w-0 rounded-lg border px-2 py-1.5 flex items-center justify-center gap-1.5 transition-colors ${
+                nameOnly ? 'shrink-0 w-11' : 'flex-1'} ${
                 active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire'
                   : done ? 'border-rp-go/40 text-ink-go' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
               <span className="text-[12px] font-semibold shrink-0">{done ? '✓' : s}</span>
-              <span className="text-[12px] font-medium truncate">{STEP_LABEL[key]}</span>
+              {!nameOnly && <span className="text-[12px] font-medium truncate">{STEP_LABEL[key]}</span>}
             </button>
           );
         })}
         </div>
+        {/* Destructive and meta actions live HERE, away from the navigation row
+            (change: builder-mobile-simplification) — the same move the stage's
+            ✕ made into its settings pane. Rendered only when the task can be
+            deleted at all (the stage's last mission cannot), so a menu never
+            opens onto nothing. */}
+        {onRemove && (
+          <div className="shrink-0">
+            <OverflowMenu
+              label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
+              ariaLabel={b.taskMoreMenuAria}
+              triggerClassName="w-11 h-11 justify-center rounded-lg text-lg leading-none text-[--ink-3]"
+            >
+              <button
+                role="menuitem"
+                onClick={onRemove}
+                className="w-full text-start px-3 py-2.5 text-[13px] text-ink-alert rounded-lg hover:bg-rp-alert/10 transition-colors"
+              >
+                {b.deleteTask}
+              </button>
+            </OverflowMenu>
+          </div>
+        )}
         <button onClick={onClose} aria-label={closeLabel}
           className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
           ✕
@@ -226,19 +266,34 @@ export default function TaskWizard({
       {stepKey === 'execution' && !isTaskInteractionValid(task) && blockers.some(revealed) && (
         <p className="text-[13px] text-ink-fire leading-snug pt-1 shrink-0">{b.interactionIncomplete}</p>
       )}
+      {/* Footer: NAVIGATION ONLY, and exactly one primary (change:
+          builder-mobile-simplification). It used to carry four controls — back,
+          a bare red "delete mission" link, next AND done — of which two were
+          near-duplicates and one was destructive. On a phone that is four targets
+          in a 44px row, with the delete sitting between the two the thumb is
+          actually aiming for.
+          • Delete moved to the ⋯ menu in the header, and now asks first.
+          • "Done" is gone from steps 1 and 2. It closed the sheet, which is
+            exactly what the header's ✕ does, so the creator was being asked to
+            choose between two buttons with the same outcome and no way to tell
+            them apart. It stays as the LAST step's primary, where it is the real
+            end of the flow and still runs the blocker reveal.
+          Leaving early from any step is unchanged: ✕ (and Esc) close, and the
+          draft is flushed on unmount. The persistent record of what is still
+          broken is the readiness surface, not this footer. */}
       <div className="flex items-center gap-2 pt-2 shrink-0 border-t border-[--rp-border] mt-2">
         {canGoBack(step) ? (
           <Button variant="ghost" onClick={() => setStep((s) => (s - 1) as WizardStep)}>← {b.back}</Button>
         ) : <span />}
-        {onRemove && <button onClick={onRemove} className="text-neon-red text-xs hover:underline">{b.deleteTask}</button>}
-        {/* Finish is reachable from EVERY step and is never disabled: the first
-            press reveals every unrevealed blocker and keeps the editor open (it
-            lands on the offending step), the next one closes. */}
         <div className="ms-auto flex items-center gap-2">
-          {step < lastStep && (
+          {step < lastStep ? (
             <Button disabled={!canGoNext(stepKey, task)} onClick={() => setStep((s) => (s + 1) as WizardStep)}>{b.next} →</Button>
+          ) : (
+            /* Never disabled: the first press reveals every unrevealed blocker and
+               keeps the editor open (landing on the offending step), the next
+               closes. */
+            <Button onClick={finish}>{b.done}</Button>
           )}
-          <Button variant={step < lastStep ? 'ghost' : undefined} onClick={finish}>{b.done}</Button>
         </div>
       </div>
     </div>
@@ -845,8 +900,16 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
       <div>
         <Label dense>{b.howComplete}</Label>
         {/* Compact type picker: icon + label grid, with a one-line description for
-            the active type below. */}
-        <div className="grid grid-cols-3 gap-1.5">
+            the active type below.
+            TWO columns on a phone (change: builder-mobile-simplification). At
+            three, a tile inside the mission sheet is ~110px wide and `pe-12`
+            already reserves 48px of that for the ✨ and the tooltip, leaving
+            ~35px of text — every label rendered as "…מ" and the creator was being
+            asked to choose between nine options they could not read. Two columns
+            cost about 70px of height and buy back the whole label. Same lesson the
+            new-game path cards learned (see NewGameWizard): never truncate a
+            choice. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
           {TYPE_PICKER_ORDER.map((ty) => {
             const active = task.type === ty;
             return (

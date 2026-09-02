@@ -22,6 +22,7 @@ import {
 import {
   initialWizardState, wizardReducer, buildCreationPlan, availableGameTypes,
   templateForGameType, type CreationPlan, type GameTypeId, type WizardTemplateOption,
+  type WizardPath,
 } from '../lib/newGameWizard';
 import { blendGameDescription, derivedGameTags, type NewGameDescriptionCopy } from '../lib/describeNewGame';
 import type { ComposerAnswers } from '../lib/composeGame';
@@ -57,6 +58,11 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
   const d = t.dashboard;
   const w = d.wizard;
   const [state, dispatch] = useReducer(wizardReducer, undefined, initialWizardState);
+  // The path step SELECTS and then confirms (change: builder-mobile-simplification),
+  // so the choice needs somewhere to live between the two taps. It starts on the
+  // recommended path: the step can then never present a disabled Next, and a
+  // creator who simply taps through gets the option we actually recommend.
+  const [pathChoice, setPathChoice] = useState<WizardPath>('smart_build');
   const [nameTouched, setNameTouched] = useState(false);
 
   // Only the types an admin actually tagged a template for. A type nothing can
@@ -118,14 +124,28 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
   // floating in the same width the icon-grid steps need read as unfinished
   // empty space, not a deliberate first screen (real creator feedback on the
   // shipped panel — change: smart-build-delight follow-up).
-  if (state.step === 'name' || state.step === 'path') {
-    // The name step is a single input: narrow and centred, or it floats lost in
-    // the modal's full width. The path step needs the full width back for its
-    // 3-column card grid, so only 'name' gets the cap.
+  // The three ways in, as data: one shape, one render, so a card can never drift
+  // from its siblings the way the two accented ones did before.
+  const PATH_CARDS: readonly { path: WizardPath; icon: string; title: string; body: string; recommended?: boolean }[] = [
+    { path: 'smart_build', icon: '🧠', title: w.smartTitle, body: w.smartBody, recommended: true },
+    { path: 'guided', icon: '📖', title: w.guidedTitle, body: w.guidedBody },
+    { path: 'scratch', icon: '📄', title: w.scratchTitle, body: w.scratchBody },
+  ];
+
+  // ── The NAME step ─────────────────────────────────────────────────────────
+  // Split from the path step (change: builder-mobile-simplification). The two
+  // used to share one branch, which meant the PATH screen still rendered the name
+  // heading, the name sub-line and the name input above its own question: the
+  // biggest thing on the screen asked "what shall we call the game?" while the
+  // 13px line under it asked how to start, and the actual answer was three cards
+  // with no primary button under them — only a 12px text link. Every other screen
+  // in this flow trains the eye to find an orange button at the bottom, so the one
+  // screen without one read as stuck.
+  if (state.step === 'name') {
     return (
-      <div className={['flex flex-col gap-3', state.step === 'name' ? 'mx-auto w-full max-w-sm' : ''].join(' ')}>
-        <div className={state.step === 'name' ? 'text-center' : undefined}>
-          {state.step === 'name' && <div className="text-3xl leading-none mb-1.5" aria-hidden="true">🎲</div>}
+      <div className="flex flex-col gap-3 mx-auto w-full max-w-sm">
+        <div className="text-center">
+          <div className="text-3xl leading-none mb-1.5" aria-hidden="true">🎲</div>
           <h3 className="font-brand font-bold text-[--ink-1] text-lg">{w.nameTitle}</h3>
           <p className="text-[--ink-3] text-[13px] mt-0.5">{w.nameSub}</p>
         </div>
@@ -135,77 +155,109 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
           dir="auto"
           placeholder={w.namePlaceholder}
           onChange={(e) => { dispatch({ type: 'setName', name: e.target.value }); setNameTouched(true); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' && state.step === 'name') dispatch({ type: 'next' }); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') dispatch({ type: 'next' }); }}
         />
-        {state.step === 'name' ? (
-          // A blank name never blocks — it resolves to the untitled fallback.
-          <Button onClick={() => dispatch({ type: 'next' })} className="w-full min-h-[44px]">
-            {w.next}
-          </Button>
-        ) : (
-          <>
-            <div className="text-[13px] font-medium text-[--ink-2]">{w.pathTitle}</div>
-            {/* ONE emphasised card, not two. The compose and story cards used to
-                share the same orange treatment, so of three genuinely different
-                options two read as a matched pair and the blank one read as the
-                odd one out — the opposite of the real hierarchy. Compose is the
-                recommended path and carries the accent alone; the other two are
-                neutral peers. On a phone they stack, on a wide screen they sit
-                side by side. */}
-            {/* NOTHING here is truncated, on purpose. This used to `truncate` the
-                titles and `line-clamp-1` the bodies (change:
-                smart-build-wizard-no-scroll) to keep three stacked cards short
-                enough not to scroll on a phone. It worked on the phone and read
-                badly everywhere else: at three columns the widest card is ~200px,
-                so the recommended card rendered as "שנרכיב לכם מ…" with its body
-                cut mid-word — the creator was being asked to choose between three
-                options they could not finish reading.
-                The height is bought back from the COPY instead (i18n `smartBody`
-                / `guidedBody` are two clauses, not three), which shortens the
-                cards in every layout rather than hiding text in one of them.
-                `items-start` so a title that does wrap still aligns with its
-                icon; `break-words` so a long single word cannot overflow the
-                card instead of being clipped by it. */}
-            <div className="grid gap-2 sm:grid-cols-3">
-              <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'smart_build' })}
-                className="text-start rounded-xl border-2 border-rp-fire bg-rp-fire/5 p-2.5 hover:bg-rp-fire/10 transition-colors disabled:opacity-40">
-                <div className="flex items-start gap-1.5">
-                  <span className="text-lg leading-none shrink-0">🧠</span>
-                  <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{w.smartTitle}</span>
-                  <span className="ms-auto shrink-0 rounded-full bg-rp-fire/15 text-ink-fire text-[12px] font-medium px-1.5 py-0.5">
-                    {w.smartRecommended}
-                  </span>
-                </div>
-                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug break-words">{w.smartBody}</div>
-              </button>
-              <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'guided' })}
-                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
-                <div className="flex items-start gap-1.5">
-                  <span className="text-lg leading-none shrink-0">📖</span>
-                  <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{w.guidedTitle}</span>
-                </div>
-                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug break-words">{w.guidedBody}</div>
-              </button>
-              <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'scratch' })}
-                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
-                <div className="flex items-start gap-1.5">
-                  <span className="text-lg leading-none shrink-0">📄</span>
-                  <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{w.scratchTitle}</span>
-                </div>
-                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug break-words">{w.scratchBody}</div>
-              </button>
-            </div>
-            <button type="button" onClick={() => dispatch({ type: 'back' })}
-              className="text-[12px] text-[--ink-3] hover:text-[--ink-1] self-start min-h-[40px]">
-              ← {w.back}
-            </button>
-          </>
-        )}
+        {/* A blank name never blocks — it resolves to the untitled fallback. */}
+        <Button onClick={() => dispatch({ type: 'next' })} className="w-full min-h-[44px]">
+          {w.next}
+        </Button>
         {/* Only shown once the creator has typed something, so an untouched field
             never looks like an error. */}
         {nameTouched && !state.name.trim() && (
           <p className="text-[13px] text-[--ink-3]">{d.untitledGame}</p>
         )}
+      </div>
+    );
+  }
+
+  // ── The PATH step ─────────────────────────────────────────────────────────
+  // Its own question as the heading, the name reduced to a one-line reminder that
+  // is also the way back to editing it, and — the point of the split — a real
+  // footer with the same חזרה / הבא pair every other step has. The cards SELECT
+  // rather than commit, so choosing and confirming are two separate acts here
+  // exactly as they are in the questionnaire that follows.
+  if (state.step === 'path') {
+    return (
+      <div className="flex flex-col gap-3">
+        <div>
+          <h3 className="font-brand font-bold text-[--ink-1] text-lg">{w.pathTitle}</h3>
+        </div>
+        <button
+          type="button"
+          onClick={() => dispatch({ type: 'back' })}
+          aria-label={w.nameTitle}
+          className="self-start max-w-full flex items-center gap-1.5 rounded-lg border border-[--rp-border] bg-[--surface-2]/60 px-2.5 py-1 text-[13px] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+        >
+          <span className="truncate" dir="auto">{state.name.trim() || d.untitledGame}</span>
+          <span aria-hidden className="shrink-0 text-[--ink-3]">✎</span>
+        </button>
+        {/* NOTHING here is truncated, on purpose (change:
+            smart-build-wizard-no-scroll). The titles used to `truncate` and the
+            bodies to `line-clamp-1`, to keep three stacked cards short enough not
+            to scroll on a phone. It worked on the phone and read badly everywhere
+            else: at three columns the widest card is ~200px, so the recommended
+            card rendered as "שנרכיב לכם מ…" with its body cut mid-word — the
+            creator was being asked to choose between three options they could not
+            finish reading. The height is bought back from the COPY instead
+            (i18n `smartBody` / `guidedBody` are two clauses, not three), which
+            shortens the cards in every layout rather than hiding text in one.
+            `items-start` so a title that does wrap still aligns with its icon;
+            `break-words` so a long single word cannot overflow the card.
+
+            ONE emphasised card, not two: of three genuinely different options the
+            compose and story cards used to share the same orange treatment, so two
+            read as a matched pair and the blank one as the odd one out — the
+            opposite of the real hierarchy.
+
+            Selection is `aria-pressed` plus a border WIDTH change and a tick,
+            never colour alone — the rule ChoiceCardRow follows. The recommended
+            card keeps a softer accent while unselected so the recommendation
+            survives selection moving elsewhere, and the tick is what says which
+            one is chosen, so the two signals never read as the same thing. */}
+        <div className="grid gap-2 sm:grid-cols-3">
+          {PATH_CARDS.map(({ path, icon, title, body, recommended }) => {
+            const on = pathChoice === path;
+            return (
+              <button
+                key={path}
+                type="button"
+                disabled={busy}
+                aria-pressed={on}
+                onClick={() => setPathChoice(path)}
+                className={`relative text-start rounded-xl border-2 p-2.5 transition-colors disabled:opacity-40 ${
+                  on ? 'border-rp-fire bg-rp-fire/10'
+                    : recommended ? 'border-rp-fire/60 bg-rp-fire/5 hover:bg-rp-fire/10'
+                    : 'border-[--rp-border] bg-[--surface-1] hover:border-rp-fire/50 hover:bg-[--surface-2]'}`}
+              >
+                <div className="flex items-start gap-1.5">
+                  <span className="text-lg leading-none shrink-0">{icon}</span>
+                  <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{title}</span>
+                  {recommended && !on && (
+                    <span className="ms-auto shrink-0 rounded-full bg-rp-fire/15 text-ink-fire text-[12px] font-medium px-1.5 py-0.5">
+                      {w.smartRecommended}
+                    </span>
+                  )}
+                  {on && (
+                    <span aria-hidden className="ms-auto shrink-0 grid h-5 w-5 place-items-center rounded-full bg-rp-fire text-white text-[12px] leading-none">✓</span>
+                  )}
+                </div>
+                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug break-words">{body}</div>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => dispatch({ type: 'back' })} className="min-h-[44px]">
+              {w.back}
+            </Button>
+            <Button
+              onClick={() => advanceOrCreate({ type: 'choosePath', path: pathChoice })}
+              loading={busy}
+              className="flex-1 min-h-[44px]"
+            >
+            {w.next}
+          </Button>
+        </div>
       </div>
     );
   }

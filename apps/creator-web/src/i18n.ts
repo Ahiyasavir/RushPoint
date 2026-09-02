@@ -1804,6 +1804,13 @@ const HE = {
     done: 'סיום',
     interactionIncomplete: 'חסר פרט חובה (תשובה, קוד סודי או שלבים). בלעדיו המשתתפים לא יוכלו להשלים את המשימה.',
     deleteTask: 'מחק משימה',
+    // Deleting a mission is as final as deleting a stage and was the ONLY
+    // destructive control in the Builder that fired without asking — a bare red
+    // link sitting between "back" and "next" in the mission editor's footer
+    // (change: builder-mobile-simplification). Same posture as deleteStage now.
+    deleteTaskConfirm: (title: string) =>
+      `למחוק את המשימה "${title}"? אי אפשר לשחזר.`,
+    taskMoreMenuAria: 'עוד פעולות למשימה',
     removeItem: 'הסר',
     // Folds an optional section back to a chip WITHOUT clearing it (change:
     // builder-nondestructive-disclosure). Must not say "הסר" — it removes nothing.
@@ -4304,6 +4311,13 @@ const EN: typeof HE = {
     done: 'Done',
     interactionIncomplete: 'A required detail is missing (answer, secret code or steps). Without it participants can never complete this mission.',
     deleteTask: 'Delete mission',
+    // Deleting a mission is as final as deleting a stage and was the ONLY
+    // destructive control in the Builder that fired without asking — a bare red
+    // link sitting between "back" and "next" in the mission editor's footer
+    // (change: builder-mobile-simplification). Same posture as deleteStage now.
+    deleteTaskConfirm: (title: string) =>
+      `Delete the mission "${title}"? This cannot be undone.`,
+    taskMoreMenuAria: 'More mission actions',
     removeItem: 'Remove',
     // Folds an optional section back to a chip WITHOUT clearing it (change:
     // builder-nondestructive-disclosure). Must not say "Remove" — it removes nothing.

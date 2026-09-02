@@ -19,6 +19,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import PacingBar from './PacingBar';
 import { useT } from './LanguageContext';
+import { useIsMobile } from '../hooks/useMediaQuery';
 
 /** Rail id namespace — a stage is both a sortable ITEM (its own id) and a task
  *  drop TARGET (this prefixed id), so the two never collide in one context. */
@@ -69,11 +70,13 @@ export const railAwareCollisionDetection: CollisionDetection = (args) => {
   return closestCenter({ ...args, droppableContainers });
 };
 
-function RailEntry({ stage, index, active, onSelect, taskDragging }: {
+function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
   stage: Stage; index: number; active: boolean; onSelect: () => void;
   /** True while a TASK (not a stage) is in flight — highlights the rail as a
    *  landing zone and suppresses the stage-reorder outline. */
   taskDragging: boolean;
+  /** Phone width: one line per stage instead of a card (see StageRail). */
+  compact?: boolean;
 }) {
   const b = useT().builder;
   const {
@@ -87,33 +90,66 @@ function RailEntry({ stage, index, active, onSelect, taskDragging }: {
     data: { type: 'stage-drop', stageId: stage.id },
   });
   const taskOver = taskDragging && drop.isOver;
+
+  // Shared by both shapes: identity, drag affordance, drop target, selection.
+  const shellClass = `cursor-pointer rounded-xl border transition-colors shrink-0 ${
+    active ? 'border-rp-fire bg-rp-fire/10' : 'border-[--rp-border] hover:bg-[--surface-2]'
+  } ${isDragging ? 'opacity-40' : ''} ${taskOver ? 'outline-dashed outline-2 outline-rp-fire' : ''}`;
+
+  // The handle is the sortable ACTIVATOR and must keep a real touch target at
+  // both sizes; on the compact pill it grows into the row's own padding via the
+  // negative margins rather than making the pill 44px+ tall.
+  const handle = (
+    <span
+      {...attributes}
+      {...listeners}
+      ref={setActivatorNodeRef}
+      title={b.dragStageHandle}
+      aria-label={b.dragStageHandle}
+      onClick={(e) => e.stopPropagation()}
+      className={`cursor-grab active:cursor-grabbing select-none text-[--ink-3] touch-none rounded
+        flex items-center justify-center w-11 h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60
+        ${compact ? '-my-3 -ms-2 -me-1' : '-mx-1.5 -my-2.5'}`}
+    >⠿</span>
+  );
+
+  // ── Phone: ONE line (change: builder-mobile-simplification) ───────────────
+  // The card shape spends ~110px per stage on a pacing bar 40px wide and a task
+  // count the pill can carry inline, and the strip then costs ~150px of an 844px
+  // screen before the creator sees a single mission. Everything that identifies
+  // the stage survives — number, finale tag, title, task count — and the pacing
+  // bar, which is a shape-of-the-whole-game reading, stays on the desktop rail
+  // where there is room to compare stages side by side.
+  if (compact) {
+    return (
+      <div
+        ref={(el) => { setNodeRef(el); drop.setNodeRef(el); }}
+        style={{ transform: CSS.Translate.toString(transform), transition }}
+        onClick={onSelect}
+        className={`${shellClass} max-w-[60vw] px-2.5 py-2 flex items-center gap-1.5`}
+      >
+        {handle}
+        <span className="text-[12px] font-semibold text-[--ink-3] tabular-nums shrink-0">
+          {b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}
+        </span>
+        <span className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{stage.title || b.untitledStage}</span>
+        <span className="text-[12px] text-[--ink-3] shrink-0 tabular-nums">{stage.tasks.length}</span>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={(el) => { setNodeRef(el); drop.setNodeRef(el); }}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       onClick={onSelect}
-      className={`cursor-pointer rounded-xl border p-2.5 transition-colors w-40 shrink-0 sm:w-auto sm:shrink ${
-        active ? 'border-rp-fire bg-rp-fire/10' : 'border-[--rp-border] hover:bg-[--surface-2]'
-      } ${isDragging ? 'opacity-40' : ''} ${taskOver ? 'outline-dashed outline-2 outline-rp-fire' : ''}`}
+      className={`${shellClass} p-2.5 w-40 sm:w-auto sm:shrink`}
     >
       <div className="flex items-center gap-1.5 mb-1">
-        <span
-          {...attributes}
-          {...listeners}
-          // Registers the ⠿ as the ACTIVATOR (see TaskCanvas) so the keyboard
-          // sensor measures from the stage card, not from the handle glyph.
-          ref={setActivatorNodeRef}
-          title={b.dragStageHandle}
-          aria-label={b.dragStageHandle}
-          onClick={(e) => e.stopPropagation()}
-          // 44px touch target; see the matching note in TaskCard. -mx-1.5
-          // matches THIS row's gap-1.5, so the enlarged box stops flush against
-          // the stage label; -my-2.5 grows into the card's p-2.5 instead of
-          // making every rail entry taller.
-          className="cursor-grab active:cursor-grabbing select-none text-[--ink-3] touch-none rounded
-            flex items-center justify-center w-11 h-11 -mx-1.5 -my-2.5
-            focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
-        >⠿</span>
+        {/* Registers the ⠿ as the ACTIVATOR (see TaskCanvas) so the keyboard
+            sensor measures from the stage card, not from the handle glyph.
+            44px touch target; see the matching note in TaskCard. */}
+        {handle}
         <span className="text-[12px] font-semibold uppercase tracking-wide text-[--ink-3]">{b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}</span>
       </div>
       <div className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{stage.title || b.untitledStage}</div>
@@ -132,14 +168,21 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
   taskDragging?: boolean;
 }) {
   const b = useT().builder;
+  const compact = useIsMobile();
   return (
-    // Phone: a full-width, horizontally-scrolling strip that sits above the
-    // canvas. Desktop (≥sm): the classic vertical side rail.
+    // Phone: ONE horizontally-scrolling line of stage pills above the canvas.
+    // Desktop (≥sm): the classic vertical side rail of cards.
     <aside data-tour="builder-stages" className="w-full sm:w-52 shrink-0 sm:h-full sm:space-y-2 sm:overflow-y-auto pe-0.5">
-      <div className="flex items-center justify-between px-1 mb-1 sm:mb-0">
-        <span className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
-        <span className="text-[12px] text-[--ink-4]">{stages.length}</span>
-      </div>
+      {/* The "STAGES · 5" caption is desktop only (change:
+          builder-mobile-simplification). A numbered strip of stages does not need
+          a heading telling the creator it is a list of stages, and on a phone that
+          line was ~20px of the budget the canvas needed. */}
+      {!compact && (
+        <div className="flex items-center justify-between px-1 mb-1 sm:mb-0">
+          <span className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
+          <span className="text-[12px] text-[--ink-4]">{stages.length}</span>
+        </div>
+      )}
       <div className="flex sm:flex-col items-stretch gap-2 overflow-x-auto sm:overflow-visible pb-1 sm:pb-0">
         <SortableContext items={stages.map((s) => s.id)} strategy={verticalListSortingStrategy}>
           {stages.map((s, idx) => (
@@ -150,14 +193,17 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
               active={s.id === activeStageId}
               onSelect={() => onSelect(s.id)}
               taskDragging={taskDragging}
+              compact={compact}
             />
           ))}
         </SortableContext>
         <button
           onClick={onAdd}
-          className="shrink-0 w-32 sm:w-full rounded-xl border border-dashed border-[--rp-border] text-[--ink-3] text-sm px-3 py-2 whitespace-nowrap hover:border-rp-fire/60 hover:text-ink-fire transition-colors"
+          aria-label={b.addStage}
+          className={`shrink-0 rounded-xl border border-dashed border-[--rp-border] text-[--ink-3] whitespace-nowrap hover:border-rp-fire/60 hover:text-ink-fire transition-colors ${
+            compact ? 'w-11 text-base' : 'w-32 sm:w-full text-sm px-3 py-2'}`}
         >
-          ＋ {b.addStage}
+          {compact ? '＋' : <>＋ {b.addStage}</>}
         </button>
       </div>
     </aside>
