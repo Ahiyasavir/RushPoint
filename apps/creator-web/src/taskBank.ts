@@ -2266,9 +2266,32 @@ function base(over: Partial<Task> & Pick<Task, 'title' | 'type'>): Task {
   };
 }
 
-/** A mission the team does wherever they happen to be standing. */
+/**
+ * A mission the team does wherever they happen to be standing.
+ *
+ * `maxConcurrentTeams: OPEN_SPACE_CAPACITY`, not `base()`'s floor of 1, and the
+ * reason is a trap rather than a live bug. Routing skips the cap entirely for a
+ * locationless task (`assignNextTask.ts`, "locationless tasks are uncapped"), so
+ * the value is inert here and this change moves nothing today.
+ *
+ * It stops being inert the moment a creator gives the mission a pin. The
+ * Builder's `locationChoicePatch` flips `locationless` to false and does not
+ * touch capacity, so eighty composed missions carrying the bare floor of 1 would
+ * each become a ONE-TEAM STATION the instant somebody placed them — a queue at a
+ * mission with no physical scarcity, which is precisely the defect section 13 of
+ * scripts/test-task-bank.ts was written to make unshippable, arriving through a
+ * door that section does not watch.
+ *
+ * So the inherited default is now the safe one. An entry that really is scarce
+ * still overrides it, and `exclusiveStation` remains located-only.
+ */
 const anywhere = (over: Partial<Task> & Pick<Task, 'title' | 'type'>): Task =>
-  base({ locationless: true, triggerMode: 'locationless', ...over });
+  base({
+    locationless: true,
+    triggerMode: 'locationless',
+    maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    ...over,
+  });
 
 /** A mission with a real spot on the map. The creator drops the pin per event. */
 const sited = (over: Partial<Task> & Pick<Task, 'title' | 'type'>): Task =>
