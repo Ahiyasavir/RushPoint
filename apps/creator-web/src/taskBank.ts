@@ -1992,6 +1992,33 @@
 // had a checkable answer hiding in it, and some other type would have handed them
 // feedback for free instead of making rule 60 ask you to fake it in prose.
 //
+// THE TEST WAS THEN RUN OVER ALL 61, so nobody has to do it again. Fifty-seven
+// are artifacts — a human pyramid, a freeze frame, a recreated family photo, a
+// group shouting its battle cry into a stadium — and their pictures are the
+// reason the mission exists. Four are receipts:
+//
+//     escape-route      the photo is of a fire exit. Nobody keeps that. Worse,
+//                       nothing ever told the team whether they walked to the
+//                       RIGHT one, so a navigation-from-memory mission had no
+//                       answer at all. Fixed in place, not converted: it now
+//                       sends them back to the map to check, which is the same
+//                       repair silent-briefing got.
+//     count-the-candles the content is literally a count. `numeric` would verify
+//                       it — but the video of the cake is a birthday keepsake,
+//                       so this is a genuine trade, not an oversight.
+//     the-hidden-key    the payoff is the blind-guided search; the photo proves
+//                       it happened. Convertible if whatever is locked held a
+//                       code instead.
+//     trade-up          "photograph the marker in your hand" is pure proof. The
+//                       terminal condition is already unambiguous, so it loses
+//                       nothing by staying a photo.
+//
+// Four of sixty-one is a much better ratio than the 59% headline suggests, and
+// that is the useful correction: the bank is photo-heavy because this product
+// makes albums, not because its authors were lazy. Rule 54's worry about a
+// self-similar middle still stands; rule 76's worry about missing feedback turns
+// out to apply to four missions rather than to sixty-one.
+//
 // ─── 77. A mission that can strand a team does not only fail itself — it taxes
 //         the next one ────────────────────────────────────────────────────────
 //
@@ -3718,7 +3745,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'מסלול המילוט',
-      description: 'מצאו את מפת המילוט על הקיר. הסתכלו עליה 30 שניות, ואז לכו יחד ליציאת החירום הקרובה, בלי להסתכל שוב ובלי לשאול. צלמו את היציאה שהגעתם אליה.',
+      description: 'מצאו את מפת המילוט על הקיר. הסתכלו עליה 30 שניות, ואז לכו יחד ליציאת החירום הקרובה, בלי להסתכל שוב ובלי לשאול. צלמו את היציאה שהגעתם אליה, ואז חזרו למפה ובדקו: באמת הגעתם לקרובה ביותר?',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
