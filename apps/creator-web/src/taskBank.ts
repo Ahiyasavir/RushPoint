@@ -2138,6 +2138,53 @@
 // sincerity alone, which is what made it unplayable at fifteen, and the wish is
 // better for being six voices instead of one chorus.
 //
+// ─── 79. An opener is judged by what it makes NORMAL, not by how good it is ──
+//
+// Rule 55 gave the finisher its own job — it is the sentence the day compresses
+// into. The opener's job is different and had never been named, and peak-end
+// (rule 53) is the clue: the FIRST mission is not what gets remembered. Its work
+// is done long before anyone recalls anything.
+//
+// Group-development research says what that work is. The forming stage is where
+// members test boundaries, create ground rules and define standards, and norms
+// come out of the earliest interactions — explicit ones like stated rules, and
+// implicit ones like whatever the group just watched itself do. So the first
+// mission of a game is a norm-setting instrument whether its author intended it
+// or not. It teaches the group what this game is going to ask of them.
+//
+// Read that way, this bank's eight openers turn out to encode four different
+// norms, none of them written down until now:
+//
+//     open-team-name / open-team-motto   every person contributes and every
+//                                        contribution is USED. The accept-all
+//                                        norm (rule 68), taught in minute one.
+//     open-everyone-airborne             "as many attempts as you need" —
+//                                        retrying is pre-authorised, which is
+//                                        the single most useful thing a group
+//                                        can believe at the start.
+//     height-line-up                     cooperation without talking.
+//     open-team-pact                     the group states its own rules and signs
+//                                        them. Tuckman's forming stage turned
+//                                        into a mission, and the best opener here
+//                                        by this reading.
+//     open-one-take-intro                everyone is seen, everyone gets a turn.
+//
+// So when choosing or writing an opener, do not ask whether it is a good
+// mission. Ask what a group believes about this game after doing it.
+//
+// ONE FAILED THAT TEST AND CARRIED THREE SEPARATE FAULTS. youth-human-pyramid
+// was tagged `start` with a reason written in its own comment — "it is the bank's
+// ONLY opener that needs no venue" — and there are now SEVEN placeless openers,
+// so the reason expired without anyone revisiting the tag. It is also the only
+// opener above difficulty 3 or five minutes, and it opens by asking people to
+// climb on each other: high physical contact at minute zero, which rules 39 and
+// 63 both say is the wrong end of the ramp. And it specified "a base of THREE
+// members", a headcount rule 50 forbids — unplayable by a pair and awkward for
+// five.
+//
+// `start` removed (it stays in the bank as the mid-game mission it always was),
+// and the pyramid is now described by its shape rather than by a count.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -2408,16 +2455,16 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-human-pyramid',
     sourceTemplateKey: 'youth-missions',
-    // Also tagged `start`: it is the bank's only opener that needs no venue, and
-    // without one a no-venue game opened on whatever mission happened to be
-    // picked first. Everything that frames a literal start line is sited by
-    // nature, so the placeless opener has to be a mission that works as an
-    // icebreaker — which a human pyramid does better than most.
-    tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school'],
+    // It used to carry `start`, on the grounds — written here — that it was "the
+    // bank's only opener that needs no venue". There are seven placeless openers
+    // now, so that reason expired; and by rule 79 it was the wrong opener anyway,
+    // being the only one above difficulty 3 and the only one that opens a game by
+    // asking strangers to climb on each other (rules 39 and 63). Removed 2026-09-02.
+    tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school'],
     difficulty: 5,
     build: () => anywhere({
       title: 'פירמידה אנושית',
-      description: 'תבנו פירמידה אנושית עם בסיס של 3 חברים. צלמו אותה ברגע שהיא יציבה.',
+      description: 'תבנו פירמידה אנושית: שכבה רחבה למטה, וכל שכבה שמעליה צרה ממנה. צלמו אותה ברגע שהיא עומדת יציב בלי שאף אחד מחזיק אותה.',
       type: 'photo',
       smart: upload(),
     }),
