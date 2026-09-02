@@ -1662,6 +1662,89 @@
 // something, taking a group photo — over ones that require a bystander to work
 // out that a game is happening.
 //
+// ─── 72. `educational` means PROVOCATION, not recall — information is not
+//         interpretation ────────────────────────────────────────────────────
+//
+// Freeman Tilden wrote the six principles of heritage interpretation in 1957 for
+// the National Park Service, and two of them settle a tag this bank had been
+// applying by feel for its whole existence:
+//
+//     "Information, as such, is not Interpretation. Interpretation is REVELATION
+//      BASED UPON information. But they are entirely different things."
+//     "The chief aim of Interpretation is not instruction, but PROVOCATION."
+//
+// Rule 34 already says a located mission should provoke curiosity about a place
+// rather than test knowledge of it. This is the same claim aimed at the tag, and
+// the audit was unflattering: eleven missions carried `educational` and they fell
+// into three groups, only one of which had any business with it.
+//
+//   REVELATION — keep. Each demands a reasoned inference about something real
+//   and present, which is exactly Tilden's revelation-based-on-information:
+//     oldest-thing-here     find the oldest object here, say how old and WHY
+//     local-legend          get a story and one checkable fact out of a local
+//     school-then-and-now   find a corner that has not changed, stage the past
+//     escape-route          read the fire map, then walk it from memory
+//
+//   RECALL WEARING A FACT — remove. Their actual mechanic is approaching a
+//   stranger; the fact is the pretext, which rule 71 noticed is a perfectly good
+//   alibi but is not education:
+//     trivia-bones          how many bones are in an adult body
+//     trivia-longest-river  which river is longest
+//     invention-order       put five inventions in order
+//
+//   WORTHY, WHICH IS NOT THE SAME THING — remove. This is the confusion worth
+//   naming, because it is the one an author falls into without noticing: the tag
+//   drifted from "teaches something" to "is a good thing to do".
+//     honest-compliment     say a precise kind thing to a stranger
+//     do-someone-a-favour   do a real favour and tell nobody
+//     team-decision-drill   three steps, no majority votes allowed
+//
+// Eleven down to five. Nothing was deleted and no mission got worse; a creator
+// who asks for educational content now gets four missions that provoke thought
+// about a real place instead of a mixed bag containing two general-knowledge
+// questions and a kindness.
+//
+// NOTED, BECAUSE IT IS A DISAGREEMENT AND NOT AN OVERSIGHT: the operator's own
+// editing pass removed `educational` from oldest-thing-here and added `creative`.
+// By Tilden it is the single best example of the tag in this bank — a team
+// standing in front of a real object, reasoning from evidence to an age, out
+// loud. That override still wins at read time and is left alone. It is recorded
+// here because if the disagreement is real then the tag means something narrower
+// than Tilden's interpretation, and that is worth settling on purpose rather
+// than by whoever edited last.
+//
+// ─── 73. For one young audience, write a DIFFERENT mission, not a thinner one
+//         — and know where this fights rule 57 ─────────────────────────────
+//
+// Tilden's sixth principle, and it is sharper than anything else in this file on
+// the subject: interpretation for children "should not be a dilution of the
+// presentation to adults, but should follow a fundamentally different approach.
+// To be at its best it will require a SEPARATE PROGRAM."
+//
+// Which sits awkwardly against rule 57, and the tension is worth having in the
+// open rather than resolved by whichever rule is read first. Rule 57 fixed a
+// metaphor riddle tagged `kids` by adding a literal route beside the figurative
+// one, so a nine-year-old and an adult each find a way in. Tilden would call that
+// dilution and tell you to write the child their own riddle.
+//
+// Both are right, about different situations, and the tag system is what decides
+// which:
+//
+//   • A mission tagged `mixed` is played by a real mixed-age group — a family,
+//     a birthday with parents in it. There is one group and one mission, nobody
+//     can be sent to a different programme, and rule 57's second route is the
+//     only honest answer.
+//   • A mission tagged `kids` only, or `adults` only, IS a separate programme —
+//     the audience filter is exactly the mechanism Tilden is asking for. Here,
+//     writing a softened version of an adult mission is the mistake he names.
+//     Write the one that is best for ten-year-olds, which will usually be a
+//     different mission entirely (rule 32 already says what those are made of).
+//
+// So the question to ask of an age-limited mission is not "how do I make this
+// easier" but "what is the BEST mission for this audience", and if the answer is
+// a different mission, write that one and let the original keep its own
+// audience.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -2571,7 +2654,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'authored',
     tags: ['action', 'camera', 'noPrep', 'fromAnywhere',
       'cityCenter', 'mall', 'neighborhood', 'beach',
-      'mixed', 'youth', 'adults', 'medium', 'crowded', 'educational'],
+      'mixed', 'youth', 'adults', 'medium', 'crowded'],
     difficulty: 5,
     build: () => anywhere({
       title: 'מחמאה אמיתית',
@@ -2916,7 +2999,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     family: 'trivia-fact',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
       'school', 'office', 'mall', 'park',
-      'mixed', 'youth', 'kids', 'adults', 'medium', 'educational'],
+      'mixed', 'youth', 'kids', 'adults', 'medium'],
     difficulty: 4,
     build: () => anywhere({
       title: 'שאלת חימום',
@@ -2937,7 +3020,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     family: 'trivia-fact',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
       'school', 'office', 'mall', 'park',
-      'mixed', 'youth', 'adults', 'medium', 'educational'],
+      'mixed', 'youth', 'adults', 'medium'],
     difficulty: 5,
     build: () => anywhere({
       title: 'שאלת הנהר',
@@ -2957,7 +3040,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'authored',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere',
       'neighborhood', 'cityCenter', 'mall', 'park', 'beach',
-      'mixed', 'youth', 'adults', 'corporate', 'easy', 'crowded', 'educational'],
+      'mixed', 'youth', 'adults', 'corporate', 'easy', 'crowded'],
     difficulty: 3,
     build: () => anywhere({
       title: 'טובה אחת',
@@ -3194,7 +3277,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'authored',
     tags: ['teamwork', 'thinking', 'needsSetup', 'fromAnywhere', 'home', 'indoor',
       'office', 'mall', 'park', 'school',
-      'corporate', 'adults', 'medium', 'educational'],
+      'corporate', 'adults', 'medium'],
     difficulty: 5,
     setup: [{
       field: 'steps',
@@ -3421,7 +3504,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'crowded',
       'school', 'office', 'mall', 'park',
-      'mixed', 'youth', 'adults', 'corporate', 'medium', 'educational'],
+      'mixed', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 6,
     build: () => anywhere({
       title: 'לפי הסדר הנכון',
