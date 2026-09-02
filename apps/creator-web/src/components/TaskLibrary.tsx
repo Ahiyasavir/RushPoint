@@ -9,36 +9,9 @@ import { dialog } from './dialog';
 import { useT } from './LanguageContext';
 import GalleryTaskDetailModal from './GalleryTaskDetailModal';
 import { useModalDismiss } from '../hooks/useModalDismiss';
-
-const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
-
-// Copying a library task brings its APPROXIMATE area, never the author's exact
-// pin (change: task-library-map-view). The copy path was the second door onto the
-// same secret: `coordinates` used to be the exact authored point, so "copy a task"
-// was a way to read it — including for a hidden-location task whose location is
-// the puzzle. A copied mission is being re-sited anyway, and an unplaced one flows
-// through the Builder's normal "needs placement" path.
-function toTask(pt: PublicTask): Task {
-  return {
-    id: uuid(),
-    title: pt.title,
-    description: pt.description,
-    type: pt.type,
-    // `Task.coordinates` is required, so an absent area falls back to the SAME
-    // (0,0) placeholder `blankTask()` uses — the Builder's established "not placed
-    // yet" value, which its placement validation already rejects.
-    coordinates: pt.approxLocation ?? { lat: 0, lng: 0 },
-    difficulty: pt.difficulty,
-    estimatedMinutes: pt.estimatedMinutes,
-    pointValue: pt.pointValue,
-    // 1, not 3: a copied task's real capacity is a property of the ORIGINAL
-    // creator's venue, which does not travel with the copy. 1 is the safe
-    // assumption until the new creator says otherwise — matches
-    // TASK_FIELD_DEFAULTS / blankTask() (lib/taskOptInGroups.ts, lib/wizardLogic.ts).
-    maxConcurrentTeams: 1,
-    tags: pt.tags ?? [],
-  };
-}
+// Extracted so the third field-default seeder in this app can be tested against
+// the other two (see lib/libraryTask.ts for why that matters).
+import { libraryTaskToTask } from '../lib/libraryTask';
 
 export default function TaskLibrary({ onInsert, onClose }: {
   onInsert: (task: Task) => void;
@@ -78,7 +51,7 @@ export default function TaskLibrary({ onInsert, onClose }: {
   useEffect(() => { void run(); /* eslint-disable-next-line */ }, []);
 
   function pick(pt: PublicTask) {
-    onInsert(toTask(pt));
+    onInsert(libraryTaskToTask(pt));
     incrementTaskCopyCount({ publicTaskId: pt.id }).catch(() => undefined);
     onClose();
   }
@@ -123,7 +96,7 @@ export default function TaskLibrary({ onInsert, onClose }: {
                   {t.sourceGameTitle && <span className="truncate">{b.libraryFrom(t.sourceGameTitle)}</span>}
                 </div>
                 {/* Tags (change: game-task-tags): this component already read
-                    `pt.tags` — but only to COPY it into the new task at toTask()
+                    `pt.tags` — but only to COPY it into the new task at libraryTaskToTask()
                     above. Nothing ever showed them to the creator choosing. */}
                 <TagChips tags={t.tags} max={4} more={gl.moreTags} className="mt-1" />
               </div>

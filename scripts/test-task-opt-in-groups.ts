@@ -12,8 +12,8 @@
 //
 // 1. EVERY group opens COLLAPSED, always. Expansion used to be coupled to "does
 //    this group hold content", which read well on paper and failed in practice:
-//    the template seeder (templates.ts `task()`) writes maxConcurrentTeams 5 while
-//    blankTask/TASK_FIELD_DEFAULTS say 3, so EVERY template-derived task looked
+//    a template seeder wrote a different maxConcurrentTeams from
+//    blankTask/TASK_FIELD_DEFAULTS, so EVERY template-derived task looked
 //    authored and opened its rules group — plus timer/points, since the templates
 //    override difficulty and pointValue per task. The editor greeted the creator
 //    with three or four unfolded sections of settings they never chose.
@@ -35,6 +35,7 @@ import {
   foldGroupAway,
 } from '../apps/creator-web/src/lib/taskOptInGroups';
 import { blankTask } from '../apps/creator-web/src/lib/wizardLogic';
+import { libraryTaskToTask } from '../apps/creator-web/src/lib/libraryTask';
 
 let failures = 0;
 function ok(label: string, cond: boolean): void {
@@ -78,6 +79,33 @@ eq('the declared default difficulty matches blankTask', TASK_FIELD_DEFAULTS.diff
 eq('the declared default points matches blankTask', TASK_FIELD_DEFAULTS.pointValue, f.pointValue);
 eq('the declared default capacity matches blankTask',
   TASK_FIELD_DEFAULTS.maxConcurrentTeams, f.maxConcurrentTeams);
+
+// ── The THIRD seeder, which sat outside this guarantee until 2026-09-02 ──────
+//
+// Copying a task out of the gallery is the app's other way of creating one, and
+// it seeds its own defaults. It was never compared against these two purely
+// because it lived inside a component file; it is now lib/libraryTask.ts.
+//
+// The stakes are on record in taskOptInGroups.ts's header: when two seeders
+// disagreed about capacity, every task derived from the disagreeing one read as
+// "authored", and the editor greeted creators with three or four unfolded
+// sections of settings they had never chosen.
+{
+  const copied = libraryTaskToTask({
+    id: 'pt1', gameId: 'g1', ownerUid: 'u1',
+    title: 'x', description: 'y', type: 'photo',
+    difficulty: 5, estimatedMinutes: 7, pointValue: 100,
+  } as unknown as Parameters<typeof libraryTaskToTask>[0]);
+  eq('a gallery copy seeds the same capacity as blankTask',
+    copied.maxConcurrentTeams, f.maxConcurrentTeams);
+  eq('…and the same capacity TASK_FIELD_DEFAULTS declares',
+    copied.maxConcurrentTeams, TASK_FIELD_DEFAULTS.maxConcurrentTeams);
+  // It deliberately does NOT mirror difficulty/pointValue: those travel with the
+  // copied mission because the original author chose them. Capacity does not,
+  // because it describes the original's venue rather than the mission.
+  eq('a gallery copy keeps the source difficulty rather than the default',
+    copied.difficulty, 5);
+}
 
 console.log('\n── 3. a group with data renders EXPANDED, never behind a chip ─');
 ok('a hint expands the hint group', groupHasContent('hint', withT({ hint: 'look up' })));
