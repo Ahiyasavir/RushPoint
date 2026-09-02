@@ -1533,6 +1533,75 @@
 // of them kept; and to office-olympics, whose invented sport had one rule from
 // whoever spoke first and now takes one rule from each player.
 //
+// ─── 69. A named target belongs to the GROUP. On one person, in public, it is
+//         a threat rather than a goal ───────────────────────────────────────
+//
+// This is rule 64's boundary condition, and it was found the hard way: by
+// noticing that applying rule 64 two nights earlier had made a mission worse.
+//
+// the-witness has one player study a place for a minute and then recall it aloud
+// while the others film, after which the camera is turned on the place "so you
+// can check how right HE was". The rule-64 pass added a specific difficult
+// target — ten correct details — because the mission was already verifying the
+// count and had never stated it. Every word of that reasoning was right and the
+// result was a mission that stands one named person in front of their friends
+// with a number they can publicly fail to reach.
+//
+// The research on social-evaluative threat says this is not squeamishness. Being
+// evaluated in front of peers measurably DEGRADES cognitive performance — so the
+// spotlight makes the failure it is measuring more likely — and adolescence is
+// specifically a window of heightened sensitivity to peer evaluation, which is
+// the same finding rule 51 reached through Elkind from a completely different
+// literature. Convergent evidence is the strongest kind available here. Worse,
+// visible nervousness in front of peers has real social consequences afterwards,
+// so a mission can cost a quiet player something that outlasts the game.
+//
+// This bank happens to contain the controlled experiment, two missions with
+// nearly identical staging and opposite status design:
+//
+//     blind-describe  one player turns their back while the others describe an
+//                     object without naming it. The mission ENDS WHEN THEY GET IT
+//                     RIGHT — there is no failure state, the difficulty sits with
+//                     the describers, and the spotlit player is handed a win.
+//     the-witness     one player performs from memory against a public number,
+//                     and the last beat of the mission is everybody checking
+//                     whether they fell short.
+//
+// So: keep the target, move who carries it. the-witness now has the witness lead
+// the recall and the rest add what they caught, against a target that is stated
+// as the group's. The witness keeps the starring role and can no longer fail
+// alone.
+//
+// ─── 70. Status is played, not possessed — so never let a mission fix it ─────
+//
+// Johnstone's other half. Status is not a property of a person but a thing they
+// DO, moment to moment, in every inflection; playing high says "don't touch me",
+// playing low says "don't hurt me". Scenes come alive on the SHIFT — a high
+// character brought low, a low one finding the nerve to assert. "If you get the
+// status right, you can relax and the scene will play itself."
+//
+// Two things follow for a mission author.
+//
+// FIRST, IT EXPLAINS RULE 68. Johnstone's observation is that low-status players
+// accept and HIGH-STATUS PLAYERS BLOCK. Blocking is not a personality flaw, it is
+// a status move — so a mission that permits blocking is a mission that quietly
+// awards one player high status at the group's expense, and the accept-all
+// pattern is a status intervention as much as a creative one. That is why it
+// works on the quiet member rather than merely including them.
+//
+// SECOND, DO NOT CAST THE GAME. A mission that permanently makes one player the
+// expert, the judge or the tested, with no rotation and no reversal, has removed
+// the only thing that makes the arrangement bearable: the possibility of a shift.
+// Fixed status is also flat drama — Johnstone's whole point is that the shift is
+// where the interest lives.
+//
+// Three moves, in order of preference: ROTATE the role so everyone occupies it
+// (draft B's prediction round runs until everybody has been the subject);
+// INVERT it, so the apparently high role turns out to depend on the low one
+// (blind-describe's guesser looks spotlit and is actually being carried); or, if
+// neither is possible, make the FAILURE SHARED so the role is a position rather
+// than a verdict.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -4280,7 +4349,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'העד',
-      description: 'אחד מכם מסתכל על מה שמולו בשקט מוחלט דקה שלמה, בלי לצלם ובלי לדבר. אחר כך הוא מסתובב עם הגב, והשאר מצלמים אותו מונה בקול את הפרטים שהוא זוכר. המטרה: עשרה פרטים נכונים. בסוף הפנו את המצלמה למקום עצמו, כדי שאפשר יהיה לבדוק כמה הוא צדק.',
+      description: 'אחד מכם מסתכל על מה שמולו בשקט מוחלט דקה שלמה, בלי לצלם ובלי לדבר. אחר כך הוא מסתובב עם הגב ומונה בקול את הפרטים שהוא זוכר, ואז השאר מוסיפים כל מה שהם קלטו. המטרה של כולכם ביחד: עשרה פרטים נכונים. בסוף הפנו את המצלמה למקום עצמו, כדי שאפשר יהיה לבדוק.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 7,
