@@ -2849,8 +2849,14 @@ async function foldPlatformBenchmark(
   }
   // One transaction per task type — independent keys, safe to run concurrently.
   await Promise.all([...totalsByType.entries()].map(async ([type, totals]) => {
+    // NULL, not median([]) — a run that completed none of this type measured no
+    // duration, and `median([])` returns 0, which mergeBenchmark used to fold in
+    // as "a station takes zero milliseconds". That is how benchmarks/smart_station
+    // reached count 23 with a rolling median of zero. The completion rate below
+    // IS a real measurement in the same situation and still counts.
+    const durations = durationsByType.get(type) ?? [];
     const sample = {
-      medianMs: median(durationsByType.get(type) ?? []),
+      medianMs: durations.length > 0 ? median(durations) : null,
       completionRate: totals.total > 0 ? totals.done / totals.total : 0,
     };
     const benchRef = db.doc(`benchmarks/${type}`);
