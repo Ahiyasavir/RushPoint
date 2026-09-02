@@ -224,7 +224,135 @@ console.log('\n── 7. public photography asks permission (rule 71) ───�
     ASKS_PERMISSION.test('בקשו ממנו רשות לצלם אותו למשחק'));
 }
 
-// ── 8. Within-family minute spread — REPORTED, never asserted (rule 75) ──────
+// ── 8. No sequence step is a wall (rule 77) ──────────────────────────────────
+//
+// A `sequence` is the only task type where a player cannot go round an obstacle:
+// the steps are ordered and the mission does not complete until the last one
+// does. So a step whose answer nobody can learn does not merely fail — it blocks
+// every step after it, and by rule 77 the residue taxes whatever the composer
+// routes the team to next.
+//
+// Both of this bank's two sequence missions shipped that way. disarm-the-device
+// asked for "the secret code word" against an answer that appeared nowhere in
+// the entry, in a `noPrep` mission whose own comment called every step "fully
+// self-contained content".
+//
+// Checkable for the same reason rules 41-42, 60 and 71 are: it compares two
+// encodings of one fact — an authored answer, against whether the entry gives the
+// player any route to it.
+console.log('\n── 8. no sequence step is a wall (rule 77) ────────────────');
+{
+  interface Step { prompt: string; answer?: string }
+
+  /**
+   * Steps whose answer is legitimately NOT written down anywhere, with the reason.
+   * Declared, never inferred — a step that is a riddle to be deduced rather than a
+   * token to be relayed belongs here, and a stale entry fails below.
+   */
+  const DEDUCED_NOT_RELAYED: Record<string, string> = {};
+
+  /**
+   * The decision, isolated from the bank so it can be proven against fixtures.
+   *
+   * A gate nobody has watched catch anything is not a gate — that is this repo's
+   * own lesson about checks whose regex has quietly stopped matching, and the
+   * shape `scripts/lib/callableHardening.mjs` already uses (decision logic tested
+   * on synthetic inputs, THEN run over the real tree).
+   */
+  function wallsIn(entry: {
+    key: string;
+    setup?: { field: string; required?: boolean }[];
+    description?: string;
+    hint?: string;
+    steps: Step[];
+  }): string[] {
+    // A required Quick Setup step targeting `steps` means the creator authors the
+    // question AND the answer before launch, so a placeholder is correct here.
+    const creatorAuthorsSteps = (entry.setup ?? []).some((sp) => sp.field === 'steps' && sp.required);
+    const haystack = [
+      entry.description ?? '',
+      entry.hint ?? '',
+      ...entry.steps.map((sp) => sp.prompt),
+    ].join(' ');
+    const out: string[] = [];
+    entry.steps.forEach((sp, i) => {
+      const answer = (sp.answer ?? '').trim();
+      if (!answer) return;               // confirm-only, or a creator placeholder
+      if (creatorAuthorsSteps) return;   // the creator supplies both halves
+      if (haystack.includes(answer)) return;
+      out.push(`${entry.key} step ${i + 1}: answer "${answer}" appears nowhere in the entry`);
+    });
+    return out;
+  }
+
+  // ── Layer 1: the decision logic, against the shape that actually shipped ──
+  {
+    // disarm-the-device exactly as it was before 2026-09-02, which is the bug this
+    // section exists for. If this stops being caught, the gate has rotted.
+    const asShipped = {
+      key: 'fixture-wall',
+      description: 'שלושה סוכנים לפניכם נכשלו כאן. בצעו את שלושת השלבים בדיוק לפי הסדר.',
+      steps: [
+        { prompt: 'שלב 1: חברו את החוט הכחול. אשרו כשסיימתם.' },
+        { prompt: 'שלב 2: הקלידו את מילת הקוד הסודית.', answer: 'פרוטוקול' },
+        { prompt: 'שלב 3: לחצו לנטרול סופי.' },
+      ],
+    };
+    ok('the shipped bug IS caught by this check', wallsIn(asShipped).length === 1,
+      JSON.stringify(wallsIn(asShipped)));
+
+    // The fix: the same entry with the word in the briefing.
+    const fixed = { ...asShipped, description: `${asShipped.description} מילת הקוד היא "פרוטוקול".` };
+    eq('…and the repair clears it', wallsIn(fixed), []);
+
+    // A required steps setup makes a placeholder legitimate.
+    eq('a creator-authored steps setup is not a wall',
+      wallsIn({
+        key: 'fixture-setup', description: 'x',
+        setup: [{ field: 'steps', required: true }],
+        steps: [{ prompt: 'type the word', answer: '' }, { prompt: 'and this one', answer: 'anything' }],
+      }), []);
+    // …but an OPTIONAL one does not excuse it: the mission can launch unconfigured.
+    ok('an optional steps setup does not excuse an unknowable answer', wallsIn({
+      key: 'fixture-optional', description: 'x',
+      setup: [{ field: 'steps' }],
+      steps: [{ prompt: 'type the word', answer: 'unknowable' }],
+    }).length === 1);
+
+    eq('a hint counts as a route to the answer',
+      wallsIn({
+        key: 'fixture-hint', description: 'x', hint: 'the word is banana',
+        steps: [{ prompt: 'type it', answer: 'banana' }],
+      }), []);
+    eq('confirm-only steps are never walls',
+      wallsIn({ key: 'fixture-confirm', description: 'x', steps: [{ prompt: 'do the thing' }] }), []);
+  }
+
+  // ── Layer 2: the real bank ────────────────────────────────────────────────
+  const walls: string[] = [];
+  const seen: string[] = [];
+  for (const e of TASK_BANK) {
+    const t = e.build();
+    const steps = (t as unknown as { steps?: Step[] }).steps;
+    if (!steps?.length) continue;
+    seen.push(e.key);
+    walls.push(...wallsIn({
+      key: e.key, setup: e.setup, description: t.description, hint: t.hint, steps,
+    }));
+  }
+
+  eq('every answered sequence step tells the player where to learn the answer',
+    walls.filter((w) => !(w.split(' ')[0] in DEDUCED_NOT_RELAYED)), []);
+  eq('no stale entries in the deduced-answer allowlist',
+    Object.keys(DEDUCED_NOT_RELAYED).filter((k) => !walls.some((w) => w.startsWith(k))), []);
+
+  // The denominator, and the anti-vacuity guard: this section is worthless if the
+  // bank ever stops containing sequence missions and nobody notices.
+  console.log(`  → checked ${seen.length} sequence mission(s): ${seen.join(', ')}`);
+  ok('the scan actually saw a sequence mission', seen.length > 0);
+}
+
+// ── 9. Within-family minute spread — REPORTED, never asserted (rule 75) ──────
 //
 // `estimatedMinutes` feeds taskScoreSmart and computeSkillRatio, so it decides
 // whether a team reads as fast or slow, and it feeds the composer's budget, so it
@@ -238,7 +366,7 @@ console.log('\n── 7. public photography asks permission (rule 71) ───�
 // somebody's estimate was never re-read. Reported rather than asserted — the
 // right value is a judgement, and rule 52's failed screen is the standing warning
 // about gating on those.
-console.log('\n── 8. minutes spread within each family (informational, rule 75) ──');
+console.log('\n── 9. minutes spread within each family (informational, rule 75) ──');
 {
   const families = new Map<string, { key: string; est: number; diff: number }[]>();
   for (const e of TASK_BANK) {
@@ -280,7 +408,7 @@ console.log('\n── 8. minutes spread within each family (informational, rule 
 // call and this suite does not pretend otherwise — but drifting further without
 // anyone noticing should not be possible, and a count with its denominator
 // printed is the cheapest way to make it visible.
-console.log('\n── 9. composition mix (informational, rule 54) ────────────');
+console.log('\n── 10. composition mix (informational, rule 54) ───────────');
 {
   const byType = new Map<string, number>();
   for (const e of TASK_BANK) {
