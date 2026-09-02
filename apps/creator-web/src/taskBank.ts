@@ -63,6 +63,95 @@
 // alone. Everything below was learned by having real missions rejected; each
 // rule names the mission that produced it, because the example is the argument.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// PRE-FLIGHT — run this, not the whole file
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The guide below is 73 numbered rules and about ninety minutes of reading. That
+// is a reference, not a procedure, and Gawande's finding about checklists
+// applies exactly: a list that tries to document everything fails, because it
+// trains people to stop reading it. Good ones are five to nine items and carry
+// only the KILLER ITEMS — the steps that are both critical and actually get
+// missed.
+//
+// MEASURED, not asserted: the nine items below are 502 words, about two and a
+// half minutes. That is over Gawande's sixty-to-ninety seconds, and the
+// difference is deliberate — his figure is for a surgical pause point with a
+// patient open on the table. Two and a half minutes before writing a mission
+// that goes out to every creator on the platform is cheap. It is recorded so the
+// next person to add an item knows what they are spending.
+//
+// So this is the list. It is DO-CONFIRM, not READ-DO: write the mission from
+// your own judgement first, then stop and run these against it. Each points at
+// the rule that carries the reasoning and the evidence; go there when an item
+// fires, not before.
+//
+//   1. WHAT DOES THE TEAM DECIDE, what could they be GOOD at, and what do they
+//      know about each other afterwards? Zero of three is the definition of a
+//      stupid mission. One is the line.                             → rule 52
+//
+//   2. Could ONE PLAYER do this while the others watch? If yes, rewrite it so
+//      each person contributes one element and ALL of them must appear in the
+//      result. That one clause also fixes reciprocity, blocking and status.
+//                                                        → rules 33, 62, 68, 70
+//
+//   3. Does it make somebody conspicuous in public? Then it needs a cover: a
+//      character, a display of competence, or an errand that makes approaching
+//      someone socially legible. Write a sentence of fiction before you touch a
+//      tag.                                                          → rule 51
+//
+//   4. Did you ask for something to be creative, original, funny or convincing?
+//      Delete it and name the target instead. "Do your best" is the weakest
+//      instruction there is, and asking for originality makes the work worse.
+//                                                             → rules 64, 67
+//
+//   5. Can the team tell whether they did it WELL, without asking anybody? An
+//      auto-approved upload says nothing about quality, so the criterion has to
+//      be in the text. And never promise points the scoring cannot pay.
+//                                                                    → rule 60
+//
+//   6. If there is a target or a spotlight, WHOSE is it? A number on one named
+//      person in public is a threat, not a goal.                     → rule 69
+//
+//   7. Does a stranger appear in it? Then the text asks their permission and
+//      says what the picture is for — and does not script their refusal.
+//                                                                → rules 71, 49
+//
+//   8. Read it back and delete: the sentence that handles failure, the one that
+//      sets a size nothing enforces, and the one that grants permission.
+//                                                                    → rule 49
+//
+//   9. FOR A FINISHER ONLY: say out loud what the group is holding as they walk
+//      away. "A photo of themselves standing still" is not an ending.
+//                                                                    → rule 55
+//
+// DELIBERATELY ABSENT: the tag laws (rules 41-42), the unpayable-bonus check
+// (rule 60's second half) and the public-photography ask (rule 71's) are all
+// enforced by scripts/test-task-bank-tag-laws.ts. A machine already runs them on
+// every commit, so spending a human's attention there would buy nothing and cost
+// two of the nine slots.
+//
+// ─── Where the rules disagree with each other ────────────────────────────────
+//
+// Four known tensions. None is an error; each is two true things meeting, and a
+// reader who hits one should know it is charted rather than assume they have
+// misread something.
+//
+//   46 ↔ 67   Constraints multiply failure (46) but a blank instruction has no
+//             pull (67). Creativity peaks at MODERATE constraint, so these are
+//             the two walls of one corridor rather than opposing advice.
+//   48 ↔ 61   A ladder of escalating disclosure needs several rungs; two
+//             missions sharing a mechanic are duplicates and the composer will
+//             place only one. Resolved by rule 66: rungs escalate through
+//             different VERBS.
+//   57 ↔ 73   Give a mixed-age mission a second, literal route (57) versus
+//             Tilden's "children need a separate programme, not a dilution"
+//             (73). The audience tags decide which applies — see rule 73.
+//   64 ↔ 69   Name a specific difficult target (64) versus never put a public
+//             number on one named person (69). Targets belong to groups. This
+//             one was found by applying 64 faithfully and making a mission
+//             worse, which is why it is written down.
+//
 // ─── 1. Adult-credible by default ────────────────────────────────────────────
 //
 // The failure mode this bank keeps hitting is the summer-camp reflex: battle
@@ -1744,6 +1833,48 @@
 // easier" but "what is the BEST mission for this audience", and if the answer is
 // a different mission, write that one and let the original keep its own
 // audience.
+//
+// ─── 74. This file has a reading budget and it is now spent ─────────────────
+//
+// Ten nights of research added thirty-three rules to a file that already had
+// forty, and the result is eighteen thousand words — about ninety minutes before
+// you are allowed to write your first mission. Nobody does that, which means the
+// marginal rule added in that state is not merely low-value: it is NEGATIVE,
+// because it lengthens the thing that is already too long to be read and dilutes
+// the rules that matter.
+//
+// Gawande's discipline is the right one and it is now this file's: the value is
+// in the KILLER ITEMS, the steps both critical and commonly missed, and
+// everything else is reference material that earns its place by being findable
+// rather than by being read. The PRE-FLIGHT block at the top is the interface.
+// The numbered rules are the archive behind it — they keep the evidence and the
+// reasoning, which is what makes them worth having at all, and they are looked
+// up rather than read through.
+//
+// SO, FROM HERE ON, A NEW RULE MUST DO ONE OF THREE THINGS:
+//
+//   • Earn a slot in the pre-flight, which means displacing one of the nine.
+//     Argue for the swap explicitly; do not quietly make it ten, then eleven.
+//   • Become machine-checkable, and go and live in
+//     scripts/test-task-bank-tag-laws.ts. This is the best outcome available and
+//     costs a human nothing — it is what happened to rules 41, 42, 60 and 71.
+//   • Replace an existing numbered rule rather than sit beside it. Two rules
+//     that overlap are worse than either alone, because a reader now has to work
+//     out which one governs.
+//
+// A rule that does none of those is a note, and notes belong in the comment on
+// the entry that taught them, where the person editing that mission will
+// actually meet it.
+//
+// AND THIS PASS DID NOT PAY ITS OWN BILL, which is worth stating rather than
+// hoping nobody measures. Writing rule 74 and the pre-flight ADDED about eleven
+// hundred words to a file whose length was the problem. The defence is that the
+// pre-flight is the interface that makes the other eighteen thousand findable
+// instead of mandatory, and rule 74 is what makes every future addition cost
+// something — so this is the addition that turns the budget from a wish into a
+// constraint. It is still a debt. The next pass over this file owes a deletion,
+// and the first place to look is rules that overlap: 20 and 64 both say "specific
+// beats generic", and one of them should absorb the other.
 //
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
