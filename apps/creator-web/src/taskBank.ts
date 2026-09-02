@@ -1602,6 +1602,66 @@
 // neither is possible, make the FAILURE SHARED so the role is a position rather
 // than a verdict.
 //
+// ─── 71. The stranger never agreed to play. Ask before you photograph them,
+//         say what it is for, and never script their refusal ────────────────
+//
+// Every rule in this file up to here is about the player. Thirteen missions send
+// a team at members of the public, and not one line had ever been written about
+// the person on the other end.
+//
+// Pervasive-game theory is the literature for this and its central observation
+// is uncomfortable: a game played in ordinary space expands the magic circle
+// until people who never opted in are inside it. Montola, Stenros and Waern give
+// them a name — UNAWARE PARTICIPANTS — and treat them as a design problem in
+// their own right rather than as scenery. The pleasure of the ambiguous zone
+// between play and non-play belongs to the players. The stranger gets the
+// ambiguity without the pleasure.
+//
+// On photographs specifically, the ethics literature is blunt about the gap this
+// bank was sitting in: in most countries you MAY photograph a person in public
+// without asking, and legal permission is the floor rather than the standard.
+// The working test is whether you would be comfortable showing the picture to
+// the person in it. Add two facts particular to this product — our players are
+// frequently minors, and the strangers sometimes are too — and "you are allowed
+// to" stops being an answer.
+//
+// AND THE BANK WAS ALREADY INCONSISTENT WITH ITSELF, which is the tell that this
+// was never decided, only improvised mission by mission:
+//
+//     thirty-second-interview   "ask permission" — then films            ✓
+//     namesake-stranger         introduces itself and explains, films    ~
+//     local-legend              films the answer, nobody asked           ✗
+//     teach-a-stranger          films them performing, nobody asked      ✗
+//     challenge-shampoo-pitch   "get photographed with them", no ask     ✗
+//     do-someone-a-favour       "do NOT photograph them, and do not tell
+//                                them it is a mission"                   ★
+//
+// The last one is the most carefully written mission in this bank and it points
+// at the shape of the rule: it forbids the photograph because the mission's
+// meaning depends on the favour being real, and a favour done for a camera is
+// not one. That is a REASON, not a reflex, which is what the other five were
+// missing in both directions.
+//
+// SO: a mission that photographs an identifiable member of the public must ask,
+// in the text, and must say what the picture is for. One clause. It also
+// produces better material — a stranger who knows they are in somebody's game
+// plays along, and rule 35 already says the stranger is a co-star rather than an
+// audience; you cannot co-star in something nobody told you about.
+//
+// DO NOT SCRIPT THE REFUSAL. Rule 49 cut "if he refuses, thank him and find
+// another" from two missions and that still stands: instructing the ASK is an
+// instruction, while narrating the no is failure-handling prose that tells a team
+// to expect rejection before they have opened their mouth. Ask for the
+// permission; leave what happens next to the people standing there.
+//
+// A SECOND HALF, FROM THE SAME LITERATURE. The magic circle leaks both ways, so
+// a mission also has to be legible FROM OUTSIDE. A group of teenagers doing
+// something inexplicable in a shopping centre gets security called, and the
+// mission's designer is the only person who could have prevented that. Prefer
+// missions whose surface reading is ordinary — asking a question, buying
+// something, taking a group photo — over ones that require a bystander to work
+// out that a game is happening.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -2045,7 +2105,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'שיווק שמפו',
-      description: 'בקופסה שקיבלתם יש שמפו, עליכם למכור אותו לאדם זר בלפחות 10 שקלים ולהצטלם איתו.',
+      description: 'בקופסה שקיבלתם יש שמפו. מכרו אותו לאדם זר בלפחות 10 שקלים, ספרו לו שזה חלק ממשחק, ובקשו רשות להצטלם איתו.',
       type: 'photo',
       estimatedMinutes: 2,
       smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
@@ -2769,7 +2829,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 7,
     build: () => anywhere({
       title: 'האגדה המקומית',
-      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן. בקשו ממנו סיפור מוזר או מפתיע על המקום, ובקשו פרט אחד שאפשר לבדוק: שם, שנה או אירוע. צלמו את התשובה, וחזרו על הפרט בקול בסוף הסרטון.',
+      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן. בקשו ממנו סיפור מוזר או מפתיע על המקום, ובקשו פרט אחד שאפשר לבדוק: שם, שנה או אירוע. בקשו רשות לצלם את התשובה למשחק, ובסוף הסרטון חזרו על הפרט בקול.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -4274,7 +4334,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 7,
     build: () => anywhere({
       title: 'שם משותף',
-      description: 'מצאו אדם זר שקוראים לו בדיוק כמו אחד מכם. הציגו את עצמכם, ספרו לו למה אתם שואלים, וצלמו את שניהם יחד.',
+      description: 'מצאו אדם זר שקוראים לו בדיוק כמו אחד מכם. הציגו את עצמכם, ספרו לו שאתם באמצע משחק ולמה אתם שואלים, ובקשו רשות לתמונה של שניהם יחד.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -4299,7 +4359,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'תלמידים לרגע',
-      description: 'המציאו עכשיו לחיצת יד משלכם: כל אחד מכם מוסיף בתורו תנועה אחת, וכולן נשארות בפנים. לימדו אותה לאדם זר עד שהוא מבצע את כל התנועות נכון בעצמו, וצלמו אותו עושה אותה בלי שאתם מובילים.',
+      description: 'המציאו עכשיו לחיצת יד משלכם: כל אחד מכם מוסיף בתורו תנועה אחת, וכולן נשארות בפנים. לימדו אותה לאדם זר עד שהוא מבצע את כל התנועות נכון בעצמו. בקשו ממנו רשות לצלם אותו למשחק, וצלמו אותו עושה אותה בלי שאתם מובילים.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 10,

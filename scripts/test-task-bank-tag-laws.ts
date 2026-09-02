@@ -171,7 +171,60 @@ console.log('\n── 6. no unpayable reward is promised (rule 60) ────�
     !BONUS_PROMISE.test('צלמו את הקבוצה ליד השלט'));
 }
 
-// ── 7. Composition mix — REPORTED, never asserted (rule 54) ──────────────────
+// ── 7. A mission that photographs a member of the public asks first (rule 71) ─
+//
+// The one rule in this file with a consequence outside the game. Our players are
+// frequently minors and so, sometimes, are the strangers; "you are legally
+// allowed to photograph people in public" is the floor, not the standard. The
+// bank was inconsistent with itself here for as long as it has existed — some
+// missions asked permission, some filmed a stranger performing without a word,
+// and nothing recorded which was intended.
+//
+// Checkable for the same reason rule 60's is: it compares two encodings of one
+// fact. `crowded` is the bank's own declaration that a mission needs members of
+// the public, `type: photo` is its declaration that something gets captured, and
+// prose naming a person as the subject is the third. When all three hold, the
+// text must ask.
+console.log('\n── 7. public photography asks permission (rule 71) ────────');
+{
+  // Prose that makes a PERSON the subject of the capture, as opposed to an
+  // object, a sign or a page.
+  const SHOOTS_A_PERSON = /צלמו אותו|צלמו אותה|הצטלמו איתו|הצטלמו איתה|סלפי|את שניהם|צלמו את התשובה|צלמו אותם/;
+  const ASKS_PERMISSION = /בקשו רשות|רשות לצלם|רשות לתמונה|בקשו ממנו רשות|רשות להצטלם/;
+
+  /**
+   * Declared exceptions, never inferred. A mission lands here only with a reason
+   * that survives being read aloud, and a stale entry fails below.
+   */
+  const NO_ASK_NEEDED: Record<string, string> = {
+    'honest-compliment':
+      'the capture IS the request — "if they smiled, ask them for a selfie together" is '
+      + 'itself the asking, so a second permission clause would be the same sentence twice.',
+  };
+
+  const offenders = TASK_BANK.filter((e) => {
+    const t = e.build();
+    if (t.type !== 'photo' || !e.tags.includes('crowded')) return false;
+    const d = t.description ?? '';
+    return SHOOTS_A_PERSON.test(d) && !ASKS_PERMISSION.test(d);
+  }).map((e) => e.key);
+
+  eq('every public-photography mission asks permission in its text',
+    offenders.filter((k) => !(k in NO_ASK_NEEDED)), []);
+
+  // A declared exception that no longer applies is itself a defect: it would
+  // silently excuse a future mission that had drifted into needing the clause.
+  const stale = Object.keys(NO_ASK_NEEDED).filter((k) => !offenders.includes(k));
+  eq('no stale entries in the no-ask allowlist', stale, []);
+
+  // Anti-vacuity: the patterns must still recognise the shapes they are for.
+  ok('the subject pattern matches prose that photographs a person',
+    SHOOTS_A_PERSON.test('וצלמו אותו עושה אותה'));
+  ok('the permission pattern matches an actual ask',
+    ASKS_PERMISSION.test('בקשו ממנו רשות לצלם אותו למשחק'));
+}
+
+// ── 8. Composition mix — REPORTED, never asserted (rule 54) ──────────────────
 //
 // Distinctiveness is relational: the peak of a composed game is whatever differs
 // from its neighbours, so a pool where three missions in five are the same kind
@@ -179,7 +232,7 @@ console.log('\n── 6. no unpayable reward is promised (rule 60) ────�
 // call and this suite does not pretend otherwise — but drifting further without
 // anyone noticing should not be possible, and a count with its denominator
 // printed is the cheapest way to make it visible.
-console.log('\n── 7. composition mix (informational, rule 54) ────────────');
+console.log('\n── 8. composition mix (informational, rule 54) ────────────');
 {
   const byType = new Map<string, number>();
   for (const e of TASK_BANK) {
