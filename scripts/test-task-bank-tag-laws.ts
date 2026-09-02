@@ -137,7 +137,41 @@ console.log('\n── 5. the authored bank is already a fixed point ────
   eq('re-banding the whole bank is a no-op', churned, []);
 }
 
-// ── 6. Composition mix — REPORTED, never asserted (rule 54) ──────────────────
+// ── 6. No mission promises a reward the platform cannot pay (rule 60) ────────
+//
+// Two missions told players that something would earn BONUS POINTS — "an
+// original performance earns bonus points", "bonus if real strangers take part"
+// — while being auto-approved photo uploads, which award the same flat score to
+// every submission alike. There is no bonus and there has never been one: the
+// platform scores a photo mission by its `pointValue`, and the only differential
+// scoring that exists anywhere is a staff member manually calling
+// adjustTeamScore. A player who works harder for the promised bonus gets exactly
+// what a player who ignored it gets.
+//
+// This one IS mechanically checkable, unlike most of the authoring rules,
+// because it compares two encodings of a single fact: prose promising
+// differential scoring against a configuration that cannot deliver it. Same
+// class as rules 41-42, and the reason section 6 of this suite can assert while
+// section 7 can only report.
+console.log('\n── 6. no unpayable reward is promised (rule 60) ───────────');
+{
+  // Deliberately broad. A near-miss phrasing that this misses is a bug in the
+  // pattern; a false positive is a mission that should be reworded anyway.
+  const BONUS_PROMISE = /בונוס|ניקוד נוסף|נקודות נוספות|תקבלו יותר|יותר נקודות|ניקוד גבוה|נקודות בונוס/;
+  const promising = TASK_BANK
+    .filter((e) => BONUS_PROMISE.test(e.build().description ?? ''))
+    .map((e) => `${e.key}: ${(e.build().description ?? '').match(/[^.]*(בונוס|ניקוד|נקודות)[^.]*/)?.[0]?.trim()}`);
+  eq('no mission promises bonus points the scoring cannot award', promising, []);
+
+  // Anti-vacuity in both directions: prove the pattern still matches something,
+  // or a silent edit to it would turn this assertion into a no-op forever.
+  ok('the bonus pattern still matches text that contains a promise',
+    BONUS_PROMISE.test('ביצוע מקורי מקבל ניקוד בונוס'));
+  ok('…and does not match ordinary mission prose',
+    !BONUS_PROMISE.test('צלמו את הקבוצה ליד השלט'));
+}
+
+// ── 7. Composition mix — REPORTED, never asserted (rule 54) ──────────────────
 //
 // Distinctiveness is relational: the peak of a composed game is whatever differs
 // from its neighbours, so a pool where three missions in five are the same kind
@@ -145,7 +179,7 @@ console.log('\n── 5. the authored bank is already a fixed point ────
 // call and this suite does not pretend otherwise — but drifting further without
 // anyone noticing should not be possible, and a count with its denominator
 // printed is the cheapest way to make it visible.
-console.log('\n── 6. composition mix (informational, rule 54) ────────────');
+console.log('\n── 7. composition mix (informational, rule 54) ────────────');
 {
   const byType = new Map<string, number>();
   for (const e of TASK_BANK) {

@@ -1002,11 +1002,34 @@
 //      is difficulty 8 and is a story people tell for years. Difficulty is how
 //      hard, intensity is how much it marks you, and this bank can only express
 //      the first. That is a real gap, recorded here as the next thing to build.
-//   3. THE COMPOSER'S ARC IS A DIFFICULTY ARC, NOT AN INTENSITY ARC, and its
-//      blueprints all rise monotonically to the last stage, which quietly
-//      assumes the peak and the end are the same mission. They are two different
-//      slots in the remembered experience and a game is allowed to have its
-//      biggest moment two thirds of the way through and still land well.
+//   3. THE COMPOSER'S ARC IS A DIFFICULTY ARC, NOT AN INTENSITY ARC, and in
+//      every one of its four blueprints the HIGHEST target is the last stage —
+//      which quietly assumes the peak and the ending are the same mission. They
+//      are two different slots in the remembered experience, and a game is
+//      allowed to have its biggest moment two thirds of the way through and
+//      still land well.
+//
+//      Measured rather than assumed, because the first draft of this rule said
+//      "all rise monotonically" and that is false for half of them:
+//
+//          classic-3    [3, 6, 8]           monotonic, max at the end
+//          steady-4     [3, 5, 6, 8]        monotonic, max at the end
+//          twist-5      [3, 5, 7, 6, 8]     bumps at stage 3, max still the end
+//          marathon-6   [2, 4, 5, 7, 6, 9]  bumps at stage 4, max still the end
+//
+//      Two of them already bend, and scripts/test-composer-blueprints.ts
+//      deliberately asserts only that a blueprint "ends harder than it starts",
+//      step-by-step being left free so that a mid-game spike stays legal. So the
+//      SHAPE is already permitted and the data simply never uses it for a real
+//      peak.
+//
+//      Which is the trap: the obvious response is to go and edit those arrays,
+//      and it would accomplish nothing. Rule 58 is the reason — difficulty is
+//      not arousal, so moving cognitive load earlier does not put a memorable
+//      moment there. Rearranging the curve would feel like acting on this rule
+//      while changing nothing anybody would remember. The curve is not the
+//      missing piece; the missing piece is that no mission can say how much it
+//      moves you.
 //
 // ─── 54. Distinctive means different FROM ITS NEIGHBOURS, not extreme in
 //         itself ─────────────────────────────────────────────────────────────
@@ -1173,6 +1196,77 @@
 // its position depends on its neighbours). Until it exists, an author placing a
 // mission into a template should ask what the player's PULSE is doing, and put
 // the answer in the entry's comment.
+//
+// ─── 59. Curiosity needs a SMALL gap, and the gap has to be named ────────────
+//
+// Loewenstein's information-gap theory (1994): curiosity is the feeling of a
+// discrepancy between what you know and what you want to know, and it only fires
+// once that gap is made SALIENT — you have to be shown the shape of what you are
+// missing. The counter-intuitive half, and the useful one: curiosity is
+// strongest when the gap is SMALL. A large gap produces less curiosity, not
+// more, because there is no existing structure for the answer to complete.
+//
+// Which means "find something interesting here" is not a mission. It is an
+// unbounded gap, and an unbounded gap produces no pull at all. The bank's best
+// searching missions are all small, named gaps, and reading them side by side
+// makes the shape obvious:
+//
+//     odd-one-planted   "somebody hid ONE object here that does not belong."
+//                       You know the count, the category and the location. You
+//                       lack exactly one datum. That is the whole design.
+//     kims-game         "here is a photo of how this looked. Find what changed."
+//                       You are handed the before-state, so the gap is precisely
+//                       one difference wide.
+//     the-hidden-key    "a key is hidden here, and it opens THIS."
+//
+// Compare a draft that says "look around and find something surprising": same
+// activity, no gap, no pull.
+//
+// So before shipping a mission built on searching, deducing or guessing, say out
+// loud what the player knows and what single thing they do not. If you cannot
+// state the missing thing in one short phrase, the gap is too big and the
+// mission will read as a chore. Narrow it until you can.
+//
+// ─── 60. Auto-approval says nothing about quality, so the mission must carry
+//         its own criterion — and must never promise a reward it cannot pay ──
+//
+// Csikszentmihalyi's flow conditions are three, and this platform is structurally
+// weak on the second: clear goals, IMMEDIATE FEEDBACK, and a challenge matched to
+// skill. Sixty-one of this bank's 103 missions are photo or video uploads set to
+// `autoApprove`, which means every submission gets the identical response. The
+// team learns that it was accepted. It learns nothing about whether it was any
+// good — and rule 52's competence need is precisely the experience of doing
+// something WELL, which cannot exist without a signal.
+//
+// Rule 40 already asks that a team know it is RIGHT before it submits. This is
+// the neighbouring requirement and it is not the same one: correctness versus
+// quality. A photo mission is always "correct". Nothing in the platform will
+// ever tell a team their photo was better than another team's.
+//
+// So the mission text has to supply the signal itself, in a form the team can
+// check without anybody's help. The good ones already do, and they are worth
+// copying: "both feet off the ground, no cheating" (open-everyone-airborne),
+// "one miss and you go back to the first person" (finish-all-or-nothing),
+// "until they can do it themselves without you leading" (teach-a-stranger),
+// "keep swapping until somebody gives you a marker" (trade-up), "so that the
+// whole letter is visible" (human-letter). Every one of those is a sentence the
+// team can hold up against what they just made.
+//
+// AND THE HARDER HALF: never promise a reward the platform cannot pay. Two
+// missions here told players that something would earn BONUS POINTS — "an
+// original performance earns bonus points", "bonus if real strangers take part"
+// — while being auto-approved, which awards a flat score to every submission
+// alike. There is no bonus. There has never been a bonus. A player who works
+// harder for it gets exactly what a player who did not gets, and the only thing
+// the promise reliably produces is the suspicion that scoring is arbitrary.
+//
+// This is rule 14 again (verification must match what the type can actually
+// check) arriving from the scoring side, and unlike most of these rules it IS
+// machine-checkable, because it compares two encodings of one fact: prose that
+// promises differential scoring against a config that cannot deliver it.
+// scripts/test-task-bank-tag-laws.ts now fails on any bonus promise in the bank.
+// Convert the intent into a criterion instead — the thing you wanted to reward
+// is almost always the thing you should have required.
 //
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
@@ -1398,7 +1492,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'ראפ מנצח',
-      description: 'בחרו שם לקבוצה, והקליטו סרטון של 30 שניות עם ראפ על הקבוצה שלכם. ביצוע מקורי מקבל ניקוד בונוס.',
+      description: 'בחרו שם לקבוצה, והקליטו סרטון של 30 שניות עם ראפ על הקבוצה שלכם. שם הקבוצה חייב להופיע בראפ לפחות פעמיים, וכל אחד מכם שר לפחות שורה אחת.',
       type: 'photo',
       estimatedMinutes: 15,
       smart: upload({ captureKind: 'video', videoMinSeconds: 20, videoMaxSeconds: 40 }),
@@ -1495,7 +1589,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'כתבת חדשות דחופה 📰',
-      description: 'אחד מכם כתב טלוויזיה שמדווח בשידור חי על אירוע מוזר שקרה כאן. השאר משחקים ניצבים, עוברי אורח או גיבורי האירוע. סרטון של 40 שניות, עם פתיחה וסיום. בונוס אם זרים אמיתיים משתתפים.',
+      description: 'אחד מכם כתב טלוויזיה שמדווח בשידור חי על אירוע מוזר שקרה כאן. השאר משחקים ניצבים, עוברי אורח או גיבורי האירוע. סרטון של 40 שניות, עם פתיחה וסיום. הכתב חייב לומר איפה הוא עומד ומה קרה כאן. אם תצליחו לשכנע עובר אורח אמיתי להתראיין, זה מה שיהפוך את הסרטון לאמיתי.',
       type: 'photo',
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
     }),
@@ -1821,7 +1915,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'תדרוך בלי מילים',
-      description: 'אחד מכם קורא בשקט: "בנו מגדל מחפצים שיש לכם, אבל הפוך: הבסיס הרחב למעלה, לא למטה." בלי מילים, רק בציור, העבירו את ההוראה לצוות. הם מבצעים לפי מה שהבינו. צלמו את התוצאה.',
+      description: 'אחד מכם קורא בשקט: "בנו מגדל מחפצים שיש לכם, אבל הפוך: הבסיס הרחב למעלה, לא למטה." בלי מילים, רק בציור, העבירו את ההוראה לצוות. הם מבצעים לפי מה שהבינו. עכשיו הקריאו את ההוראה המקורית בקול והשוו למה שנבנה: קלעתם? צלמו את התוצאה ואת הציור זה לצד זה.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 8,
