@@ -114,7 +114,7 @@ const APPS = [
     name: 'play-web',
     html: join(ROOT, 'apps', 'play-web', 'index.html'),
     // Firebase default hosts that must bounce to the canonical domain, and where to.
-    canonical: 'rush-point.com',
+    canonical: 'player.rush-point.com',
     defaultHosts: ['rushpoint-play.web.app', 'rushpoint-play.firebaseapp.com'],
   },
   {
@@ -123,17 +123,36 @@ const APPS = [
     canonical: 'creator.rush-point.com',
     defaultHosts: ['rushpoint-creator.web.app', 'rushpoint-creator.firebaseapp.com'],
   },
+  {
+    // The marketing site is Astro, so its tag lives in a COMPONENT rather than in a
+    // single index.html. It is in this list because it was the surface that proved the
+    // point: its vendored component read the id from config.yaml, config.yaml said
+    // `null`, and the site went live untagged while looking configured
+    // (change: marketing-analytics-parity). It reports to the same properties as the
+    // two apps, so the funnel from marketing into creator/player stays one journey.
+    name: 'marketing',
+    html: join(ROOT, 'apps', 'marketing', 'src', 'components', 'common', 'Analytics.astro'),
+    // No canonical-host redirect here: this site OWNS the apex, so there is no
+    // non-canonical front door of its own to bounce away from.
+    canonical: null,
+    defaultHosts: [],
+  },
 ];
 
 /** The inline analytics <script> body, identified by the marker comment above it. */
 function analyticsScriptBody(html: string): string | null {
   const marker = html.indexOf('Google tag (gtag.js)');
   if (marker === -1) return null;
-  const open = html.indexOf('<script>', marker);
-  if (open === -1) return null;
+  // `<script>` in the two apps, `<script is:inline>` in the Astro component. The
+  // attribute is not decoration there: without `is:inline` Astro bundles and DEFERS
+  // the script, which silently undoes both the localhost early-return and the
+  // charset-ordering guarantee.
+  const openTag = html.slice(marker).match(/<script(\s[^>]*)?>/);
+  if (!openTag) return null;
+  const open = marker + (openTag.index ?? 0) + openTag[0].length;
   const close = html.indexOf('</script>', open);
   if (close === -1) return null;
-  return html.slice(open + '<script>'.length, close);
+  return html.slice(open, close);
 }
 
 /**
@@ -183,15 +202,35 @@ for (const app of APPS) {
 // ─────────────────────────────────────────────────────────────────────────────
 // GROUP 3 — the tag is present, hardened, and loaded imperatively
 // ─────────────────────────────────────────────────────────────────────────────
-console.log('3. the tag is present and privacy-hardened in both apps');
+console.log('3. the tag is present and privacy-hardened on every surface');
 
 for (const app of APPS) {
   let html = '';
   try { html = readFileSync(app.html, 'utf8'); } catch { /* reported in group 2 */ }
   if (!html) continue;
 
-  ok(html.includes(GA_MEASUREMENT_ID), `[${app.name}] must carry the measurement id`);
-  ok(html.includes(GA_MEASUREMENT_ID_SECONDARY), `[${app.name}] must carry the secondary measurement id`);
+  // Assert against the EXECUTABLE body, not the whole file.
+  //
+  // This used to read `html.includes(GA_MEASUREMENT_ID)`, and a deliberate drift test
+  // walked straight through it: the marketing component names `_ga_G-89TM5X68RR` in a
+  // comment explaining the cookie, so pointing `var ID` at a different property still
+  // satisfied a whole-file string match. The check passed on prose while the surface
+  // reported to the wrong GA property — the precise failure this group exists to
+  // catch. Prose must never be able to satisfy a behavioural assertion.
+  const body = analyticsScriptBody(html) ?? '';
+  ok(body.length > 0, `[${app.name}] the analytics script body must be extractable`);
+
+  ok(body.includes(GA_MEASUREMENT_ID), `[${app.name}] the SCRIPT must carry the measurement id`);
+  ok(
+    body.includes(GA_MEASUREMENT_ID_SECONDARY),
+    `[${app.name}] the SCRIPT must carry the secondary measurement id`,
+  );
+  // And no OTHER GA4 property may be configured: an extra id here is traffic quietly
+  // reported somewhere nobody is reading.
+  const stray = [...body.matchAll(/G-[A-Z0-9]{6,}/g)]
+    .map((m) => m[0])
+    .filter((id) => id !== GA_MEASUREMENT_ID && id !== GA_MEASUREMENT_ID_SECONDARY);
+  ok(stray.length === 0, `[${app.name}] the script configures an unknown GA property: ${stray.join(', ')}`);
   ok(html.includes('googletagmanager.com'), `[${app.name}] must reference googletagmanager.com`);
   for (const key of Object.keys(GA_CONFIG)) {
     ok(html.includes(key), `[${app.name}] must configure ${key}`);
@@ -211,6 +250,14 @@ for (const app of APPS) {
     !/<script[^>]*\ssrc=["']https:\/\/www\.googletagmanager\.com/.test(html),
     `[${app.name}] the gtag script must be created imperatively, never a static <script src>`,
   );
+
+  // Astro only. Without `is:inline` Astro processes and bundles the script, which
+  // DEFERS it — that silently undoes the localhost early-return above (the request
+  // would already be in flight) and drops it out of the head ordering that keeps
+  // <meta charset> inside the first 1024 bytes.
+  if (app.html.endsWith('.astro')) {
+    ok(/<script\s+is:inline\s*>/.test(html), `[${app.name}] the tag must be <script is:inline>`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,6 +266,11 @@ for (const app of APPS) {
 console.log('4. <meta charset> precedes the tag and stays in the first 1024 bytes');
 
 for (const app of APPS) {
+  // The Astro component does not carry <meta charset> — CommonMeta does, and the head
+  // order is fixed by Layout.astro. The built pages are what actually has to hold this
+  // property, and scripts/check-marketing-output.ts reads those.
+  if (app.html.endsWith('.astro')) continue;
+
   let html = '';
   try { html = readFileSync(app.html, 'utf8'); } catch { /* reported in group 2 */ }
   if (!html) continue;
@@ -245,6 +297,11 @@ for (const app of APPS) {
 console.log('4b. canonical-host redirect precedes the analytics tag');
 
 for (const app of APPS) {
+  // Only a surface that has a non-canonical front door needs one. The marketing site
+  // owns the apex, so there is nothing for it to bounce away from, and asserting a
+  // redirect there would be demanding a bug.
+  if (app.canonical === null) continue;
+
   let html = '';
   try { html = readFileSync(app.html, 'utf8'); } catch { /* reported in group 2 */ }
   if (!html) continue;
