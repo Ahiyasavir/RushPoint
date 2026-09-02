@@ -1078,6 +1078,102 @@
 // away from it. If the answer is "a photo of themselves standing still", it is
 // not an ending, it is the last item on a list.
 //
+// ─── 56. An age is a claim about the OPERATION a mission demands, never about
+//         its subject matter ────────────────────────────────────────────────
+//
+// Piaget's stages are coarse and much argued over, but the boundary this bank
+// keeps walking into is not: CONCRETE operational reasoning (roughly 7-11) works
+// on things that are present and real, and FORMAL operational reasoning — the
+// hypothetical, the analogy, the metaphor, the double meaning — arrives around
+// eleven. The related finding on figurative language is blunter still: children
+// below about nine generally do not get sarcasm or second meanings at all. Not
+// "find them hard". Do not have the machinery yet.
+//
+// So the question an author must ask is never "is this about simple things". It
+// is "what operation does a player have to run". The bank got this exactly
+// backwards on five entries at once, and the pattern is worth seeing whole,
+// because all five carry the same `minAge: 6`:
+//
+//     paper-airplane-trial   fold a plane and throw it        motor      ✓ 6
+//     waiters-race           carry things without spilling    motor      ✓ 6
+//     blanket-fort           build a fort out of cushions     motor      ✓ 6
+//     mystery-gift           feel a wrapped parcel and guess  sensory    ✓ 6
+//     household-riddle-comb  "I have teeth but do not bite"   METAPHOR   ✗ 6
+//
+// mystery-gift at six is RIGHT precisely because its inference is sensory: a
+// child holds a box, feels a shape, and says a thing. household-riddle-comb at
+// six is wrong precisely because its inference is figurative, however homely the
+// answer happens to be. The minAge on both was set from how domestic the mission
+// felt, not from what the player has to do inside their head.
+//
+// And the bank already knew. It holds exactly three riddles of the same
+// construction — "I have X but not Y, what am I" — and two of them are tagged
+// correctly:
+//
+//     the-hard-riddle        cities with no houses   → adults, corporate, youth
+//     echo-riddle            speaks with no mouth    → youth, adults, corporate
+//     household-riddle-comb  teeth that do not bite  → KIDS, and minAge 6
+//
+// The rule was understood twice and broken once, which is what a rule that lives
+// in somebody's head rather than in the file looks like.
+//
+// ─── 57. In a mixed-age mission, every figurative clue needs a literal
+//         companion ─────────────────────────────────────────────────────────
+//
+// The obvious repair for the riddle above is to take `kids` off it. That is the
+// wrong repair, and noticing why is the useful part: this bank holds three
+// riddles and all three are metaphorical, so removing the only one children can
+// be offered leaves them with no riddle at all — and rule 54 has just finished
+// arguing that variety inside a composed game is what produces a peak.
+//
+// The better repair is to give the answer a SECOND ROUTE. A clue that says what
+// the object literally does sits beside the clue that says what it figuratively
+// is, so a nine-year-old reaches the answer by the concrete path while an adult
+// still gets the pleasure of the metaphor. The metaphor stops being a gate and
+// becomes a bonus, which is what `mixed` should have meant all along: not
+// "nobody is excluded on paper", but "two different players can each find their
+// own way in".
+//
+// household-riddle-comb now carries both. Do this wherever a mission is offered
+// across ages and its solution runs through a figure of speech.
+//
+// ─── 58. Arousal is not difficulty, and arousal is what is remembered ────────
+//
+// Rule 53 left a gap open on purpose: the bank can say how HARD a mission is and
+// has no way to say how much it MARKS you. This is what fills it.
+//
+// McGaugh's work on memory consolidation: the amygdala modulates the strength of
+// memory encoding IN PROPORTION TO THE EMOTIONAL AROUSAL accompanying the
+// experience — adrenaline and glucocorticoids released by arousal regulate what
+// gets consolidated into long-term memory. Arousal, not effort, and not even
+// pleasantness: unpleasant arousing events consolidate too.
+//
+// Difficulty and arousal are close to orthogonal, and this bank has a clean pair
+// to prove it. Both are difficulty 8:
+//
+//     the-hard-riddle   you sit and think. Cognitively demanding, physiologically
+//                       flat. Nobody's pulse changes. Nobody retells it.
+//     trade-up          you walk up to a stranger holding an object and ask them
+//                       to swap. Then you do it again. Cognitively trivial,
+//                       physiologically enormous, and the mission people describe
+//                       first when they get home.
+//
+// The composer currently paces games on `difficultyCurve` alone, which means it
+// is arranging cognitive load and calling it an arc. Combined with rule 54, the
+// full statement is:
+//
+//     A PEAK = intrinsic arousal (a property of the MISSION)
+//            × contextual distinctiveness (a property of the PLACEMENT)
+//
+// The first belongs in the bank and does not exist yet; the second belongs in
+// the composer and does not exist yet either. The next structural change to this
+// bank is therefore an `intensity` scalar beside `difficulty` — deliberately NOT
+// a tag (tags are a filtering vocabulary and this is a placement weight) and
+// deliberately not a third bookend (a peak is positional, and von Restorff says
+// its position depends on its neighbours). Until it exists, an author placing a
+// mission into a template should ask what the player's PULSE is doing, and put
+// the answer in the entry's comment.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -3545,7 +3641,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     minAge: 6,
     build: () => anywhere({
       title: 'החידה שיושבת בבית',
-      description: 'יש לי שיניים אבל אני לא נושך, יש לי גב אבל אף אחד לא שוכב עליי. מי אני? הקלידו את התשובה במילה אחת.',
+      description: 'יש לי שיניים אבל אני לא נושך, ויש לי גב אבל אף אחד לא שוכב עליי. אני שטוח, אני נכנס לתיק, ואני עובר לכם בשיער בכל בוקר. מי אני? הקלידו את התשובה במילה אחת.',
       type: 'quiz',
       difficulty: 2,
       estimatedMinutes: 2,
