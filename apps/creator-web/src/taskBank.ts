@@ -2093,6 +2093,32 @@
 // mission serve both ages, which is a more useful design instruction than any
 // amount of tone advice.
 //
+// AND THE COVER COMES FROM THREE PLACES, NOT ONE — found by building a scan for
+// this rule and watching it over-fire on eleven of the forty-two, of which ten
+// turned out to be fine:
+//
+//   THE PROSE     a stated target, a fail-and-retry, a synchrony requirement, a
+//                 character. What the scan was looking for.
+//   THE TYPE      `numeric`, `quiz`, `sequence`, `geofence` and `smart_station`
+//                 have the platform tell the team whether they got it right, and
+//                 being right IS competence (rule 76). Seven of the eleven were
+//                 this: exact-count, how-many-steps, chalk-code, kims-game,
+//                 anagram-easy, celebrants-favorites-ranking, vendor-secret-code.
+//   THE STRUCTURE the accept-all pattern (rule 68) distributes exposure so that
+//                 nobody stands alone in it, which is a cover in itself. Two more
+//                 were this: birthday-wish and finish-what-we-didnt-know.
+//
+// And the last one is the correction that matters: A MISSION WITH NO EXPOSURE
+// NEEDS NO COVER. Rule 51 is about being conspicuous; best-moment-so-far is four
+// people talking to each other about the game they are playing, and asking what
+// protects them is asking the wrong question of the wrong mission.
+//
+// Which left exactly ONE genuine failure out of forty-two — everyone-hidden, and
+// its problem was rule 47 rather than this rule: "whoever looks must believe you
+// are all there" names a judge the platform does not have, the same sentence
+// shape that got frozen-genre deleted. Rewritten so the team checks it
+// themselves and retries.
+//
 // THIS MATTERS COMMERCIALLY AND NOT ONLY THEORETICALLY. The birthday product
 // this bank serves is sold for ages 10 to 15 — a band that straddles both
 // boundaries exactly. Every mission in a 10-15 party game is making the double
@@ -3535,7 +3561,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'כולם בתמונה, אף אחד לא נראה',
-      description: 'צלמו תמונה שכל הקבוצה נמצאת בה, אבל אי אפשר לזהות אף אחד. מאחורי עצים, מתחת לשמיכה, רק צללים. מי שמסתכל צריך להאמין שכולכם שם.',
+      description: 'צלמו תמונה שכל הקבוצה נמצאת בה ואי אפשר לזהות אף אחד: לא פנים ולא סימן מזהה. מאחורי עצים, מתחת לשמיכה, רק צללים. עברו על התמונה יחד, ואם מישהו מזוהה צלמו שוב.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 7,

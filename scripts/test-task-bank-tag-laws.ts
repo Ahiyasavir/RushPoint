@@ -408,7 +408,42 @@ console.log('\n── 9. minutes spread within each family (informational, rule 
 // call and this suite does not pretend otherwise — but drifting further without
 // anyone noticing should not be possible, and a count with its denominator
 // printed is the cheapest way to make it visible.
-console.log('\n── 10. composition mix (informational, rule 54) ───────────');
+// ── 10. The kids+youth double claim — REPORTED (rule 78) ────────────────────
+//
+// Carrying both tags says a ten-year-old and a fifteen-year-old will each find
+// this good, and rules 51 and 56 say those two want opposite things. A mission
+// making the claim needs a COVER, and the cover has three possible sources: the
+// prose (a target, a fail-and-retry, a character), the TYPE (a verifying task
+// tells you whether you were right, and being right is competence — rule 76), or
+// the STRUCTURE (accept-all distributes exposure so nobody stands alone in it).
+//
+// Reported, never asserted. The first version of this scan read prose only and
+// over-fired on eleven of forty-two, ten of which were fine — which is exactly
+// rule 52's standing warning about screens that look decisive and are not.
+console.log('\n── 10. kids+youth double claim (informational, rule 78) ───');
+{
+  const VERIFYING = new Set(['quiz', 'numeric', 'geofence', 'sequence', 'smart_station']);
+  const PROSE_COVER = /לפחות|עד ש|חייב|כך ש|נפל\?|טעיתם\?|מישהו פספס|בדיוק|בסנכרון|באותו זמן|בו זמנית|באותו רגע|המטרה|יציב|רצף אחד|בלי הפסקה|בלי חיתוך|בלי לעצור|בלי ל|הכי קרוב|ככל ש|צלמו שוב|נסו שוב|חוזרים ל|התחילו מ|אתם ה|אתם משלחת|אתם בסצנ|אתם נכנסים|כאילו|סצנ|הסרט שלכם|הכרוז|כתב טלוויזיה|הפסל|סוכנים|איש הקשר|אצטדיון|שמאי/;
+  // "every one of you contributes and all of them stay in" — rule 68.
+  const ACCEPT_ALL = /כל אחד מכם|כל אחד בתורו|כולן נשארות|כל השורות|על כל אחד נאמר|כל אחד מדבר/;
+
+  const both = TASK_BANK.filter((e) => e.tags.includes('kids') && e.tags.includes('youth'));
+  const bare: string[] = [];
+  for (const e of both) {
+    const t = e.build();
+    const d = `${t.title} ${t.description ?? ''}`;
+    if (VERIFYING.has(t.type) || PROSE_COVER.test(d) || ACCEPT_ALL.test(d)) continue;
+    bare.push(e.key);
+  }
+  console.log(`  → ${both.length} of ${TASK_BANK.length} missions claim both kids and youth`);
+  console.log(`  → ${both.length - bare.length} carry a cover (prose, verifying type, or accept-all structure)`);
+  console.log(bare.length
+    ? `  → no cover found, worth a human read: ${bare.join(', ')}`
+    : '  → none without a cover THAT THIS SCAN CAN SEE — which is not the same'
+      + ' as none without a cover, and is why this section reports (rule 52)');
+}
+
+console.log('\n── 11. composition mix (informational, rule 54) ───────────');
 {
   const byType = new Map<string, number>();
   for (const e of TASK_BANK) {
