@@ -293,6 +293,18 @@ console.log('\n── 9. composition mix (informational, rule 54) ────�
   }
   const [topType, topN] = ranked[0];
   console.log(`  → most common kind: ${topType} at ${topN} of ${TASK_BANK.length}`);
+
+  // Rule 76: the split that actually matters is not variety for its own sake, it
+  // is whether the player is told anything. Everything with a checkable answer
+  // gives immediate feedback (flow's second condition); an auto-approved upload
+  // tells a team only that it arrived, which is why rule 60 has to ask authors to
+  // write the criterion into the prose by hand.
+  const VERIFIES = new Set(['quiz', 'numeric', 'geofence', 'sequence', 'smart_station']);
+  const verified = TASK_BANK.filter((e) => VERIFIES.has(e.build().type)).length;
+  console.log(`  → the platform tells the team whether they got it right in`
+    + ` ${verified} of ${TASK_BANK.length} missions`
+    + ` (${(100 * verified / TASK_BANK.length).toFixed(0)}%); in the rest the mission`
+    + ` text has to carry its own criterion (rule 60)`);
 }
 
 console.log(failures === 0

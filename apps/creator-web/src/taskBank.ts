@@ -1940,6 +1940,58 @@
 // Rule 45 governs the opposite direction (make the mission fit the number it was
 // given); this one is about the number never having been checked at all.
 //
+// ─── 76. `photo` is the type that never says no — which is why 59% of this
+//         bank is photo, and why that is half a problem ────────────────────
+//
+// Rule 54 recorded the number and called it a design problem. This is the
+// mechanism, and it turns out to be half defensible, which the earlier rule did
+// not know.
+//
+// Duncker's candle problem is the frame: given a candle, a box of tacks and
+// matches, most people fail to attach the candle to the wall because the box is
+// fixed in their minds as a container for tacks rather than as a shelf.
+// FUNCTIONAL FIXEDNESS — an object with an obvious function is hard to see as
+// anything else. `photo` is this bank's tack box.
+//
+// THE BAD HALF. Look at what each type demands of its author before it will
+// accept a mission at all:
+//
+//     numeric        a checkable number and a tolerance
+//     quiz           an answer key
+//     sequence       ordered steps, each with its own answer
+//     geofence       real coordinates
+//     smart_station  a code, and a person or object to carry it
+//     self_report    a reason to trust the team
+//     photo          nothing. Any sentence at all, auto-approved.
+//
+// That is a gradient of authoring cost, and the distribution follows it exactly:
+// photo 61, quiz 17, numeric 8, geofence 5, smart_station 4, and sequence,
+// self_report, survey and field on two apiece. The bank did not choose photo 61
+// times. Photo is the only type that never refuses an idea, so every mission that
+// does not obviously belong somewhere else lands there by default.
+//
+// And the consequence is an inversion worth stating plainly: THE CHEAPEST TYPE TO
+// AUTHOR IS THE ONLY ONE THAT GIVES THE PLAYER NO FEEDBACK. Everything with a
+// checkable answer tells a team instantly whether they got it; an auto-approved
+// upload tells them it arrived. Rule 60 exists because of that gap and asks
+// authors to write the criterion into the prose by hand — which is repair work
+// that choosing a different type would have made unnecessary. `sequence` is the
+// starkest case: ordered steps, each verified, feedback after every one, and it
+// is the richest team type this platform has. There are two of them.
+//
+// THE DEFENSIBLE HALF, which matters because it stops this rule being used as a
+// blunt instrument: photo is also the ONLY type that produces an artifact anybody
+// keeps. Rule 44 already says the frame has to contain the team because the album
+// is what the group looks at afterwards, and that album is a real part of what
+// this product sells. A pyramid, a freeze frame, a recreated family photo — those
+// missions are photo because their value IS the picture, not because nobody could
+// be bothered writing an answer key.
+//
+// SO THE TEST, before writing another photo mission: IS THE PICTURE THE POINT, OR
+// IS IT A RECEIPT? If the team would happily never look at it again, the mission
+// had a checkable answer hiding in it, and some other type would have handed them
+// feedback for free instead of making rule 60 ask you to fake it in prose.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
