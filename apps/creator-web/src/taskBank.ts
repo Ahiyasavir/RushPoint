@@ -182,13 +182,25 @@
 // while walking. Give them: what to do, the one constraint, what to submit. A
 // mission that has to be funny is usually compensating for being thin.
 //
-// ─── 3. Name the real thing ──────────────────────────────────────────────────
+// ─── 3. Name the real thing, and do not genericise it back ──────────────────
 //
 // "מגדל מהשטח" — build the tallest tower from found materials — became "רוג׳ום":
 // a cairn. Same act, but a cairn is a real practice with a real name, a real
 // place (a trail, a forest) and a real purpose (marking a route). Generic
 // framing produces generic missions. Reach for the specific noun, the real
 // custom, the actual object.
+//
+// AND DO NOT RETREAT TOWARD PORTABILITY. (This absorbed rule 20 on 2026-09-02;
+// rule 20 had itself opened by saying "rule 3 already says this".) The first
+// draft of "ספירת האות" asked players to count any repeating thing they liked.
+// More portable than the shipped version, and worse — genericising a concrete
+// idea into an abstract template throws away the thing that made it memorable.
+// The shipped version names one real, recognisable device, an accessible
+// pedestrian-crossing signal, and asks how many WORDS its announcement speaks:
+// something a creator can point at, survey once, and hand over with total
+// confidence. A mission that only fits venues with the right real feature is
+// fine (rule 8) — the creator surveys it, exactly as how-many-steps already
+// does. "Works at any venue" is not a virtue worth paying for.
 //
 // ─── 4. The constraint IS the mission ────────────────────────────────────────
 //
@@ -364,18 +376,12 @@
 // explicit rule for which one is (a mark, a position, a count) — never leave it
 // implicit and hope the creator invents a fair rule on their own.
 //
-// ─── 20. Real and specific beats generic and "adaptable" ─────────────────────
+// ─── 20. → merged into rule 3 (2026-09-02) ──────────────────────────────────
 //
-// "ספירת האות"'s first draft ("count any repeating thing you pick") was more
-// portable than the shipped version but worse: genericizing a good concrete idea
-// into an abstract template threw away what made it memorable. The shipped
-// version names one real, specific, recognizable device (an accessible
-// pedestrian-crossing signal) and asks how many WORDS its announcement speaks —
-// something a creator can point at, survey once, and hand to players with total
-// confidence. Rule 3 ("name the real thing") already says this; the addition
-// is: don't retreat toward "works at any venue" for its own sake. A mission that
-// only fits venues with the right real feature is fine, same as rule 8 — the
-// creator surveys it, same discipline `how-many-steps` already uses.
+// "Real and specific beats generic and adaptable" was always one clause hanging
+// off rule 3, and said so in its own first paragraph. It now lives there. Kept
+// as a pointer rather than removed because entry comments and rule 64 cite this
+// number, and rule 74 forbids two rules saying one thing.
 //
 // ─── 21. A personal fact only has an ORDER if you ask for the right relation ──
 //
@@ -1834,47 +1840,51 @@
 // a different mission, write that one and let the original keep its own
 // audience.
 //
-// ─── 74. This file has a reading budget and it is now spent ─────────────────
+// ─── 74. The cost of a rule is AMBIGUITY, not words ─────────────────────────
 //
-// Ten nights of research added thirty-three rules to a file that already had
-// forty, and the result is eighteen thousand words — about ninety minutes before
-// you are allowed to write your first mission. Nobody does that, which means the
-// marginal rule added in that state is not merely low-value: it is NEGATIVE,
-// because it lengthens the thing that is already too long to be read and dilutes
-// the rules that matter.
+// Ten nights of research added thirty-four rules to a file that had forty. The
+// first version of this rule called that a reading-budget problem — eighteen
+// thousand words, ninety minutes before you may write your first mission — and
+// prescribed that every new rule must displace an old one.
 //
-// Gawande's discipline is the right one and it is now this file's: the value is
-// in the KILLER ITEMS, the steps both critical and commonly missed, and
-// everything else is reference material that earns its place by being findable
-// rather than by being read. The PRE-FLIGHT block at the top is the interface.
-// The numbered rules are the archive behind it — they keep the evidence and the
-// reasoning, which is what makes them worth having at all, and they are looked
-// up rather than read through.
+// Then the next pass tried to obey it, merged rule 20 into rule 3, and MADE THE
+// FILE 421 WORDS LONGER, because the pointer the merge needed and the note
+// explaining it cost more than the deleted body saved. Measuring that is what
+// produced the rule you are reading, so the earlier version is left described
+// rather than deleted: it was wrong in an instructive way.
 //
-// SO, FROM HERE ON, A NEW RULE MUST DO ONE OF THREE THINGS:
+// THE LENGTH OF THE ARCHIVE IS NEARLY FREE. What costs is the moment of lookup.
+// An author consults this file with one decision in front of them, and the only
+// thing that hurts is finding TWO NUMBERED RULES THAT BOTH GOVERN IT and having
+// to work out which wins. Rules 3 and 20 were that: 20 opened by conceding "rule
+// 3 already says this" and was never more than a clause of it. Merging them was
+// right, and the word count was never the reason.
 //
-//   • Earn a slot in the pre-flight, which means displacing one of the nine.
-//     Argue for the swap explicitly; do not quietly make it ten, then eleven.
-//   • Become machine-checkable, and go and live in
-//     scripts/test-task-bank-tag-laws.ts. This is the best outcome available and
-//     costs a human nothing — it is what happened to rules 41, 42, 60 and 71.
-//   • Replace an existing numbered rule rather than sit beside it. Two rules
-//     that overlap are worse than either alone, because a reader now has to work
-//     out which one governs.
+// So there is exactly ONE hard budget, and it is the PRE-FLIGHT at the top: nine
+// items, 502 words, about two and a half minutes. That is the interface, and it
+// is the thing a new rule has to compete for. Everything below it is an archive
+// that earns its place by being findable and by being unambiguous.
+//
+// A NEW RULE MUST THEREFORE DO ONE OF THREE THINGS:
+//
+//   • Become machine-checkable and move to scripts/test-task-bank-tag-laws.ts.
+//     Best outcome available; costs a reader nothing. Rules 41, 42, 60 and 71
+//     all ended up there.
+//   • Earn a pre-flight slot by displacing one of the nine. Argue the swap out
+//     loud — do not quietly make it ten, then eleven.
+//   • Sit in the archive WITHOUT overlapping anything already in it. Length is
+//     acceptable; a second rule governing a decision that already has one is not.
 //
 // A rule that does none of those is a note, and notes belong in the comment on
-// the entry that taught them, where the person editing that mission will
-// actually meet it.
+// the entry that taught them, where whoever edits that mission will meet it.
 //
-// AND THIS PASS DID NOT PAY ITS OWN BILL, which is worth stating rather than
-// hoping nobody measures. Writing rule 74 and the pre-flight ADDED about eleven
-// hundred words to a file whose length was the problem. The defence is that the
-// pre-flight is the interface that makes the other eighteen thousand findable
-// instead of mandatory, and rule 74 is what makes every future addition cost
-// something — so this is the addition that turns the budget from a wish into a
-// constraint. It is still a debt. The next pass over this file owes a deletion,
-// and the first place to look is rules that overlap: 20 and 64 both say "specific
-// beats generic", and one of them should absorb the other.
+// TWO WARNINGS FOR THE NEXT PASS. Do not judge overlap by headings: this pass
+// proposed merging 20 into 64 because both titles say "specific beats generic",
+// and reading them showed 20 is about the specificity of a mission's SUBJECT
+// while 64 is about the GOAL handed to the team. Different axes, no overlap. And
+// the unexamined candidate is 33, 62 and 68 — three views of one idea that the
+// pre-flight already collapses into a single item, which is the tell. Read all
+// three before touching any.
 //
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
