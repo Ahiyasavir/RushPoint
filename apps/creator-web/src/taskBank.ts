@@ -959,6 +959,125 @@
 // the team a choice to make, give the mission a way to be done well, or make it
 // require something one of them has to reveal.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES 53+ — the second night of the same research pass (2026-09-02), aimed at
+// the word the operator actually used: he asked for missions that are SHARP.
+// Rules 51-52 answered why a mission is refused and what makes one stupid.
+// Neither says what makes one MEMORABLE, and memorable is the whole product: a
+// field game is bought, recommended and repeated on the strength of what people
+// tell each other afterwards.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ─── 53. A game is remembered as ONE peak and ONE ending. Its length is not
+//         remembered at all ──────────────────────────────────────────────────
+//
+// This is the most robustly replicated finding in the psychology of experience
+// and it is brutal about how this bank is currently assembled. Kahneman and
+// Fredrickson's PEAK-END RULE: a retrospective evaluation is not the average of
+// an experience, it is the average of its most intense moment and its final
+// moment. Its companion, DURATION NEGLECT: how long the experience lasted has
+// almost no effect on how it is remembered. A 2022 meta-analysis put the
+// peak-end effect at large and the duration effect at essentially nil.
+//
+// The original demonstration is worth carrying around because it is so
+// counter-intuitive: people who held a hand in painfully cold water for 60
+// seconds, and people who did the same 60 seconds and then a further 30 seconds
+// as the water was warmed slightly, preferred to REPEAT the longer trial. More
+// total discomfort, better memory, because it ended better.
+//
+// Three consequences, and the first one contradicts something this product
+// currently tells creators:
+//
+//   1. LENGTH IS NOT QUALITY. The smart-build wizard asks how long the game
+//      should be and warns when the composed game falls short of it
+//      (`shortfall`). That warning is honest about minutes and silent about the
+//      thing that actually determines whether the day was good. A ninety-minute
+//      game with one extraordinary mission is remembered better than a
+//      three-hour game with fifteen decent ones. Do not add missions to hit a
+//      number; a flat middle is not remembered, it is merely endured.
+//   2. THE BANK HAS NO CONCEPT OF A PEAK. It marks `start` and `finish` — one of
+//      the two things that gets remembered — and has no way to say "this mission
+//      is the one they will still be talking about in a year". `difficulty` is
+//      not that: the-hard-riddle is difficulty 8 and is a riddle, while trade-up
+//      is difficulty 8 and is a story people tell for years. Difficulty is how
+//      hard, intensity is how much it marks you, and this bank can only express
+//      the first. That is a real gap, recorded here as the next thing to build.
+//   3. THE COMPOSER'S ARC IS A DIFFICULTY ARC, NOT AN INTENSITY ARC, and its
+//      blueprints all rise monotonically to the last stage, which quietly
+//      assumes the peak and the end are the same mission. They are two different
+//      slots in the remembered experience and a game is allowed to have its
+//      biggest moment two thirds of the way through and still land well.
+//
+// ─── 54. Distinctive means different FROM ITS NEIGHBOURS, not extreme in
+//         itself ─────────────────────────────────────────────────────────────
+//
+// The von Restorff (isolation) effect: within a series, the item that differs is
+// the one recalled. The mechanism matters more than the headline — it is
+// "processing of difference in the CONTEXT OF SIMILARITY". Distinctiveness is
+// relational. Nothing is memorable on its own; it is memorable against what sat
+// beside it.
+//
+// So a peak is not the mission with the highest number on it. A peak is the
+// mission that is unlike the four around it. In a game made of eight photo
+// missions, the ninth photo mission cannot be the peak however good it is — but
+// a single mission where the team has to talk a stranger into something, or
+// where the whole group has to be silent, will be the one they describe first.
+//
+// This is why the bank's composition is a design problem and not merely a
+// statistic. Measured 2026-09-02: 61 of 103 missions are photo submissions, 59%,
+// with the next largest kind (quiz) at 17 and everything else in single figures.
+// A pool that homogeneous makes every composed game's middle self-similar, and a
+// self-similar middle has no peak in it at all — von Restorff says the peak is
+// whatever DIFFERS, and in an all-photo game nothing does.
+// scripts/test-task-bank-tag-laws.ts prints this mix on every run rather than
+// asserting on it: the right ratio is a judgement, but drifting further without
+// noticing should not be possible. When adding
+// a mission, the useful question is not "is this good" but "what is this
+// UNLIKE". A mission that is the only one of its kind in a typical composed game
+// is worth more than a better mission that is the fourth of its kind.
+//
+// ─── 55. The last mission is the summary frame — never spend it on tidiness ──
+//
+// Half of what is remembered is the ending, and the ending gets that weight even
+// when it is not intense. So the final mission is not a full stop and not
+// admin: it is the sentence the whole day gets compressed into.
+//
+// Judged that way, our own finish pool splits sharply, and the split had never
+// been looked at:
+//
+//   STRONG — they leave the group holding something.
+//     finish-what-we-didnt-know   each says one thing they learned about
+//                                 somebody else today. It is about each other,
+//                                 it is emotional, and it literally asks the
+//                                 group to summarise the day. This is what an
+//                                 ending is for.
+//     finish-all-or-nothing       one unbroken take, one miss and you start
+//                                 again. Collective tension resolved together.
+//     finish-the-credits          cinematic, alibi-rich (rule 51), and it ends
+//                                 on one person turning to camera to say a line.
+//
+//   WEAK — they end the game without ending anything.
+//     finish-podium               a pose. No decision, no skill, nothing about
+//                                 anybody. The operator had already halved its
+//                                 difficulty and pulled `youth` off it. Now
+//                                 rewritten so the group has to NAME something
+//                                 real that happened today and give itself an
+//                                 award for it: the ceremony is the alibi and
+//                                 the naming is the summary.
+//     youth-finish-point          "navigate to the finish point". The literal
+//                                 end of a race and the emptiest possible last
+//                                 memory of one — by duration neglect it can
+//                                 undo three hours in thirty seconds. A race
+//                                 genuinely needs a finish line, so the mission
+//                                 stays; it now asks the team to stop and look
+//                                 at each other before they walk in, which costs
+//                                 nothing and is the difference between arriving
+//                                 and finishing.
+//
+// The test for a finisher: say out loud what the group is holding as they walk
+// away from it. If the answer is "a photo of themselves standing still", it is
+// not an ending, it is the last item on a list.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -1376,7 +1495,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [PLACE_IT],
     build: () => base({
       title: 'נקודת הסיום',
-      description: 'נווטו אל נקודת הסיום של המירוץ.',
+      description: 'נווטו אל נקודת הסיום של המירוץ. עצרו רגע אחד לפני שאתם נכנסים, והסתכלו אחד על השני. עשיתם את זה.',
       type: 'field',
       estimatedMinutes: 5,
       // Every team finishes here, often at the same time — the opposite of a
@@ -1543,7 +1662,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'טקס הניצחון',
-      description: 'עמדו כאילו קיבלתם מדליות: מי בזהב, מי בכסף, מי בארד. פוזה דרמטית, כאילו יש קהל שצופה. צלמו את הרגע.',
+      description: 'טקס הפרסים: החליטו יחד על תואר אחד שהקבוצה שלכם הרוויחה היום, משהו אמיתי שקרה. אחד מכם מכריז עליו בקול, וכולם עולים לפודיום ומקבלים אותו. פוזה דרמטית, כאילו יש קהל. צלמו את הרגע.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 5,

@@ -137,6 +137,29 @@ console.log('\n── 5. the authored bank is already a fixed point ────
   eq('re-banding the whole bank is a no-op', churned, []);
 }
 
+// ── 6. Composition mix — REPORTED, never asserted (rule 54) ──────────────────
+//
+// Distinctiveness is relational: the peak of a composed game is whatever differs
+// from its neighbours, so a pool where three missions in five are the same kind
+// has a self-similar middle and no peak in it. The right ratio is a judgement
+// call and this suite does not pretend otherwise — but drifting further without
+// anyone noticing should not be possible, and a count with its denominator
+// printed is the cheapest way to make it visible.
+console.log('\n── 6. composition mix (informational, rule 54) ────────────');
+{
+  const byType = new Map<string, number>();
+  for (const e of TASK_BANK) {
+    const t = e.build().type;
+    byType.set(t, (byType.get(t) ?? 0) + 1);
+  }
+  const ranked = [...byType.entries()].sort((a, b) => b[1] - a[1]);
+  for (const [type, n] of ranked) {
+    console.log(`  ${type.padEnd(14)} ${String(n).padStart(3)}  ${(100 * n / TASK_BANK.length).toFixed(0)}%`);
+  }
+  const [topType, topN] = ranked[0];
+  console.log(`  → most common kind: ${topType} at ${topN} of ${TASK_BANK.length}`);
+}
+
 console.log(failures === 0
   ? '\n✅ mission bank tag laws: all assertions passed\n'
   : `\n❌ mission bank tag laws: ${failures} assertion(s) failed\n`);
