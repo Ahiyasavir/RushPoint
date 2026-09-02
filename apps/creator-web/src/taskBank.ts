@@ -2335,7 +2335,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-start-point',
     sourceTemplateKey: 'youth-missions',
-    tags: ['start', 'teamwork', 'noPrep', 'locationBased', 'outdoor', 'youth', 'mixed', 'easy', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school'],
+    tags: ['start', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'easy', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school'],
     difficulty: 2,
     // The gathering point. Everyone walks to it before the clock matters, so it
     // is the one sited mission that costs no transit.
@@ -2548,7 +2548,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-finish-point',
     sourceTemplateKey: 'youth-missions',
-    tags: ['finish', 'teamwork', 'noPrep', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school'],
+    tags: ['finish', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school'],
     difficulty: 5,
     // The last leg home, and usually the longest single walk of the game.
     transitMinutes: 10,

@@ -20,6 +20,37 @@
 //
 // The mapping itself is NOT restated here: it is imported from bankTags.ts, so
 // this test, the overlay merge and the admin form cannot drift from each other.
+//
+// ─── BEFORE YOU ADD A SECTION: gate, or report? ──────────────────────────────
+//
+// This file has both, and after a fortnight of adding them the rule for deciding
+// turned out to be exact. NAME THE TWO THINGS THE CHECK COMPARES.
+//
+//   BOTH SIDES ALREADY ENCODED IN THE ARTEFACT → it is a CONSISTENCY check, it
+//   cannot be wrong about what it measures, and it should ASSERT. Every gate here
+//   is one: a tag against a task type (1), a band tag against a number (2), prose
+//   promising a bonus against a config that pays none (6), a `crowded` photo
+//   mission against whether its text asks (7), an authored answer against whether
+//   the entry offers any route to it (8). Between them they caught eleven missing
+//   `camera` tags, two band drifts, two unpayable promises, four missing
+//   permission clauses and one unsolvable step. FALSE POSITIVES: NONE, EVER.
+//
+//   ONE SIDE IS A JUDGEMENT → the prose is a PROXY for it, and the check has a
+//   construct-validity problem however careful the regex. It should REPORT. Three
+//   were attempted as gates first and all three over-fired: rule 52's three-needs
+//   screen flagged roughly thirty of 103 including two of the best missions in the
+//   bank, a rule 51 exposure scan flagged seventeen of which about one was real,
+//   and rule 78's cover scan flagged eleven of which one was. The pattern is
+//   consistent enough to be a law of this repository: A PROSE SCAN OVER THIS BANK
+//   PRODUCES CANDIDATES, NEVER VERDICTS.
+//
+// AND NEVER TUNE A REPORT UNTIL IT IS EMPTY. Goodhart: when a measure becomes a
+// target it stops being a measure, and "if you cannot define the construct you are
+// measuring theatre". Section 10's patterns were extended once, legitimately —
+// they had missed a real cover form in a fix made ten minutes earlier — and its
+// empty-case line says "none that THIS SCAN CAN SEE" precisely so the zero is
+// never read as an all-clear. Fix the mission first; widen the pattern only when
+// the pattern genuinely missed something real, and say so in the output.
 import { TASK_BANK } from '../apps/creator-web/src/taskBank';
 import {
   DIFFICULTY_TAG_IDS, difficultyBandFor, withDifficultyBand, isDifficultyTagId,
@@ -408,7 +439,40 @@ console.log('\n── 9. minutes spread within each family (informational, rule 
 // call and this suite does not pretend otherwise — but drifting further without
 // anyone noticing should not be possible, and a count with its denominator
 // printed is the cheapest way to make it visible.
-// ── 10. The kids+youth double claim — REPORTED (rule 78) ────────────────────
+// ── 10. `noPrep` never carries a required Quick Setup step (rule 30) ─────────
+//
+// Written by applying this file's own gate-or-report test to the bank and looking
+// for another pair of encodings. This is one: the prep TAG says what the creator
+// must do before the game, and the `setup` array says it again in a form the
+// composer actually reads. Rule 30 settled which wins — "if a REQUIRED Quick
+// Setup step asks them to author content, it is `needsSetup`, whatever props are
+// involved" — and named dropping a pin as the exact case that made a level-1
+// game unlaunchable.
+//
+// Two missions still had it: youth-start-point and youth-finish-point, both
+// tagged `noPrep` while requiring PLACE_IT. The composer was already safe (rule
+// 30 made `fitScore` read the `setup` array rather than the tag, so it cannot
+// drift again) — but the tag was still telling creators something untrue, which
+// is what a filter runs on.
+console.log('\n── 10. noPrep never requires setup (rule 30) ──────────────');
+{
+  const required = (e: typeof TASK_BANK[number]) => (e.setup ?? []).filter((sp) => sp.required).length;
+  const lying = TASK_BANK
+    .filter((e) => e.tags.includes('noPrep') && required(e) > 0)
+    .map((e) => `${e.key} (${required(e)} required step(s))`);
+  eq('no `noPrep` mission carries a required Quick Setup step', lying, []);
+
+  const contradicting = TASK_BANK
+    .filter((e) => e.tags.includes('noPrep') && e.tags.includes('needsSetup'))
+    .map((e) => e.key);
+  eq('no mission claims both `noPrep` and `needsSetup`', contradicting, []);
+
+  const withRequired = TASK_BANK.filter((e) => required(e) > 0).length;
+  ok(`the scan actually saw required setup steps :: ${withRequired} of ${TASK_BANK.length}`,
+    withRequired > 5);
+}
+
+// ── 11. The kids+youth double claim — REPORTED (rule 78) ────────────────────
 //
 // Carrying both tags says a ten-year-old and a fifteen-year-old will each find
 // this good, and rules 51 and 56 say those two want opposite things. A mission
@@ -420,7 +484,7 @@ console.log('\n── 9. minutes spread within each family (informational, rule 
 // Reported, never asserted. The first version of this scan read prose only and
 // over-fired on eleven of forty-two, ten of which were fine — which is exactly
 // rule 52's standing warning about screens that look decisive and are not.
-console.log('\n── 10. kids+youth double claim (informational, rule 78) ───');
+console.log('\n── 11. kids+youth double claim (informational, rule 78) ───');
 {
   const VERIFYING = new Set(['quiz', 'numeric', 'geofence', 'sequence', 'smart_station']);
   const PROSE_COVER = /לפחות|עד ש|חייב|כך ש|נפל\?|טעיתם\?|מישהו פספס|בדיוק|בסנכרון|באותו זמן|בו זמנית|באותו רגע|המטרה|יציב|רצף אחד|בלי הפסקה|בלי חיתוך|בלי לעצור|בלי ל|הכי קרוב|ככל ש|צלמו שוב|נסו שוב|חוזרים ל|התחילו מ|אתם ה|אתם משלחת|אתם בסצנ|אתם נכנסים|כאילו|סצנ|הסרט שלכם|הכרוז|כתב טלוויזיה|הפסל|סוכנים|איש הקשר|אצטדיון|שמאי/;
@@ -443,7 +507,7 @@ console.log('\n── 10. kids+youth double claim (informational, rule 78) ─�
       + ' as none without a cover, and is why this section reports (rule 52)');
 }
 
-console.log('\n── 11. composition mix (informational, rule 54) ───────────');
+console.log('\n── 12. composition mix (informational, rule 54) ───────────');
 {
   const byType = new Map<string, number>();
   for (const e of TASK_BANK) {
