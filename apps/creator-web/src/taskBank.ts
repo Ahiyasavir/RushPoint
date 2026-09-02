@@ -1457,6 +1457,82 @@
 // steps must differ in kind and not only in degree, because everything in this
 // system that prevents repetition works on kind.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES 67+ — the improv night. Most of this bank is performance: sixty-one
+// missions where a group does something in front of a camera. Improvisation is
+// the body of knowledge that is actually about that, it has been refined by
+// practitioners for sixty years, and until now none of it was in this file.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ─── 67. Never ask for originality. Ask for the first thought, and put the
+//         originality in the CONSTRAINT ────────────────────────────────────────
+//
+// Rule 64 banned "be creative" for being vague. Johnstone's claim in Impro is
+// much stronger and it is the one that matters: asking for originality actively
+// makes the work WORSE. Performers block their own imaginations because they are
+// afraid of being unoriginal; straining for something clever takes you away from
+// yourself and lands you on cliché, which is precisely what the straining was
+// trying to avoid. His instruction to students is the opposite of the intuitive
+// one — BE OBVIOUS. Trust the first thought. Your obvious is not my obvious, and
+// that difference is where real originality comes from.
+//
+// This also finishes an argument from rule 51. Telling a teenager to "invent a
+// FUNNY walk" fails twice over: it is exposure with no alibi, and it is a demand
+// for cleverness that guarantees a self-conscious, worse walk. Both halves of
+// that sentence were wrong, for different reasons, and the alien delegation fixed
+// both at once — because a premise removes the need to be clever.
+//
+// WHICH IS THE OTHER HALF OF THE RULE. If the player is not supposed to supply
+// originality, something has to, and that something is the constraint. The
+// research on bounded creativity says the same thing from the other end:
+// constraints work by directing attention into a narrowed search space, and
+// without them people are overwhelmed by possibility — "endless freedom
+// indefinitely postpones motivation to act", which is a precise description of
+// four people standing in a park having been told to be imaginative.
+//
+// AND THERE IS A CEILING. Creativity peaks at MODERATE constraint; both too few
+// and too many hurt. So this rule and rule 46 (count the ways it can fail before
+// you count the ways it is clever) are the two walls of one corridor, not two
+// separate warnings. Rule 46 guards the over-constrained end where chain-reaction
+// died; this guards the under-constrained end where a blank instruction dies.
+// The mission wants to sit in the middle: enough of a frame that the first
+// thought is already interesting, few enough rules that it can survive contact
+// with a real group.
+//
+// ─── 68. Build so that every offer MUST be used — blocking is a structural
+//         problem, not a personality one ───────────────────────────────────────
+//
+// Johnstone's central mechanic: an OFFER is anything a player puts forward, and
+// it can be accepted or BLOCKED. A block is anything that wipes out your
+// partner's premise. Scenes generate themselves when players offer and accept
+// alternately; they die the moment someone blocks. And the crucial part for a
+// mission author is that blocking is not usually malice — it is what any group
+// does by default when a mission says "decide together", because deciding
+// together means selecting one offer and discarding the rest.
+//
+// This bank contains the fix already, unnamed, in its best opener:
+//
+//     open-team-name   "each of you says one word, and you build the name OUT OF
+//                       those words"
+//
+// Nobody can be overruled, because every offer is load-bearing. The quiet member
+// is in the result, not merely present at it. Compare "choose a team name
+// together", which is the same mission and hands it to whoever talks most.
+//
+// SO THE PATTERN, and it is worth reaching for by default in any group-creative
+// mission: EACH PERSON CONTRIBUTES ONE ELEMENT, AND ALL OF THEM MUST APPEAR IN
+// THE RESULT. It is not a style preference. In one clause it satisfies four
+// rules that otherwise need separate attention — 33 (a mission one player can
+// finish alone is not a team mission), 62 (reciprocity has to be structural),
+// 67 (the constraint supplies the originality) and 65 (the choice is bounded,
+// because there is nothing to choose) — and it scales with team size for free,
+// which "pick three of you" never does (rule 50).
+//
+// Applied here to teach-a-stranger, whose handshake was "at least three steps"
+// invented by nobody in particular and is now one move per person, in turn, all
+// of them kept; and to office-olympics, whose invented sport had one rule from
+// whoever spoke first and now takes one rule from each player.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -2503,7 +2579,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'אולימפיאדת המשרד',
-      description: 'המציאו ענף ספורט חדש שאפשר לשחק רק בציוד משרדי. הגדירו חוק אחד, שחקו סיבוב שלם, וצלמו את הזוכה חוגג.',
+      description: 'המציאו ענף ספורט חדש שאפשר לשחק רק בציוד משרדי. כל אחד מכם מוסיף לו חוק אחד, וכל החוקים נשארים בפנים. שחקו סיבוב שלם לפי כולם, וצלמו את הזוכה חוגג.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 9,
@@ -4154,7 +4230,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'תלמידים לרגע',
-      description: 'המציאו עכשיו לחיצת יד או תנועת ניצחון משלכם, בת שלושה שלבים לפחות. לימדו אותה לאדם זר עד שהוא מבצע אותה נכון בעצמו, וצלמו אותו עושה אותה בלי שאתם מובילים.',
+      description: 'המציאו עכשיו לחיצת יד משלכם: כל אחד מכם מוסיף בתורו תנועה אחת, וכולן נשארות בפנים. לימדו אותה לאדם זר עד שהוא מבצע את כל התנועות נכון בעצמו, וצלמו אותו עושה אותה בלי שאתם מובילים.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 10,
