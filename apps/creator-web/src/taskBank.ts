@@ -131,6 +131,17 @@
 // every commit, so spending a human's attention there would buy nothing and cost
 // two of the nine slots.
 //
+// IT WORKS, and the evidence is embarrassing in the useful way. Two mission
+// drafts written two nights before this list existed
+// (docs/mission-drafts-relatedness-ladder.md) were re-audited against it. Item 2
+// found that one of them handed the whole mission to whoever spoke fastest, and
+// item 6 found that its "three out of five" target was a public score on one
+// named person's round — a group announcing it does not know them. Both were
+// invisible to the person who wrote them, who had just spent the evening arguing
+// for the rules that catch them. That is the case for DO-CONFIRM: an author is
+// the last person able to see what their own draft is missing, and a short fixed
+// list asked afterwards is what closes the gap.
+//
 // ─── Where the rules disagree with each other ────────────────────────────────
 //
 // Four known tensions. None is an error; each is two true things meeting, and a
