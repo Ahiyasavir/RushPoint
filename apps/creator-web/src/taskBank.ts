@@ -827,6 +827,138 @@
 // where a role is genuinely needed ("one of you films"), and never by enumerating
 // them.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES 51+ — added during an overnight research pass (2026-09-02) that went
+// looking for the MECHANISM under rule 43. That rule recorded a real pattern —
+// teenagers refuse missions that make them look foolish — but "teens are
+// self-conscious" is an observation, not something you can design against. It
+// gives you one move, deleting the `youth` tag, and the bank lost three decent
+// missions to it in an afternoon.
+//
+// The mechanism turns out to be well documented in two literatures that have
+// never been pointed at each other, and once it is named the same evidence
+// yields a much better move than deleting a tag.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ─── 51. Exposure needs a cover, and there are exactly two: a character, or
+//         competence ───────────────────────────────────────────────────────────
+//
+// THE MECHANISM. Developmental psychology calls it the IMAGINARY AUDIENCE
+// (Elkind, 1967): from roughly eleven to fifteen, a person believes they are
+// being watched and judged more or less continuously, and behaves accordingly.
+// It is a stage, not a personality, and it peaks across exactly the ages this
+// bank serves — the youth band, and the whole of the 10-15 birthday product.
+// A fourteen-year-old refusing to do a silly walk in the street is not being
+// difficult and is not too cool for the game. They are doing arithmetic about an
+// audience they cannot switch off.
+//
+// THE FIX HAS A NAME. Nordic larp calls it ALIBI: the permission a portrayed
+// character gives you to do something you would never do as yourself, because
+// the act belongs to the role. Larp designers treat alibi as something the
+// design SUPPLIES, not something the player brings — the surrounding fiction has
+// to make the role legitimate (the same literature calls that its "aura"), and
+// characters whose whole job is to hand other players permission are a standard
+// tool.
+//
+// OUR OWN BANK IS THE PROOF, and the correlation is close to total. Every
+// high-exposure mission that survived the operator's editing pass with `youth`
+// intact carries a fiction the act belongs to:
+//
+//     youth-great-escape    "you are in the climax of an action film"
+//     youth-breaking-news   "one of you is a TV reporter, the rest are extras"
+//     statue-remake         "one of you is the statue, the rest are museum
+//                            visitors photographing it" — even the photographer
+//                            is given a part to play
+//     finish-the-credits    "film the closing scene of your film"
+//
+// Every high-exposure mission he stripped `youth` from has no fiction at all:
+//
+//     silliest-walk         "invent a funny walk and walk it"  — that is you,
+//                            being funny, in the street, as yourself
+//     open-team-name        "film all of you shouting your battle cry"
+//     finish-podium         "stand as if you had been given medals" — "as if" is
+//                            a gesture at a frame, not a frame
+//
+// He could not name what he was cutting, and cut accurately anyway. What he was
+// cutting was missions with no alibi.
+//
+// THE SECOND COVER is competence, and it comes from a different literature:
+// self-determination theory's three needs — autonomy, competence, relatedness —
+// each independently predict enjoyment in games (Ryan, Rigby & Przybylski, 2006;
+// the PENS model). A mission that makes a player conspicuous while doing
+// something that reads as SKILFUL needs no fiction, because the imaginary
+// audience is watching them succeed rather than watching them be ridiculous.
+// That is why youth-human-pyramid and height-line-up ("get into height order
+// without speaking, hand signals only") both survived untouched while the silly
+// walk did not. A pyramid is a feat. A silent coordination puzzle is a feat.
+//
+// SO, WHEN A MISSION EXPOSES A PLAYER IN PUBLIC, IT MUST DO ONE OF TWO THINGS:
+// hand them a character the act belongs to, or give them something to be good
+// at. If it does neither, the mission is for kids, who have no imaginary
+// audience yet, or for adults, who have made their peace with theirs.
+//
+// And the move this replaces: when a high-exposure mission reads wrong for
+// teenagers, WRITE IT A SENTENCE OF FICTION before you touch its tags. One
+// sentence usually does it, it costs nothing, and it turns a mission that half
+// the bank's audience refuses into one they queue up for. Never instruct a
+// player to "be funny" — that is the exposing act itself, stated as a demand.
+// Give them a premise and let the comedy come off it.
+//
+// A THIRD SOURCE OF COVER, found by hand-judging all thirteen missions in this
+// bank that declare `crowded`: the TASK ITSELF can be the alibi, when it gives a
+// socially legible reason to approach. "Excuse me, do you know how many bones
+// are in the human body" is a normal thing to say to a stranger; the question is
+// the permission. trivia-bones, invention-order, the-hard-riddle and human-gps
+// all send a team at the public with nothing but an errand and are none the
+// worse for it. honest-compliment was the only one of the thirteen with no cover
+// of any kind — no character, no skill, no errand, just "walk up to somebody and
+// be nice at them" — and it is exactly the one the operator quietly narrowed. It
+// has since been recast so that the PRECISION of the observation is the skill.
+//
+// AND A NEGATIVE RESULT WORTH KEEPING. Rule 52 was drafted with an automated
+// screen alongside it, scoring every mission for the three needs by matching
+// prose. It does not work and cannot be made to: the screen flagged
+// youth-great-escape and youth-breaking-news, two of the strongest missions
+// here, because a mission can decide a great deal without containing the word
+// "choose". Rules 41-42 are machine-checkable because they compare two encodings
+// of one structural fact. Rule 52 compares a mission against what people enjoy,
+// and there is no regular expression for that. Do not add one; the danger is not
+// that it fails, it is that it passes.
+//
+// ─── 52. "Stupid" is measurable — name the choice, the skill, and the thing
+//         they learn about each other ────────────────────────────────────────
+//
+// The commonest complaint about a bad mission is that it is stupid, which sounds
+// like taste and is not. Self-determination theory's three needs give it a
+// definition sharp enough to screen with, because all three are things you can
+// point at in a draft or fail to:
+//
+//     AUTONOMY     — what does the team actually DECIDE? If every group produces
+//                    the same submission, the mission is a chore with a camera.
+//     COMPETENCE   — what could they be GOOD at? Not "complete", good. A mission
+//                    with no ceiling gives nobody the experience of mastery, and
+//                    a mission that cannot be done badly cannot be done well.
+//     RELATEDNESS  — what do they know about each other afterwards that they did
+//                    not know before? This is the need a field game is uniquely
+//                    able to serve and the one most often left on the floor.
+//
+// Score a draft out of three, honestly. Three is a mission people talk about
+// afterwards. Two is fine, and most good missions are two. ONE IS THE LINE. Zero
+// is the definition of the word.
+//
+// It retro-predicts our own deletions, which is the only reason to trust it.
+// hero-walk — walk slowly like an action hero and all say a catchy line at the
+// same moment — scores zero: nothing is decided (the walk is specified), nothing
+// can be done well (it is walking), and nobody learns anything about anybody. It
+// was cut. trade-up scores three — every swap is a real decision, negotiating is
+// a genuine skill with a visible ceiling, and a team finds out fast who among
+// them can talk to strangers — and it is the mission the operator raised the
+// difficulty of rather than trimming.
+//
+// The test is also a REPAIR KIT, because each need suggests its own fix: give
+// the team a choice to make, give the mission a way to be done well, or make it
+// require something one of them has to reveal.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -1324,7 +1456,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // opener, not despite one. Narrowed to the audience it actually suits.
     key: 'open-team-name',
     sourceTemplateKey: 'authored',
-        tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
+    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'easy', 'forest', 'beach', 'park', 'neighborhood',
       'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
     difficulty: 2,
@@ -1337,7 +1469,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       // it. The old closing nudge ("the less embarrassed you are, the better it
       // comes out") was also dropped: it pressures exactly the people the
       // team-building research says already opt out.
-      description: 'בחרו שם לקבוצה כך: כל אחד מכם אומר מילה אחת, ומהמילים האלה אתם מרכיבים את השם. אחר כך המציאו קריאת קרב של חמש שניות, וצלמו את כולכם צועקים אותה יחד.',
+      description: 'בחרו שם לקבוצה כך: כל אחד מכם אומר מילה אחת, ומהמילים האלה אתם מרכיבים את השם. עכשיו אתם נכנסים לאצטדיון: אחד מכם הכרוז שמכריז על הקבוצה בקול, והשאר נכנסים ועונים בקריאת קרב של חמש שניות. צלמו את הכניסה.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 3,
@@ -1723,7 +1855,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'ראיון של שלושים שניות',
-      description: 'מצאו אדם זר, בקשו רשות ושאלו: מה הייעוץ הכי גרוע שהוא קיבל אי פעם, וממי? צלמו את התשובה. אם הוא מסרב, תודו לו ותמצאו אחר.',
+      description: 'מצאו אדם זר, בקשו רשות ושאלו: מה העצה הכי טובה שהוא קיבל אי פעם, וממי? צלמו את התשובה.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 7,
@@ -1740,7 +1872,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'מחמאה אמיתית',
-      description: 'תנו מחמאה כנה לאדם זר. לא על המראה, על משהו שבאמת שמתם לב אליו. אם הוא חייך, בקשו סלפי משותף.',
+      description: 'בחרו אדם זר, ומצאו אצלו פרט אחד שאי אפשר להגיד על אף אחד אחר. אמרו לו אותו במילים שלכם. אם הוא חייך, בקשו סלפי משותף.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 6,
@@ -1969,8 +2101,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       'kids', 'youth', 'mixed', 'easy'],
     difficulty: 2,
     build: () => anywhere({
-      title: 'ההליכה הכי מצחיקה',
-      description: 'המציאו ביחד הליכה מצחיקה אחת, ולכו בה עשרה מטרים. כל הקבוצה, אותה הליכה, באותו זמן. צלמו מהצד.',
+      title: 'רגליים חדשות',
+      description: 'אתם משלחת מכוכב אחר, וקיבלתם רגליים רק הבוקר. המציאו ביחד הליכה אחת של מי שעדיין לא הבין איך הדבר הזה עובד, ולכו בה עשרה מטרים. כל הקבוצה, אותה הליכה, באותו זמן. צלמו מהצד.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 5,
@@ -3499,7 +3631,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 7,
     build: () => anywhere({
       title: 'שם משותף',
-      description: 'מצאו אדם זר שקוראים לו בדיוק כמו אחד מכם. הציגו את עצמכם, ספרו לו למה אתם שואלים, וצלמו את שניהם יחד. מסרב? תודו לו ותמשיכו הלאה.',
+      description: 'מצאו אדם זר שקוראים לו בדיוק כמו אחד מכם. הציגו את עצמכם, ספרו לו למה אתם שואלים, וצלמו את שניהם יחד.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
