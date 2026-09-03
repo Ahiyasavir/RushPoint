@@ -2185,6 +2185,103 @@
 // `start` removed (it stays in the bank as the mid-game mission it always was),
 // and the pyramid is now described by its shape rather than by a count.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES 80+ — read off the owner's OWN curation pass (2026-09-02), not from
+// research. He worked through the bank in the admin page and left 43 rows in
+// `missionBankOverrides`: 5 deletions, 25 content edits, 13 missions ticked as
+// read and left exactly as they were. Those rows are evidence about this
+// doctrine that no amount of further reading could produce, so they are read
+// here as findings rather than as opinions.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ─── 80. Harvested content survives review. Authored content is what gets cut ─
+//
+// The cleanest result in the whole pass, and it is not close:
+//
+//     text-edited     25 missions   25 authored,  0 harvested
+//     deleted          5 missions    5 authored,  0 harvested
+//     read, untouched 13 missions    0 authored, 13 harvested
+//
+// Every single mission he changed or removed was one an agent wrote. Every
+// single mission he read and left alone came from a game that had actually been
+// run with real players (`youth-missions`, `challenge-missions`). Not one
+// harvested entry was touched.
+//
+// That is a statement about where the risk lives. Content lifted from a game
+// somebody really ran carries evidence that it works; content invented against
+// this ruleset carries only that it satisfies the ruleset. When the bank needs
+// missions, re-harvesting from a real template beats authoring — and when
+// authoring is the only option, the entry deserves more suspicion than the
+// rules alone will generate, because the rules are what produced every mission
+// on the cut list.
+//
+// ─── 81. A constraint REPLACES the vague part of an instruction. It is never
+//         appended to it ────────────────────────────────────────────────────
+//
+// 13 of his 14 description edits made the text SHORTER: a median of about 27%
+// off, and 60% off `finish-podium`. Nothing was cut at random. What came out
+// was, every time, a clause a rule had put in:
+//
+//     ad-for-nothing     "three things: the problem it solves, a demo of it
+//                        working, and the slogan at the end. All of you appear."
+//     office-olympics    "each of you adds one rule, and all the rules stay in"
+//     open-team-name     the stadium framing: an announcer, an entrance, a reply
+//     silliest-walk      the whole alien-delegation premise, title included
+//     honest-compliment  "a detail that could not be said about anyone else"
+//     human-gps          "and at least three different people"
+//     the-hidden-key     the entire eyes-closed, guided-by-voice mechanic
+//
+// Rules 4, 17 and 33 are all real, and all three were being applied ADDITIVELY:
+// each one bolts one more clause onto an instruction that already worked, and
+// four such rules produce a paragraph. A player skimming on a phone reads that
+// as clutter and the owner reads it as clutter too.
+//
+// The fix is not "write shorter". It is that a constraint has to REPLACE the
+// loose part of the instruction — "trade until someone hands you a marker pen"
+// instead of "trade up, and by the way accept every offer, and film it, and
+// each of you must speak once". If your constraint cannot be made to do the
+// vague clause's job, the mission wanted the vague clause, not the constraint.
+// Before shipping an edit, diff it against what it replaces: if the new version
+// is longer, justify the growth or drop it.
+//
+// ─── 82. A `family` pair is a smell. Pick one and delete the other ───────────
+//
+// Three of the five deletions were one half of a near-duplicate pair:
+//
+//     frozen-genre          deleted, `freeze-frame` kept youth-great-escape
+//     finish-one-word-each  deleted, `closing-round` kept finish-what-we-didnt-know
+//     hero-walk             deleted, silliest-walk kept (the pair rule 12 missed)
+//
+// `family` was invented so two near-duplicates could BOTH stay in the pool and
+// simply never co-occur (rule 12). The owner did not use it that way once: shown
+// the pair, he removed the weaker one. And in the `freeze-frame` case the
+// survivor is the HARVESTED half, which is rule 80 again.
+//
+// So `family` is the right mechanism for two missions that genuinely differ in
+// feel and share a mechanic — and it is the wrong answer for two missions that
+// are the same idea, where it just keeps dead weight in the bank and splits the
+// slot. Adding a family, ask first whether you are grouping two good missions or
+// preserving one you should be cutting.
+//
+// ─── 83. The team goes IN the shot, not behind the camera ───────────────────
+//
+// Exactly one of his 14 description edits made the text LONGER, and it is the
+// same change twice:
+//
+//     odd-one-planted   "צלמו אותו"          →  "הצטלמו איתו"
+//     the-hidden-key    "פותחים ומצלמים"      →  "הצטלמו איתה פתוחה"
+//
+// Photograph IT became photograph YOURSELVES WITH IT. It costs a couple of
+// words and it buys two things at once: the submission now proves the team was
+// there rather than that a picture exists, and the artifact is of the people
+// rather than of an object nobody will look at again (which is what the whole
+// "camera roll that tells a story" finding is about). `honest-compliment` and
+// `family-photo-remake` already had it and both survived untouched on this axis.
+//
+// Default to the team being in frame on any photo mission built around an
+// object or a place. The exceptions are real but narrow: a code to read, a sign
+// to document, a shot where a person would obscure the thing being judged.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -2441,7 +2538,10 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-great-escape',
     sourceTemplateKey: 'youth-missions',
-    family: 'freeze-frame',
+    // `freeze-frame` dissolved: its other half, `frozen-genre`, was deleted in the
+    // owner's curation pass. Rule 82 — shown the pair he removed the weaker one
+    // rather than relying on the family to keep them apart, and the survivor is
+    // the harvested half (rule 80).
     tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium'],
     difficulty: 5,
     build: () => anywhere({
@@ -2714,9 +2814,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // opener, not despite one. Narrowed to the audience it actually suits.
     key: 'open-team-name',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'kids', 'youth', 'easy', 'forest', 'beach', 'park', 'neighborhood',
-      'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
+    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'easy'],
     difficulty: 2,
     build: () => anywhere({
       title: 'שם וקריאת קרב',
@@ -2727,7 +2825,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       // it. The old closing nudge ("the less embarrassed you are, the better it
       // comes out") was also dropped: it pressures exactly the people the
       // team-building research says already opt out.
-      description: 'בחרו שם לקבוצה כך: כל אחד מכם אומר מילה אחת, ומהמילים האלה אתם מרכיבים את השם. עכשיו אתם נכנסים לאצטדיון: אחד מכם הכרוז שמכריז על הקבוצה בקול, והשאר נכנסים ועונים בקריאת קרב של חמש שניות. צלמו את הכניסה.',
+      description: 'בחרו שם לקבוצה כך: כל אחד מכם אומר מילה אחת, ומהמילים האלה אתם מרכיבים את השם. אחר כך המציאו קריאת קרב של חמש שניות, וצלמו את כולכם צועקים אותה יחד.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 3,
@@ -2739,8 +2837,10 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The adults/corporate placeless opener open-team-name can no longer cover.
     key: 'open-team-motto',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
-      'adults', 'corporate', 'mixed', 'easy'],
+    tags: [
+      'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'adults', 'corporate',
+      'easy', 'youth', 'office', 'mall', 'cityCenter', 'neighborhood', 'park', 'beach', 'forest',
+      'indoor', 'outdoor', 'educational', 'finish'],
     difficulty: 2,
     build: () => anywhere({
       title: 'המוטו של הצוות',
@@ -2758,52 +2858,33 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'open-everyone-airborne',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'kids', 'youth', 'easy'],
-    difficulty: 2,
+    tags: [
+      'start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids',
+      'youth', 'medium', 'indoor', 'outdoor', 'forest', 'beach', 'park', 'neighborhood',
+      'cityCenter', 'mall', 'office', 'school'],
+    difficulty: 4,
     build: () => anywhere({
       title: 'כולם באוויר',
       description: 'תמונה אחת שבה כל חברי הקבוצה באוויר בו זמנית. שתי הרגליים באוויר, בלי רמאויות. כמה ניסיונות שצריך.',
       type: 'photo',
-      difficulty: 2,
+      difficulty: 4,
       estimatedMinutes: 4,
       pointValue: 60,
       smart: upload(),
     }),
   },
-
-  // ── Finales, playable anywhere ────────────────────────────────────────────
-  {
-    key: 'finish-one-word-each',
-    sourceTemplateKey: 'authored',
-    // Same go-around-the-circle mechanic as `finish-what-we-didnt-know`, one
-    // word instead of one sentence — a game must never close on both (rule 12).
-    family: 'closing-round',
-    tags: ['finish', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
-    difficulty: 3,
-    build: () => anywhere({
-      title: 'מילה אחת לכל אחד',
-      description: 'סרטון של עשרים שניות: כל אחד בקבוצה אומר מילה אחת בלבד על היום הזה. בלי לחזור על מילה שכבר נאמרה.',
-      type: 'photo',
-      difficulty: 3,
-      estimatedMinutes: 4,
-      pointValue: 90,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
-    }),
-  },
   {
     key: 'finish-podium',
     sourceTemplateKey: 'authored',
-        tags: ['finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'kids', 'youth', 'medium', 'forest', 'beach', 'park', 'neighborhood',
-      'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 4,
+        tags: [
+          'finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed',
+          'kids', 'easy'],
+    difficulty: 2,
     build: () => anywhere({
       title: 'טקס הניצחון',
-      description: 'טקס הפרסים: החליטו יחד על תואר אחד שהקבוצה שלכם הרוויחה היום, משהו אמיתי שקרה. אחד מכם מכריז עליו בקול, וכולם עולים לפודיום ומקבלים אותו. פוזה דרמטית, כאילו יש קהל. צלמו את הרגע.',
+      description: 'עמדו כאילו קיבלתם מדליות. פוזה דרמטית, כאילו יש קהל שצופה. צלמו את הרגע.',
       type: 'photo',
-      difficulty: 4,
+      difficulty: 2,
       estimatedMinutes: 5,
       pointValue: 110,
       smart: upload(),
@@ -2901,9 +2982,22 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'the-hidden-key',
     sourceTemplateKey: 'authored',
     exclusiveStation: true,
-    tags: ['camera', 'thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
-      'park', 'forest', 'neighborhood', 'office', 'school',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
+    // `camera` restored after the owner's curation row dropped it. This is a
+    // `photo` mission whose own instruction says to photograph yourselves with
+    // the box open, and scripts/test-task-bank-tag-laws.ts makes the pairing
+    // mechanical, so the tag is a fact about the task type rather than a
+    // preference.
+    //
+    // Players were never affected: `applyBankOverrides` already pins `camera` to
+    // the source entry in both directions, so the stored row was repaired on every
+    // read. What the fold changed is that the SOURCE now has to be right on its
+    // own, because folding the row in removed the thing that was compensating for
+    // it. scripts/test-bank-overlay-tag-laws.ts was added here to assert that
+    // repair over the real bank rather than over a three-entry fixture.
+    tags: [
+      'thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'forest',
+      'neighborhood', 'office', 'school', 'mixed', 'youth', 'adults', 'corporate', 'medium',
+      'kids', 'historic', 'cityCenter', 'home', 'beach', 'creative', 'action', 'camera'],
     difficulty: 6,
     transitMinutes: 5,
     setup: [
@@ -2930,7 +3024,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'המפתח החבוי',
-      description: 'מוחבא כאן מפתח שפותח [הוראות ליוצר: מה בדיוק נעול]. אחד מכם עוצם עיניים. השאר מדריכים אותו בקול בלבד, בלי לגעת, עד שהמפתח ביד. אז פותחים ומצלמים. בסיום מחזירים את המפתח בדיוק למקום, הקבוצה הבאה צריכה אותו.',
+      description: 'מוחבא כאן מפתח שפותח [הוראות ליוצר: מה בדיוק נעול]. מצאו אותו, פתחו את התיבה והצטלמו איתה פתוחה. בסיום מחזירים את המפתח בדיוק למקום.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 9,
@@ -2949,13 +3043,13 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'ad-for-nothing',
     sourceTemplateKey: 'authored',
-        tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed',
-      'youth', 'adults', 'corporate', 'medium', 'forest', 'beach', 'park', 'neighborhood',
-      'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
+        tags: [
+          'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'youth',
+          'adults', 'corporate', 'medium'],
     difficulty: 5,
     build: () => anywhere({
       title: 'פרסומת למוצר שלא קיים',
-      description: 'המציאו מוצר שלא קיים ותנו לו שם וסיסמה. צלמו לו פרסומת שיש בה שלושה דברים: הבעיה שהמוצר פותר, הדגמה שלו בפעולה, והסיסמה בסוף. כולכם מופיעים בה.',
+      description: 'המציאו מוצר רנדומלי לגמרי, תנו לו שם וסיסמה, וצלמו לו פרסומת. משכנעת ואיכותית שתערב את כולם.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -2963,53 +3057,14 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
     }),
   },
-  {
-    key: 'frozen-genre',
-    sourceTemplateKey: 'authored',
-    family: 'freeze-frame',
-    tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'youth', 'adults', 'medium'],
-    difficulty: 5,
-    build: () => anywhere({
-      title: 'סרט בפריים אחד',
-      description: 'בחרו ז׳אנר: אימה, רומנטיקה או מדע בדיוני. צרו תמונה קפואה אחת שמספרת ממנו סצנה שלמה. מי שמסתכל צריך לזהות את הז׳אנר בלי שתגידו לו.',
-      type: 'photo',
-      difficulty: 5,
-      estimatedMinutes: 6,
-      pointValue: 120,
-      smart: upload(),
-    }),
-  },
-  {
-    // Replaced "human machine" (everyone mimes one moving part) — a mime-loop
-    // reads as a kids'-drama-class exercise, not a mission a work team takes
-    // seriously. A real chain reaction is the same idea done concretely: it is
-    // an actual small engineering problem, it looks genuinely impressive on
-    // video, and finishing one is satisfying in a way that acting out a sound
-    // effect is not.
-    key: 'chain-reaction',
-    sourceTemplateKey: 'authored',
-    tags: ['camera', 'creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 6,
-    build: () => anywhere({
-      title: 'שרשרת הפעולות',
-      description: 'בנו שרשרת של שלוש פעולות לפחות מכל מה שיש בסביבה: בקבוק, תיק, נעל, אבן, ענף. כל פעולה מפעילה את הבאה, ואחרי שהתחלתם אסור לגעת בידיים. צלמו ברצף אחד, בלי לעצור.',
-      type: 'photo',
-      difficulty: 6,
-      estimatedMinutes: 10,
-      pointValue: 140,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
-    }),
-  },
   // ── Thinking: the bank had four, and a puzzle game needs more than four ───
   {
     key: 'exact-count',
     sourceTemplateKey: 'authored',
     family: 'count-estimate',
-    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor',
-      'neighborhood', 'cityCenter', 'park', 'beach',
-      'mixed', 'youth', 'kids', 'adults', 'medium'],
+    tags: [
+      'thinking', 'needsSetup', 'locationBased', 'outdoor', 'neighborhood', 'cityCenter', 'park',
+      'beach', 'mixed', 'youth', 'kids', 'adults', 'medium', 'mall'],
     difficulty: 5,
     transitMinutes: 4,
     setup: [
@@ -3027,7 +3082,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'הספירה המדויקת',
-      description: 'ספרו כמה ספסלים יש בטווח מאה מטר מהנקודה הזאת. תשובה אחת, מספר אחד. מומלץ להתחלק ולספור פעמיים.',
+      description: 'ספרו כמה ספסלים יש בטווח 40 מטר מהנקודה הזאת. תשובה אחת, מספר אחד. מומלץ להתחלק ולספור פעמיים.',
       type: 'numeric',
       difficulty: 5,
       estimatedMinutes: 7,
@@ -3076,9 +3131,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'odd-one-planted',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'camera', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
-      'park', 'neighborhood', 'school', 'office', 'mall',
-      'mixed', 'kids', 'youth', 'medium'],
+    tags: [
+      'thinking', 'camera', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park',
+      'neighborhood', 'school', 'office', 'mall', 'mixed', 'kids', 'youth', 'medium'],
     difficulty: 5,
     transitMinutes: 4,
     setup: [
@@ -3091,7 +3146,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'מה לא שייך לכאן',
-      description: 'מישהו החביא כאן חפץ אחד שלא אמור להיות במקום הזה. מצאו אותו וצלמו אותו במקום שבו מצאתם, בלי להזיז אותו.',
+      description: 'מישהו החביא כאן חפץ אחד שלא אמור להיות במקום הזה. מצאו אותו והצטלמו איתו במקום שבו מצאתם, בלי להזיז אותו.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -3107,13 +3162,14 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'thirty-second-interview',
     sourceTemplateKey: 'authored',
-    tags: ['action', 'camera', 'creative', 'noPrep', 'fromAnywhere',
-      'cityCenter', 'mall', 'neighborhood', 'beach',
-      'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded'],
+    tags: [
+      'action', 'camera', 'creative', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall',
+      'neighborhood', 'beach', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded',
+      'educational', 'indoor', 'outdoor', 'school', 'office', 'park'],
     difficulty: 6,
     build: () => anywhere({
       title: 'ראיון של שלושים שניות',
-      description: 'מצאו אדם זר, בקשו רשות ושאלו: מה העצה הכי טובה שהוא קיבל אי פעם, וממי? צלמו את התשובה.',
+      description: 'מצאו אדם זר, בקשו רשות ושאלו: מה העצה הכי טובה שהוא קיבל אי פעם, וממי?',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 7,
@@ -3124,13 +3180,13 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'honest-compliment',
     sourceTemplateKey: 'authored',
-    tags: ['action', 'camera', 'noPrep', 'fromAnywhere',
-      'cityCenter', 'mall', 'neighborhood', 'beach',
-      'mixed', 'youth', 'adults', 'medium', 'crowded'],
+    tags: [
+      'action', 'camera', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'beach',
+      'mixed', 'youth', 'medium', 'crowded', 'educational'],
     difficulty: 5,
     build: () => anywhere({
       title: 'מחמאה אמיתית',
-      description: 'בחרו אדם זר, ומצאו אצלו פרט אחד שאי אפשר להגיד על אף אחד אחר. אמרו לו אותו במילים שלכם. אם הוא חייך, בקשו סלפי משותף.',
+      description: 'תנו מחמאה כנה לאדם זר. על משהו שבאמת שמתם לב אליו. אם הוא חייך, בקשו סלפי משותף.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 6,
@@ -3145,10 +3201,10 @@ export const TASK_BANK: TaskBankEntry[] = [
     // finish line.
     key: 'trade-up',
     sourceTemplateKey: 'authored',
-    tags: ['camera', 'action', 'teamwork', 'creative', 'needsSetup', 'fromAnywhere',
-      'cityCenter', 'mall', 'neighborhood',
-      'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded'],
-    difficulty: 6,
+    tags: [
+      'action', 'teamwork', 'creative', 'needsSetup', 'fromAnywhere', 'cityCenter', 'mall',
+      'neighborhood', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'crowded', 'camera'],
+    difficulty: 8,
     setup: [{
       field: 'description',
       required: true,
@@ -3158,7 +3214,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       title: 'סחר חליפין',
       description: 'קיבלתם חפץ קטן. הציעו אותו לאנשים ברחוב, וקבלו כל הצעת חילופין, לא משנה מה. המשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
       type: 'photo',
-      difficulty: 6,
+      difficulty: 8,
       estimatedMinutes: 15,
       pointValue: 170,
       smart: upload(),
@@ -3175,9 +3231,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'authored',
     // `needsSetup`, not `noPrep`: the address clue is the ENTIRE mission, and
     // the creator has to write it (rule 30).
-    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor',
-      'neighborhood', 'cityCenter', 'park',
-      'mixed', 'youth', 'adults', 'hard'],
+    tags: [
+      'thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'neighborhood',
+      'cityCenter', 'park', 'mixed', 'youth', 'adults', 'hard', 'crowded'],
     difficulty: 7,
     transitMinutes: 9,
     setup: [
@@ -3190,7 +3246,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'ניווט אנושי',
-      description: 'הגיעו לנקודה הזאת בלי אפליקציית ניווט ובלי מפה. יש לכם רק את הכתובת. מותר רק לשאול אנשים בדרך, ולפחות שלושה אנשים שונים.',
+      description: 'הגיעו לנקודה הזאת בלי אפליקציית ניווט ובלי מפה. יש לכם רק את הכתובת. מותר רק לשאול אנשים בדרך.',
       type: 'geofence',
       difficulty: 7,
       estimatedMinutes: 4,
@@ -3212,9 +3268,10 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The vendor is the exclusive resource: one person can only hand the code
     // to one team at a time (see TaskBankEntry.exclusiveStation).
     exclusiveStation: true,
-    tags: ['action', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor',
-      'cityCenter', 'mall', 'neighborhood', 'beach',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'crowded'],
+    tags: [
+      'action', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor', 'cityCenter',
+      'mall', 'neighborhood', 'beach', 'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy',
+      'crowded', 'creative', 'thinking'],
     difficulty: 3,
     transitMinutes: 7,
     setup: [
@@ -3228,7 +3285,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => codeStation({
       title: 'המנה הסודית',
-      description: 'גשו לדוכן ובקשו את המנה הסודית בשם הקוד שסוכם. מי שעומד שם כבר יודע. תקבלו אותה ואיתה קוד. הקלידו אותו כאן.',
+      description: 'לכו ל [להכניס את המקום] ובקשו מיץ גזר עם לימון. תקבלו איתו קוד, הקלידו אותו כאן.',
       difficulty: 3,
       estimatedMinutes: 6,
       pointValue: 110,
@@ -3240,9 +3297,10 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'one-colour-five-things',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
-    tags: ['camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home',
-      'mall', 'office', 'school', 'neighborhood',
-      'mixed', 'kids', 'youth', 'corporate', 'easy'],
+    tags: [
+      'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'mall', 'office',
+      'school', 'neighborhood', 'mixed', 'kids', 'corporate', 'easy', 'youth', 'forest', 'park',
+      'cityCenter'],
     difficulty: 3,
     build: () => anywhere({
       title: 'חמישה דברים, צבע אחד',
@@ -3257,13 +3315,13 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'office-olympics',
     sourceTemplateKey: 'authored',
-    tags: ['camera', 'action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor',
-      'office', 'school',
-      'corporate', 'adults', 'mixed', 'medium'],
+    tags: [
+      'action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'corporate',
+      'adults', 'mixed', 'medium', 'camera'],
     difficulty: 5,
     build: () => anywhere({
       title: 'אולימפיאדת המשרד',
-      description: 'המציאו ענף ספורט חדש שאפשר לשחק רק בציוד משרדי. כל אחד מכם מוסיף לו חוק אחד, וכל החוקים נשארים בפנים. שחקו סיבוב שלם לפי כולם, וצלמו את הזוכה חוגג.',
+      description: 'המציאו ענף ספורט חדש שאפשר לשחק רק בציוד משרדי. הגדירו חוק אחד, שחקו סיבוב שלם, וצלמו את הזוכה חוגג.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 9,
@@ -3274,9 +3332,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'elevator-pitch',
     sourceTemplateKey: 'authored',
-    tags: ['camera', 'creative', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'indoor',
-      'office', 'mall', 'cityCenter',
-      'corporate', 'adults', 'medium'],
+    tags: [
+      'creative', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'mall',
+      'cityCenter', 'corporate', 'medium', 'camera', 'youth'],
     difficulty: 6,
     build: () => anywhere({
       title: 'נאום המעלית',
@@ -3291,9 +3349,10 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'oldest-thing-here',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
-      'office', 'school', 'mall', 'neighborhood', 'cityCenter',
-      'corporate', 'adults', 'mixed', 'medium', 'historic', 'educational'],
+    tags: [
+      'thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school',
+      'mall', 'neighborhood', 'cityCenter', 'corporate', 'adults', 'mixed', 'medium', 'historic',
+      'creative', 'youth'],
     difficulty: 4,
     build: () => anywhere({
       title: 'הדבר הכי ותיק כאן',
@@ -3309,37 +3368,13 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
     }),
   },
-
-  // ── Kids: nothing in the bank was written for eight year olds ─────────────
-  {
-    // Replaced "animal parade" (mimic an animal's walk and sound) — reads as
-    // preschool even for the 10+ end of "kids". Same mechanic underneath
-    // (synchronized group movement, camera-friendly, zero prep) reframed as an
-    // action-movie hero shot, which is the same kind of silly-but-cool a 10 to
-    // 13 year old (or an adult) will actually commit to on camera.
-    key: 'hero-walk',
-    sourceTemplateKey: 'authored',
-    tags: ['action', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
-      'park', 'school', 'forest', 'beach', 'neighborhood',
-      'kids', 'youth', 'mixed', 'easy'],
-    difficulty: 2,
-    build: () => anywhere({
-      title: 'הליכת הגיבורים',
-      description: 'צעדו יחד לאט ובביטחון, כמו בסצנת אקשן אחרי פיצוץ מאחוריכם. כולם אומרים באותו רגע משפט קליט אחד. צלמו בווידאו.',
-      type: 'photo',
-      difficulty: 2,
-      estimatedMinutes: 5,
-      pointValue: 80,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
-    }),
-  },
   {
     key: 'rainbow-hunt',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
-    tags: ['camera', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home',
-      'park', 'school', 'forest', 'beach', 'neighborhood',
-      'kids', 'mixed', 'easy'],
+    tags: [
+      'camera', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'forest',
+      'beach', 'neighborhood', 'kids', 'mixed', 'easy'],
     difficulty: 3,
     build: () => anywhere({
       title: 'ציד הקשת',
@@ -3354,13 +3389,13 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'silliest-walk',
     sourceTemplateKey: 'authored',
-    tags: ['action', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
-      'park', 'school', 'beach', 'neighborhood',
-      'kids', 'youth', 'mixed', 'easy'],
+    tags: [
+      'action', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'park', 'school',
+      'beach', 'neighborhood', 'kids', 'mixed', 'easy'],
     difficulty: 2,
     build: () => anywhere({
-      title: 'רגליים חדשות',
-      description: 'אתם משלחת מכוכב אחר, וקיבלתם רגליים רק הבוקר. המציאו ביחד הליכה אחת של מי שעדיין לא הבין איך הדבר הזה עובד, ולכו בה עשרה מטרים. כל הקבוצה, אותה הליכה, באותו זמן. צלמו מהצד.',
+      title: 'ההליכה הכי מצחיקה',
+      description: 'המציאו ביחד הליכה מצחיקה אחת, ולכו בה עשרה מטרים. כל הקבוצה, אותה הליכה, באותו זמן. צלמו מהצד.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 5,
@@ -3378,13 +3413,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     // is a real skill (interviewing, judging a source) rather than a photo op.
     key: 'local-legend',
     sourceTemplateKey: 'authored',
-    tags: ['camera', 'thinking', 'action', 'creative', 'noPrep', 'fromAnywhere',
-      'neighborhood', 'cityCenter', 'beach', 'historic',
-      'adults', 'corporate', 'mixed', 'hard', 'educational'],
+    tags: [
+      'thinking', 'action', 'creative', 'noPrep', 'fromAnywhere', 'neighborhood', 'cityCenter',
+      'beach', 'historic', 'adults', 'corporate', 'mixed', 'hard', 'educational', 'camera'],
     difficulty: 7,
     build: () => anywhere({
       title: 'האגדה המקומית',
-      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן. בקשו ממנו סיפור מוזר או מפתיע על המקום, ובקשו פרט אחד שאפשר לבדוק: שם, שנה או אירוע. בקשו רשות לצלם את התשובה למשחק, ובסוף הסרטון חזרו על הפרט בקול.',
+      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן. בקשו ממנו סיפור מוזר או מפתיע על המקום, ובקשו פרט אחד שאפשר לבדוק: שם, שנה או אירוע. צלמו את התשובה, וחזרו על הפרט בקול בסוף הסרטון.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -3397,9 +3432,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'two-truths-one-lie',
     sourceTemplateKey: 'authored',
-    tags: ['teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'office', 'mall', 'park', 'beach',
-      'corporate', 'adults', 'youth', 'mixed', 'easy'],
+    tags: [
+      'teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'office',
+      'mall', 'park', 'beach', 'corporate', 'youth', 'mixed', 'easy', 'kids', 'adults'],
     difficulty: 3,
     build: () => anywhere({
       title: 'שתי אמיתות ושקר',
@@ -4799,7 +4834,8 @@ export const TASK_BANK: TaskBankEntry[] = [
     // go-around-the-circle mechanic with a shorter unit (rule 12).
     key: 'finish-what-we-didnt-know',
     sourceTemplateKey: 'authored',
-    family: 'closing-round',
+    // `closing-round` dissolved: its other half, `finish-one-word-each`, was deleted
+    // in the owner's curation pass (rule 82).
         tags: ['finish', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'forest', 'beach', 'park',
       'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
@@ -4963,32 +4999,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     }),
   },
 
-  // ── Rule 33: the mission the quiet member wins ────────────────────────────
-  {
-    // The bank had nothing where being careful beat being loud, which is exactly
-    // the population the team-building research says disengages. Self-validating
-    // by construction (rule 40): the camera pans to the real scene at the end,
-    // so the recall is checkable without the creator authoring a single answer —
-    // and that is what keeps it out of the saturated counting family.
-    key: 'the-witness',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home',
-      'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 6,
-    build: () => anywhere({
-      title: 'העד',
-      description: 'אחד מכם מסתכל על מה שמולו בשקט מוחלט דקה שלמה, בלי לצלם ובלי לדבר. אחר כך הוא מסתובב עם הגב ומונה בקול את הפרטים שהוא זוכר, ואז השאר מוסיפים כל מה שהם קלטו. המטרה של כולכם ביחד: עשרה פרטים נכונים. בסוף הפנו את המצלמה למקום עצמו, כדי שאפשר יהיה לבדוק.',
-      type: 'photo',
-      difficulty: 6,
-      estimatedMinutes: 7,
-      pointValue: 150,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
-      hint: 'רמז: קל יותר לזכור לפי אזורים ולא לפי חפצים: שמאל, מרכז, ימין, ואז כל מה שמעל גובה העיניים.',
-      hintPenalty: 20,
-    }),
-  },
-
   // ── The bank's first `pausesTimer` mission ────────────────────────────────
   {
     // `pausesTimer` is a real, shipped platform field that no entry had ever
@@ -5000,9 +5010,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     // mechanic label.
     key: 'thinking-room',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home',
-      'office', 'school', 'mall', 'park',
-      'mixed', 'youth', 'adults', 'corporate', 'hard'],
+    tags: [
+      'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'park',
+      'mixed', 'youth', 'adults', 'corporate', 'hard', 'educational'],
     difficulty: 8,
     build: () => anywhere({
       title: 'חדר החשיבה',
@@ -5042,7 +5052,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'התמונה מלפני שנים',
-      description: 'חפשו בטלפונים תמונה ישנה שלכם, מלפני כמה שנים לפחות, שכמה מכם מופיעים בה. שחזרו אותה עכשיו: אותה תנוחה, אותו סידור, אותן הבעות. כל מי שהיה במקור חייב להיות גם בשחזור. החזיקו את התמונה הישנה בתוך הפריים, כדי שרואים את שתיהן יחד.',
+      description: 'חפשו בטלפונים תמונה ישנה שלכם, מלפני כמה שנים לפחות, שכמה מכם מופיעים בה. שחזרו אותה עכשיו: אותה תנוחה, אותו סידור, אותן הבעות. החזיקו את התמונה הישנה בתוך הפריים, כדי שרואים את שתיהן יחד.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 8,
@@ -5060,9 +5070,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     // of place, so putting it back is in the copy the players read.
     key: 'living-room-obstacle',
     sourceTemplateKey: 'authored',
-    tags: ['action', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'school', 'office',
-      'mixed', 'kids', 'youth', 'medium'],
+    tags: [
+      'action', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
+      'kids', 'medium', 'mixed'],
     difficulty: 5,
     build: () => anywhere({
       title: 'מסלול המכשולים מהסלון',
@@ -5087,9 +5097,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     // object is chosen from whatever is in the room.
     key: 'blind-describe',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'office', 'school', 'mall',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
+    tags: [
+      'thinking', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
+      'office', 'school', 'mall', 'mixed', 'kids', 'youth', 'corporate', 'medium', 'adults'],
     difficulty: 6,
     build: () => anywhere({
       title: 'תארו לי בלי להגיד',
@@ -5103,4 +5113,5 @@ export const TASK_BANK: TaskBankEntry[] = [
       hintPenalty: 20,
     }),
   },
+
 ];
