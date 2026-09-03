@@ -115,7 +115,8 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
   // the map never shows two answers for one mission. Rendered via
   // `lib/searchAreas.ts` → NavMap.
   searchArea?: { lat: number; lng: number; radiusMeters: number };
-  steps?: { id: string; prompt: string }[];
+  // `hasAnswer` false ⇒ tap-to-confirm step (the creator authored no answer key).
+  steps?: { id: string; prompt: string; hasAnswer?: boolean }[];
   smart?: {
     enabled: boolean;
     verificationType: 'code_verification' | 'photo_upload';

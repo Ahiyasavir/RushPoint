@@ -1689,14 +1689,23 @@ function SequenceRunner({ task, stepsDone, busy, prefill, onSubmit }: {
     void Promise.resolve(onSubmit(idx, val)).then((ok) => { if (ok) setVal(''); });
   }
   if (!step) return null;
+  // A step the creator authored with no answer key is a tap-to-confirm beat, not a
+  // question. Telling the player to "leave it blank to confirm" asked them to infer
+  // the creator's authoring from an empty box; the server accepts an absent answer
+  // either way, so this is purely how the step is PRESENTED.
+  const confirmOnly = step.hasAnswer === false;
   return (
     <div className="space-y-3">
       <Progress done={stepsDone} total={steps.length} />
       <div className="text-xs text-zinc-500">{t.task.stepOf({ step: idx + 1, total: steps.length })}</div>
       <p dir="auto" className="text-sm text-zinc-200" data-testid="sequence-prompt">{step.prompt}</p>
-      <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submitStep(); }} data-testid="sequence-input" />
-      <Button disabled={busy} onClick={submitStep} data-testid="sequence-submit">{t.task.submitStep}</Button>
+      {!confirmOnly && (
+        <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submitStep(); }} data-testid="sequence-input" />
+      )}
+      <Button disabled={busy} onClick={submitStep} data-testid="sequence-submit">
+        {confirmOnly ? t.task.confirmStep : t.task.submitStep}
+      </Button>
     </div>
   );
 }

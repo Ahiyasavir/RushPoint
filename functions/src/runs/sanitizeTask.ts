@@ -121,7 +121,16 @@ export function sanitizeTaskForParticipant(
     ...(hidden ? { locationHidden: true as const } : {}),
     hasHint: !!hint && hint.trim().length > 0,
     hintPenalty: task.hintPenalty ?? 25,
-    steps: steps?.map((s) => ({ id: s.id, prompt: s.prompt })),
+    // The step ANSWER stays server-secret, but whether a step HAS one is not a
+    // secret and the client cannot function without it: a step with no answer key
+    // is a tap-to-confirm beat, and asking the player to "leave it blank to
+    // confirm" is an instruction to guess at the creator's authoring. `hasAnswer`
+    // lets the runner render a plain confirm button instead.
+    steps: steps?.map((s) => ({
+      id: s.id,
+      prompt: s.prompt,
+      hasAnswer: typeof s.answer === 'string' && s.answer.trim().length > 0,
+    })),
     smart: smart
       ? {
           enabled: smart.enabled,

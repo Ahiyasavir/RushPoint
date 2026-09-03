@@ -341,8 +341,11 @@ function assertTaskPayloadAllowlisted(label, task) {
     check(`${label}: task.smart keys are allowlisted`, badSmart.length === 0, badSmart.join(','));
   }
   if (task?.steps) {
-    const badStep = task.steps.flatMap((s) => Object.keys(s).filter((k) => k !== 'id' && k !== 'prompt'));
-    check(`${label}: step keys are allowlisted (id+prompt only)`, badStep.length === 0, badStep.join(','));
+    // `hasAnswer` is a derived BOOLEAN, never the key itself: the runner needs it to
+    // render a tap-to-confirm step as a confirm button instead of an empty input.
+    const okStepKeys = new Set(['id', 'prompt', 'hasAnswer']);
+    const badStep = task.steps.flatMap((s) => Object.keys(s).filter((k) => !okStepKeys.has(k)));
+    check(`${label}: step keys are allowlisted (id+prompt+hasAnswer only)`, badStep.length === 0, badStep.join(','));
   }
 }
 
@@ -3256,6 +3259,12 @@ async function main() {
   const seqTask = sSeq?.activeStageTasks?.find((t) => t.id === 'sq1');
   check('sequence: step prompts sent without answers',
     Array.isArray(seqTask?.steps) && seqTask.steps.length === 3 && seqTask.steps.every((s) => s.answer === undefined),
+    JSON.stringify(seqTask?.steps));
+  // Whether a step HAS an answer key is not a secret, and the runner cannot render a
+  // tap-to-confirm step without it (it would show an input and tell the player to
+  // leave it blank). The answer itself stays server-side — asserted just above.
+  check('sequence: hasAnswer marks the tap-to-confirm step',
+    seqTask?.steps?.map((s) => s.hasAnswer).join(',') === 'true,false,true',
     JSON.stringify(seqTask?.steps));
   const seq0 = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 0, answer: 'open' });
   check('sequence: step 1 (answer) accepted', seq0?.stepCorrect === true && seq0?.stepsDone === 1);

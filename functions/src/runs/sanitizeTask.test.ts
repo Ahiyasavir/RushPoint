@@ -65,9 +65,25 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(steps?.[0]).not.toHaveProperty('answer');
 
     // Renderable fields survive so the UI still works:
-    expect(steps?.[0]).toMatchObject({ id: 's1', prompt: 'Open the box' });
+    expect(steps?.[0]).toMatchObject({ id: 's1', prompt: 'Open the box', hasAnswer: true });
     expect(smart).toMatchObject({ hasCode: true, codeInputLabel: 'Enter code', attemptLimit: 3 });
     expect(out.hasHint).toBe(false);
+  });
+
+  test('a step with no answer key is marked hasAnswer:false (tap-to-confirm)', () => {
+    // The runner renders this step as a plain "confirm" button rather than an empty
+    // input, so the flag has to survive sanitization even though the answer never does.
+    const out = sanitizeTaskForParticipant(baseTask({
+      type: 'sequence',
+      steps: [
+        { id: 's1', prompt: 'Say the word', answer: 'TWIST' },
+        { id: 's2', prompt: 'Tap when you are at the door' },
+        { id: 's3', prompt: 'Blank answers do not count', answer: '   ' },
+      ],
+    })) as Record<string, unknown>;
+    const steps = out.steps as Array<Record<string, unknown>>;
+    expect(steps.map((s) => s.hasAnswer)).toEqual([true, false, false]);
+    for (const s of steps) expect(s).not.toHaveProperty('answer');
   });
 
   // survey-tasks: a survey has no answer key, so its surveyChoices are
