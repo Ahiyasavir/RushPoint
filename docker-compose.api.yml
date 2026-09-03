@@ -12,6 +12,28 @@ services:
       dockerfile: Dockerfile.api
     image: rushpoint-api
     restart: always
+    # ── Log rotation. NOT optional on this host ──────────────────────────────
+    # Docker's default json-file driver is UNBOUNDED, and this VPS has no
+    # /etc/docker/daemon.json to cap it either, so the API's log could only ever
+    # grow: the disk is a single 116G volume already 61% full, shared with the
+    # container images, the Firestore emulator backups and the run track files.
+    # A full root filesystem does not degrade this service, it stops it, and it
+    # stops it in the way that is hardest to read, because the thing that would
+    # tell you why can no longer be written.
+    #
+    # It matters more with RUSHPOINT_FS_OPCOUNT on (below): that emits one
+    # structured record per callable invocation, and a 100 team run makes roughly
+    # 11,000 callables, so the instrument that measures the Firestore budget is
+    # itself the biggest writer to this log.
+    #
+    # 10 files x 20MB caps the API at 200MB, which is many runs' worth of history
+    # and a rounding error against 46G free. Applied when the container is next
+    # RECREATED, not on restart.
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "10"
     # Secrets (RESEND_API_KEY etc.) live in a gitignored .env next to this file,
     # never inline here — see api.env.example for the template.
     env_file:
@@ -75,6 +97,23 @@ services:
       # ⚠️ If this service is ever given `deploy.replicas > 1` or put behind a second
       # container, REMOVE this line first.
       RUSHPOINT_DOC_CACHE: "1"
+      # ── Firestore op counting (change: spark-tier-location-load) ────────────
+      # Attributes every Firestore read and write to the callable that caused it
+      # and emits one `fsops` record per invocation, which scripts/fs-ops-report.mjs
+      # aggregates. Opt-in and inert when unset; every hook is wrapped so a
+      # counting defect can never fail the operation it is measuring.
+      #
+      # ON in production deliberately. This project is on the Spark free tier with
+      # a hard 50,000 read / 20,000 write daily ceiling and has already lost a
+      # login to exhausting it, and the lesson from that investigation was that the
+      # most expensive read in the product was invisible because no call site
+      # looked expensive. Turning the instrument off is how that recurs.
+      #
+      # It had been set by hand on the VPS since 2026-08-27 and never committed,
+      # so the running platform and this file disagreed and nothing in git said
+      # what production actually ran. Set it to "0" or delete the line to disable;
+      # see the log rotation note below, which is what bounds its cost.
+      RUSHPOINT_FS_OPCOUNT: "1"
       # ── The marketing CMS's GitHub sign in (change: marketing-cms-oauth) ────
       # Which pages may be handed a repo-scoped GitHub token by /oauth/callback.
       # Deliberately NARROWER than ALLOWED_ORIGINS above: the CMS lives only on
