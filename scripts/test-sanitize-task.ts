@@ -71,8 +71,48 @@ const base: Task = {
   check('sequence: prompts preserved', leaks(out, 'What colour') && leaks(out, 'How many windows'));
   const steps = out.steps as Array<Record<string, unknown>>;
   check('sequence: step ids preserved', steps[0].id === 's1' && steps[1].id === 's2');
-  check('sequence: step objects carry ONLY id + prompt',
-    steps.every((s) => Object.keys(s).sort().join(',') === 'id,prompt'));
+  // Default-deny allow-list: a step may carry these keys and nothing else, so a
+  // new field added to the sanitizer fails HERE rather than leaking quietly.
+  //
+  // `hasAnswer` was admitted deliberately (change: sequence-confirm-step). It is
+  // a boolean DERIVED from whether the creator authored an answer key, never the
+  // key itself — the assertion above still proves neither SECRETRED nor
+  // SECRETSEVEN reaches the payload. And it is not itself a secret: a step with
+  // no answer is a tap-to-confirm beat, which the player discovers the moment
+  // they read the prompt. Without it the runner had to tell them to "leave the
+  // box blank to confirm", i.e. to guess at the creator's authoring.
+  //
+  // Adding a key here is a decision about what participants may see. Widen this
+  // list only for a value that is derived, never for one that is stored.
+  check('sequence: step objects carry ONLY id + prompt + hasAnswer',
+    steps.every((s) => Object.keys(s).sort().join(',') === 'hasAnswer,id,prompt'));
+  check('sequence: hasAnswer reports the answer key WITHOUT revealing it',
+    steps.every((s) => s.hasAnswer === true));
+}
+
+// ── 3b. A step the creator left with no answer key is a tap-to-confirm beat ───
+// The case the field exists for. An absent, empty or whitespace-only answer all
+// mean the same thing to a player, so all three must report `false` — otherwise
+// the runner shows a text box for a step that has nothing to type into it.
+{
+  const seq: Task = {
+    ...base,
+    type: 'sequence',
+    steps: [
+      { id: 's1', prompt: 'Stand at the gate.' },
+      { id: 's2', prompt: 'Everyone ready?', answer: '' },
+      { id: 's3', prompt: 'Count to ten.', answer: '   ' },
+      { id: 's4', prompt: 'What colour is the door?', answer: 'SECRETRED' },
+    ],
+  } as Task;
+  const out = sanitizeTaskForParticipant(seq) as Record<string, unknown>;
+  const steps = out.steps as Array<Record<string, unknown>>;
+  check('sequence: a step with no answer key reports hasAnswer false',
+    steps[0].hasAnswer === false);
+  check('sequence: an empty answer counts as no answer', steps[1].hasAnswer === false);
+  check('sequence: a whitespace-only answer counts as no answer', steps[2].hasAnswer === false);
+  check('sequence: a real answer still reports true', steps[3].hasAnswer === true);
+  check('sequence: the real answer still never leaks', !leaks(out, 'SECRETRED'));
 }
 
 // ── 4. Hint text never sent — only hasHint + penalty ──────────────────────────
