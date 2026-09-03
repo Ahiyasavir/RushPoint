@@ -520,12 +520,70 @@ for (const page of LANDING_PAGES) {
   }
 }
 
+// The MARKETING site's titles. PART F was written for the two applications and the
+// landing pages, and skipped the apex entirely — which is the surface the rule was
+// actually about. `%s, RushPoint` is declared in apps/marketing/src/config.yaml with a
+// comment saying "A COMMA, not an em dash", but a comment is not a gate: the template,
+// the default title, every standing page's title and every post's title are all free to
+// grow a colon, and the apex title is the single most read line this product publishes.
+const MARKETING_ROOT = join(ROOT, 'apps', 'marketing');
+const MARKETING_CONFIG = join(MARKETING_ROOT, 'src', 'config.yaml');
+
+if (existsSync(MARKETING_CONFIG)) {
+  const yaml = readFileSync(MARKETING_CONFIG, 'utf8');
+  // The two title fields under `metadata.title`, read by their own keys rather than by
+  // parsing the document: a dependency free regex cannot go stale against a YAML parser
+  // version, and a key that is renamed away simply stops contributing — which the reach
+  // assertion below then catches.
+  for (const key of ['default', 'template']) {
+    const m = new RegExp(`^\\s{4}${key}:\\s*(.+)$`, 'm').exec(yaml);
+    if (!m) continue;
+    const value = m[1].trim().replace(/^['"]|['"]$/g, '');
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(value)) {
+      titleOffenders.push(`marketing config.yaml metadata.title.${key} → "${value}"`);
+    }
+  }
+}
+
+// Every standing page, both languages. `title` is what the template wraps and what
+// Google prints as the link.
+if (existsSync(MARKETING_PAGES_DIR)) {
+  for (const file of readdirSync(MARKETING_PAGES_DIR).filter((f) => f.endsWith('.json'))) {
+    const parsed = JSON.parse(readFileSync(join(MARKETING_PAGES_DIR, file), 'utf8')) as Record<string, unknown>;
+    const title = parsed.title;
+    if (typeof title !== 'string') continue;
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(title)) {
+      titleOffenders.push(`marketing ${file} title → "${title}"`);
+    }
+  }
+}
+
+// Blog posts. Only the frontmatter `title`, for the same reason as everywhere else in
+// this part: a colon inside the body is ordinary punctuation and is not scanned.
+if (existsSync(MARKETING_POST_DIR)) {
+  for (const file of readdirSync(MARKETING_POST_DIR).filter((f) => /\.mdx?$/.test(f))) {
+    const raw = readFileSync(join(MARKETING_POST_DIR, file), 'utf8').replace(/\r\n/g, '\n');
+    const fm = /^---\n([\s\S]*?)\n---/.exec(raw);
+    if (!fm) continue;
+    const m = /^title:\s*(.+)$/m.exec(fm[1]);
+    if (!m) continue;
+    const value = m[1].trim().replace(/^['"]|['"]$/g, '');
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(value)) {
+      titleOffenders.push(`marketing ${file} frontmatter.title → "${value}"`);
+    }
+  }
+}
+
 check('F · no colon in a shipped page title', titleOffenders.length === 0, titleOffenders.join(' | '));
 
 // The same reach assertion PARTS C, D and E carry, for the same reason: this part is a set
 // of absences, and an empty input set satisfies every one of them. Two apps contribute a
-// title, two title meta fields and two manifest keys each, plus twelve landing pages.
-check('F · the title scan actually reached the titles', titlesScanned >= 20, `${titlesScanned} title(s)`);
+// title, two title meta fields and two manifest keys each, plus twelve landing pages,
+// plus the marketing site's two config fields and six standing page titles.
+check('F · the title scan actually reached the titles', titlesScanned >= 28, `${titlesScanned} title(s)`);
 
 console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);
