@@ -284,7 +284,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
   // ── Step 1: enter access code ──────────────────────────────────────────────
   if (!info) {
     return (
-      <div className="min-h-screen flex flex-col max-w-md mx-auto w-full animate-race-in">
+      <div className="min-h-screen flex flex-col max-w-md mx-auto w-full animate-race-in rp-safe-t-flush">
 
         {/* Full-bleed gradient hero */}
         {/* Tightened from pt-16/pb-12 (change: join-screen-fits-one-phone). The
@@ -454,9 +454,11 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
           <div className="mt-5 pt-3 border-t border-glass-border text-center space-y-1.5">
               <p className="text-[13px] text-zinc-500">
                 {t.join.createOwnCta}{' '}
+                {/* Same 44px treatment as the staff button just below: styled
+                    down to inline text this measured 17px tall. */}
                 <a
                   href={creatorUrl()}
-                  className="font-bold text-ink-fire underline underline-offset-2 hover:opacity-80"
+                  className="inline-flex items-center justify-center min-h-[44px] px-2 font-bold text-ink-fire underline underline-offset-2 hover:opacity-80"
                 >
                   {t.join.createOwnLink}
                 </a>

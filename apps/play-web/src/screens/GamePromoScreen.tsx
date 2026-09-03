@@ -216,7 +216,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           <button
             type="button"
             onClick={shareGame}
-            className="mt-3 w-full text-xs font-medium text-zinc-500 hover:text-ink-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded py-1"
+            className="mt-2 w-full inline-flex items-center justify-center min-h-[44px] text-xs font-medium text-zinc-500 hover:text-ink-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded"
           >
             {copied ? t.promo.linkCopied : `🔗 ${t.promo.shareGame}`}
           </button>

@@ -20,7 +20,15 @@ import { useT } from '../i18nContext';
  */
 export default function LegalFooter() {
   const { t } = useT();
-  const linkClass = 'underline underline-offset-2 hover:text-zinc-300 transition-colors';
+  // Visually quiet, but a REAL 44px tap target. These are read outdoors, one
+  // handed, often by a child or an older relative, and styling a link down to
+  // inline text leaves it 17px tall — measured, not guessed. The staff button on
+  // the join screen already carries this exact fix and this footer sits three
+  // lines below it, so the lesson was learned once and not applied to its
+  // neighbours. `inline-flex` + `min-h` rather than an invisible expanded hit
+  // area: these two links sit side by side, and overlapping hit boxes turn a
+  // mis-tap into "the wrong document opened".
+  const linkClass = 'inline-flex items-center justify-center min-h-[44px] px-3 underline underline-offset-2 hover:text-zinc-300 transition-colors';
   return (
     <p className="text-center text-[13px] text-zinc-500 mt-4">
       <a href="/terms" target="_blank" rel="noopener noreferrer" className={linkClass}>

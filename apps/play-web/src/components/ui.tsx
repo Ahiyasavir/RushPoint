@@ -151,8 +151,16 @@ export function Progress({ done, total, label }: { done: number; total: number; 
   );
 }
 
+// The page shell every participant screen sits in.
+//
+// `rp-safe-t` replaces a flat `pt-6` (change: play-top-overlay-stack). index.html
+// sets `viewport-fit=cover` and the manifest asks for `display: standalone`, so an
+// installed PWA and the Play Store TWA draw the page UNDER the status bar and the
+// notch. Only the fixed overlays folded that inset in; ordinary content did not,
+// which put the header — team name, score, leave — inside the cutout on every
+// notched phone. The same class also reserves room for a pushing top banner.
 export function Screen({ children }: { children: ReactNode }) {
-  return <div className="min-h-screen flex flex-col px-5 pt-6 rp-safe-b max-w-md mx-auto w-full">{children}</div>;
+  return <div className="min-h-screen flex flex-col px-5 rp-safe-t rp-safe-b max-w-md mx-auto w-full">{children}</div>;
 }
 
 // Content-shaped loading placeholder. Size via `className` (e.g. "h-4 w-24").

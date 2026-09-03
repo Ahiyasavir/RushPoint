@@ -139,7 +139,7 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
           disabled={sending}
           aria-label={t.chat.chatPlaceholder}
           placeholder={t.chat.chatPlaceholder}
-          className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
+          className="flex-1 min-w-0 min-h-[44px] rounded-full bg-app-raised border border-glass-border px-4 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
         />
         {/* bg-ink-fire, not bg-accent: white on #FF5722 is 3.16:1 (below AA).
             min-h-[44px] because this was a ~36px target, tapped one handed while

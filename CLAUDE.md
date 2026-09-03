@@ -886,6 +886,59 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   keyed limiter, store each key's OWN window beside its state — looking the window back up by
   bucket name returns `undefined` for override budgets and unknown buckets, which reads as
   "elapsed" and deletes a LIVE exhausted key, turning the cap off for whoever is hammering hardest.
+- **A fail-safe is a claim about what a missing value MEANS, and an unrelated change can
+  quietly falsify it.** `computeLocationRelevant` (now
+  `apps/play-web/src/lib/locationRelevance.ts`) decided whether to run GPS and draw the map,
+  and treated an active-stage task record with no sanitized content as *"unknown, assume
+  located"* — correct when the client received every task in the stage. Wave D
+  (play-task-gating) then made `getMyTeamState` ship content only for `assigned`/`completed`
+  tasks, so an UNASSIGNED task has no content **by design** and its absence says nothing
+  about location. Every stage holding one unassigned task — essentially every stage of every
+  game — hit the fail-safe on its first iteration and returned TRUE unconditionally. The
+  feature became dead code while reading as perfectly healthy: both halves typecheck, the
+  predicate is total, and the symptom is a map that appears when it should not, which looks
+  exactly like a map. It cost every locationless game a dead 208px placeholder above the
+  mission, a **browser location permission prompt** asked of a family playing indoors, and a
+  live `watchPosition` with its `updateLocation` pings — the write CLAUDE.md elsewhere calls
+  a hard Spark-tier design constraint. Found by PLAYING the seeded all-locationless demo, not
+  by any gate. Two rules follow. **When you narrow what a payload carries, grep for every
+  reader that treats absence as information.** And when a decision latches, the latch and the
+  verdict are different values: the pre-payload "assume TRUE" is an absence of data, not an
+  observation, and latching it pins the flag ON forever — the first repair of this bug did
+  exactly that and reproduced it with new code. `scripts/test-location-relevance.ts` pins
+  both.
+- **Tailwind emits NOTHING for a colour token that does not exist, silently.** `bg-app` (the
+  token is `app-card`; bare `app` has never existed) sat on both reorder buttons of the
+  ordering task, rendering them as unfilled ghosts on a warm row — which reads as "disabled",
+  not "tap me". No signal anywhere: typecheck does not see class strings, eslint does not know
+  the theme, the a11y scan checks contrast between tokens that DID resolve, and a screenshot
+  shows a button that merely looks subtle. `scripts/test-brand-class-scan.ts` now fails on any
+  utility naming a token absent from the app's own `tailwind.config.js`, scoped to our own
+  namespaces (`app`/`rp`/`ink`/`glass`/`accent`/`danger`) so every finding is certain rather
+  than a guess about Tailwind's default palette.
+- **A 44px tap-target fix applied to one control does not travel to its siblings.** The join
+  screen's staff button carries the comment *"Visually 11px to stay quiet, but a REAL 44px tap
+  target … styling it down to inline text shrank it to 17px."* Three links in the same
+  paragraph and the footer immediately below it still measured 17px, and the SOS alert's
+  "open the team's location" link in the staff console measured ~16px — the control a staff
+  member hits while responding to a distressed child. Measured, not guessed: the sizes come
+  from `getBoundingClientRect` in a real browser, which is the layout engine
+  `scripts/lib/playA11yScan.ts` correctly says a source scan does not have. A text-styled
+  `<a>`/`<button>` with no `min-h-` is line-height tall; use the house constants in
+  `apps/play-web/src/lib/interaction.ts`.
+- **Three independently-`fixed` overlays at three hardcoded top offsets is an overlap waiting
+  to happen.** The offline banner (top 0), power-up toast (0.75rem) and reconnect pill (2rem)
+  were each sized so that IT alone looked right, and are owned by two unrelated React trees,
+  so none could see the others; measured they span ~[0,28], ~[12,48] and ~[32,60]. Going
+  offline is precisely the event that raises the banner AND fails the poll. They now flow in
+  ONE fixed flex column (`.rp-top-stack`, `components/TopOverlays.tsx`), ordered by flex
+  `order` because portals mount in arbitrary sequence — so no combination can overlap however
+  many are added later. Related and separate: `viewport-fit=cover` + `display: standalone`
+  means an installed PWA/TWA draws UNDER the notch, and only those overlays folded in
+  `env(safe-area-inset-top)` — every page SHELL ran on a flat `pt-6`, putting the header
+  inside the cutout. Invisible in a browser tab, where the inset is 0 and browser chrome hides
+  it, so no desktop screenshot can ever show it. `.rp-safe-t` / `.rp-safe-t-flush` fix it;
+  `scripts/test-top-overlay-stack.ts` keeps every full-height shell declaring its intent.
 - **`text-zinc-*` is REVERSED in creator-web** (`tailwind.config.js` maps `zinc-700` → `#d6d3d1`),
   a leftover from the dark theme. On the light "Warm Trail" surfaces that is pale grey on beige
   (~1.2:1) — the map search results looked like a disabled control, which is most of why search

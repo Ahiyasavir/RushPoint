@@ -130,7 +130,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
   // "next" and a mouse may not be within reach.
   return (
     <div
-      className="min-h-screen bg-app-bg p-6 sm:p-10 flex flex-col cursor-pointer select-none"
+      className="min-h-screen bg-app-bg px-6 pb-6 sm:px-10 sm:pb-10 rp-safe-t flex flex-col cursor-pointer select-none"
       role="button"
       tabIndex={0}
       onClick={advance}

@@ -79,6 +79,13 @@
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#F97316" />
+    <!-- Both spellings, deliberately. `apple-mobile-web-app-capable` is the one iOS
+         actually reads and it is what makes an added-to-home-screen install run
+         without Safari chrome; Chrome now logs it as deprecated and wants the
+         standard `mobile-web-app-capable`. Dropping the apple one to silence the
+         warning would un-standalone the app on iPhone, which is most of the
+         audience, so ship both. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.webmanifest" />

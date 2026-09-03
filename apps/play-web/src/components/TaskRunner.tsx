@@ -951,7 +951,26 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
         {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
 
-        <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
+        {/* Viewer mode is `pointer-events-none` ONLY. It used to also carry
+            `opacity-60`, which is the same mistake the Button variant map (ui.tsx)
+            already documents for its disabled skin: opacity composites the element
+            toward the page, so it dims the LABEL as hard as the fill. Measured
+            against the primary CTA on this card, white on the gradient falls from
+            5.18:1 to 2.62:1 — under AA, and under even the 3:1 large-text floor —
+            while the mission text drops from 17.49:1 to 4.58:1. No alpha fixes it:
+            at 0.85, still readable-looking, the CTA label is 4.05:1.
+
+            And the tradeoff is upside down. A disabled control may be low contrast
+            (WCAG 1.4.3 exempts inactive components), but a viewer phone is not
+            looking at a disabled control — it is looking at the MISSION, which is
+            the whole reason a teammate is holding a phone at all. Most of a team
+            is viewers, reading this outdoors, in sun.
+
+            Nothing is lost by dropping it: `pointer-events-none` still refuses the
+            tap, `aria-disabled` still announces it, and the run already renders an
+            explicit "👀 {name} is playing" banner above the mission (PlayScreen),
+            which says in words what the dimming only hinted at. */}
+        <div className={readOnly ? 'mt-5 pointer-events-none' : 'mt-5'} aria-disabled={readOnly}>
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
             {t.task.checkArrival}
           </Button>
@@ -1022,7 +1041,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         })}
       />
 
-      <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
+      <div className={readOnly ? 'mt-5 pointer-events-none' : 'mt-5'} aria-disabled={readOnly}>
         {task.type === 'field' || task.type === 'self_report' ? (
           <>
             <Button disabled={frozen} loading={busy} onClick={field} data-testid="task-field-checkin">
@@ -1485,10 +1504,10 @@ function OrderingEntry({ items, busy, prefillOrder, onSubmit }: {
             <span dir="auto" className="flex-1 min-w-0 text-sm text-zinc-100">{item}</span>
             <button onClick={() => move(i, -1)} disabled={busy || i === 0}
               aria-label={`${t.task.orderingMoveUp} ${i + 1}`} data-testid="ordering-up" data-item={item}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app-card border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
             <button onClick={() => move(i, 1)} disabled={busy || i === arranged.length - 1}
               aria-label={`${t.task.orderingMoveDown} ${i + 1}`} data-testid="ordering-down" data-item={item}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app-card border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
           </li>
         ))}
       </ol>

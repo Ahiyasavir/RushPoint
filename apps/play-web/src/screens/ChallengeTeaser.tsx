@@ -182,11 +182,11 @@ export default function ChallengeTeaser({
           <p className="text-sm text-zinc-300 mb-3">{t.challenge.ctaTitle}</p>
           <Button className="w-full" onClick={onJoin}>{t.challenge.ctaJoin}</Button>
           <a href={CREATOR_URL} target="_blank" rel="noreferrer"
-            className="block mt-2 text-sm font-semibold text-ink-fire hover:text-ink-amber">
+            className="flex items-center justify-center min-h-[44px] mt-2 text-sm font-semibold text-ink-fire hover:text-ink-amber">
             {t.challenge.ctaBuild}
           </a>
           <button onClick={share} disabled={busy}
-            className="mt-3 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50">
+            className="inline-flex items-center justify-center min-h-[44px] px-3 mt-1 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50">
             {t.challenge.shareBtn}
           </button>
           {shareNote && (

@@ -71,9 +71,76 @@ body {
    Declared after @tailwind utilities so they win at equal specificity; env()
    resolves to 0px on a device with no cutout, so nothing else changes. */
 .rp-safe-b     { padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)); }
-.rp-safe-top-0 { top: env(safe-area-inset-top, 0px); }
-.rp-safe-top-3 { top: calc(0.75rem + env(safe-area-inset-top, 0px)); }
-.rp-safe-top-8 { top: calc(2rem + env(safe-area-inset-top, 0px)); }
+
+/* The TOP half of the same problem, and it was missing (change: play-top-overlay-stack).
+   `viewport-fit=cover` plus `display: standalone` in the manifest means an installed
+   PWA (and the Play Store TWA) draws the page UNDER the status bar and the notch.
+   Only the three FIXED overlays folded in the top inset; ordinary page content ran
+   on a flat `pt-6`, so on a notched phone the Screen shell put the team name, the
+   score and the leave button an inch INTO the cutout. It looked fine in a browser
+   tab, where the inset resolves to 0 and the browser chrome does the job for us,
+   which is why it survived: the bug is invisible in every context except the one
+   real players install.
+
+   `--rp-top-stack-h` is the measured height of the pushing banner slot below, so a
+   full-width banner (offline) makes room for itself instead of covering the header.
+   It resolves to 0px whenever nothing is banner-ing, which is the overwhelmingly
+   common case, and the transition keeps the reflow from reading as a glitch. */
+.rp-safe-t {
+  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px) + var(--rp-top-stack-h, 0px));
+  transition: padding-top 150ms ease-out;
+}
+/* Same inset, no comfort padding of its own — for a shell whose children already
+   bring their own top spacing (the join screen) or that sets its own larger pad
+   (the legal pages). Splitting it in two beats a variable base: every call site
+   reads as one of two intents rather than as arithmetic. */
+.rp-safe-t-flush {
+  padding-top: calc(env(safe-area-inset-top, 0px) + var(--rp-top-stack-h, 0px));
+  transition: padding-top 150ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-safe-t, .rp-safe-t-flush { transition: none; }
+}
+
+/* ── The top overlay stack (change: play-top-overlay-stack) ────────────────────
+   Three independent `position: fixed` overlays used to sit at three hardcoded top
+   offsets — 0, 0.75rem and 2rem — each sized so that IT alone looked right. They
+   are owned by two different React trees (ConnectionBanner from App, the pill and
+   the toast from PlayScreen), so nothing could see the others, and the offsets are
+   only far enough apart for one at a time:
+     offline banner  spans ~[0, 28]
+     power-up toast  spans ~[12, 48]   <- overlaps the banner
+     reconnect pill  spans ~[32, 60]   <- overlaps the toast
+   Going offline is precisely the event that raises the banner AND fails the poll,
+   so the collision was reachable in normal field play, not a corner case.
+
+   Flow beats arithmetic: ONE fixed container, children laid out as a flex column
+   with a real gap, so no combination of overlays can overlap no matter how many
+   are added later. Order is by flex `order` (see lib/topOverlays.ts), not DOM
+   order, because the children arrive by portal from unrelated trees and mount in
+   whatever sequence React happens to choose.
+
+   Two slots, because "push the page down" and "float over it" are different jobs:
+   a persistent full-width banner must not hide the header underneath it, while a
+   two-second toast must not shove the whole run down and back. */
+.rp-top-stack {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  inset-inline: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  /* Non-interactive by construction: every child is a status message. This also
+     fixes a smaller bug of its own — the offline banner had no pointer-events
+     rule, so while offline it silently ate taps in a full-width strip across the
+     top of the screen, which is where the header's leave button lives. */
+  pointer-events: none;
+}
+.rp-top-stack > * { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; width: 100%; }
+/* Only the banner slot is measured into --rp-top-stack-h. */
+.rp-top-banners:empty, .rp-top-toasts:empty { display: none; }
 
 /* Glass task card */
 .task-card-glass {

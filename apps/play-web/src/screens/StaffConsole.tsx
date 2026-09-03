@@ -195,7 +195,7 @@ function StaffSignIn({
         <Button disabled={busy || !ownerUid || !gameId || !runId || !name.trim() || !pin} loading={busy} onClick={() => void submitAction.run()} className="mt-5">
           {t.staff.signIn}
         </Button>
-        <button className="text-zinc-500 text-sm mt-4 mx-auto" onClick={onExit}>{t.staff.backToJoin}</button>
+        <button className="inline-flex items-center justify-center min-h-[44px] px-3 text-zinc-500 text-sm mt-2 mx-auto" onClick={onExit}>{t.staff.backToJoin}</button>
       </div>
     </Screen>
   );
@@ -414,7 +414,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const visibleTeams = useMemo(() => filterTeamsByName(teams, teamQuery), [teams, teamQuery]);
 
   return (
-    <div className="min-h-screen max-w-md mx-auto w-full px-5 py-6 flex flex-col">
+    <div className="min-h-screen max-w-md mx-auto w-full px-5 pb-6 rp-safe-t flex flex-col">
       <header className="flex items-center justify-between mb-5">
         <div>
           <h1 className="font-brand text-xl font-extrabold text-ink-fire">{t.staff.title}</h1>
@@ -430,7 +430,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         <div role="status" aria-live="polite" className="mb-3">
           <p className="text-danger text-xs">⚠ {t.staff[readErr.key]}</p>
           {readErr.sessionExpired && (
-            <button className="mt-1 text-xs font-semibold text-ink-fire underline" onClick={onSignOut}>
+            <button className="inline-flex items-center justify-center min-h-[44px] px-2 -ms-2 text-xs font-semibold text-ink-fire underline" onClick={onSignOut}>
               {t.staff.backToSignIn}
             </button>
           )}
@@ -453,7 +453,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
                   {a.lat != null && a.lng != null && (
                     <a
-                      className="text-ink-fire text-xs underline"
+                      className="inline-flex items-center min-h-[44px] px-2 -ms-2 text-ink-fire text-xs underline"
                       href={`https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lng}&travelmode=walking`}
                       target="_blank" rel="noreferrer"
                     >
@@ -462,7 +462,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   )}
                 </div>
                 <button
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-app-raised text-zinc-100 text-sm border border-glass-border disabled:opacity-40"
+                  className="shrink-0 inline-flex items-center justify-center min-h-[44px] px-3 rounded-lg bg-app-raised text-zinc-100 text-sm border border-glass-border disabled:opacity-40"
                   disabled={ackAction.isBusy(a.id)}
                   onClick={() => void ackAction.run(a)}
                 >
@@ -1002,7 +1002,7 @@ function StaffChatSection({
             const expanded = openTeam === th.teamId;
             return (
               <Card key={th.teamId} className="p-3 mb-2">
-                <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages)}>
+                <button className="w-full min-h-[44px] text-start" onClick={() => expand(th.teamId, th.messages)}>
                   <div className="flex items-center justify-between gap-2">
                     <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{nameFor(th.teamId)}</div>
                     {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">{t.chat.chatUnread}</span>}
@@ -1038,7 +1038,7 @@ function StaffChatSection({
                         dir="auto"
                         disabled={busy}
                         placeholder={t.chat.chatReplyPlaceholder}
-                        className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
+                        className="flex-1 min-w-0 min-h-[44px] rounded-full bg-app-raised border border-glass-border px-4 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
                       />
                       <button
                         onClick={() => void replyAction.run(th.teamId)}
@@ -1171,7 +1171,7 @@ function StaffAdminChannelSection({
               dir="auto"
               disabled={sendAction.busy}
               placeholder={t.staff.channelPlaceholder}
-              className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
+              className="flex-1 min-w-0 min-h-[44px] rounded-full bg-app-raised border border-glass-border px-4 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
             />
             <button
               onClick={() => void sendAction.run()}

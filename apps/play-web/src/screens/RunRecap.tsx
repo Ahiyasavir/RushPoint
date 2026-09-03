@@ -134,7 +134,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
           </p>
         )}
         <a href={CREATOR_URL} target="_blank" rel="noreferrer"
-          className="block text-center text-sm font-semibold text-ink-fire hover:text-ink-amber">
+          className="flex items-center justify-center min-h-[44px] text-sm font-semibold text-ink-fire hover:text-ink-amber">
           {t.recap.buildOwn}
         </a>
       </div>

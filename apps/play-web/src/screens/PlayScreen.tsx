@@ -13,6 +13,10 @@ import { heldNotice } from '../lib/holdNotice';
 // Which sealed hidden missions may be drawn as a search circle
 // (change: hidden-mission-search-area).
 import { selectSearchAreas } from '../lib/searchAreas';
+// Whether to run GPS and draw the map at all. Extracted from this file so the
+// decision is unit-testable — it had silently latched ON for every game; see
+// lib/locationRelevance.ts (change: locationless-fail-safe-vs-task-gating).
+import { computeLocationRelevant } from '../lib/locationRelevance';
 import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
@@ -20,6 +24,8 @@ import TaskRunner from '../components/TaskRunner';
 import { LoadingView } from '../components/LoadingView';
 import TeamDevicesPanel from '../components/TeamDevicesPanel';
 import InRunAlerts from '../components/InRunAlerts';
+// Shared top overlay stack (change: play-top-overlay-stack) — see components/TopOverlays.tsx.
+import { TopOverlay } from '../components/TopOverlays';
 import type { NavTarget } from '../components/NavMap';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
@@ -46,44 +52,6 @@ const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
-// "Is location relevant right now?" (change: locationless-no-gps-no-map).
-// TRUE if ANYTHING located could appear on the map or drive GPS this render:
-// a real task pin, a sealed-hidden search area, a territory zone, an active hot
-// zone, or a sealed hidden task awaiting a GPS-confirmed arrival. Only when ALL
-// of those are absent (the confidently pure-locationless case, e.g. the
-// all-locationless "Pocket Spy Academy" demo) is it FALSE.
-//
-// Fail SAFE toward today's behavior: total and never throws — if state isn't
-// loaded yet, or any piece is missing/undefined, it returns TRUE, so a located
-// game keeps its GPS watcher + map exactly as before. Suppression only happens
-// when we are CONFIDENT nothing is located.
-function computeLocationRelevant(state: MyTeamState | null, zones: CaptureZone[]): boolean {
-  if (!state) return true; // not loaded yet — keep current behavior
-  try {
-    if (zones.length > 0) return true;
-    if (state.run?.hotZone) return true;
-    const contents = state.activeStageTasks ?? [];
-    // A sealed hidden task is unsealed by a server-verified GPS arrival, so it
-    // MUST count as location-relevant (it also draws completed pins + a circle).
-    if (contents.some((c) => c.arrivalPending)) return true;
-    if (selectSearchAreas(contents).length > 0) return true;
-    const stage = state.team?.stages?.find((s) => s.status === 'active');
-    if (stage) {
-      for (const rec of stage.tasks) {
-        if (rec.status === 'completed' || rec.status === 'skipped') continue;
-        const content = contents.find((c) => c.id === rec.taskId);
-        if (!content) return true; // unknown content → assume located (fail safe)
-        if (content.locationless) continue;
-        if (content.arrivalPending) continue; // sealed — no pin (handled above)
-        const coords = content.smart?.stationCoords ?? content.coordinates;
-        if (coords && (coords.lat !== 0 || coords.lng !== 0)) return true;
-      }
-    }
-    return false;
-  } catch {
-    return true; // never throw — default to current (located) behavior
-  }
-}
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const { t, lang } = useT();
@@ -155,6 +123,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // for teams with nothing sealed.
   const pendingArrivalRef = useRef<string | null>(null);
   const lastArrivalProbe = useRef(0);
+  // Latch for the location verdict above. A ref, not state: it must never itself
+  // trigger a render, and it is read during render right after it is written.
+  const everLocationRelevant = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -279,7 +250,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // the map block. A boolean, so the watcher effect only re-mounts when the value
   // actually flips (not on every poll). When a later located stage flips it true,
   // the watcher starts THEN — so an all-locationless demo never prompts for GPS.
-  const locationRelevant = computeLocationRelevant(state, zones);
+  // Sticky: a game does not shed its places mid-run, and re-judging each render
+  // would make the map vanish and return in the gap between two missions — a
+  // ~224px layout jump twice per mission. See lib/locationRelevance.ts.
+  // The latch is deliberately NOT the same value as the verdict: the pre-payload
+  // TRUE is a safe default, not an observation, and latching it would pin every
+  // game ON from its first render. See lib/locationRelevance.ts.
+  const locationVerdict = computeLocationRelevant(state, zones, everLocationRelevant.current);
+  const locationRelevant = locationVerdict.relevant;
+  everLocationRelevant.current = locationVerdict.latch;
 
   // Track the participant's live position for the navigation map, and report it
   // to the host's live team map (throttled to once per ~20s, only while active).
@@ -801,13 +780,18 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 // screen and this reassures the player it's syncing (never a full-screen takeover).
 function ReconnectingPill({ show, text }: { show: boolean; text: string }) {
   if (!show) return null;
+  // In the shared top stack's TOAST slot (change: play-top-overlay-stack): it
+  // floats, because a poll that fails for one cycle and recovers must not shove
+  // the mission down and back. It sits BELOW the offline banner when both show,
+  // which is the pair that actually co-occurs: losing the radio is what fails the
+  // poll, and the two used to be laid out as though only one could ever exist.
   return (
-    <div className="fixed rp-safe-top-8 inset-x-0 z-40 flex justify-center pointer-events-none" role="status" aria-live="polite">
-      <div className="flex items-center gap-2 rounded-full bg-zinc-800/90 text-zinc-100 text-xs px-3 py-1.5 shadow">
+    <TopOverlay kind="reconnecting">
+      <div className="flex items-center gap-2 rounded-full bg-zinc-800/90 text-zinc-100 text-xs px-3 py-1.5 shadow" role="status" aria-live="polite">
         <span className="w-3 h-3 rounded-full border-2 border-zinc-400/40 border-t-zinc-100 animate-spin" />
         {text}
       </div>
-    </div>
+    </TopOverlay>
   );
 }
 
@@ -1073,7 +1057,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
                   aria-selected={active === tab.id}
                   onClick={() => setPicked(tab.id)}
                   data-testid={`more-tab-${tab.id}`}
-                  className={`shrink-0 inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                  className={`shrink-0 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg text-xs font-semibold border transition-colors ${
                     active === tab.id
                       ? 'bg-rp-fire/15 border-rp-fire/40 text-ink-fire'
                       : 'bg-app-card border-glass-border text-zinc-400'
@@ -1460,10 +1444,11 @@ function PowerUpToast({ type }: { type: 'double_points' | 'bonus_points' | null 
   if (!type) return null;
   const text = type === 'double_points' ? t.play.powerUpDoubleToast : t.play.powerUpBonusToast;
   return (
-    <div role="status" aria-live="polite" className="fixed inset-x-0 rp-safe-top-3 z-50 flex justify-center px-4 pointer-events-none">
-      <div className="rounded-full bg-ink-fire text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
+    <TopOverlay kind="powerUp">
+      <div role="status" aria-live="polite"
+        className="max-w-[calc(100%-2rem)] rounded-full bg-ink-fire text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
         {text}
       </div>
-    </div>
+    </TopOverlay>
   );
 }
