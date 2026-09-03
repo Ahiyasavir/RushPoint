@@ -11,7 +11,7 @@ OUT = os.path.dirname(os.path.abspath(__file__))
 SS = 2
 W, H = 2480 * SS, 3508 * SS
 M = 172 * SS
-BOT = int(H * 0.775)          # map elements stop here; CTA owns the bottom band
+TZ = int(H * 0.808)
 
 PHONE = "055 964 1404"
 WA = "https://wa.me/972559641404?text=%D7%9E%D7%99%D7%A8%D7%95%D7%A5"
@@ -79,8 +79,8 @@ def catmull(p, k=40):
             y=0.5*((2*p1[1])+(-p0[1]+p2[1])*t+(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2+(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3)
             o.append((x,y))
     return o
-anchors = [(W*0.31, H*0.765), (W*0.21, H*0.66), (W*0.35, H*0.58),
-           (W*0.19, H*0.49), (W*0.34, H*0.41), (W*0.22, H*0.34),
+anchors = [(W*0.30, H*0.80), (W*0.22, H*0.73), (W*0.35, H*0.63),
+           (W*0.19, H*0.52), (W*0.34, H*0.42), (W*0.22, H*0.35),
            (CX + 4*SS, CY + 8*SS)]
 path = catmull(anchors)
 seg=[0.0]
@@ -96,7 +96,7 @@ d,g = 42*SS, 24*SS
 s=0.0
 while s<total:
     a,b = at(s), at(min(s+d,total))
-    if a[1] < BOT and b[1] < BOT:
+    if a[1] < TZ-18*SS and b[1] < TZ-18*SS:
         draw.line([a,b], fill=ORANGE, width=13*SS)
     s += d+g
 
@@ -113,11 +113,10 @@ for k, fr in enumerate(frac):
 # terrain = jackpot map: a pot gauge climbing the left edge
 GX = M
 draw.text((GX, H*0.30), He("הקופה"), font=f_sb(32*SS), fill=(*ORANGE_DK,230))
-for (gy, amt, dx) in [(0.735,"100,000",26*SS), (0.62,"300,000",0), (0.50,"500,000",0),
-                      (0.375,"700,000",0), (0.245,"900,000",0)]:
+for (gy, amt) in [(0.66,"200,000"), (0.52,"400,000"), (0.375,"600,000"), (0.235,"800,000")]:
     yy = H*gy
-    draw.line([(GX+dx, yy),(GX+dx+30*SS, yy)], fill=(*INK,120), width=3*SS)
-    draw.text((GX+dx+44*SS, yy), amt, font=f_mono(32*SS), fill=(*INK,170), anchor="lm")
+    draw.line([(GX, yy),(GX+30*SS, yy)], fill=(*INK,120), width=3*SS)
+    draw.text((GX+44*SS, yy), amt, font=f_mono(32*SS), fill=(*INK,170), anchor="lm")
 
 draw.polygon([(CX, CY-40*SS),(CX-32*SS, CY+22*SS),(CX+32*SS, CY+22*SS)], fill=INK)
 draw.text((CX+54*SS, CY-6*SS),  "1,000,000", font=f_monob(48*SS), fill=INK, anchor="lm")
@@ -161,38 +160,38 @@ draw.line([(RIGHT-560*SS, M-4*SS),(RIGHT, M-4*SS)], fill=INK, width=3*SS)
 rtext(M + 8*SS, "תצפית שדה · ירושלים", f_reg(34*SS), tracking=8*SS)
 
 # HEADLINE
-HS = 380*SS
-rtext(Y(0.078),  "המירוץ",  f_head(HS))
-rtext(Y(0.196),  "למיליון", f_head(HS), fill=ORANGE)
-uy = Y(0.302)
+HS = 336*SS
+rtext(Y(0.086),  "המירוץ",  f_head(HS))
+rtext(Y(0.193),  "למיליון", f_head(HS), fill=ORANGE)
+uy = Y(0.286)
 draw.line([(RIGHT-tl("למיליון", f_head(HS)), uy),(RIGHT, uy)], fill=ORANGE, width=9*SS)
 
 # RushPoint bar — prominent, sized tight around its own type
-rbx0, rby0 = int(W*0.40), Y(0.318)
-rpf1, rpf2 = f_bold(64*SS), f_sb(38*SS)
-rph = 34*SS + 76*SS + 16*SS + 50*SS + 30*SS
+rbx0, rby0 = int(W*0.40), Y(0.300)
+rpf1, rpf2 = f_bold(58*SS), f_sb(34*SS)
+rph = 30*SS + 68*SS + 14*SS + 44*SS + 26*SS
 draw.rectangle([rbx0, rby0, RIGHT, rby0+rph], fill=INK)
-ctext((rbx0+RIGHT)/2, rby0 + 34*SS, "רץ על RushPoint", rpf1, fill=BONE)
-ctext((rbx0+RIGHT)/2, rby0 + 34*SS + 76*SS + 16*SS, "פלטפורמה מקצועית למשחקי פעולה", rpf2, fill=BONE)
+ctext((rbx0+RIGHT)/2, rby0 + 30*SS, "רץ על RushPoint", rpf1, fill=BONE)
+ctext((rbx0+RIGHT)/2, rby0 + 30*SS + 68*SS + 14*SS, "מערכת מקצועית למירוצי שטח", rpf2, fill=BONE)
 rby1 = rby0 + rph
 
 # sub
-rtext(Y(0.416), "יום הולדת אקשן בחוץ · לגילאי 10 עד 15", f_bold(64*SS))
+rtext(Y(0.372), "יום הולדת אקשן בחוץ · לגילאי 10 עד 15", f_bold(76*SS))
 # explaining sentence
-rtext(Y(0.486), "מתחלקים לצוותים ורצים בין תחנות עם משימות בטלפון.", f_reg(52*SS))
-rtext(Y(0.522), "כל משימה מקפיצה את הקופה המשותפת למעלה.", f_reg(52*SS))
+rtext(Y(0.424), "מתחלקים לצוותים ורצים בין תחנות עם משימות בטלפון.", f_reg(54*SS))
+rtext(Y(0.456), "כל משימה מקפיצה את הקופה המשותפת למעלה.", f_reg(54*SS))
 # spec
-draw.line([(RIGHT-1200*SS, Y(0.572)-20*SS),(RIGHT, Y(0.572)-20*SS)], fill=INK, width=2*SS)
-rtext(Y(0.576), "עד 30 משתתפים   ·   משך זמן גמיש", f_sb(50*SS))
-rtext(Y(0.614), "המשחק מותאם אישית לאירוע שלכם", f_sb(50*SS))
+draw.line([(RIGHT-1120*SS, Y(0.502)-18*SS),(RIGHT, Y(0.502)-18*SS)], fill=INK, width=2*SS)
+rtext(Y(0.506), "עד 50 משתתפים   ·   משך זמן גמיש", f_sb(46*SS))
+rtext(Y(0.540), "המשחק מותאם אישית לאירוע שלכם", f_sb(46*SS))
 
 # THE TWIST
-draw.line([(RIGHT-1320*SS, Y(0.666)-30*SS),(RIGHT, Y(0.666)-30*SS)], fill=ORANGE, width=5*SS)
-rtext(Y(0.670), "חמש התחנות שעל המפה מסתירות מילה.", f_bold(64*SS))
-rtext(Y(0.714), "אמרו אותה בטלפון, וזה מחיר המייסדים שלכם.", f_reg(54*SS))
+draw.line([(RIGHT-1240*SS, Y(0.582)-28*SS),(RIGHT, Y(0.582)-28*SS)], fill=ORANGE, width=5*SS)
+rtext(Y(0.586), "חמש התחנות שעל המפה מסתירות מילה.", f_bold(60*SS))
+rtext(Y(0.626), "אמרו אותה בטלפון, וזה מחיר המייסדים שלכם.", f_reg(50*SS))
 
 # safety
-rtext(Y(0.756), "אזור בטוח מסומן מראש · מבוגר מלווה · אני מגיע ומפעיל.", f_reg(44*SS))
+rtext(Y(0.664), "אזור בטוח מסומן מראש · מבוגר מלווה · אתם רק מביאים עוגה.", f_reg(42*SS))
 
 # =====================================================================
 #                CTA BLOCK  (phone + embedded QR) — sized to its own type
@@ -214,10 +213,10 @@ def tl2(s, font): return draw.textlength(s, font=font)
 # ---- CTA text block: narrow, sized to its own three lines ----------
 label_s = "לתיאום תאריך · שיחה קצרה, בלי התחייבות"
 code_s  = "המילה מהמפה היא הקוד שאומרים בשיחה"
-label_f = f_sb(42*SS)
-phone_f = f_head(132*SS)
-code_f  = f_sb(32*SS)
-pad_t, gap_t = 40*SS, 26*SS
+label_f = f_sb(38*SS)
+phone_f = f_head(120*SS)
+code_f  = f_sb(28*SS)
+pad_t, gap_t = 34*SS, 22*SS
 track = 5*SS
 
 label_h, phone_h, code_h = glyph_h(label_f), glyph_h(phone_f), glyph_h(code_f)
@@ -226,25 +225,8 @@ phone_w = sum(tl2(c, phone_f) for c in PHONE) + track*(len(PHONE)-1)
 text_w  = max(tl2(He(label_s), label_f), phone_w, tl2(He(code_s), code_f)) + 2*pad_t
 text_h  = text_col_h + 2*pad_t
 
-BAND_Y = Y(0.796)
-# ---- QR block: its own block, sitting just left of the text block --
-QS = 340*SS   # much larger now that the tear-offs are gone
-qc_s = "סרקו לוואטסאפ עם הקוד"
-qc_f = f_sb(38*SS)
-pad_q, cap_gap = 32*SS, 18*SS
-qc_h = glyph_h(qc_f)
-q_w = max(QS, draw.textlength(He(qc_s), font=qc_f)) + 2*pad_q
-q_h = QS + cap_gap + qc_h + 2*pad_q
-
-q_x0 = M
-q_x1 = q_x0 + q_w
-q_y0 = BAND_Y
-draw.rounded_rectangle([q_x0, q_y0, q_x1, q_y0+q_h], radius=18*SS, fill=INK)
-
-# the text block, right-aligned, vertically centred against the QR block
-text_x1 = RIGHT
+text_x1, text_y0 = RIGHT, Y(0.701)
 text_x0 = text_x1 - text_w
-text_y0 = BAND_Y + (q_h - text_h)//2
 draw.rounded_rectangle([text_x0, text_y0, text_x1, text_y0+text_h], radius=18*SS, fill=INK)
 tr = text_x1 - pad_t
 tyy = text_y0 + pad_t
@@ -254,22 +236,58 @@ ltext_right(tr, tyy, PHONE, phone_f, BONE, tracking=track)
 tyy += phone_h + gap_t
 rtext(tyy, code_s, code_f, fill=BONE, right=tr)
 
+# ---- QR block: its own block, sitting just left of the text block --
+QS = 212*SS   # a bit bigger than before, still budget-checked against TZ
+qc_s = "סרקו לוואטסאפ עם הקוד"
+qc_f = f_sb(25*SS)
+pad_q, cap_gap = 26*SS, 16*SS
+qc_h = glyph_h(qc_f)
+q_w = QS + 2*pad_q
+q_h = QS + cap_gap + qc_h + 2*pad_q
+
+q_x1 = text_x0 - 46*SS
+q_x0 = q_x1 - q_w
+q_y0 = text_y0 + (text_h - q_h)//2
+draw.rounded_rectangle([q_x0, q_y0, q_x1, q_y0+q_h], radius=18*SS, fill=INK)
+
 qr = segno.make(WA, error='h')
 qp = os.path.join(OUT, "_qr.png")
 qr.save(qp, scale=20, dark="#191713", light="#f4ecde", border=1)
 qim = Image.open(qp).convert("RGB").resize((QS, QS), Image.NEAREST)
-qx, qy = int(q_x0 + (q_w - QS)//2), int(q_y0 + pad_q)
+qx, qy = int(q_x0 + pad_q), int(q_y0 + pad_q)
 img.paste(qim, (qx, qy)); draw = ImageDraw.Draw(img, "RGBA")
-draw.rectangle([qx,qy,qx+QS,qy+QS], outline=BONE, width=4*SS)
-ctext(q_x0 + q_w/2, qy+QS+cap_gap, qc_s, qc_f, fill=BONE)
+draw.rectangle([qx,qy,qx+QS,qy+QS], outline=BONE, width=3*SS)
+ctext(qx+QS/2, qy+QS+cap_gap, qc_s, qc_f, fill=BONE)
 
-fy = H - int(M*0.80)
-rtext(fy - 2*SS, "מופעל על RushPoint · פלטפורמה מקצועית למשחקי פעולה", f_sb(26*SS), fill=(*INK,170))
+# =====================================================================
+#                        TEAR-OFF STRIPS  (many, thin)
+# =====================================================================
+draw.rectangle([M//2+2*SS, TZ, W-M//2-2*SS, H-M//2-2*SS], fill=BONE)
+draw.line([(M, TZ),(W-M, TZ)], fill=INK, width=4*SS)
+rtext(TZ - 40*SS, "גזרו · קחו · התקשרו", f_sb(30*SS))
+draw.text((M, TZ - 36*SS), "↓ ↓ ↓", font=f_reg(28*SS), fill=ORANGE)
+NST = 11
+sw = (W-2*M)/NST
+sh = int(H - M*0.5 - TZ - 34*SS); sbot = int(H - M*0.5)
+for i in range(NST):
+    x = M + i*sw
+    if i % 2: draw.rectangle([x, TZ+2*SS, x+sw, sbot], fill=BONE_DEEP)
+    if i:
+        for yy in range(int(TZ)+12*SS, sbot, 30*SS):
+            draw.line([(x,yy),(x,yy+16*SS)], fill=(*INK,150), width=2*SS)
+    tmp = Image.new("RGBA", (sh, int(sw)), (0,0,0,0)); td = ImageDraw.Draw(tmp)
+    td.text((sh*0.07, sw*0.5), He("המירוץ למיליון"), font=f_sb(38*SS), fill=INK, anchor="lm")
+    td.text((sh*0.58, sw*0.5), PHONE, font=f_monob(32*SS), fill=ORANGE_DK, anchor="lm")
+    strip = tmp.rotate(-90, expand=True)
+    img.paste(strip, (int(x+(sw-strip.width)/2), int(TZ+22*SS)), strip)
+
+fy = H - int(M*0.42)
+rtext(fy - 2*SS, "מופעל על RushPoint · מערכת מקצועית למירוצי שטח", f_sb(24*SS), fill=(*INK,170))
 draw.text((M, fy), "SHEET RP 01 · REV A", font=f_mono(22*SS), fill=(*INK,150))
 
 ndv = int(W*0.40)
-draw.line([(ndv, M//2),(ndv, Y(0.775))], fill=(*INK,50), width=2*SS)
-for yy in range(M, int(Y(0.775)), 230*SS):
+draw.line([(ndv, M//2),(ndv, TZ)], fill=(*INK,50), width=2*SS)
+for yy in range(M, int(TZ), 230*SS):
     draw.line([(ndv-10*SS, yy),(ndv+10*SS, yy)], fill=(*INK,50), width=2*SS)
 draw.rectangle([M//2, M//2, W-M//2, H-M//2], outline=(*INK,105), width=2*SS)
 
@@ -278,5 +296,4 @@ png = os.path.join(OUT, "mirotz-lamillion-poster.png")
 pdf = os.path.join(OUT, "mirotz-lamillion-poster.pdf")
 out.save(png, dpi=(300,300)); out.save(pdf, "PDF", resolution=300.0)
 os.remove(qp)
-print("band:", BAND_Y/SS, "->", (BAND_Y+max(text_h,q_h))/SS, " footer:", fy/SS, " frame:", (H-M//2)/SS)
 print("wrote", png, "and", pdf)
