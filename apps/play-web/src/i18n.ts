@@ -229,6 +229,9 @@ const HE = {
     uploadingAudio: 'מעלה הקלטה…',
     uploadingVideo: 'מעלה סרטון…',
     uploadingPercent: ({ pct }: { pct: number }) => `מעלה… ${pct}%`,
+    // Shown while an upload is in flight but has not reported a percentage yet —
+    // on a weak uplink that gap can be seconds, and silence there reads as a freeze.
+    uploadStarting: 'מתחיל להעלות…',
     uploadRetrying: 'הרשת איטית. מנסים שוב…',
     photoNotCompressed: 'לא הצלחנו לכווץ את התמונה, ההעלאה עשויה להיות איטית.',
     approved: 'אושר!',
@@ -964,6 +967,7 @@ const EN: typeof HE = {
     uploadingAudio: 'Uploading recording…',
     uploadingVideo: 'Uploading video…',
     uploadingPercent: ({ pct }: { pct: number }) => `Uploading… ${pct}%`,
+    uploadStarting: 'Starting upload…',
     uploadRetrying: 'Slow network. Retrying…',
     photoNotCompressed: "We couldn't shrink the photo, the upload may be slow.",
     approved: 'Approved!',

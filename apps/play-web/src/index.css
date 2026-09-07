@@ -203,3 +203,15 @@ body {
   .rp-working-sweep { animation: none; }
   .rp-card-exit { animation: none; }
 }
+
+/* Indeterminate upload bar — used while an upload is in flight but has not yet
+   reported a percentage. A still bar at 0% is indistinguishable from a frozen
+   app, which is the whole defect this exists to close. */
+@keyframes rp-indeterminate-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.rp-indeterminate { animation: rp-indeterminate-slide 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-indeterminate { animation: none; width: 100%; opacity: 0.5; }
+}

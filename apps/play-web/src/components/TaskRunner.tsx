@@ -1756,6 +1756,44 @@ const MAX_PHOTO_BYTES = 12 * 1024 * 1024; // 12 MB — the cap on the COMPRESSED
 // this only rejects genuinely absurd inputs early.
 const MAX_RAW_PHOTO_BYTES = 40 * 1024 * 1024; // 40 MB
 
+// ─── Upload feedback, shared by every media entry ────────────────────────────
+// This used to live INLINE inside PhotoEntry only, so a 20 MB video on a weak
+// uplink — the slowest upload in the product, with a 45 s stall detector and a
+// 180 s per-attempt ceiling behind it — rendered NOTHING at all and read as a
+// frozen app. The progress/retrying values were already published globally by
+// uploadResilient() in services/firebase.ts; audio and video simply never
+// subscribed. Extracted rather than copied twice so the next media type cannot
+// repeat the omission.
+//
+// It renders whenever `busy`, not only once a percentage exists: on a slow link
+// the first progress event can be seconds away, and that gap was itself part of
+// the freeze.
+function UploadProgress({ busy }: { busy: boolean }) {
+  const { t } = useT();
+  const [pct, setPct] = useState<number | null>(getUploadProgress());
+  const [retrying, setRetrying] = useState(getUploadRetrying());
+  useEffect(() => {
+    const un1 = subscribeUploadProgress(setPct);
+    const un2 = subscribeUploadRetrying(setRetrying);
+    return () => { un1(); un2(); };
+  }, []);
+  if (!busy) return null;
+  const known = pct !== null;
+  return (
+    <div className="space-y-1" data-testid="upload-progress">
+      <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+        <div
+          className={known ? 'h-full bg-rp-fire transition-all duration-200' : 'h-full w-1/3 bg-rp-fire rp-indeterminate'}
+          style={known ? { width: `${pct}%` } : undefined}
+        />
+      </div>
+      <p className="text-xs text-zinc-400" dir="auto" aria-live="polite">
+        {retrying ? t.task.uploadRetrying : known ? t.task.uploadingPercent({ pct: pct as number }) : t.task.uploadStarting}
+      </p>
+    </div>
+  );
+}
+
 function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) => void }) {
   const { t } = useT();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1765,16 +1803,6 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
   // A full-size fallback (compression failed) is the difference between a 400 KB
   // and a 5 MB upload — tell the player instead of letting it look like a freeze.
   const [warn, setWarn] = useState('');
-  // Live upload progress, published by uploadResilient() in services/firebase.ts.
-  // A store rather than a prop because the upload is kicked off by TaskRunner's
-  // photo() several components away. See docs/wave-a/upload-resiliency.md.
-  const [pct, setPct] = useState<number | null>(getUploadProgress());
-  const [retrying, setRetrying] = useState(getUploadRetrying());
-  useEffect(() => {
-    const un1 = subscribeUploadProgress(setPct);
-    const un2 = subscribeUploadRetrying(setRetrying);
-    return () => { un1(); un2(); };
-  }, []);
   // Track the live object URL so we can revoke the previous one (and clean up on
   // unmount) — otherwise each re-pick leaks a blob URL.
   const prevPreviewRef = useRef<string | null>(null);
@@ -1824,17 +1852,8 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
       {fileErr && <p className="text-ink-alert text-sm">{fileErr}</p>}
       {!fileErr && warn && <p className="text-sm text-zinc-400" data-testid="photo-warn">{warn}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
-      {/* Determinate progress: a slow upload must never look like a frozen app. */}
-      {busy && pct !== null && (
-        <div className="space-y-1" data-testid="photo-progress">
-          <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
-            <div className="h-full bg-rp-fire transition-all duration-200" style={{ width: `${pct}%` }} />
-          </div>
-          <p className="text-xs text-zinc-400" dir="auto">
-            {retrying ? t.task.uploadRetrying : t.task.uploadingPercent({ pct })}
-          </p>
-        </div>
-      )}
+      {/* A slow upload must never look like a frozen app. */}
+      <UploadProgress busy={busy} />
       <Button disabled={!canSubmit} onClick={() => file && onSubmit(file)} data-testid="photo-submit">
         {busy ? t.task.working : t.task.submitPhoto}
       </Button>
@@ -2086,6 +2105,7 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
               {busy ? t.task.working : t.task.submitAudio}
             </Button>
           </div>
+          <UploadProgress busy={busy} />
         </div>
       ) : (
         <Button disabled={busy} onClick={start}>{t.task.startRecording}</Button>
@@ -2522,6 +2542,7 @@ function VideoEntry({ smart, busy, onSubmit }: {
             {busy ? t.task.working : t.task.submitVideo}
           </Button>
         </div>
+        <UploadProgress busy={busy} />
       </div>
     );
   }
