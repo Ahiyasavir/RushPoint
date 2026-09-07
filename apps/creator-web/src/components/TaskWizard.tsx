@@ -60,6 +60,12 @@ import {
   type LocationChoice, TIGHT_RADIUS_M, DEFAULT_RADIUS_M, CHOICE_ICON_MODE,
   locationChoiceOf, skipsGpsCheck, locationChoicePatch, radiusPatch, skipGpsPatch,
 } from '../lib/locationPicker';
+// הקמה מהירה, guided mode (change: quick-setup-guided-editor): what this editor
+// shows while the flow is driving it. The decisions are all THERE; here we obey.
+import {
+  guidedEditorView, guidedLocationView, GUIDED_BODY_CLASS, GUIDED_KEEP_CLASS,
+} from '../lib/guidedEditor';
+import { missionSummaryLine } from '../lib/quickSetup';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -87,7 +93,7 @@ const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[]
 
 export default function TaskWizard({
   task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings, revealAll,
-  focusTab, focusGroup, focusNonce,
+  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors,
 }: {
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
   onClose: () => void; closeLabel: string; gameId?: string;
@@ -107,6 +113,22 @@ export default function TaskWizard({
   focusTab?: 'location' | 'details' | 'execution' | null;
   focusGroup?: OptInGroupKey | 'locationAdvanced' | null;
   focusNonce?: number;
+  // GUIDED MODE (change: quick-setup-guided-editor). True while הקמה מהירה is on
+  // screen: the editor then answers ONE question — the control `guidedAnchor`
+  // names — and everything the template already decided (which kind of mission
+  // this is, its samples, the tab strip, delete, the editor's own next/back) is
+  // withheld until the creator leaves the flow. `onExitGuided` IS that exit, and
+  // it is offered inside the strip so "I want to change something else" is never
+  // a dead end. Every unknown falls back to the full editor — see lib/guidedEditor.
+  guided?: boolean;
+  guidedAnchor?: string | null;
+  onExitGuided?: () => void;
+  // Every PLACED mission of the WHOLE game (change: location-picker-game-anchor)
+  // — not `siblings`, which is this stage only, and a creator's second mission is
+  // routinely in a different stage from the first. Decides the view the map opens
+  // on when THIS mission has no pin yet, so mission two starts on mission one's
+  // street instead of on a zoom-8 view of the country.
+  gameAnchors?: readonly { lat: number; lng: number }[];
 }) {
   const t = useT();
   const b = t.builder;
@@ -167,6 +189,63 @@ export default function TaskWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
 
+  // What this editor renders right now. Every branch below reads `view`; nothing
+  // below re-derives "are we guided?" for itself.
+  const view = guidedEditorView({ guided, anchor: guidedAnchor });
+
+  // ── Guided isolation (change: quick-setup-guided-editor) ────────────────────
+  // Find the section that HOLDS the current step's control, mark it, and only
+  // THEN let the hiding rule apply to its siblings. Survivor first is the whole
+  // safety argument: the CSS is scoped to `.rp-guided`, which is added last, so a
+  // control that never appears leaves the editor untouched rather than empty.
+  //
+  // A DOM query rather than a prop threaded through every section: the anchors
+  // already exist (they are what Quick Setup's focus ring aims at) and there are
+  // two dozen of them spread across three step bodies and a dozen sub-components.
+  // Wrapping each one by hand would mean a new field silently opting OUT of
+  // isolation, which is the failure this codebase keeps re-learning; here a field
+  // with no anchor simply isolates nothing. Same retry budget and the same
+  // tolerance as `useQuickSetupFocus` in QuickSetup.tsx, and for the same reason:
+  // the tab switch above lands a render or two later.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const clear = (): void => {
+      root.querySelectorAll(`.${GUIDED_BODY_CLASS}`).forEach((el) => el.classList.remove(GUIDED_BODY_CLASS));
+      root.querySelectorAll(`.${GUIDED_KEEP_CLASS}`).forEach((el) => el.classList.remove(GUIDED_KEEP_CLASS));
+    };
+    clear();
+    const anchor = view.isolateAnchor;
+    if (!anchor) return undefined;
+    let poll: number | undefined;
+    const deadline = performance.now() + 3000;
+    const apply = (): void => {
+      const target = root.querySelector(`[data-qs-field="${CSS.escape(anchor)}"]`);
+      if (!target) {
+        if (performance.now() < deadline) poll = window.setTimeout(apply, 60);
+        return;
+      }
+      const body = target.closest('[data-qs-body]');
+      // No list to isolate within, or the anchor IS the whole list (the location
+      // step marks its own root `coordinates`): there is nothing to subtract, and
+      // subtracting nothing is the correct answer, not a retry.
+      if (!body || body === target) return;
+      let keeper: Element = target;
+      while (keeper.parentElement && keeper.parentElement !== body) keeper = keeper.parentElement;
+      if (keeper.parentElement !== body) return;
+      keeper.classList.add(GUIDED_KEEP_CLASS);
+      body.classList.add(GUIDED_BODY_CLASS);
+    };
+    poll = window.setTimeout(apply, 0);
+    return () => {
+      if (poll) window.clearTimeout(poll);
+      clear();
+    };
+    // `step` and `task.type` both change WHICH sections exist, so the marks have
+    // to be recomputed; `focusNonce` re-runs it when the same step is re-activated.
+  }, [view.isolateAnchor, step, task.type, focusNonce]);
+
   // Each step body derives the location state it needs for itself: the Location
   // step reasons in the creator's two choices (lib/locationPicker), the
   // interaction step in "does this task have a GPS gate" (for the pause-clock
@@ -192,7 +271,7 @@ export default function TaskWizard({
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0" ref={rootRef}>
       {/* Step tabs (single line) + close — one compact row, no separate title bar.
           On a phone only the ACTIVE step spells its name (change:
           builder-mobile-simplification): three equal thirds of a 390px row left
@@ -200,7 +279,17 @@ export default function TaskWizard({
           a tab that has stopped naming anything. The other two collapse to their
           number, which is what the row was already using as their primary mark,
           and the active one takes the space they give up. */}
+      {/* Skipped entirely in guided mode. Hiding the tabs and the ⋯ menu left this
+          row holding a single unlabelled ✕ against 44px of empty width — a stray
+          glyph on its own line, above a header that was about to draw its own
+          box. The close control moves INTO that header instead, which is also
+          where it stops being nameless. */}
+      {!view.showContextStrip && (
       <div className="flex items-center gap-1.5 pb-2 shrink-0">
+        {/* Hidden in guided mode: the flow chooses the tab, so a tab strip is
+            three controls that can only take the creator away from the one thing
+            they were just asked for. The guided header below takes its place. */}
+        {view.showTabs ? (
         <div role="tablist" className="flex gap-1.5 flex-1 min-w-0">
         {/* Tabs and bodies both read WIZARD_STEP_ORDER, so a tab and the body
             under it can never disagree. */}
@@ -224,12 +313,13 @@ export default function TaskWizard({
           );
         })}
         </div>
+        ) : <span className="flex-1 min-w-0" />}
         {/* Destructive and meta actions live HERE, away from the navigation row
             (change: builder-mobile-simplification) — the same move the stage's
             ✕ made into its settings pane. Rendered only when the task can be
             deleted at all (the stage's last mission cannot), so a menu never
             opens onto nothing. */}
-        {onRemove && (
+        {onRemove && view.showTaskMenu && (
           <div className="shrink-0">
             <OverflowMenu
               label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
@@ -251,14 +341,92 @@ export default function TaskWizard({
           ✕
         </button>
       </div>
+      )}
+
+      {/* ── The guided header (change: quick-setup-guided-editor) ───────────────
+          While the flow is driving, this REPLACES the editor's tab row: it is the
+          only thing between the instruction and the single control the step asks
+          for, so it answers "what am I setting up?" and nothing else.
+
+          A header, not a card. It was a filled, bordered box, which put three
+          stacked boxes on screen — the flow's instruction card, this, then the
+          control — and the eye had to decide which of the three it was being
+          asked to act on. A hairline underneath says "everything below belongs to
+          this" without competing for the same attention.
+
+          Read-only by design: the kind of mission is the template's decision and
+          no Quick Setup step can target `task.type` (it is not in
+          QUICK_SETUP_FIELDS), so offering the picker here would be offering to
+          undo work nobody asked about. It is LABELLED "מה סוג המשימה" rather than
+          left as a bare chip: an unlabelled chip beside a title looks exactly like
+          the pickable chips two steps away, and a creator who taps it and gets
+          nothing has been told the screen is broken. The exit sits right beside
+          it, because "hidden until you leave the flow" is only fair if leaving is
+          one tap. */}
+      {view.showContextStrip && (
+        <div role="group" aria-label={b.guidedGroupAria} className="shrink-0 mb-2.5 pb-2 border-b border-[--rp-border]">
+          <div className="flex items-start gap-1.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-semibold text-[--ink-1] leading-snug" dir="auto">
+                {task.title?.trim() || b.untitledTask}
+              </p>
+              {missionSummaryLine(task.description) !== '' && (
+                <p className="text-[13px] text-[--ink-2] leading-snug mt-0.5" dir="auto">
+                  {missionSummaryLine(task.description)}
+                </p>
+              )}
+            </div>
+            {/* The editor's own close, moved here from the row above. */}
+            <button onClick={onClose} aria-label={closeLabel}
+              className="shrink-0 -mt-1.5 -me-1.5 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+              ✕
+            </button>
+          </div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 min-w-0 rounded-full bg-[--surface-2] border border-[--rp-border] ps-2 pe-2.5 py-1 text-[13px] text-[--ink-2]">
+              <span className="text-[--ink-3] shrink-0">{b.guidedTypeLabel}</span>
+              <BuilderIcon name={TYPE_ICON_NAME[task.type]} className="w-3.5 h-3.5 shrink-0" />
+              <span className="font-medium text-[--ink-1] truncate">{typeMetaOf(b)[task.type].label}</span>
+            </span>
+            {onExitGuided && (
+              /* A REAL 44px target (lib/interaction's lesson, applied here by
+                 hand): styled down to inline text this is line-height tall, and
+                 it is the only door out of guided mode inside the editor. Given a
+                 border rather than an underline for the same reason the chip is
+                 labelled — it is the one thing on this header that DOES something,
+                 and it should not read as the quietest mark on the row. */
+              <button
+                type="button"
+                onClick={onExitGuided}
+                className="ms-auto shrink-0 min-h-[44px] px-2.5 rounded-lg border border-[--rp-border] text-[13px] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+              >
+                {b.guidedEditEverything}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Step body. Pure flexbox column (no height:100% hops) so step 1's map can
           grow to fill; the other steps scroll only inside themselves if ever
           needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
-        {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} advOpen={locAdvOpen} setAdvOpen={setLocAdvOpen} />}
-        {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} /></div>}
-        {stepKey === 'execution' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} /></div>}
+        {/* The location step is one tall control, not a list of sections, so the
+            `[data-qs-body]` rule cannot reach inside it — `guidedLocationView` is
+            its own subtraction. */}
+        {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} advOpen={locAdvOpen} setAdvOpen={setLocAdvOpen} gameAnchors={gameAnchors}
+          guided={guidedLocationView({ guided, anchor: view.isolateAnchor, choice: locationChoiceOf(task) })} />}
+        {/* `overscroll-contain` on each step body (change: creator-mobile-mechanics):
+            this editor is a bottom sheet on a phone, sitting over a Builder that
+            is itself a stack of scrollers. Without containment, reaching the end
+            of a step hands the gesture straight to whatever is behind the sheet,
+            which reads as the sheet sticking while the page rubber-bands under
+            it. The two gallery modals already do this; the Builder's own
+            containers never got it. */}
+        {/* `data-qs-body` marks the LIST guided isolation subtracts within — the
+            direct children of these wrappers are the sections a step can keep. */}
+        {stepKey === 'details' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} showTypePicker={view.showTypePicker} /></div>}
+        {stepKey === 'execution' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} /></div>}
       </div>
 
       {/* Footer. The "this task cannot be completed" line is a response to an
@@ -281,6 +449,10 @@ export default function TaskWizard({
           Leaving early from any step is unchanged: ✕ (and Esc) close, and the
           draft is flushed on unmount. The persistent record of what is still
           broken is the readiness surface, not this footer. */}
+      {/* Hidden in guided mode: the flow owns "what next" and shows its own bar in
+          this very sheet, so a second next/done pair here is two primaries with
+          different meanings a step apart. ✕ still closes the editor. */}
+      {view.showFooterNav && (
       <div className="flex items-center gap-2 pt-2 shrink-0 border-t border-[--rp-border] mt-2">
         {canGoBack(step) ? (
           <Button variant="ghost" onClick={() => setStep((s) => (s - 1) as WizardStep)}>← {b.back}</Button>
@@ -296,6 +468,7 @@ export default function TaskWizard({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -425,8 +598,14 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
 // 40 m arrival check. The four stored `TriggerMode` values are unchanged: see
 // lib/locationPicker for why 'instant' stays a LOCATED task rather than being
 // folded into 'anywhere'.
-function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
+function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guided }: {
   task: Task; set: (p: Partial<Task>) => void; b: B;
+  // What a הקמה מהירה step leaves on screen here (change:
+  // quick-setup-guided-editor). DISPLAY only — the stored placement is untouched,
+  // and both flags are true whenever the flow is not driving this step.
+  guided?: { showModeChooser: boolean; showAdvanced: boolean };
+  /** See TaskWizard's prop of the same name. */
+  gameAnchors?: readonly { lat: number; lng: number }[];
   // Lifted to TaskWizard (change: quick-setup-mobile-visibility) so a הקמה מהירה
   // step targeting the radius / skip-GPS / hide-location clue can open this panel
   // the same way a step targets an execution-tab chip.
@@ -441,6 +620,8 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
     { choice: 'anywhere', label: b.locAnywhere, sub: b.locAnywhereSub, desc: b.locAnywhereDesc },
     { choice: 'specific', label: b.locSpecific, sub: b.locSpecificSub, desc: b.locSpecificDesc },
   ];
+  const showModeChooser = guided?.showModeChooser !== false;
+  const showAdvanced = guided?.showAdvanced !== false;
   const radius = task.geofenceRadiusMeters ?? DEFAULT_RADIUS_M;
   const skipGps = skipsGpsCheck(task);
   const onChange = (lat: number, lng: number) => set({ coordinates: { lat, lng } });
@@ -449,7 +630,8 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
     // layout strategy: on any normal panel everything fits and no scrollbar appears.
     // It only engages on a viewport too short for a usable map, where scrolling to a
     // real map beats staring at a clipped one.
-    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto" data-qs-field="coordinates">
+    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto overscroll-contain" data-qs-field="coordinates">
+      {showModeChooser && (
       <div className="shrink-0">
         <Label>{b.fireQuestion}</Label>
         {/* The two location choices lead (bigger, primary — this is the actual
@@ -496,6 +678,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
           {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
         </p>
       </div>
+      )}
 
       {/* Advanced settings: in flow, but ONLY while open (change:
           builder-step1-full-height-map, revised). Collapsed it is not here at all —
@@ -504,8 +687,8 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
           map height for the settings the creator just asked for is the expected
           behaviour; capped and scrollable so it can never eat the whole step. The
           previous attempt floated this over the map and made the map unreadable. */}
-      {choice === 'specific' && advOpen && (
-        <div className="shrink-0 max-h-[45%] overflow-y-auto rounded-lg border border-[--rp-border] bg-[--surface-2] p-2.5">
+      {showAdvanced && choice === 'specific' && advOpen && (
+        <div className="shrink-0 max-h-[45%] overflow-y-auto overscroll-contain rounded-lg border border-[--rp-border] bg-[--surface-2] p-2.5">
           <div className="space-y-3">
               <div>
                 <Label dense>{b.locRadiusLabel}</Label>
@@ -580,7 +763,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
               button on the search button (top) and then on the coordinates input
               (bottom) — two bugs from the same wrong assumption. `cornerControl`
               places it in the map's own coordinate space, beside MapModeToggle. */}
-          <LocationStep coordinates={task.coordinates} onChange={onChange} fill
+          <LocationStep coordinates={task.coordinates} onChange={onChange} fill anchors={gameAnchors}
             cornerControl={(
               <button type="button" onClick={() => setExpanded(true)}
                 aria-label={b.enlargeMap} title={b.enlargeMap}
@@ -606,7 +789,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
                 className="w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">✕</button>
             </div>
             <div className="flex-1 min-h-0 p-3 flex flex-col">
-              <LocationStep coordinates={task.coordinates} onChange={onChange} fill />
+              <LocationStep coordinates={task.coordinates} onChange={onChange} fill anchors={gameAnchors} />
             </div>
           </div>
         </div>,
@@ -836,11 +1019,16 @@ function typeMetaOf(b: B): Record<TaskType, { label: string; short: string; desc
 // on step 3, beside the point value it actually interacts with; every other
 // optional field became a chip there too. This step is the one a creator must
 // answer, so it asks nothing else.
-function DetailsStepBody({ task, set, b, replace, gameId }: {
+function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true }: {
   task: Task; set: (p: Partial<Task>) => void; b: B; replace: (t: Task) => void;
   // Media is authored here now (change: task-media-durability), and the upload path
   // needs the game id to build its storage prefix.
   gameId?: string;
+  // Guided mode hides "how do teams complete this?" — the flow is pointing at a
+  // mission that already HAS a kind, and re-deciding that mid-step is the one
+  // choice it is not asking for (lib/guidedEditor). DISPLAY only, per that
+  // module's rule 2: nothing here is written, so the type is untouched.
+  showTypePicker?: boolean;
 }) {
   // Which type's sample list is open (only for a type that offers more than one).
   const [samplePickerFor, setSamplePickerFor] = useState<TaskType | null>(null);
@@ -897,6 +1085,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
         <MediaSection task={task} set={set} b={b} gameId={gameId} replace={replace} />
       </div>
 
+      {showTypePicker && (
       <div>
         <Label dense>{b.howComplete}</Label>
         {/* Compact type picker: icon + label grid, with a one-line description for
@@ -958,6 +1147,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
             keep the full sentence (change: builder-ux-round-2). */}
         <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">{TYPE_META[task.type].short}</p>
       </div>
+      )}
     </>
   );
 }

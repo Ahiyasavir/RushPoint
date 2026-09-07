@@ -69,6 +69,25 @@ export function Button({
   );
 }
 
+// What a form control animates on focus (change: creator-mobile-mechanics).
+//
+// This was `transition-all`, which includes FONT-SIZE — and font-size on a text
+// field is not decoration, it is the input to a browser decision. iOS Safari
+// reads the computed size at the moment focus lands and zooms the whole page in
+// (without ever zooming back out) if it is under 16px; src/index.css floors these
+// controls at 16px on phone widths precisely to stop that. An animating
+// font-size can be caught mid-flight at 15.4px by exactly that read, which would
+// re-arm the bug the floor exists to remove.
+//
+// Observed, not theorised: with `transition-all` a control whose breakpoint had
+// just flipped reported a stale 16px through a live `font-size` transition while
+// a fresh clone of the same element resolved to 15px.
+//
+// Border and shadow are what the focus ring was ever meant to animate, so naming
+// them costs nothing and leaves no property in the transition that any other
+// system reads as a value.
+const FIELD_TRANSITION = 'transition-[border-color,box-shadow] duration-150';
+
 // ── Input ─────────────────────────────────────────────────────────────────────
 // `dense` trades the roomy default padding for a compact control — used by the
 // Task Builder so a form of many small fields fits on screen without scrolling.
@@ -84,7 +103,7 @@ export function Input({ className = '', dense = false, ...rest }: InputHTMLAttri
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]
         focus:outline-none focus:ring-2 focus:ring-rp-fire/25 focus:border-rp-fire/40
-        transition-all duration-150
+        ${FIELD_TRANSITION}
         ${className}
       `}
       {...rest}
@@ -102,7 +121,7 @@ export function Textarea({ className = '', dense = false, ...rest }: TextareaHTM
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]
         focus:outline-none focus:ring-2 focus:ring-rp-fire/25 focus:border-rp-fire/40
-        transition-all duration-150
+        ${FIELD_TRANSITION}
         ${className}
       `}
       {...rest}
@@ -120,7 +139,7 @@ export function Select({ className = '', children, ...rest }: SelectHTMLAttribut
         border border-[--rp-border]
         text-[--ink-1]
         focus:outline-none focus:ring-2 focus:ring-rp-fire/25 focus:border-rp-fire/40
-        transition-all duration-150
+        ${FIELD_TRANSITION}
         ${className}
       `}
       {...rest}

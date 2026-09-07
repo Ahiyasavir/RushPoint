@@ -71,7 +71,21 @@
         });
       })();
     </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `interactive-widget=resizes-content` (change: creator-mobile-mechanics):
+         by default the on-screen keyboard FLOATS over an unchanged layout
+         viewport, so the Builder's bottom-anchored mission sheet kept its
+         pre-keyboard height and its footer (הבא / save / delete) ended up
+         underneath the keyboard — the primary action disappearing at exactly the
+         moment it is needed. Asking the browser to resize the layout instead
+         means the sheet's own dvh cap shrinks with it.
+
+         Deliberately NO `maximum-scale` and NO `user-scalable=no`. Both would
+         stop the iOS focus-zoom this console suffers from, and both would do it
+         by taking pinch zoom away from every person who needs it. The zoom is
+         fixed properly, with a 16px floor under the form controls themselves
+         (src/index.css); scripts/test-mobile-form-zoom.ts fails if anyone
+         reaches for the shortcut later. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#050508" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

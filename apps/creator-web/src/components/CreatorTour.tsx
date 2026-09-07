@@ -24,6 +24,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { useAuth } from './AuthGate';
 import { useT } from './LanguageContext';
+import { toast } from './toast';
+import { useGuidanceCandidate, useGuidanceVisible, useTourGuidance } from './GuidanceProvider';
 import {
   INITIAL_TOUR_STATE, firstGameIdKey,
   buildTourSteps, currentTourStep, isEstablishedCreator, knownGameCountKey, readTourRecord,
@@ -54,16 +56,17 @@ function readLocal(key: string): string | null {
 
 const EMPTY_RECT: TourRect = { top: 0, left: 0, width: 0, height: 0 };
 
-/**
- * Is the full walkthrough on screen right now?
- *
- * A module-level flag rather than a DOM probe: the Builder's own first-open
- * spotlight has to YIELD to this tour (two guided overlays at once is worse than
- * none), and querying for the tour's dialog element would break silently the next
- * time its markup changes (change: guided-new-game-wizard).
+/*
+ * There used to be a `let tourRunning` module flag here, exported as
+ * `isCreatorTourRunning()` and assigned during render, so that the Builder's
+ * first-open spotlight could yield to this tour. It is gone (change:
+ * builder-guidance-arbiter): a render-time mutable global read from another
+ * component's effect could only ever answer "is it running RIGHT NOW", which made
+ * the spotlight's yield a snapshot — taken at its 700 ms settle, and therefore blind
+ * to this tour's 2000 ms auto-start. Both surfaces now declare candidacy to
+ * GuidanceProvider and are told which of them may render, so the answer is a rule
+ * rather than a moment.
  */
-let tourRunning = false;
-export function isCreatorTourRunning(): boolean { return tourRunning; }
 
 export default function CreatorTour() {
   const t = useT();
@@ -79,10 +82,15 @@ export default function CreatorTour() {
     [steps],
   );
 
-  // Kept in sync for isCreatorTourRunning(). Assigned during render on purpose:
-  // the Builder reads it in an effect that runs AFTER this render, so an effect
-  // here would publish the flag one frame too late and both overlays could open.
-  tourRunning = state.status === 'running';
+  // Candidacy, not a global: "I want the screen". Whether we GET it is
+  // `visible` below, and a higher-priority surface (a launch confirmation, an
+  // in-progress הקמה מהירה) can take it while the tour stays running underneath —
+  // it reappears where it left off when that surface closes.
+  const running = state.status === 'running';
+  useGuidanceCandidate('tour', running);
+  const visible = useGuidanceVisible('tour');
+
+  const { requestTour, tourStartToken } = useTourGuidance();
 
   const step = currentTourStep(state, steps);
   const uid = user?.uid ?? '';
@@ -128,7 +136,12 @@ export default function CreatorTour() {
       if (!shouldAutoStartTour({ record, established, justSignedUp: sawSignupRef.current })) return;
       // Let the dashboard mount and settle before the welcome appears — starting
       // on the same tick anchors steps against a half-rendered page.
-      timer = window.setTimeout(() => dispatch({ type: 'start' }), POST_SIGNUP_TOUR_DELAY_MS);
+      // Routed through the arbiter, which DROPS an auto-start that loses rather
+      // than holding it: an unrequested tour surfacing minutes later, after the
+      // creator has started working, would be a new bug rather than a fix.
+      timer = window.setTimeout(() => {
+        if (requestTour('auto') === 'start') dispatch({ type: 'start' });
+      }, POST_SIGNUP_TOUR_DELAY_MS);
     };
     evaluate();
     window.addEventListener(JUST_SIGNED_UP_EVENT, evaluate);
@@ -136,7 +149,7 @@ export default function CreatorTour() {
       window.removeEventListener(JUST_SIGNED_UP_EVENT, evaluate);
       if (timer) window.clearTimeout(timer);
     };
-  }, [uid, dispatch]);
+  }, [uid, dispatch, requestTour]);
 
   // ── Persist only a terminal outcome.
   useEffect(() => {
@@ -146,12 +159,29 @@ export default function CreatorTour() {
     try { localStorage.setItem(tourStorageKey(uid), writeTourRecord(record)); } catch { /* storage unavailable */ }
   }, [state, steps, uid]);
 
-  // ── Replay on demand.
+  // ── Replay on demand. The "?" lives in the global nav and used to fire straight
+  //    into `restart`, so pressing it mid-הקמה-מהירה drew a second spotlight overlay
+  //    over the first. It now asks the arbiter: it starts if the screen is free, and
+  //    otherwise is HELD and acknowledged — a user-initiated action that resolves
+  //    silently is a dead button.
   useEffect(() => {
-    const handler = () => dispatch({ type: 'restart' });
+    const handler = () => {
+      const outcome = requestTour('help');
+      if (outcome === 'start') dispatch({ type: 'restart' });
+      else if (outcome === 'hold') toast.info(tour.deferred);
+    };
     window.addEventListener(TOUR_RESTART_EVENT, handler);
     return () => window.removeEventListener(TOUR_RESTART_EVENT, handler);
-  }, [dispatch]);
+  }, [dispatch, requestTour, tour.deferred]);
+
+  // ── The held request fires here: the provider bumps its token once the screen is
+  //    free. The first render's token is skipped, so mounting never starts a tour.
+  const seenTokenRef = useRef(tourStartToken);
+  useEffect(() => {
+    if (tourStartToken === seenTokenRef.current) return;
+    seenTokenRef.current = tourStartToken;
+    if (state.status !== 'running') dispatch({ type: 'restart' });
+  }, [tourStartToken, dispatch, state.status]);
 
   // ── Drive the creator to the step's surface (change: tour-auto-navigate).
   //    `firstGameId` is re-read on every navigation and while a step is waiting
@@ -251,6 +281,9 @@ export default function CreatorTour() {
   useEffect(() => { if (step) cardRef.current?.focus(); }, [step?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!step || typeof document === 'undefined') return null;
+  // Arbitration is the LAST gate, after every hook: a higher-priority surface hides
+  // the tour without ending it (change: builder-guidance-arbiter).
+  if (!visible) return null;
 
   const awaiting = intent.kind === 'awaitAction' ? intent.anchor : null;
   const anchoring = resolveTourAnchoring(step, rect !== null);

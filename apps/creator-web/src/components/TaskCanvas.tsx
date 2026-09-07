@@ -121,7 +121,11 @@ export default function TaskCanvas({
   // only needs the ordering, and `useSortable` registers just the mounted rows.
   const itemIds = tasks.map((t) => t.id);
   return (
-    <div ref={parentRef} className="h-full overflow-y-auto -mx-1 px-1">
+    // `overscroll-contain` (change: creator-mobile-mechanics): the Builder shell
+    // never scrolls the page, so without containment a flick that reaches the end
+    // of the mission list is handed to the shell behind it and iOS rubber-bands
+    // the whole workspace.
+    <div ref={parentRef} className="h-full overflow-y-auto overscroll-contain -mx-1 px-1">
       <SortableContext items={itemIds} strategy={small ? rectSortingStrategy : verticalListSortingStrategy}>
         {small ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 content-start">

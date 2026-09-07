@@ -186,7 +186,10 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
   return (
     // Phone: ONE horizontally-scrolling line of stage pills above the canvas.
     // Desktop (≥sm): the classic vertical side rail of cards.
-    <aside data-tour="builder-stages" className="w-full sm:w-52 shrink-0 sm:h-full sm:space-y-2 sm:overflow-y-auto pe-0.5">
+    // The vertical scroll is desktop-only (the phone strip below scrolls
+    // sideways), so the containment is scoped the same way — it stops a flick
+    // that reaches the end of the rail from scrolling the workspace behind it.
+    <aside data-tour="builder-stages" className="w-full sm:w-52 shrink-0 sm:h-full sm:space-y-2 sm:overflow-y-auto sm:overscroll-contain pe-0.5">
       {/* The "STAGES · 5" caption is desktop only (change:
           builder-mobile-simplification). A numbered strip of stages does not need
           a heading telling the creator it is a list of stages, and on a phone that

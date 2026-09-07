@@ -1711,6 +1711,13 @@ const HE = {
     fromLibrary: 'מהספרייה',
     newTask: 'משימה חדשה',
     closePanel: 'סגירה',
+    // The guided mission editor's header — WHAT is being set up, before the one
+    // control the step asks for (change: quick-setup-guided-editor).
+    guidedGroupAria: 'המשימה שאנחנו מגדירים עכשיו',
+    guidedTypeLabel: 'סוג המשימה',
+    // The only door out of guided editing from inside the mission editor
+    // (change: builder-mission-editor-route).
+    guidedEditEverything: 'עריכת כל השדות',
     untitledTask: 'משימה ללא שם',
     stageTitlePlaceholder: 'שם השלב',
     finalLabel: 'אחרון',
@@ -2295,6 +2302,7 @@ const HE = {
   tour: {
     dialogLabel: 'סיור מודרך',
     helpLabel: 'פתיחת הסיור המודרך',
+    deferred: 'הסיור יתחיל ברגע שתסיימו את מה שפתוח כרגע.',
     next: 'הבא',
     back: 'הקודם',
     // מוצג במקום 'הבא' כששלב ממתין לפעולה: הוא מדלג על כל הרצף החסום בבת אחת,
@@ -4249,6 +4257,13 @@ const EN: typeof HE = {
     fromLibrary: 'From library',
     newTask: 'New mission',
     closePanel: 'Close',
+    // The guided mission editor's header — WHAT is being set up, before the one
+    // control the step asks for (change: quick-setup-guided-editor).
+    guidedGroupAria: 'The mission being set up right now',
+    guidedTypeLabel: 'Mission type',
+    // The only door out of guided editing from inside the mission editor
+    // (change: builder-mission-editor-route).
+    guidedEditEverything: 'Edit every field',
     untitledTask: 'Untitled mission',
     stageTitlePlaceholder: 'Stage name',
     finalLabel: 'final',
@@ -4835,6 +4850,7 @@ const EN: typeof HE = {
   tour: {
     dialogLabel: 'Guided tour',
     helpLabel: 'Open the guided tour',
+    deferred: 'The tour will start as soon as you finish what is open.',
     next: 'Next',
     back: 'Back',
     // Replaces 'Next' while a step is waiting on an action: it jumps the whole

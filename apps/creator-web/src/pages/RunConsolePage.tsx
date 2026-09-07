@@ -84,6 +84,7 @@ import { useT } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
 import HeatmapMap from '../components/HeatmapMap';
 import LocationStep from '../components/LocationStep';
+import { isPlacedCoord, type LatLng } from '../lib/mapAnchor';
 import { isValidCoord } from '@rushpoint/shared';
 
 // Where the participant app lives (for the shareable join link/QR).
@@ -487,6 +488,11 @@ export default function RunConsolePage() {
   // Which game is live, for the console header. Display only — the same
   // owner-scoped read that builds taskTitles already returns it.
   const [gameTitle, setGameTitle] = useState('');
+  // Where this game actually happens, so the hot-zone and zone pickers open on
+  // the neighbourhood instead of on central Israel (change:
+  // location-picker-game-anchor). Collected in the read that already walks every
+  // task for taskTitles above — no extra Firestore read.
+  const [gameAnchors, setGameAnchors] = useState<readonly LatLng[]>([]);
   useEffect(() => {
     if (!gameId) return;
     let alive = true;
@@ -495,10 +501,15 @@ export default function RunConsolePage() {
         if (!alive) return;
         setGameTitle(game.title ?? '');
         const map = new Map<string, string>();
+        const anchors: LatLng[] = [];
         for (const stage of game.stages ?? []) {
-          for (const task of stage.tasks ?? []) map.set(task.id, task.title);
+          for (const task of stage.tasks ?? []) {
+            map.set(task.id, task.title);
+            if (isPlacedCoord(task.coordinates)) anchors.push(task.coordinates);
+          }
         }
         setTaskTitles(map);
+        setGameAnchors(anchors);
       })
       .catch(() => undefined);
     return () => { alive = false; };
@@ -1205,10 +1216,10 @@ export default function RunConsolePage() {
           </PanelShell>
         );
 
-      case 'hotZone': return <HotZonePanel ctx={ctx} hotZone={activeRun.hotZone ?? null} />;
+      case 'hotZone': return <HotZonePanel ctx={ctx} hotZone={activeRun.hotZone ?? null} gameAnchors={gameAnchors} />;
       case 'flashMission': return <FlashMissionCard ctx={ctx} />;
       case 'trackables': return <TrackablesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} />;
-      case 'zones': return <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />;
+      case 'zones': return <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} gameAnchors={gameAnchors} />;
       case 'taskAvailability':
         return <TaskAvailabilityConsole ctx={ctx} overrides={activeRun.taskStatusOverrides} />;
 
@@ -1771,7 +1782,7 @@ function FlashMissionCard({ ctx }: { ctx: { ownerUid: string; gameId: string; ru
 
 
 // ── Hot Zone activate panel (hot-zone-bonus) ──────────────────────────────────
-function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: string; runId: string }; hotZone: HotZone | null }) {
+function HotZonePanel({ ctx, hotZone, gameAnchors }: { ctx: { ownerUid: string; gameId: string; runId: string }; hotZone: HotZone | null; gameAnchors?: readonly LatLng[] }) {
   const t = useT();
   const [lat, setLat] = useState(0);
   const [lng, setLng] = useState(0);
@@ -1821,7 +1832,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
       ) : (
         <div className="space-y-2">
           <Label>{t.runConsole.hotZoneCenter}</Label>
-          <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" />
+          <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" anchors={gameAnchors} />
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div><Label>{t.runConsole.hotZoneRadius}</Label><Input type="number" value={radius} onChange={(e) => setRadius(Math.max(1, Number(e.target.value)))} /></div>
             <div><Label>{t.runConsole.hotZoneMultiplier}</Label><Input type="number" value={mult} min={2} max={5} onChange={(e) => setMult(Math.min(5, Math.max(2, Number(e.target.value))))} /></div>
@@ -1998,7 +2009,7 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
 // see which team currently holds each. Center is picked on the map; leaving it
 // unset (0,0) makes a locationless zone. Capturing is validated server-side
 // against the player's GPS.
-function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: string; runId: string }) {
+function ZonesConsole({ ownerUid, gameId, runId, gameAnchors }: { ownerUid: string; gameId: string; runId: string; gameAnchors?: readonly LatLng[] }) {
   const rc = useT().runConsole;
   const [zones, setZones] = useState<CaptureZone[]>([]);
   const [title, setTitle] = useState('');
@@ -2040,7 +2051,7 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
         <Button variant={runActionVariant('createZone')} disabled={busy || !title.trim()} onClick={create}>{rc.zonesAdd}</Button>
       </div>
       <div className="mb-3">
-        <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" />
+        <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" anchors={gameAnchors} />
       </div>
       {zones.length === 0 ? (
         <PanelEmpty panel="zones" />

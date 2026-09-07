@@ -270,7 +270,7 @@ export function QuickSetupIntro({ step, index, total, taskTitle, summary, scope,
  * stay legible while the creator is typing into a control anywhere on the page,
  * including inside the mission drawer, which the header sits behind.
  */
-export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, onClose }: {
+export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, onClose, inline = false }: {
   step: TemplateWizardStep;
   index: number;
   total: number;
@@ -278,6 +278,20 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
   onNext: () => void;
   onDefer: () => void;
   onClose: () => void;
+  /**
+   * Render IN FLOW instead of floating (change: builder-mission-editor-route).
+   *
+   * While the mission editor is full-screen on a phone, this bar lives inside it
+   * rather than over it. As a `fixed z-50` element it claimed the same corner as
+   * the editor's own surface, and the two negotiated by hand — the editor gave up
+   * a third of its height so both could be seen. Nothing inside the editor has to
+   * negotiate with the editor.
+   *
+   * Same component and the same copy on purpose: an instruction that reworded
+   * itself depending on where it was shown would be a second thing to keep in
+   * sync, and this one is already translated in two dictionaries.
+   */
+  inline?: boolean;
 }) {
   const q = useT().quickSetup;
   const headline = copyLine(q.copy, copyKey);
@@ -294,8 +308,12 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
       // a ~390px viewport it claimed almost the whole width and left the text column
       // — `flex-1 min-w-0`, which is allowed to shrink to nothing — about two words
       // per line, turning three sentences into a tall ribbon down one edge.
-      className={`fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
-      style={{ insetInlineStart: 0, insetInlineEnd: 0 }}
+      className={inline
+        ? `shrink-0 m-2 mb-0 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`
+        : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
+      // The logical insets only mean anything for the floating variant; in flow the
+      // element is already laid out by its parent.
+      style={inline ? undefined : { insetInlineStart: 0, insetInlineEnd: 0 }}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-fire">

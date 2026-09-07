@@ -8,6 +8,10 @@ import { useT } from './components/LanguageContext';
 import { Spinner } from './components/ui';
 import { DialogHost } from './components/dialog';
 import { ToastHost } from './components/toast';
+// One arbiter for every Builder guidance surface (change: builder-guidance-arbiter).
+// Mounted here, above BOTH <CreatorTour /> and the routed Builder, because those two
+// are siblings: nothing inside the Builder could ever arbitrate with the tour.
+import { GuidanceProvider } from './components/GuidanceProvider';
 import ActiveRunBar from './components/ActiveRunBar';
 import { buildNavDestinations } from './lib/creatorNav';
 import { SHARE_RETURN_KEY, sharedGamePath } from './lib/publicCreatorPath';
@@ -123,6 +127,7 @@ export default function App() {
     // rule always win — silently reverting to vh on every browser instead of
     // tracking the keyboard on the ones that support dvh. `rp-h-dvh` uses
     // `@supports` for an unambiguous, order-independent fallback instead.
+    <GuidanceProvider>
     <div className={`relative bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250 ${isBuilder ? 'rp-h-dvh overflow-hidden flex flex-col' : 'min-h-screen overflow-x-clip'}`}>
 
       {/* ── Animated mesh gradient ── */}
@@ -259,5 +264,6 @@ export default function App() {
       <DialogHost />
       <ToastHost />
     </div>
+    </GuidanceProvider>
   );
 }

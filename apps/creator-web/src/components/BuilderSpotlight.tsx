@@ -20,7 +20,7 @@ import {
   visibleSpotlightSteps,
   type SpotlightStep,
 } from '../lib/creatorOnboarding';
-import { isCreatorTourRunning } from './CreatorTour';
+import { useGuidanceCandidate, useGuidanceVisible } from './GuidanceProvider';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 
 /** How long to let the Builder settle before pointing at any of it. */
@@ -34,7 +34,7 @@ function anchorRect(anchor: string): DOMRect | null {
   return r.width > 0 && r.height > 0 ? r : null;
 }
 
-export default function BuilderSpotlight({ quickSetupActive }: { quickSetupActive: boolean }) {
+export default function BuilderSpotlight() {
   const t = useT();
   const copy = t.tour.spotlight;
   const { user } = useAuth();
@@ -56,29 +56,29 @@ export default function BuilderSpotlight({ quickSetupActive }: { quickSetupActiv
     try {
       raw = localStorage.getItem(spotlightSeenKey(uid));
     } catch { /* blocked storage reads as never-seen, which shows the explainer */ }
-    if (!shouldStartBuilderSpotlight({
-      record: readSpotlightRecord(raw),
-      tourRunning: isCreatorTourRunning(),
-      quickSetupActive,
-    })) return;
+    // Only OUR OWN eligibility is decided here — has this creator seen it. Whether
+    // another guided surface is up is no longer this component's question to ask
+    // (change: builder-guidance-arbiter): it declares candidacy below and is told.
+    // That also fixes the ordering hole this effect had, being a one-shot decision
+    // at SETTLE_MS that could not see a tour auto-starting 1.3 s later.
+    if (!shouldStartBuilderSpotlight({ record: readSpotlightRecord(raw) })) return;
 
     const timer = window.setTimeout(() => {
-      // Re-check the yielders at fire time: Quick Setup's own auto-invite lands in
-      // this same window, and whichever guided flow is already up must win.
-      if (isCreatorTourRunning()) return;
-      const visible = visibleSpotlightSteps((a) => anchorRect(a) !== null);
-      if (visible.length > 0) setSteps(visible);
+      const onScreen = visibleSpotlightSteps((a) => anchorRect(a) !== null);
+      if (onScreen.length > 0) setSteps(onScreen);
     }, SETTLE_MS);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Quick Setup can open AFTER we did — its invite is asynchronous. Close rather
-  // than stack.
-  useEffect(() => {
-    if (quickSetupActive && steps) finish();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quickSetupActive]);
+  // Declare candidacy; arbitration decides whether we actually render. This
+  // REPLACES an effect that called `finish()` when Quick Setup opened after us —
+  // and `finish()` writes the "seen" record, so being suppressed by another surface
+  // permanently consumed this creator's one-shot explainer. Suppressed is not seen:
+  // the record is now written only by a real dismissal, below.
+  const wants = steps !== null && steps.length > 0;
+  useGuidanceCandidate('spotlight', wants);
+  const visible = useGuidanceVisible('spotlight');
 
   function finish() {
     setSteps(null);
@@ -88,6 +88,7 @@ export default function BuilderSpotlight({ quickSetupActive }: { quickSetupActiv
   }
 
   if (!steps || steps.length === 0) return null;
+  if (!visible) return null;
   const step = steps[Math.min(index, steps.length - 1)];
   const rect = anchorRect(step.anchor);
   // The anchor vanished between deciding and rendering (a resize, a closed panel):

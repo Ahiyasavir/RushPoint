@@ -1,7 +1,8 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
+import { isPlacedCoord } from '../lib/mapAnchor';
 import type { ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
@@ -38,6 +39,7 @@ import { useAuth } from '../components/AuthGate';
 // to the full tour, so in practice it reaches the creator who started from scratch
 // — the one person the product guides nowhere else.
 import BuilderSpotlight from '../components/BuilderSpotlight';
+import { useGuidanceCandidate, useGuidanceSlot } from '../components/GuidanceProvider';
 // One mapping from a rejection to copy a creator can act on
 // (change: creator-no-silent-failures).
 import { describeCallFailure, type CallFailure } from '../lib/callFeedback';
@@ -55,7 +57,7 @@ import {
   INITIAL_QUICK_SETUP_STATE, quickSetupReducer, quickSetupSteps, outstandingQuickSetupIds,
   quickSetupLaunchBlockers, currentQuickSetupStep, quickSetupIntroStep, quickSetupProgress,
   quickSetupFocusPlan, shouldAutoOpenQuickSetup, missionSummaryLine,
-  quickSetupStorageKey, readQuickSetupRecord, writeQuickSetupRecord,
+  quickSetupStorageKey, readQuickSetupRecord, writeQuickSetupRecord, isJustCreatedNavState,
   type QuickSetupState, type QuickSetupAction, type TaskEditorTab, type TaskOptInGroup,
   type QuickSetupCopyKey,
 } from '../lib/quickSetup';
@@ -78,6 +80,11 @@ import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 // Builder header stage/mission breadcrumb (change: builder-clarity-mission-hierarchy).
 import { builderBreadcrumbState } from '../lib/builderBreadcrumb';
+// The open mission is addressed by the URL (change: builder-mission-editor-route),
+// so the phone's back gesture closes the editor instead of leaving the Builder.
+import {
+  readOpenMissionId, missionEditorSearch, resolveOpenMission, missionEditorNavAction,
+} from '../lib/missionEditorRoute';
 // Responsive Builder header (change: builder-simplification-round-3): below the
 // Tailwind `sm` boundary the header's secondary controls collapse into ONE
 // OverflowMenu. Branching on the hook (rather than rendering both rows and hiding
@@ -261,6 +268,12 @@ function markGamePreviewed(gameId: string) {
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
+  // Did this mount come straight from the new-game wizard? Read ONCE into a ref
+  // rather than off `location` on every render: the answer is a property of the
+  // navigation that opened this page, and the Quick Setup effect below must give
+  // the same answer whether it runs on mount or after a later re-render.
+  const justCreated = useRef(isJustCreatedNavState(location.state));
   const { user } = useAuth();
   const t = useT();
   const b = t.builder;
@@ -642,7 +655,17 @@ export default function BuilderPage() {
       // must leave the gate intact for the creator's next attempt. Marked only
       // after launchRun actually succeeds.
       if (!hasConfirmedFirstLaunch(user?.uid)) {
-        if (!(await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta))) return;
+        // Registered for the length of the await, and cleared in `finally` so a
+        // throw cannot leave the Builder's guidance permanently suppressed
+        // (change: builder-guidance-arbiter, design D5).
+        setLaunchConfirming(true);
+        let confirmed = false;
+        try {
+          confirmed = await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta);
+        } finally {
+          setLaunchConfirming(false);
+        }
+        if (!confirmed) return;
         needFirstLaunchConfirm = true;
       }
     }
@@ -746,12 +769,34 @@ export default function BuilderPage() {
   // `intro`, so the two can never be on screen together.
   const qsStep = currentQuickSetupStep(qsState, qsSteps);
   const qsIntro = quickSetupIntroStep(qsState, qsSteps);
-  // On a phone the mission editor is a fixed, near-full-width sheet — without this,
-  // its own top edge sits directly under the floating הקמה מהירה bar/card, and a
-  // creator had to close the mission editor just to read the instruction they were
-  // supposed to be following inside it. Reserving space only while a bar/card is
-  // actually up keeps every OTHER open of the editor exactly as tall as before.
-  const qsOverlayActive = Boolean(qsStep) || Boolean(qsIntro);
+  // WHICH mission the flow is on, for the guided mission editor (change:
+  // quick-setup-guided-editor). Resolved from the step itself so it is right the
+  // moment the flow is on screen, including while an intro card is up and before
+  // the navigation effect has written `quickSetupFocus`.
+  const qsGuidedStep = qsStep ?? qsIntro;
+  const qsGuidedTaskId = game && qsGuidedStep ? resolveWizardTarget(game, qsGuidedStep)?.taskId ?? null : null;
+  // Is the mission editor open? Derived from the SAME URL the editor derives
+  // itself from (change: builder-mission-editor-route), so the two cannot
+  // disagree about it — this used to be a `qsOverlayActive` boolean passed DOWN
+  // to make the sheet shrink itself, which is the negotiation that change removed.
+  // What it decides now is only WHERE the הקמה מהירה instruction renders.
+  const missionEditorOpen = Boolean(resolveOpenMission(game, readOpenMissionId(location.search)));
+
+  // ── Guidance arbitration (change: builder-guidance-arbiter). Each surface below
+  //    declares ONLY its own eligibility; `GuidanceProvider` decides which single
+  //    one may be on screen, using the order in lib/builderGuidance.ts. Declared
+  //    here, above the early returns, because these are hooks (React #300).
+  const qsWantsScreen = qsState.status === 'welcome' || Boolean(qsIntro) || Boolean(qsStep) || qsCelebrating;
+  const qsVisible = useGuidanceSlot('quick-setup', qsWantsScreen);
+  const nudgeVisible = useGuidanceSlot(
+    'ready-nudge',
+    !isMobile && !readyNudgeDismissed && readiness.length === 0 && (game?.playCount ?? 0) === 0,
+  );
+  // A launch confirmation is an awaited dialog, so it has no render to gate — it
+  // registers for the length of the await instead (design D5), which is enough to
+  // suppress the nudge and to make a concurrent "?" press defer rather than stack.
+  const [launchConfirming, setLaunchConfirming] = useState(false);
+  useGuidanceCandidate('launch-confirm', launchConfirming);
   // Quick Setup FOCUS MODE (change: quick-setup-wizard). While any Quick Setup
   // surface is up — welcome, a chapter's intro card, or the running bar — the
   // canvas is a distraction, not help: the creator's whole job right now is one
@@ -777,6 +822,10 @@ export default function BuilderPage() {
         hasRecord: rec !== null,
         outstanding: outstandingQuickSetupIds(game).length,
         total: quickSetupSteps(game).length,
+        // Landing from the new-game wizard DEFERS the invitation to the next
+        // visit rather than stacking a second guided flow onto the one the
+        // creator just finished. Nothing is recorded, so the offer is intact.
+        justCreated: justCreated.current,
       })) {
         setQsState((prev) => quickSetupReducer(prev, { type: 'invite' }, {
           steps: quickSetupSteps(game), outstanding: outstandingQuickSetupIds(game),
@@ -934,7 +983,9 @@ export default function BuilderPage() {
           yield to them: a templated game auto-invites Quick Setup on this same
           mount, and stacking two guided overlays is worse than showing neither. In
           practice that makes this the SCRATCH creator's explainer. */}
-      <BuilderSpotlight quickSetupActive={qsFocusMode || qsState.status === 'welcome'} />
+      {/* The spotlight no longer needs telling what else is on screen — it declares
+          candidacy and GuidanceProvider answers (change: builder-guidance-arbiter). */}
+      <BuilderSpotlight />
       {/* הקמה מהירה: the floating step bar and the launch refusal
           (change: quick-setup-wizard). Both are fixed-position, so they stay legible
           over the mission drawer — which is exactly where the creator is while they
@@ -942,7 +993,7 @@ export default function BuilderPage() {
       {/* The one-time invitation. Offered on a freshly cloned template rather than
           waiting to be discovered — and it moves nothing on the canvas until the
           creator accepts, so declining costs exactly one click. */}
-      {qsState.status === 'welcome' && (
+      {qsVisible && qsState.status === 'welcome' && (
         <QuickSetupWelcome
           remaining={qsOutstanding.length}
           onBegin={() => dispatchQs({ type: 'begin' })}
@@ -952,7 +1003,7 @@ export default function BuilderPage() {
       {/* Context before controls: the card naming the mission we are about to set
           up. Only when the flow CROSSES into a new mission — two fields of the same
           one run straight on, because the creator is already looking at it. */}
-      {qsIntro && (
+      {qsVisible && qsIntro && (
         <QuickSetupIntro
           step={qsIntro}
           index={quickSetupProgress(qsState, qsSteps).step - 1}
@@ -965,7 +1016,12 @@ export default function BuilderPage() {
           onClose={() => dispatchQs({ type: 'close' })}
         />
       )}
-      {qsStep && (
+      {/* The step bar floats ONLY while the mission editor is closed. With the
+          editor open the same bar renders inside it (see `quickSetupInlineBar`
+          below), so exactly ONE instruction is ever on screen — which is what let
+          `reserveTop` and the 62dvh/88dvh height branch be deleted rather than
+          re-tuned (change: builder-mission-editor-route, design D5). */}
+      {qsVisible && qsStep && !missionEditorOpen && (
         <QuickSetupBar
           step={qsStep}
           index={quickSetupProgress(qsState, qsSteps).step - 1}
@@ -976,7 +1032,10 @@ export default function BuilderPage() {
           onClose={() => dispatchQs({ type: 'close' })}
         />
       )}
-      {qsCelebrating && <QuickSetupCelebration onClose={() => setQsCelebrating(false)} />}
+      {qsVisible && qsCelebrating && <QuickSetupCelebration onClose={() => setQsCelebrating(false)} />}
+      {/* Deliberately NOT arbitrated: this is the refusal that answers a launch
+          press, not a guidance overlay. Suppressing it would make the launch button
+          look dead. */}
       <QuickSetupBlocked
         blockers={qsBlockers}
         labelFor={quickSetupLabel}
@@ -1365,7 +1424,7 @@ export default function BuilderPage() {
           launch button is the ordinary orange one, and an unready game's button is
           amber with the count. The banner survives on desktop, where the row it
           occupies is not competing with anything. */}
-      {!isMobile && !readyNudgeDismissed && readiness.length === 0 && (game.playCount ?? 0) === 0 && (
+      {nudgeVisible && !readyNudgeDismissed && readiness.length === 0 && (game.playCount ?? 0) === 0 && (
         <div
           role="status"
           className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-go/40 bg-rp-go/10 px-4 py-2 text-xs text-[--ink-1]"
@@ -1411,7 +1470,40 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef} qsOverlayActive={qsOverlayActive} />}
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
+          quickSetupInlineBar={qsVisible && qsStep && missionEditorOpen ? (
+            <QuickSetupBar
+              inline
+              step={qsStep}
+              index={quickSetupProgress(qsState, qsSteps).step - 1}
+              total={qsSteps.length}
+              copyKey={quickSetupPresentation(qsStep).copyKey}
+              onNext={() => dispatchQs({ type: 'next' })}
+              onDefer={() => dispatchQs({ type: 'defer' })}
+              onClose={() => dispatchQs({ type: 'close' })}
+            />
+          ) : null}
+          /* Guided editing (change: quick-setup-guided-editor). While the flow is
+             RUNNING, the mission editor it just opened answers one question at a
+             time; `anchor` is the control the current step points at. Gated on
+             `qsFocusMode` — the SAME gate the canvas scrim reads — rather than on
+             `running` alone. Gating on `running` was tried and is wrong: a chapter
+             intro card leaves the status at `intro` with the editor still open, so
+             the full editor flashed back — three tabs, the type grid, a second
+             next button — underneath the card the creator was mid-sentence in.
+             `qsStep` is not part of the test either, for the same reason: it is
+             null while an intro card is up (that card reads `qsIntro`), which is
+             exactly the window the flash appeared in.
+             `close` (not `reset`) is the exit: the flow is postponed with its
+             progress intact, which is what "edit everything" means and not "throw
+             the setup away". */
+          quickSetupGuided={qsFocusMode
+            ? {
+                taskId: qsGuidedTaskId,
+                anchor: qsFocusAnchor.anchor,
+                onExit: () => dispatchQs({ type: 'close' }),
+              }
+            : null} />}
         {activeTab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
         {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} qsAnchor={qsFocusAnchor} /></div></div>}
         {activeTab === 'analytics' && (
@@ -2184,7 +2276,7 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, qsOverlayActive }: {
+function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, quickSetupInlineBar, quickSetupGuided }: {
   game: Game; setGame: (g: Game) => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
   // An activated readiness entry (change: builder-first-task-flow). The `nonce`
@@ -2199,22 +2291,111 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   quickSetupFocusMode?: boolean;
   // Parent-owned auto-open guard (survives this component's tab-switch remounts).
   autoOpenedGameRef: { current: string | null };
-  // A הקמה מהירה bar/card is currently floating (change: quick-setup-mobile-visibility)
-  // — forwarded to the mission editor's mobile sheet so it can reserve room at its
-  // own top edge instead of being hidden underneath it.
-  qsOverlayActive?: boolean;
+  // The live הקמה מהירה step, already rendered by the parent in its INLINE form,
+  // to be placed inside the mission editor (change: builder-mission-editor-route).
+  // Non-null only while the editor is open; the parent hides its floating copy for
+  // exactly that period, so one instruction is on screen and nothing overlaps.
+  quickSetupInlineBar?: ReactNode;
+  // Guided editing (change: quick-setup-guided-editor): non-null while the flow is
+  // RUNNING. `anchor` is the current step's `data-qs-field`; the editor keeps that
+  // control and withholds every unrelated one until `onExit` is taken.
+  quickSetupGuided?: { taskId: string | null; anchor: string | null; onExit: () => void } | null;
 }) {
   const b = useT().builder;
+  // Where this game is ALREADY placed (change: location-picker-game-anchor). The
+  // map picker for a mission with no pin opens on these instead of on a zoom-8
+  // view of the whole country, so the neighbourhood is found once per GAME rather
+  // than once per mission. Game-wide, not stage-wide: mission two is routinely in
+  // a different stage from mission one. Read only at the picker's mount, so the
+  // camera never re-fits itself while the creator is aiming (see lib/mapAnchor).
+  const gameAnchors = useMemo(
+    () => (game?.stages ?? [])
+      .flatMap((st) => st.tasks ?? [])
+      .map((t) => t.coordinates)
+      .filter(isPlacedCoord),
+    [game],
+  );
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
   // The stage-settings drawer starts CLOSED (change: wave-k stage-editor-redesign)
   // so the stage reads calm at rest — just its name and task cards. It collapses
   // again whenever the creator switches stages, keeping every stage calm by default.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // `revealAll` is set only when the editor was opened from the readiness
-  // surface, so the creator does not land on a silent form after clicking the
-  // statement of the problem.
-  const [editing, setEditing] = useState<{ stageId: string; taskId: string; revealAll?: boolean } | null>(null);
+  // ── The open mission lives in the URL (change: builder-mission-editor-route) ──
+  //
+  // This was `useState<{stageId, taskId, revealAll?}>`, set by SIX call sites and
+  // cleared by FIVE, with nothing tying it to the page's history. On a phone —
+  // where back is the primary navigation — back therefore did not close the
+  // editor, it left the Builder entirely, which is the most destructive thing
+  // available. One addressable value replaces eleven scattered assignments and
+  // hands dismissal to the platform.
+  //
+  // `stageId` is gone from the state on purpose: it is DERIVED from the task id
+  // (resolveOpenMission), so the open mission and the stage the Builder thinks it
+  // is in can no longer disagree. They used to, whenever a mission was dragged to
+  // another stage while its editor was open — see moveTaskToStage below, which
+  // only had to close the editor because the pair could go stale.
+  const location = useLocation();
+  const nav = useNavigate();
+  // Read at call time, never closed over: the helpers below run from handlers and
+  // effects, where a search captured at render would be one navigation behind.
+  const searchRef = useRef(location.search);
+  searchRef.current = location.search;
+  // Did WE push the live editor entry? It decides whether closing consumes an
+  // entry (`back`) or clears one we never made (`replace`) — a `back` we did not
+  // earn walks a deep-linked creator straight off the site.
+  const weOwnEntryRef = useRef(false);
+  // A mission we just asked to open, pending its arrival in `game` (see the stale
+  // address effect).
+  const pendingOpenRef = useRef<string | null>(null);
+  // `revealAll` stays LOCAL and keyed by task id. It is transient intent ("show
+  // this mission's validation now" — the creator arrived from the readiness
+  // surface), not a location: putting it in the URL would make a shared link
+  // shout at whoever opened it, and keying it stops it leaking onto the next
+  // mission the creator opens.
+  const [revealForTaskId, setRevealForTaskId] = useState<string | null>(null);
+
+  const openMissionId = readOpenMissionId(location.search);
+  const openMission = resolveOpenMission(game, openMissionId);
+
+  /**
+   * Open a mission, switch missions, or close the editor.
+   *
+   * The ONE door — every former `setEditing(...)` call site routes through here,
+   * so all six entry points and five exits share one history discipline instead
+   * of each deciding for itself. Which of push/replace/back/none applies is
+   * `missionEditorNavAction`, tested exhaustively in
+   * scripts/test-mission-editor-route.ts.
+   */
+  const setEditing = useCallback((next: { taskId: string; revealAll?: boolean } | null) => {
+    const taskId = next?.taskId ?? null;
+    setRevealForTaskId(next?.revealAll && taskId ? taskId : null);
+    const action = missionEditorNavAction(readOpenMissionId(searchRef.current), taskId, weOwnEntryRef.current);
+    if (action === 'none') return;
+    pendingOpenRef.current = taskId;
+    if (action === 'back') { weOwnEntryRef.current = false; nav(-1); return; }
+    nav({ search: missionEditorSearch(searchRef.current, taskId) }, { replace: action === 'replace' });
+    if (action === 'push') weOwnEntryRef.current = true;
+  }, [nav]);
+
+  // Whatever closed the editor — our ✕, Escape, or the creator's own back gesture
+  // — we no longer hold an entry. Deriving this from the URL is why there is no
+  // `popstate` listener here: nothing has to tell our own back() from the user's.
+  useEffect(() => { if (!openMissionId) weOwnEntryRef.current = false; }, [openMissionId]);
+
+  // A stale address: the URL names a task this game does not have — deleted,
+  // belonging to another game, or hand-typed. Clear it with REPLACE (never push,
+  // which could trap someone in a back-button loop) and open nothing. No error
+  // surface: a dead link to a mission is not something the creator can act on.
+  useEffect(() => {
+    if (!openMissionId || openMission) { pendingOpenRef.current = null; return; }
+    // A mission we JUST asked to open can be absent from `game` for one render if
+    // the state update that adds it and this navigation are not batched together
+    // (addTask does both in one handler). Give it exactly one pass before
+    // declaring the address dead.
+    if (pendingOpenRef.current === openMissionId) { pendingOpenRef.current = null; return; }
+    nav({ search: missionEditorSearch(searchRef.current, null) }, { replace: true });
+  }, [openMissionId, openMission, nav]);
   // Enforce the invariant the Builder UI implies — `isFinal` is only offered on
   // the LAST stage. The server treats ANY isFinal stage as the finale (finishing
   // the team on completion, runs/helpers.ts), so an isFinal flag left on a
@@ -2309,9 +2490,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     const next = moveTaskBetweenStages(game.stages, fromStageId, taskId, toStageId, toIndex);
     if (next === game.stages) return;
     setStages(next);
-    // The moved task lives in a different stage now; the open panel would point
-    // at a stale (stageId, taskId) pair, so close it.
-    if (editing?.taskId === taskId) setEditing(null);
+    // The editor no longer has to close here: the stage is DERIVED from the task
+    // id now (change: builder-mission-editor-route), so a moved mission simply
+    // resolves to its new stage on the next render instead of leaving a stale
+    // (stageId, taskId) pair behind. Keeping it open is also the better
+    // behaviour — moving a mission is not a reason to throw away what the
+    // creator was writing in it.
   }
 
   // ── One DndContext for the whole Builder body (change: builder-dnd-groups) ──
@@ -2403,20 +2587,23 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     const t = blankTask();
     updateStage(stageId, { tasks: [...stage.tasks, t] });
     setSettingsOpen(false);
-    setEditing({ stageId, taskId: t.id });
+    setEditing({ taskId: t.id });
   }
 
-  const editingStage = editing && game.stages.find((s) => s.id === editing.stageId);
-  const editingTask = editingStage?.tasks.find((t) => t.id === editing?.taskId);
+  // Both derived from the ONE addressed task id, so they cannot disagree.
+  const editingTask = openMission?.task ?? null;
+  const editingStage = openMission ? game.stages.find((s) => s.id === openMission.stageId) ?? null : null;
 
   // Builder header breadcrumb (change: builder-clarity-mission-hierarchy): the
   // wizard's open task only counts toward the breadcrumb while it belongs to the
-  // currently active stage, so a stale (stageId, taskId) pair from a just-completed
-  // cross-stage move never shows a mission from the wrong stage.
+  // currently active stage, so a mission in another stage never shows here. The
+  // stage now comes from the task itself (change: builder-mission-editor-route),
+  // so the "stale pair" this guard was written against can no longer occur — the
+  // guard stays because the ACTIVE-stage condition is still a real one.
   const breadcrumbState = builderBreadcrumbState(
     game.stages,
     activeStage?.id,
-    editing?.stageId === activeStage?.id ? editing?.taskId : undefined,
+    openMission?.stageId === activeStage?.id ? openMission.task.id : undefined,
     { untitledStage: b.untitledStage, untitledMission: b.untitledTask },
   );
   const breadcrumbText = breadcrumbState && (
@@ -2458,7 +2645,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     if (autoOpenedGameRef.current === game.id) return;
     autoOpenedGameRef.current = game.id;
     const target = shouldAutoOpenFirstTask(game);
-    if (target) setEditing({ stageId: target.stageId, taskId: target.taskId });
+    if (target) setEditing({ taskId: target.taskId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2467,7 +2654,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   useEffect(() => {
     if (!focusIssue) return;
     setSettingsOpen(false);
-    setEditing({ stageId: focusIssue.stageId, taskId: focusIssue.taskId, revealAll: true });
+    setEditing({ taskId: focusIssue.taskId, revealAll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusIssue?.nonce]);
 
@@ -2477,7 +2664,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   useEffect(() => {
     if (!quickSetupFocus?.taskId) return;
     setSettingsOpen(false);
-    setEditing({ stageId: quickSetupFocus.stageId, taskId: quickSetupFocus.taskId });
+    setEditing({ taskId: quickSetupFocus.taskId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quickSetupFocus?.nonce]);
 
@@ -2711,8 +2898,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             <div className="flex-1 min-h-0">
               <TaskCanvas
                 tasks={activeStage.tasks}
-                activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
-                onSelect={(taskId) => { setSettingsOpen(false); setEditing({ stageId: activeStage.id, taskId }); }}
+                activeTaskId={openMission?.stageId === activeStage.id ? openMission.task.id : undefined}
+                onSelect={(taskId) => { setSettingsOpen(false); setEditing({ taskId }); }}
                 stageId={activeStage.id}
                 groupOf={groupOf}
                 moveTargets={game.stages
@@ -2762,7 +2949,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           editor (change: wave-k stage-settings-sidepanel). It and the task editor
           are mutually exclusive (one right-hand pane), so opening it shrinks the
           centre canvas horizontally instead of pushing the task grid down. */}
-      {settingsOpen && activeStage && settings && !editing && (
+      {settingsOpen && activeStage && settings && !openMission && (
         <StageSettingsPanel
           key={activeStage.id}
           stage={activeStage}
@@ -2783,15 +2970,35 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
         />
       )}
 
-      {editing && editingStage && editingTask && (
+      {openMission && editingStage && editingTask && (
         <ContextPanel
           key={editingTask.id}
           task={editingTask}
           gameId={game.id}
-          revealAll={editing.revealAll}
+          revealAll={revealForTaskId === editingTask.id}
           focus={quickSetupFocus && quickSetupFocus.taskId === editingTask.id ? quickSetupFocus : null}
           siblings={editingStage.tasks}
-          reserveTop={!!qsOverlayActive}
+          gameAnchors={gameAnchors}
+          quickSetupStep={quickSetupInlineBar}
+          /* Guided only when the flow is pointing at THIS mission. The identity
+             comes from the STEP's own resolved target, not from `quickSetupFocus`
+             above: that state is written by the navigation effect, which is gated
+             on `running`, so it is null for a creator who reloads mid-flow and
+             lands on an intro card — the editor was open (the URL carries it) and
+             the flow owned it, but the test said otherwise and the full editor
+             came back under the card. An editor opened beside a flow aimed at a
+             different mission still stays whole.
+
+             EITHER id counts, and both are needed. The step's target alone misses
+             the other half of the same flash: a chapter intro card names the NEXT
+             mission while this editor still holds the one just finished (the
+             navigation happens when the card is dismissed), so the editor would
+             un-strip for exactly as long as the card is up. `quickSetupFocus`
+             alone misses the reload case above. Together they say "this editor
+             belongs to the flow", which is the question being asked. */
+          guided={quickSetupGuided
+            && (quickSetupGuided.taskId === editingTask.id || quickSetupFocus?.taskId === editingTask.id)
+            ? quickSetupGuided : null}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
           onRemove={editingStage.tasks.length > 1
             ? async () => {
@@ -2877,18 +3084,24 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, reserveTop }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, quickSetupStep, gameAnchors, guided }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
   siblings?: Task[];
+  // Every PLACED mission of the whole game (change: location-picker-game-anchor):
+  // the view an unplaced mission's map opens on. Drilled rather than contexted —
+  // it is one optional array on a path `gameId` and `siblings` already take.
+  gameAnchors?: readonly { lat: number; lng: number }[];
+  // The live הקמה מהירה step, rendered INSIDE this editor while it is full-screen
+  // (change: builder-mission-editor-route, design D5). See the note at the render
+  // site below for why it stopped being a floating bar.
+  quickSetupStep?: ReactNode;
   // Opened from a readiness entry: show that task's validation messages at once.
   revealAll?: boolean;
   // Opened by a הקמה מהירה step (change: quick-setup-wizard): which editor tab owns
   // the target field and which collapsed group it hides in.
   focus?: { tab: TaskEditorTab | null; group: TaskOptInGroup | null; nonce: number } | null;
-  // A הקמה מהירה bar/card is currently floating over the phone-width sheet
-  // (change: quick-setup-mobile-visibility) — reserve room at its top edge instead
-  // of letting the two overlap.
-  reserveTop?: boolean;
+  // Guided editing (change: quick-setup-guided-editor) — see lib/guidedEditor.
+  guided?: { anchor: string | null; onExit: () => void } | null;
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
@@ -2933,10 +3146,21 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
   // (flex-1 min-w-0) yields the space; no separate title bar here (the close control
   // lives in the wizard's tab row, reclaiming ~45px of chrome for the content).
   return (
-    <SlidePanel shown={shown} reserveTop={reserveTop}>
+    <SlidePanel shown={shown} variant="fullscreen">
+      {/* הקמה מהירה, rendered IN FLOW at the top of the editor rather than as a
+          floating bar over it (change: builder-mission-editor-route, design D5).
+          The bar used to be a separate fixed z-50 element claiming the same corner
+          as this sheet, and the two negotiated by hand through a `reserveTop` prop
+          that cost the editor a third of its height (88dvh → 62dvh) at exactly the
+          moment the creator had the most to read. Both earlier attempts are
+          recorded in the change: painting the sheet over the bar hid the
+          instruction, painting it under hid the editor's own tab row. Neither can
+          happen to something that is inside the editor. */}
+      {quickSetupStep}
       <div className="flex-1 min-h-0 p-2.5">
-        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll}
-          focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce} />
+        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+          focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
+          guided={!!guided} guidedAnchor={guided?.anchor ?? null} onExitGuided={guided?.onExit} />
         {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
       </div>
     </SlidePanel>
@@ -2952,52 +3176,69 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
 // owns `shown` so it can drive the mount slide-in. The `!` widths win over the
 // inline style, which only drives the lg open/close animation.
 //
-// `reserveTop` (change: quick-setup-mobile-visibility): the floating הקמה מהירה
-// bar/card is a fixed z-50 element pinned near the phone's top edge — same corner
-// as this sheet's own z-40. Rather than fight over who paints on top (either
-// answer disturbs the other: over it hides the mission editor's own tab row,
-// under it hides the very instruction the creator opened the editor to read),
-// the sheet steps its OWN top edge down by the overlay's rough height only while
-// one is actually up, so both stay fully visible and fully usable at once.
-// Below `lg` it is a BOTTOM SHEET, not a full-height side sheet (change:
-// builder-mobile-simplification). The side shape was already `min(100vw, 32rem)`
-// wide on a phone — a full-screen modal wearing a side-sheet costume — but it kept
-// the side sheet's `top-0 bottom-0` anchoring, so when the keyboard came up the
-// panel stayed as tall as the pre-keyboard viewport and its footer (`הבא`, save,
-// delete) was pushed under the keyboard: the primary action disappeared at exactly
-// the moment it was needed. Anchoring to the BOTTOM edge and capping the height in
-// `dvh` puts the footer immediately above the keyboard instead, and the body — the
-// only part that scrolls — absorbs the height the keyboard takes.
+// `variant` (change: builder-mission-editor-route):
 //
-// `reserveTop` (change: quick-setup-mobile-visibility): the floating הקמה מהירה
-// bar/card is a fixed z-50 element pinned near the phone's top edge — same corner
-// as this sheet's own z-40. Rather than fight over who paints on top (either
-// answer disturbs the other: over it hides the mission editor's own tab row,
-// under it hides the very instruction the creator opened the editor to read), the
-// sheet gives up HEIGHT while one is up, so both stay fully visible and fully
-// usable at once. It used to do that by stepping its top edge down; a bottom sheet
-// expresses the same reservation as a shorter cap.
+//   'sheet'      — today's behaviour, and what StageSettingsPanel still uses.
+//                  Below `lg` a BOTTOM sheet at a definite `h-[88dvh]`.
+//   'fullscreen' — the mission editor. Below `lg` it takes the whole viewport.
 //
-// The mobile height is DEFINITE (`h-[88dvh]`), not a max: the editor inside is a
-// flex column whose body is meant to be the only scroller, and `h-full` against an
-// `h-auto` parent resolves to `auto` — so the column stopped constraining anything,
-// the body grew instead of scrolling, and the footer fell 360px below the sheet.
-// A fixed height also means the sheet is the same size every time it opens, which
-// on a phone is worth more than sizing to content.
-function SlidePanel({ shown, children, reserveTop }: { shown: boolean; children: ReactNode; reserveTop?: boolean }) {
+// The mission editor went full-screen to end a negotiation, not to gain a little
+// room. It used to give up a third of its height (88dvh → 62dvh, the deleted
+// `reserveTop` prop) whenever the floating הקמה מהירה bar was up, because the bar
+// was a separate fixed z-50 element claiming the same corner as this sheet's z-40.
+// Both ways of resolving that by paint order failed and are recorded in the change:
+// over the bar hid the instruction, under it hid the editor's own tab row. The
+// instruction now renders INSIDE the editor (see ContextPanel), so there is nothing
+// left to negotiate and no height to surrender.
+//
+// What the bottom-sheet shape was protecting still holds and is NOT lost by going
+// full-screen: the panel is a flex column whose BODY is the only scroller and whose
+// footer (`הבא`, save, delete) is pinned, so the primary action stays above the
+// keyboard. A top-anchored panel with a `100dvh`-era height was what pushed that
+// footer under the keyboard originally; here the height is the viewport itself, and
+// `interactive-widget=resizes-content` (index.html) makes the viewport actually
+// shrink when the keyboard opens.
+//
+// The height stays DEFINITE rather than a max, in both variants: the column inside
+// needs a constraining parent, and `h-full` against an `h-auto` parent resolves to
+// `auto` — which is how the body once grew instead of scrolling and dropped the
+// footer 360px below the sheet.
+//
+// `env(safe-area-inset-*)`: an installed PWA draws under the notch. play-web learned
+// this and has `.rp-safe-t`; creator-web has no equivalent, and a full-screen surface
+// is the first thing here that reaches the physical top edge, so the insets are
+// applied directly.
+function SlidePanel({ shown, children, variant = 'sheet' }: {
+  shown: boolean; children: ReactNode; variant?: 'sheet' | 'fullscreen';
+}) {
+  const full = variant === 'fullscreen';
   return (
     <aside
       className={`shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out
-        max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-auto max-lg:z-40
-        max-lg:!w-full max-lg:p-0 max-lg:shadow-soft
-        ${reserveTop ? 'max-lg:h-[62dvh]' : 'max-lg:h-[88dvh]'}`}
+        max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:!w-full max-lg:p-0 max-lg:shadow-soft
+        ${full
+          ? 'max-lg:inset-y-0 max-lg:h-[100dvh]'
+          : 'max-lg:bottom-0 max-lg:top-auto max-lg:h-[88dvh]'}`}
       style={{ width: shown ? 'min(500px, calc(100vw - 1.5rem))' : 0 }}
     >
       <div
-        style={{ willChange: 'transform', width: 'min(500px, calc(100vw - 1.5rem))' }}
+        style={{
+          willChange: 'transform',
+          width: 'min(500px, calc(100vw - 1.5rem))',
+          // Full-screen is the only surface in this console that reaches the
+          // device's physical top and bottom edges, so it is the only one that has
+          // to know about the notch and the home indicator. Inline rather than a
+          // Tailwind class because `env()` is not expressible as one.
+          ...(full ? {
+            paddingTop: 'env(safe-area-inset-top, 0px)',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          } : {}),
+        }}
         className={`h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden
-          max-lg:!w-full max-lg:h-full max-lg:rounded-b-none max-lg:rounded-t-2xl max-lg:border-b-0
-          transition-transform duration-200 ease-out
+          max-lg:!w-full max-lg:h-full transition-transform duration-200 ease-out
+          ${full
+            ? 'max-lg:rounded-none max-lg:border-0'
+            : 'max-lg:rounded-b-none max-lg:rounded-t-2xl max-lg:border-b-0'}
           ${shown ? 'translate-x-0 max-lg:translate-y-0' : 'translate-x-full max-lg:translate-x-0 max-lg:translate-y-full'}`}
       >
         {children}

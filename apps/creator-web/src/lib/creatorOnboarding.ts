@@ -809,8 +809,16 @@ export function readSpotlightRecord(raw: string | null | undefined): SpotlightRe
 /** Should the Builder spotlight run right now? Total — never throws. */
 export function shouldStartBuilderSpotlight(args: {
   record: SpotlightRecord | null;
-  tourRunning: boolean;
-  quickSetupActive: boolean;
+  /**
+   * Both yields are now OPTIONAL and secondary. Which guided surface may be on
+   * screen is decided by `lib/builderGuidance.ts` via `GuidanceProvider`, so the
+   * caller no longer reaches into other components to answer them (change:
+   * builder-guidance-arbiter). They are kept as a defensive second gate — a caller
+   * that does know is still obeyed — and because they are what makes this predicate
+   * meaningful on its own.
+   */
+  tourRunning?: boolean;
+  quickSetupActive?: boolean;
 }): boolean {
   if (!args || typeof args !== 'object') return false;
   if (args.record?.seen === true) return false;

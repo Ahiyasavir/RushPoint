@@ -23,6 +23,10 @@ import { Badge, Button, Card, EmptyState, Input, Label, Skeleton } from '../comp
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
+// The stamp that tells the Builder this mount is the landing from the new-game
+// wizard, so it does not stack a second guided flow on top (change:
+// creator-mobile-mechanics).
+import { JUST_CREATED_NAV_STATE } from '../lib/quickSetup';
 import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
@@ -469,8 +473,16 @@ export default function DashboardPage() {
    * ONE call per path, and the guided path is a single atomic
    * `createGameFromTemplate` — personalization is applied server-side inside that
    * same write, so a failure can never leave a half-personalized game behind.
-   * Navigating to /build/<id> IS the Quick Setup handoff: BuilderPage already
-   * offers it on mount for a game carrying wizardSteps.
+   *
+   * Every hop into the Builder from here carries `JUST_CREATED_NAV_STATE`
+   * (change: creator-mobile-mechanics). This used to be the Quick Setup handoff:
+   * BuilderPage auto-offered that flow's welcome card on mount for any game
+   * carrying wizardSteps, which meant the creator answered a questionnaire, sat
+   * through the reveal, and was then handed a SECOND guided flow before ever
+   * seeing the game — three screens of ceremony ahead of the product, and the
+   * reason the setup reads as chaotic on a phone. The stamp defers that
+   * invitation to the next visit; it does not remove it (see
+   * shouldAutoOpenQuickSetup).
    */
   async function newGame(submission: WizardSubmission) {
     const { plan } = submission;
@@ -486,7 +498,7 @@ export default function DashboardPage() {
           scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
         });
         _gamesCache = null;
-        nav(`/build/${gameId}`);
+        nav(`/build/${gameId}`, { state: JUST_CREATED_NAV_STATE });
       } catch (e) {
         console.error('[dashboard] create blank game failed:', e);
         await dialog.alert(d.templateFailed);
@@ -529,7 +541,7 @@ export default function DashboardPage() {
           });
           _gamesCache = null;
           await dialog.alert(d.wizard.smartFailed);
-          nav(`/build/${gameId}`);
+          nav(`/build/${gameId}`, { state: JUST_CREATED_NAV_STATE });
         } catch (e) {
           console.error('[dashboard] blank fallback failed:', e);
           await dialog.alert(d.templateFailed);
@@ -619,7 +631,7 @@ export default function DashboardPage() {
       if (res?.fitsRequestedDuration === false && typeof res.estimatedMinutes === 'number') {
         await dialog.alert(d.wizard.longerThanAsked(res.estimatedMinutes));
       }
-      nav(`/build/${res.gameId}`);
+      nav(`/build/${res.gameId}`, { state: JUST_CREATED_NAV_STATE });
     } catch (e) {
       // The wizard closes FIRST, so a failure here used to leave the creator on an
       // unchanged dashboard with no game and no error at all
@@ -1129,7 +1141,7 @@ export default function DashboardPage() {
               onContinue={() => {
                 const { gameId } = reveal;
                 setReveal(null);
-                nav(`/build/${gameId}`);
+                nav(`/build/${gameId}`, { state: JUST_CREATED_NAV_STATE });
               }}
               labels={{
                 title: d.wizard.revealTitle,

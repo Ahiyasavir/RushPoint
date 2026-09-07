@@ -31,6 +31,8 @@ import {
   quickSetupIntroStep,
   quickSetupChapterKey,
   shouldAutoOpenQuickSetup,
+  JUST_CREATED_NAV_STATE,
+  isJustCreatedNavState,
   missionSummaryLine,
   quickSetupProgress,
   quickSetupStorageKey,
@@ -270,6 +272,28 @@ console.log('\nshouldAutoOpenQuickSetup');
     !shouldAutoOpenQuickSetup({ hasRecord: false, outstanding: 0, total: 0 }));
   ok('never offers a game that is already fully configured',
     !shouldAutoOpenQuickSetup({ hasRecord: false, outstanding: 0, total: 4 }));
+
+  // Two wizards back to back (change: creator-mobile-mechanics). The guided path
+  // is: answer the new-game wizard -> land in the Builder -> and, on that very
+  // mount, get a SECOND guided flow's welcome card. The creator has not yet seen
+  // the game they just described. Landing first is the whole fix; the invitation
+  // is deferred, not cancelled, because no record is written for it.
+  ok('does NOT stack a second wizard onto the one the creator just finished',
+    !shouldAutoOpenQuickSetup({ hasRecord: false, outstanding: 4, total: 4, justCreated: true }));
+  ok('...and still offers on the next visit, since deferring writes no record',
+    shouldAutoOpenQuickSetup({ hasRecord: false, outstanding: 4, total: 4, justCreated: false }));
+  ok('an absent justCreated is treated as an ordinary open',
+    shouldAutoOpenQuickSetup({ hasRecord: false, outstanding: 4, total: 4 }));
+
+  // The stamp that carries it. Router state is `unknown` at runtime, so every
+  // shape that is not the stamp must read as an ordinary open — the behaviour
+  // this app had before the stamp existed.
+  ok('the wizard stamp is recognised', isJustCreatedNavState(JUST_CREATED_NAV_STATE));
+  ok('null router state is an ordinary open', !isJustCreatedNavState(null));
+  ok('undefined router state is an ordinary open', !isJustCreatedNavState(undefined));
+  ok('an unrelated state object is an ordinary open', !isJustCreatedNavState({ from: '/gallery' }));
+  ok('a string state is an ordinary open', !isJustCreatedNavState('rpJustCreated'));
+  ok('a truthy-but-not-true value does not count', !isJustCreatedNavState({ rpJustCreated: 1 }));
 }
 
 // ── 3c. The context card's mission summary ──────────────────────────────────

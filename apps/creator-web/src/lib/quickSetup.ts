@@ -365,6 +365,19 @@ export function missionSummaryLine(description: string | null | undefined): stri
  *     override it every time they open the Builder.
  *   • `outstanding === 0` — nothing to guide them to. A welcome card that opens onto
  *     a finished checklist is a interruption with no payload.
+ *   • `justCreated` — this mount is the landing from the new-game wizard, so the
+ *     creator has just finished answering one guided flow and has not yet laid
+ *     eyes on the game it built. Opening a SECOND guided flow's welcome card on
+ *     top of that is what makes the setup read as chaotic rather than helpful:
+ *     three screens of ceremony (questionnaire, reveal, welcome) before the
+ *     product itself. Let them land and look.
+ *
+ *     This DEFERS the invitation, it does not cancel it — refusing here writes no
+ *     record, so the very next time this creator opens the Builder the welcome
+ *     card is offered exactly as before, and the pill is on screen meanwhile. The
+ *     rationale for auto-offering at all (a creator who cloned a template does not
+ *     know the flow exists) is about discovery over a session, not about this
+ *     particular second.
  *
  * The invitation is an OVERLAY, never a jump: nothing on the canvas moves until the
  * creator says yes, so declining costs one click and changes nothing.
@@ -373,11 +386,37 @@ export function shouldAutoOpenQuickSetup(input: {
   hasRecord: boolean;
   outstanding: number;
   total: number;
+  /** Did this Builder mount come straight from the new-game wizard? */
+  justCreated?: boolean;
 }): boolean {
   if (!input) return false;
   if (input.hasRecord) return false;
+  if (input.justCreated === true) return false;
   if (!Number.isFinite(input.total) || input.total <= 0) return false;
   return Number.isFinite(input.outstanding) && input.outstanding > 0;
+}
+
+/**
+ * Router state stamped on the hop from the new-game wizard into the Builder, so
+ * that mount can tell "the creator just answered a questionnaire" from "the
+ * creator opened this game".
+ *
+ * It is deliberately router state and not a query param or a stored flag: it
+ * describes ONE navigation, it must not survive a reload (a reload is the
+ * creator arriving fresh, which is exactly when the invitation is welcome), and
+ * it must leave no trace to clean up.
+ */
+export const JUST_CREATED_NAV_STATE = { rpJustCreated: true } as const;
+
+/**
+ * Read that stamp back. Total and defensive: router state is `unknown` by type
+ * and genuinely arbitrary at runtime (a deep link, a restored session, another
+ * page's state shape), and every unreadable value must mean "an ordinary open"
+ * — the behaviour this app had before the stamp existed.
+ */
+export function isJustCreatedNavState(state: unknown): boolean {
+  if (typeof state !== 'object' || state === null) return false;
+  return (state as { rpJustCreated?: unknown }).rpJustCreated === true;
 }
 
 /** One-based "שלב 2 מתוך 7". */
