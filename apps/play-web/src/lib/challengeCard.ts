@@ -4,6 +4,7 @@
 // native-share / download / clipboard ladder. Consumes share-branding's stampBrand.
 import { buildChallengeParam } from '@rushpoint/shared';
 import { stampBrand } from './brandWatermark';
+import { routeShare, type ShareOutcome } from './shareLadder';
 
 const W = 1080;
 const H = 1080;
@@ -81,32 +82,14 @@ export async function buildChallengeCard(opts: {
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png', 0.92));
 }
 
-type ShareNav = Navigator & {
-  share?: (d: { title?: string; text?: string; url?: string; files?: File[] }) => Promise<void>;
-  canShare?: (d: { files?: File[] }) => boolean;
-};
-
 export async function shareChallenge(opts: {
   gameId: string; taskId: string; question: string; gameName: string;
   playBaseUrl: string; ctaText: string;
-}): Promise<'shared' | 'downloaded' | 'copied' | 'failed' | 'cancelled'> {
+}): Promise<ShareOutcome> {
   const deepLink = challengeUrl(opts.playBaseUrl, opts.gameId, opts.taskId);
   const urlText = opts.playBaseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
   try {
-    const nav = navigator as ShareNav;
     const blob = await buildChallengeCard({ question: opts.question, gameName: opts.gameName, deepLink, urlText });
-    if (blob) {
-      const file = new File([blob], 'rushpoint-challenge.png', { type: 'image/png' });
-      if (nav.share && nav.canShare?.({ files: [file] })) {
-        try { await nav.share({ files: [file], text: opts.ctaText, url: deepLink }); return 'shared'; } catch (e) { return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; }
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'rushpoint-challenge.png'; a.click();
-      URL.revokeObjectURL(url);
-      return 'downloaded';
-    }
-    if (nav.share) { try { await nav.share({ title: 'RushPoint', text: opts.ctaText, url: deepLink }); return 'shared'; } catch (e) { return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; } }
-    await navigator.clipboard.writeText(`${opts.ctaText} ${deepLink}`); return 'copied';
+    return await routeShare({ blob, filename: 'rushpoint-challenge.png', text: opts.ctaText, url: deepLink });
   } catch { return 'failed'; }
 }

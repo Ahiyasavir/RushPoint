@@ -4,6 +4,7 @@
 // download / clipboard ladder. Consumes share-branding's stampBrand.
 import { computePodiumLayout, type PodiumEntry } from '@rushpoint/shared';
 import { stampBrand } from './brandWatermark';
+import { routeShare, type ShareOutcome } from './shareLadder';
 
 const W = 1080;
 const H = 1080;
@@ -70,27 +71,9 @@ export async function buildPodiumCard(podium: PodiumEntry[], opts: { gameName: s
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png', 0.92));
 }
 
-type ShareNav = Navigator & {
-  share?: (d: { title?: string; text?: string; files?: File[] }) => Promise<void>;
-  canShare?: (d: { files?: File[] }) => boolean;
-};
-
-export async function sharePodium(podium: PodiumEntry[], opts: { gameName: string; ctaUrl: string; text: string; title?: string }): Promise<'shared' | 'downloaded' | 'copied' | 'failed'> {
+export async function sharePodium(podium: PodiumEntry[], opts: { gameName: string; ctaUrl: string; text: string; title?: string }): Promise<ShareOutcome> {
   try {
-    const nav = navigator as ShareNav;
     const blob = await buildPodiumCard(podium, opts);
-    if (blob) {
-      const file = new File([blob], 'rushpoint-podium.png', { type: 'image/png' });
-      if (nav.share && nav.canShare?.({ files: [file] })) {
-        try { await nav.share({ files: [file], text: opts.text }); return 'shared'; } catch { return 'failed'; }
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'rushpoint-podium.png'; a.click();
-      URL.revokeObjectURL(url);
-      return 'downloaded';
-    }
-    if (nav.share) { try { await nav.share({ title: 'RushPoint', text: opts.text }); return 'shared'; } catch { return 'failed'; } }
-    await navigator.clipboard.writeText(opts.text); return 'copied';
+    return await routeShare({ blob, filename: 'rushpoint-podium.png', text: opts.text, url: opts.ctaUrl });
   } catch { return 'failed'; }
 }

@@ -234,6 +234,39 @@ const homePages = defineCollection({
     gallerySubtitle: z.string().optional(),
     gallery: z.array(mediaItem()).default([]),
 
+    /**
+     * The occasion doors under the hero (change: marketing-home-occasion-doors).
+     *
+     * The hero borrows one image to be understood in a beat, and this row is what buys
+     * the breadth back: four ways in, so a visitor whose reason is not the one the
+     * headline pictured still finds themselves on the page. Each `examples` line ends in
+     * a catch all clause on purpose; four doors have to stand in for an open set.
+     *
+     * OPTIONAL as a whole, like `tryMission` and `missionIdeas`: a content file without
+     * it renders the page exactly as before. That is deliberate, because the premise
+     * here (self selection helps more than the extra click costs) is a hypothesis to be
+     * measured, and removing it should be an edit rather than a deploy.
+     *
+     * `slug` is a URL fragment, not prose, so the no dash standard does not govern it.
+     * It must be a slug the landing page registry generates, which
+     * scripts/test-marketing-home-cro.ts asserts against SUBJECT_SLUGS: a typo here
+     * renders a perfectly good link to a 404 and nothing else on the page would notice.
+     */
+    occasionDoors: z
+      .object({
+        title: z.string(),
+        doors: z
+          .array(
+            z.object({
+              title: z.string(),
+              examples: z.string(),
+              slug: z.string(),
+            }),
+          )
+          .min(1),
+      })
+      .optional(),
+
     // The playable demo mission (change: try-a-mission). OPTIONAL as a whole: a page with no
     // `tryMission` renders exactly as it did before, so this is a content decision rather
     // than a deploy. Every string a visitor can see lives here, in the language's own file,

@@ -5,11 +5,8 @@ import { useT } from '../i18nContext';
 import { shareRecap } from '../lib/recapCollage';
 import { LoadingView } from '../components/LoadingView';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
-import { CANONICAL_CREATOR_URL } from '@rushpoint/shared';
+import { creatorUrl } from '../lib/creatorUrl';
 
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
@@ -133,7 +130,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
             {shareNote === 'ok' ? t.recap.shareSaved : t.recap.shareFailed}
           </p>
         )}
-        <a href={CREATOR_URL} target="_blank" rel="noreferrer"
+        <a href={creatorUrl()} target="_blank" rel="noreferrer"
           className="flex items-center justify-center min-h-[44px] text-sm font-semibold text-ink-fire hover:text-ink-amber">
           {t.recap.buildOwn}
         </a>

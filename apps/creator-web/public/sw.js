@@ -9,7 +9,7 @@
  * would serve stale game state, so we let every non-GET and every cross-origin
  * request fall straight through to the network.
  */
-const CACHE = 'rushpoint-admin-shell-v4';
+const CACHE = 'rushpoint-admin-shell-v5';
 // Every shell path is resolved against the worker's OWN directory, never '/'.
 // In playtest/tunnel mode creator-web is served under `/creator/` (vite `base`)
 // while play-web owns `/` on the same origin — hardcoding '/' made this worker
@@ -60,15 +60,43 @@ self.addEventListener('fetch', (event) => {
   // edits (and dev-server/playtest updates) never reached the device because the
   // worker answered from cache and never re-fetched. Network-first always prefers
   // fresh content when online, and still falls back to the cache in a dead zone.
-  event.respondWith(
-    fetch(req)
-      .then((res) => {
-        if (res.ok && res.type === 'basic') {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(req)),
-  );
+  event.respondWith(networkFirstAsset(req));
 });
+
+/*
+ * Two failure modes this has to survive, both of which surface as
+ * "Failed to fetch dynamically imported module …/GalleryPage-<hash>.js" on a
+ * chunk that was present and healthy on the server the whole time:
+ *
+ * 1. `caches.match(req)` resolves to **undefined** for anything never cached —
+ *    and only the shell is precached, so every lazy ROUTE chunk is uncached
+ *    until the first successful visit to that route. Handing undefined to
+ *    `respondWith` IS a network error, so one flaky moment on a first visit to
+ *    /gallery became a hard crash screen instead of a retry. One immediate retry
+ *    absorbs the blip; if that also fails we answer with an honest 504 rather
+ *    than a synthetic network error.
+ *
+ * 2. Firebase Hosting rewrites `**` to /index.html, so a chunk that really is
+ *    gone answers **200 text/html**, not 404. Caching that under a `.js` URL
+ *    poisons the entry permanently: every later offline boot would be served
+ *    HTML as a module. Only non-HTML same-origin bodies get stored.
+ */
+async function networkFirstAsset(req) {
+  let res = await fetch(req).catch(() => null);
+  if (!res) res = await fetch(req).catch(() => null);
+
+  if (res) {
+    if (res.ok && res.type === 'basic' && !isHtml(res)) {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => undefined);
+    }
+    return res;
+  }
+
+  const cached = await caches.match(req);
+  return cached || new Response('', { status: 504, statusText: 'Offline and not cached' });
+}
+
+function isHtml(res) {
+  return (res.headers.get('content-type') || '').includes('text/html');
+}

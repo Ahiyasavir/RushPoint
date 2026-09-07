@@ -49,6 +49,12 @@ export const BANK_TAGS = {
   teamwork: { he: 'עבודת צוות', en: 'Teamwork' },
   creative: { he: 'יצירתיות', en: 'Creative' },
   educational: { he: 'חינוכי', en: 'Educational' },
+  // Real household work, done as the mission rather than mimed as one. Offered
+  // only when the creator has said the game happens at `home` (see
+  // `preferredTagOptions`, lib/smartBuildWizard.ts): a chore mission in a park
+  // is nonsense, and an activity chip nothing in the pool can satisfy is worse
+  // than an absent one.
+  chores: { he: 'עזרה בבית', en: 'Help at home' },
 
   // ── Setting — where it is played ──────────────────────────────────────────
   outdoor: { he: 'בחוץ', en: 'Outdoor' },
@@ -223,7 +229,9 @@ export type BookendTagId = typeof BOOKEND_TAG_IDS[number];
  * when two are equally common. Declaration order is the tie-break, so this list
  * must stay a subset of BANK_TAG_IDS in the same relative order.
  */
-export const ACTIVITY_TAG_IDS = ['action', 'camera', 'thinking', 'teamwork', 'creative', 'educational'] as const;
+export const ACTIVITY_TAG_IDS = [
+  'action', 'camera', 'thinking', 'teamwork', 'creative', 'educational', 'chores',
+] as const;
 export type ActivityTagId = typeof ACTIVITY_TAG_IDS[number];
 
 /**

@@ -51,7 +51,12 @@ import {
 function blankStage(): Stage {
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
   return {
-    id: uuid(), order: 0, title: 'שלב 1', requiredTaskCount: 1,
+    // Empty, not a hardcoded 'שלב 1'. That literal shipped a HEBREW stage title to
+    // an English creator, and it duplicated the rail's own positional label
+    // besides (change: stage-name-shown-twice). Every reader of stage.title
+    // already falls back — the rail prints the label, and the readiness and
+    // delete-confirm sentences use b.untitledStage / b.stageTitlePlaceholder.
+    id: uuid(), order: 0, title: '', requiredTaskCount: 1,
     tasks: [{
       id: uuid(), title: '', type: 'field', coordinates: { lat: 0, lng: 0 },
       locationless: true, triggerMode: 'locationless',
@@ -640,6 +645,8 @@ export default function DashboardPage() {
         return b.taskNotCompletable(issue.taskTitle || b.untitledTask);
       case 'taskNotPlaced':
         return b.taskNeedsLocation(issue.taskTitle || b.untitledTask);
+      case 'taskNotNamed':
+        return b.taskNeedsName;
       case 'stageUnwinnable':
         return b.stageUnwinnable(issue.stageTitle || b.stageTitlePlaceholder);
     }

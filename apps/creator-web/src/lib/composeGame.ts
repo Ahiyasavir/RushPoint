@@ -265,6 +265,16 @@ export interface FitContext {
    */
   favouredTags: readonly BankTagId[];
   /**
+   * The occasion actually answered, or `undefined` when there was none.
+   *
+   * Distinct from `favouredTags`, which is a soft bias and deliberately empty
+   * for the neutral answer. This one drives a HARD filter: a mission that
+   * declares `occasions` is meaningless anywhere else (`backwards-name` says
+   * "the celebrant's name"; there is no celebrant at a corporate offsite) and no
+   * amount of good fit makes it playable. See `TaskBankEntry.occasions`.
+   */
+  occasion?: OccasionId;
+  /**
    * Does this creator prefer missions pinned to real spots? True from prep level
    * 4 ("I'll go to the site beforehand and set it up there"). A PREFERENCE, not
    * a filter: level 4 admits exactly the missions level 3 admits.
@@ -568,6 +578,10 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
     // Neutral, unknown and absent all resolve to an EMPTY list — see
     // `occasionProfile`, which never guesses a bias from a malformed answer.
     favouredTags: occasionProfile(a.occasion).favouredTags,
+    // The raw answer, for the hard occasion filter in `fitScore`. Anything that
+    // is not a real occasion id becomes `undefined`, which reads as "we were not
+    // told" and therefore admits no occasion-locked mission at all.
+    occasion: isOccasionId(a.occasion) ? a.occasion : undefined,
     // Level 4 and up. Level 2-3 pin missions too (`prepWantsPlacedMissions`),
     // but only level 4 says the creator is going there beforehand, which is what
     // makes a located mission worth preferring rather than merely tolerable.
@@ -633,6 +647,17 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
   // for rather than on what the mission claims to cost. See
   // `FitContext.requiredSetupAllowed`.
   if (ctx.requiredSetupAllowed === false && demandsRequiredSetup(entry)) return -Infinity;
+  // A mission written for ONE kind of event. Hard, like the prep budget and for
+  // the same reason: "there is no birthday here" describes the creator's world,
+  // not their taste. And an ABSENT occasion excludes it too — "we were not told
+  // what this event is" must never resolve to "so hand them a birthday mission",
+  // which is exactly what happened before this filter existed: `backwards-name`
+  // is tagged for office, mall, forest and beach, and a park game for a mixed
+  // audience was composed with "say the celebrant's name backwards" in it.
+  if (Array.isArray(entry.occasions) && entry.occasions.length > 0
+    && (ctx.occasion === undefined || !entry.occasions.includes(ctx.occasion))) {
+    return -Infinity;
+  }
   // "No venue" makes a location-only mission literally unplayable.
   if (ctx.setting === 'fromAnywhere' && tags.includes('locationBased') && !tags.includes('fromAnywhere')) {
     return -Infinity;

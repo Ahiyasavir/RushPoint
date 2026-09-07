@@ -22,6 +22,10 @@
 //            bypasses the dictionary. Same UI-text-position detection as
 //            scripts/check-i18n.ts → no className/import false positives. Suppress
 //            a deliberate literal with a trailing `// i18n-ignore`.
+//   PART G — the mission bank (apps/creator-web/src/taskBank.ts), the largest
+//            body of user-facing Hebrew in the product and, until 2026-09-06,
+//            invisible to every part above: it is neither a `t.*` dictionary nor
+//            a JSX literal, so the standard did not reach it.
 //   npx tsx scripts/test-no-dashes.ts
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative, basename } from 'node:path';
@@ -30,6 +34,7 @@ import ts from 'typescript';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
 import { LANDING_PAGES } from './lib/landingPages';
+import { TASK_BANK } from '../apps/creator-web/src/taskBank';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -411,7 +416,13 @@ if (existsSync(MARKETING_PAGES_DIR)) {
   // Identifiers, not prose: media paths, icon names and the media discriminator
   // are Latin by necessity in both languages, and the standard already exempts
   // file paths.
-  const NOT_PROSE_KEY = /(^|\.)(src|poster|icon|kind)$/;
+  //
+  // `slug` joins them (change: marketing-home-occasion-doors): an occasion door names the
+  // landing page it opens, and those slugs are Latin and hyphenated BY DESIGN. See
+  // SUBJECT_SLUGS in scripts/lib/landingPages.ts, which explains why they are Latin in
+  // both languages and states that the no dash standard governs prose and exempts URLs.
+  // Renaming a slug to satisfy this scan would break the URL, not fix the copy.
+  const NOT_PROSE_KEY = /(^|\.)(src|poster|icon|kind|slug)$/;
 
   const leavesOf = (value: unknown, path: string, out: Array<[string, string]>): Array<[string, string]> => {
     if (typeof value === 'string') {
@@ -584,6 +595,41 @@ check('F · no colon in a shipped page title', titleOffenders.length === 0, titl
 // title, two title meta fields and two manifest keys each, plus twelve landing pages,
 // plus the marketing site's two config fields and six standing page titles.
 check('F · the title scan actually reached the titles', titlesScanned >= 28, `${titlesScanned} title(s)`);
+
+// ── PART G — the mission bank ────────────────────────────────────────────────
+//
+// The single largest body of user-facing Hebrew in the product, and until
+// 2026-09-06 no part of this gate could see a character of it. A bank mission's
+// `title`, `description` and `hint` are read by a player on a phone mid game;
+// its `setup[].prompt` is read by a creator in Quick Setup. None of it flows
+// through `t.*` (PART A) and none of it is a JSX literal (PART B), so the
+// standard simply did not apply where most of the copy lives. A register pass
+// over the bank put eight em dashes into player copy and every gate stayed
+// green, which is how this hole was found. `title`/`description`/`hint` are
+// player text and `prompt` is creator text; both are user facing.
+{
+  const offenders: string[] = [];
+  let bankScanned = 0;
+  const scan = (where: string, value: string | undefined): void => {
+    if (!value) return;
+    bankScanned++;
+    if (BANNED_DASH.test(value)) offenders.push(`${where} → "${value.slice(0, 60)}"`);
+  };
+  for (const entry of TASK_BANK) {
+    const task = entry.build();
+    scan(`${entry.key}.title`, task.title);
+    scan(`${entry.key}.description`, task.description);
+    scan(`${entry.key}.hint`, task.hint);
+    for (const step of task.steps ?? []) scan(`${entry.key}.step`, step.prompt);
+    for (const [i, sp] of (entry.setup ?? []).entries()) scan(`${entry.key}.setup[${i}]`, sp.prompt);
+  }
+  check('G · no hyphen or dash in mission bank copy', offenders.length === 0,
+    offenders.slice(0, 6).join(' | '));
+  // Same anti-vacuity assertion the other parts carry: a scan that reached
+  // nothing satisfies "no offenders" perfectly.
+  check('G · the mission bank scan actually reached the copy', bankScanned >= 200,
+    `${bankScanned} string(s) across ${TASK_BANK.length} missions`);
+}
 
 console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -23,6 +23,7 @@ import {
 } from '@rushpoint/shared';
 import { isAdminClaim } from '../lib/adminGate';
 import { buildAdminUsersCsv, filterUsers, sortUsers, type AdminUserSort } from '../lib/adminUsersExport';
+import { downloadCsv as saveCsv } from '../lib/downloadFile';
 import { formatTxDate } from '../lib/formatTxDate';
 import { EmptyState, Skeleton, Badge, Button, Input, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
@@ -103,13 +104,10 @@ export default function AdminUsersPage() {
   };
 
   function downloadCsv() {
-    const blob = new Blob([buildAdminUsersCsv(visible)], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'rushpoint-users.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    // Via the shared helper: this call site both revoked the object URL on the
+    // click's own tick (no file at all on Firefox) and omitted the UTF-8 BOM, so
+    // any Hebrew creator name opened as mojibake in Excel.
+    saveCsv(buildAdminUsersCsv(visible), 'rushpoint-users.csv');
   }
 
   /** All visible emails, for one tap "mail everyone". BCC, never To: a To list would

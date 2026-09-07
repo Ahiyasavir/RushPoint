@@ -71,6 +71,13 @@ const HE = {
     addMember: 'הוספת חבר',
     joining: 'מצטרף…',
     joinCta: '🏁 הצטרפו למירוץ',
+    // The join button answers every tap now (change: join-button-never-dead): it
+    // names what is missing instead of going quiet. One sentence per case, each
+    // saying what to do rather than what went wrong.
+    needTeamName: 'רק חסר שם לקבוצה. איך נקרא לכם בטבלה?',
+    needMemberName: 'רק חסר שם אחד לפחות. מי משחק?',
+    needYourName: 'רק חסר השם שלכם.',
+    needRequiredFields: 'נשארו כמה שדות חובה לסמן. הם מודגשים למעלה.',
     // כל הודעת כישלון בהצטרפות אומרת מה לעשות עכשיו (change: join-flow-resilience).
     finished: 'המירוץ הזה כבר הסתיים. אם זו הפתעה, בקשו מהמארגן את הקוד העדכני.',
     invalidCode: 'הקוד לא נמצא. בדקו את הקוד מול המארגן ונסו שוב.',
@@ -352,6 +359,7 @@ const HE = {
     sharePodium: '🏆 שתפו את הפודיום',
     shareCreating: 'יוצר…',
     shareSaved: '✓ נשמר!',
+    shareFailed: 'לא הצלחנו לשתף, הקישור הועתק',
     leaderboardTitle: 'טבלת דירוג',
     waitingFinalize: 'מסכמים את התוצאות…',
     finalizingTally: 'סופרים את כל הנקודות…',
@@ -474,6 +482,7 @@ const HE = {
     sent: 'נשלח ✓',
     broadcast: 'שדרו לכל הקבוצות',
     broadcastFailed: 'השידור לא נשלח. הטקסט נשמר, נסו שוב.',
+    replyFailed: 'התשובה לא נשלחה. הטקסט נשמר, נסו שוב.',
     sessionExpired: 'ההתחברות שלכם לקונסולה פגה. התחברו שוב עם קוד הצוות.',
     notFound: 'הפריט הזה כבר לא קיים. רעננו את המסך.',
     rateLimited: 'יותר מדי פעולות ברצף. המתינו רגע ונסו שוב.',
@@ -539,6 +548,8 @@ const HE = {
     heldGeneric: 'המארגן צריך לסדר משהו לפניכם לפני שתוכלו להתחיל. לא עשיתם שום דבר לא בסדר.',
     heldAskHost: 'גשו למארגן המשחק ותגידו לו שאתם מחכים. רק הוא יכול לשחרר אתכם ולהתחיל.',
     shareProgress: '📸 שתפו את ההתקדמות',
+    shareSaved: '✓ נשמר!',
+    shareFailed: 'לא הצלחנו לשתף, הקישור הועתק',
     creating: 'יוצר…',
     testRunBanner: 'ריצת בדיקה, שום דבר כאן לא נספר',
     noActiveStage: 'אין שלב פעיל.',
@@ -805,6 +816,12 @@ const EN: typeof HE = {
     addMember: 'Add member',
     joining: 'Joining…',
     joinCta: '🏁 Join the race',
+    // See the Hebrew block: the join button names what is missing instead of
+    // sitting there disabled and unexplained (change: join-button-never-dead).
+    needTeamName: 'Just need a team name. What should we call you on the board?',
+    needMemberName: 'Just need at least one name. Who is playing?',
+    needYourName: 'Just need your name.',
+    needRequiredFields: 'A couple of required fields are still empty. They are highlighted above.',
     // Every join failure says what to do next (change: join-flow-resilience).
     finished: 'This race has already finished. If that is a surprise, ask your host for the current code.',
     invalidCode: 'We could not find that code. Check it with your host and try again.',
@@ -1071,6 +1088,7 @@ const EN: typeof HE = {
     sharePodium: '🏆 Share the podium',
     shareCreating: 'Creating…',
     shareSaved: '✓ Saved!',
+    shareFailed: 'Could not share, link copied',
     leaderboardTitle: 'Leaderboard',
     waitingFinalize: 'Wrapping up the results…',
     finalizingTally: 'Counting every point…',
@@ -1193,6 +1211,7 @@ const EN: typeof HE = {
     sent: 'Sent ✓',
     broadcast: 'Broadcast to all teams',
     broadcastFailed: 'The broadcast did not go out. Your text was kept, try again.',
+    replyFailed: 'The reply did not go out. Your text was kept, try again.',
     sessionExpired: 'Your console sign in expired. Sign in again with your staff PIN.',
     notFound: 'That item no longer exists. Refresh the screen.',
     rateLimited: 'Too many actions in a row. Wait a moment and try again.',
@@ -1247,6 +1266,8 @@ const EN: typeof HE = {
     heldGeneric: 'The host has something to sort out for you before you can start. You did nothing wrong.',
     heldAskHost: 'Find the host and tell them you are waiting. Only they can release you and start you off.',
     shareProgress: '📸 Share our progress',
+    shareSaved: '✓ Saved!',
+    shareFailed: 'Could not share, link copied',
     creating: 'Creating…',
     testRunBanner: 'Test run, nothing here counts',
     noActiveStage: 'No active stage.',

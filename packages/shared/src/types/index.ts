@@ -663,6 +663,16 @@ export interface Game {
   // retuned. A template with no genre is simply not offered as a wizard answer —
   // it stays fully usable in the ordinary picker.
   templateGenre?: TemplateGenre;
+  // Taken out of the creator-facing picker while staying a template the admin
+  // owns, sees in their builder and can edit (change: template-visibility).
+  //
+  // ABSENT MEANS VISIBLE. Every template that exists today carries no such
+  // field, so absence has to be the ordinary case or the whole catalogue
+  // disappears on deploy — which is also why the field is named for the
+  // non-default state. Read it ONLY through `isTemplateHidden`: two of the four
+  // call sites see documents that came through a `.select()` field mask, where
+  // an omitted field is `undefined` on every row.
+  templateHidden?: boolean;
   // Task-library priority (change: task-library-priority-boost). Creator-settable
   // (unlike PublicGame/PublicTask.pinnedLast, which is admin-only and set directly
   // in Firestore). When true, every task this game publishes carries

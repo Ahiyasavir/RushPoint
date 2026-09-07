@@ -8259,6 +8259,127 @@ async function main() {
       JSON.stringify((junkGame?.stages ?? []).map((s) => (s.tasks ?? []).map((t) => t.maxConcurrentTeams))));
   });
 
+  // ── template visibility (change: template-visibility) ─────────────────────
+  //
+  // An admin can take a template out of the creator picker while keeping it in
+  // their own builder. Before this, `isTemplate: false` was the only lever and it
+  // removed the template from BOTH lists.
+  //
+  // Four of these assertions exist because the obvious implementations fail
+  // silently rather than loudly:
+  //   • a `where('templateHidden','==',false)` clause would drop every template
+  //     authored before the field existed — hence the legacy-template assertion;
+  //   • a field missing from TEMPLATE_LIST_FIELDS arrives `undefined`, so the
+  //     filter would pass everything and this scenario is what notices;
+  //   • hiding a row from a LIST is not an access control, hence the two
+  //     createGameFromTemplate refusals;
+  //   • a non-sticky field would mean an emoji edit un-hides a parked template.
+  await scenario('template visibility (hidden from creators, kept in the builder)', async () => {
+    const tplTask = (id) => ({
+      id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10,
+      maxConcurrentTeams: 9,
+    });
+    const authorTemplate = async (title) => {
+      const { gameId } = await platformAdmin.call('createGame', { title, mode: 'team' });
+      await platformAdmin.call('updateGame', {
+        gameId, scoringPreset: 'time_only',
+        stages: [{ id: `${gameId}-s1`, order: 0, title: 'S1', isFinal: true, tasks: [tplTask(`${gameId}-t1`)] }],
+      });
+      await platformAdmin.call('setGameTemplateFlag', {
+        gameId, isTemplate: true, templateEmoji: '👁', templateOrder: 40,
+      });
+      return gameId;
+    };
+    const offeredIds = async () => {
+      const list = await creator.call('listGameTemplates', {});
+      return (list?.templates ?? []).flatMap((g) => Object.values(g.variants ?? {})).map((v) => v.id);
+    };
+
+    const visible = await authorTemplate('Visibility: stays visible');
+    const hidden = await authorTemplate('Visibility: gets hidden');
+
+    // 1. Both are offered while neither carries the field at all — which is also
+    //    the regression guard: every template that predates this change has NO
+    //    `templateHidden`, and a query-level equality filter would drop them.
+    const before = await offeredIds();
+    check('listGameTemplates: a template with no visibility field is offered',
+      before.includes(visible) && before.includes(hidden), JSON.stringify(before));
+
+    // 2. Hide one.
+    const hid = await platformAdmin.call('setGameTemplateFlag', {
+      gameId: hidden, isTemplate: true, templateHidden: true,
+    });
+    check('setGameTemplateFlag: accepts templateHidden', hid?.ok === true || hid?.isTemplate === true,
+      JSON.stringify(hid));
+
+    const after = await offeredIds();
+    check('listGameTemplates: the hidden template is no longer offered',
+      !after.includes(hidden), JSON.stringify(after));
+    check('listGameTemplates: its sibling is untouched',
+      after.includes(visible), JSON.stringify(after));
+
+    // 3. …but it is STILL in the admin's own builder, and says so.
+    const adminList = await platformAdmin.call('listAdminTemplates', {});
+    const row = (adminList?.games ?? []).find((g) => g.id === hidden);
+    check('listAdminTemplates: the hidden template is still listed', !!row, JSON.stringify(row?.id));
+    check('listAdminTemplates: the row carries the visibility state',
+      row?.templateHidden === true, JSON.stringify(row?.templateHidden));
+
+    // 4. Hiding a row from a list is not an access control. A creator holding the
+    //    id — from a stale cached menu, or from before it was hidden — is refused,
+    //    and so is the OWNER: an admin edits a parked template in the Builder,
+    //    never by instantiating it.
+    await expectError('createGameFromTemplate: a creator cannot instantiate a hidden template',
+      creator.call('createGameFromTemplate', { templateGameId: hidden, title: 'Should not exist' }),
+      { codeIn: ['functions/failed-precondition'] });
+    await expectError('createGameFromTemplate: not even the owner can',
+      platformAdmin.call('createGameFromTemplate', { templateGameId: hidden, title: 'Should not exist' }),
+      { codeIn: ['functions/failed-precondition'] });
+    const creatorGames = await creator.call('listGames', {});
+    check('createGameFromTemplate: the refused call created nothing',
+      !(creatorGames?.games ?? []).some((g) => g.title === 'Should not exist'),
+      JSON.stringify((creatorGames?.games ?? []).map((g) => g.title)));
+
+    // 5. The field is STICKY: editing unrelated metadata must not un-hide it.
+    //    Getting this wrong is the `updateGame` cleared-optional-field bug from
+    //    the other direction — an emoji edit silently republishing a template.
+    await platformAdmin.call('setGameTemplateFlag', {
+      gameId: hidden, isTemplate: true, templateEmoji: '🙈', templateOrder: 41,
+    });
+    const stillHidden = await offeredIds();
+    check('setGameTemplateFlag: an unrelated edit does not un-hide',
+      !stillHidden.includes(hidden), JSON.stringify(stillHidden));
+
+    // 6. A malformed value is refused rather than coerced. `null` matters
+    //    specifically: the callable transport turns `undefined` into it.
+    await expectError('setGameTemplateFlag: a non-boolean visibility is refused',
+      platformAdmin.call('setGameTemplateFlag', {
+        gameId: hidden, isTemplate: true, templateHidden: 'yes',
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('setGameTemplateFlag: null is refused, not read as visible',
+      platformAdmin.call('setGameTemplateFlag', {
+        gameId: hidden, isTemplate: true, templateHidden: null,
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    const afterJunk = await offeredIds();
+    check('setGameTemplateFlag: a refused call changed nothing',
+      !afterJunk.includes(hidden), JSON.stringify(afterJunk));
+
+    // 7. Unhiding puts it back, and it can be instantiated again.
+    await platformAdmin.call('setGameTemplateFlag', {
+      gameId: hidden, isTemplate: true, templateHidden: false,
+    });
+    const restored = await offeredIds();
+    check('setGameTemplateFlag: unhiding restores it to the picker',
+      restored.includes(hidden), JSON.stringify(restored));
+    const made = await creator.call('createGameFromTemplate', {
+      templateGameId: hidden, title: 'From an unhidden template',
+    });
+    check('createGameFromTemplate: works again once visible', !!made?.gameId, JSON.stringify(made));
+  });
+
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════
   // Pins the edge semantics of answer matching and geo triggers where
   // off-by-one regressions live.

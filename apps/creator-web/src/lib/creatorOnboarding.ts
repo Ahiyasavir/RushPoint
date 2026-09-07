@@ -636,6 +636,49 @@ export function tourNavIntent(
   return { kind: 'stay' };
 }
 
+/**
+ * From a step the creator cannot yet reach, the next step they CAN.
+ *
+ * Why this exists. A brand-new creator auto-starts the tour on an empty
+ * dashboard, and `tourNavIntent` correctly turns every Builder step into
+ * `awaitAction` — "create your first game and I'll take you in". But there are
+ * SEVEN consecutive Builder steps, so pressing Next walked the creator through
+ * seven cards that all carried the identical 👆 prompt, all pointing at the same
+ * "new game" button, none of them able to show the thing they described. Worse,
+ * the prompt says the game is needed *to continue* while Next continued anyway —
+ * so the tour's own instruction was visibly false, on the first screen a creator
+ * ever sees. (Observed live: steps 4 through 10, all with the same prompt.)
+ *
+ * A blocked RUN of steps is one situation, not seven, so Next treats it as one:
+ * it lands on the first step that is actually reachable. The creator keeps both
+ * honest options — do the thing (and the tour walks them in), or move on to what
+ * they can see now — and never pages through the same instruction six times.
+ *
+ * Returns the LAST index when nothing further is reachable, so Next still ends
+ * the tour rather than stalling. Total: a malformed step list or index yields a
+ * valid in-range index, because a tour must never be the thing that breaks the
+ * console it is explaining.
+ */
+export function nextReachableTourIndex(
+  steps: readonly TourStep[],
+  index: number,
+  ctx: TourTargetContext,
+  pathname: string,
+): number {
+  const list = Array.isArray(steps) ? steps : [];
+  if (list.length === 0) return 0;
+  const last = list.length - 1;
+  const from = Number.isFinite(index) ? Math.max(0, Math.min(last, Math.floor(index))) : 0;
+
+  for (let i = from + 1; i <= last; i += 1) {
+    const step = list[i];
+    if (!step) continue;
+    if (tourNavIntent(step, ctx ?? {}, pathname).kind !== 'awaitAction') return i;
+  }
+  // Everything ahead is still blocked — go to the end, which finishes the tour.
+  return last;
+}
+
 export interface TourRect { top: number; left: number; width: number; height: number }
 export interface TourSize { width: number; height: number }
 

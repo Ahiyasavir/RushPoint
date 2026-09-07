@@ -227,11 +227,13 @@ console.log('\n── 7. public photography asks permission (rule 71) ───�
    * Declared exceptions, never inferred. A mission lands here only with a reason
    * that survives being read aloud, and a stale entry fails below.
    */
-  const NO_ASK_NEEDED: Record<string, string> = {
-    'honest-compliment':
-      'the capture IS the request — "if they smiled, ask them for a selfie together" is '
-      + 'itself the asking, so a second permission clause would be the same sentence twice.',
-  };
+  // Emptied 2026-09-06. Its one entry, `honest-compliment`, was excused on the
+  // grounds that "if they smiled, ask them for a selfie together" was itself the
+  // asking. True, and it was also the only submission a `photo` mission had,
+  // gated on a stranger's reaction — a team that got a polite nod had nothing to
+  // upload. The selfie is now asked for unconditionally, so the mission satisfies
+  // the law outright and needs no exception.
+  const NO_ASK_NEEDED: Record<string, string> = {};
 
   const offenders = TASK_BANK.filter((e) => {
     const t = e.build();

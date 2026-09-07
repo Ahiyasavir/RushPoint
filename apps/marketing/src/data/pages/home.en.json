@@ -2,8 +2,8 @@
   "title": "Build a live race, anywhere",
   "description": "A platform for building live mission races with real stations, navigation on the phone and automatic scoring. Outdoors, at home or at a party. No judges, no paper, no chasing everyone around.",
   "tagline": "A live race for any group",
-  "headline": "The <span class=\"text-primary\">live race</span> your team will remember",
-  "subhead": "Outdoors, at home or at a party, everyone plays the same way. You build the stations, the phone handles the navigation, and the scoring sorts itself out. You keep the part you started for.",
+  "headline": "Give any group their own <span class=\"text-primary\">Amazing Race</span>",
+  "subhead": "Without all the hassle it usually takes.",
   "primaryAction": "Build your first race in 5 minutes",
   "secondaryAction": "Play a real mission now",
   "ideasAction": "Ideas by occasion",
@@ -49,6 +49,31 @@
         "prompt": "Recreate the Beatles crosswalk photo.",
         "points": "+35",
         "visual": "crosswalkPhoto"
+      }
+    ]
+  },
+  "occasionDoors": {
+    "title": "Pick where to start",
+    "doors": [
+      {
+        "title": "A birthday party",
+        "examples": "A bar mitzvah, an end of year party, and any celebration you want remembered",
+        "slug": "yom-huledet"
+      },
+      {
+        "title": "Team bonding",
+        "examples": "Work, the army, and any group that wants to know itself better",
+        "slug": "gibush-tzevet"
+      },
+      {
+        "title": "Activities at home",
+        "examples": "Chores for the kids, a family evening, a night in for two, and any thing that happens indoors",
+        "slug": "pe-ilut-babayit"
+      },
+      {
+        "title": "Education",
+        "examples": "A school, a university, a youth movement, and any setting that wants to teach differently",
+        "slug": "chinuch"
       }
     ]
   },
@@ -247,9 +272,43 @@
       {
         "id": "hood",
         "label": "A neighbourhood"
+      },
+      {
+        "id": "home",
+        "label": "Inside the house"
       }
     ],
     "ideas": [
+      {
+        "text": "Find five things in the house that are the same colour and line them up. Photograph the row from the side.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Photo mission"
+      },
+      {
+        "text": "Build an obstacle course in the living room out of cushions and books, then talk one blindfolded teammate through it using only your voices.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Movement mission"
+      },
+      {
+        "text": "How many drawers are there in this house? Send a number. There is a tolerance.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Counting mission"
+      },
+      {
+        "text": "Hide a small object in one room. The other team gets three clues and three minutes to find it.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Riddle mission"
+      },
+      {
+        "text": "Everyone brings one object from the house that says something about them. Photograph them together and pick one to explain.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Creative mission"
+      },
       {
         "text": "Recreate an old photo of the guest of honour, same pose, whole team in frame.",
         "occasions": [

@@ -375,8 +375,39 @@ describe('computeGameReadiness reports every blocking issue at once', () => {
   });
 
   it('does not report a locationless task at the unplaced default', () => {
-    const g = game([stage({ tasks: [task({ id: 'a', triggerMode: 'locationless', locationless: true })] })]);
+    // Titled on purpose: this case is about LOCATION, and an untitled task is now
+    // its own blocking issue (change: readiness-requires-a-name), so leaving the
+    // fixture unnamed would make the assertion fail for an unrelated reason.
+    const g = game([stage({ tasks: [task({ id: 'a', title: 'Anywhere', triggerMode: 'locationless', locationless: true })] })]);
     expect(computeGameReadiness(g)).toEqual([]);
+  });
+
+  // readiness-requires-a-name. The Builder contradicted itself: the mission editor
+  // refuses to advance past an empty title (`canGoNext('details', …)`), but
+  // readiness never checked — so closing that editor with ✕ left an untitled task
+  // and the panel announced "everything is ready to launch". Reproduced on a
+  // brand-new account: the very first game the Builder creates for you is an
+  // untitled mission it then calls launch-ready. Players see `task.title`
+  // verbatim, so the team is handed a mission with a blank heading.
+  it('reports a task with no name', () => {
+    const g = game([stage({ tasks: [readyTask({ id: 'a', title: '' })] })]);
+    const issues = computeGameReadiness(g);
+    expect(issues.map((i) => i.code)).toEqual(['taskNotNamed']);
+    expect(issues[0].taskId).toBe('a');
+  });
+
+  it('treats a whitespace-only name as no name, exactly as the editor gate does', () => {
+    const g = game([stage({ tasks: [readyTask({ id: 'a', title: '   ' })] })]);
+    expect(computeGameReadiness(g).map((i) => i.code)).toEqual(['taskNotNamed']);
+  });
+
+  it('does not block a TEST DRIVE on a missing name', () => {
+    // Rehearsing is exactly when a creator is still naming things, and launchRun
+    // itself accepts an untitled task — so this is a soft issue, not a refusal.
+    const g = game([stage({ tasks: [readyTask({ id: 'a', title: '' })] })]);
+    const { hard, soft } = splitTestDriveReadiness(g);
+    expect(hard).toEqual([]);
+    expect(soft.map((i) => i.code)).toEqual(['taskNotNamed']);
   });
 
   it('reports a stage that requires more completions than it can yield', () => {

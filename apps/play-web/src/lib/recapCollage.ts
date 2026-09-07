@@ -4,6 +4,7 @@
 // download / clipboard ladder. Consumes share-branding's stampBrand.
 import { computeMontageGrid, type RunRecapPhoto } from '@rushpoint/shared';
 import { stampBrand, loadImage } from './brandWatermark';
+import { routeShare, type ShareOutcome } from './shareLadder';
 
 const W = 1080;
 const H = 1080;
@@ -62,30 +63,12 @@ export async function buildRecapCollage(
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png', 0.92));
 }
 
-type ShareNav = Navigator & {
-  share?: (d: { title?: string; text?: string; url?: string; files?: File[] }) => Promise<void>;
-  canShare?: (d: { files?: File[] }) => boolean;
-};
-
 export async function shareRecap(
   photos: RunRecapPhoto[],
   opts: { title: string; ctaUrl: string; text: string },
-): Promise<'shared' | 'downloaded' | 'copied' | 'failed' | 'cancelled'> {
+): Promise<ShareOutcome> {
   try {
-    const nav = navigator as ShareNav;
     const blob = await buildRecapCollage(photos, opts);
-    if (blob) {
-      const file = new File([blob], 'rushpoint-recap.png', { type: 'image/png' });
-      if (nav.share && nav.canShare?.({ files: [file] })) {
-        try { await nav.share({ files: [file], text: opts.text, url: opts.ctaUrl }); return 'shared'; } catch (e) { return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; }
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'rushpoint-recap.png'; a.click();
-      URL.revokeObjectURL(url);
-      return 'downloaded';
-    }
-    if (nav.share) { try { await nav.share({ title: 'RushPoint', text: opts.text, url: opts.ctaUrl }); return 'shared'; } catch (e) { return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; } }
-    await navigator.clipboard.writeText(`${opts.text} ${opts.ctaUrl}`); return 'copied';
+    return await routeShare({ blob, filename: 'rushpoint-recap.png', text: opts.text, url: opts.ctaUrl });
   } catch { return 'failed'; }
 }

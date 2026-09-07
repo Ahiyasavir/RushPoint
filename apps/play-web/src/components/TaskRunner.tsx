@@ -539,7 +539,15 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       await triggerSOS({ ...ctx, ...coords });
       // Scoped to the situation it was raised for — a later task re-arms the button.
       setHelpSentFor(forId);
-    } catch { /* let the player tap again; nothing persisted */ }
+    } catch {
+      // This calls triggerSOS — the SAFETY path. PlayScreen's own SOS button has
+      // always surfaced a failure (`dialog.alert(t.play.sosFailed)`); this second
+      // entry point to the SAME callable swallowed it, so a stuck player tapped
+      // "send help", nothing was sent, and nothing on screen said so — the button
+      // did not even change state, because `setHelpSentFor` is only reached on
+      // success. Reuses the existing copy, which already says what to do instead.
+      showError(t.play.sosFailed);
+    }
   }
 
   // Submit a check-in through completeTask (field / self_report / geofence all use
@@ -970,7 +978,26 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
             tap, `aria-disabled` still announces it, and the run already renders an
             explicit "👀 {name} is playing" banner above the mission (PlayScreen),
             which says in words what the dimming only hinted at. */}
-        <div className={readOnly ? 'mt-5 pointer-events-none' : 'mt-5'} aria-disabled={readOnly}>
+        {/* EVERY entry component below is keyed by `task.id`.
+          (change: entry-state-must-not-outlive-its-mission)
+
+          TaskRunner does NOT remount when routing hands out the next mission —
+          the parent resets its own state with an effect on `assignedRec?.taskId`,
+          which is proof the instance survives. So when two consecutive missions
+          use the SAME entry component, React reuses the instance and every piece
+          of local state crosses the boundary with it: the number typed for the
+          previous numeric task, the station code, the half-finished sequence
+          answer — and, worst of all, PhotoEntry's captured `file` and `preview`.
+          A player who photographed mission A and was then routed to mission B
+          (a staff skip, or a partial-completion stage auto-skipping the rest)
+          found mission B already holding mission A's photo, primed to submit,
+          with nothing on screen suggesting it was stale.
+
+          Two of these were already keyed, each with a comment explaining this
+          exact failure for its own case. The rule simply never travelled to the
+          other seven. It is a property of the BRANCH, not of any one component:
+          a new task type added here needs the key too. */}
+      <div className={readOnly ? 'mt-5 pointer-events-none' : 'mt-5'} aria-disabled={readOnly}>
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
             {t.task.checkArrival}
           </Button>
@@ -1007,7 +1034,18 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
       {task.smart?.longInstructions && <p dir="auto" className="text-zinc-300 text-base mb-3">{task.smart.longInstructions}</p>}
 
-      <ExpiryCountdown key={task.id} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
+      {/* Prefixed key (change: duplicate-sibling-keys). Both this and
+          <MissionExtras> below are direct children of the SAME <Card> and both
+          keyed to force a per-mission remount — so keying both to a bare
+          `task.id` gave one parent two children with the identical key. React
+          logged "Encountered two children with the same key … the behavior is
+          unsupported and could change", and under a duplicate key reconciliation
+          is undefined: it may match the wrong element or drop one. That voids the
+          exact guarantee both keys were added for — a countdown or an open
+          overflow menu surviving into the next mission. Keys need only be unique
+          among SIBLINGS, so a per-component prefix keeps the remount and removes
+          the collision. */}
+      <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
@@ -1062,7 +1100,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
             )}
           </>
         ) : task.type === 'smart_station' ? (
-          <CodeEntry busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode}
+          <CodeEntry key={task.id} busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode}
             prefill={fillFor(task.id)} onSubmit={verify} />
         ) : task.type === 'quiz' ? (
           task.orderItems && task.orderItems.length > 0
@@ -1070,10 +1108,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
             // key by task id so a new task reseeds the local arrangement.
             ? <OrderingEntry key={task.id} items={task.orderItems} busy={answerFrozen}
                 prefillOrder={rehearsal?.taskId === task.id ? rehearsal.order : undefined} onSubmit={submitOrdered} />
-            : <QuizEntry task={task} busy={answerFrozen} wrongSoFar={wrongAttempts[task.id] ?? 0}
+            : <QuizEntry key={task.id} task={task} busy={answerFrozen} wrongSoFar={wrongAttempts[task.id] ?? 0}
                 prefill={fillFor(task.id)} onSubmit={answer} />
         ) : task.type === 'numeric' ? (
-          <NumericEntry busy={answerFrozen} prefill={fillFor(task.id)} onSubmit={answer} />
+          <NumericEntry key={task.id} busy={answerFrozen} prefill={fillFor(task.id)} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <>
             {/* Key by task id: every piece of this watcher's state (the `fired`
@@ -1086,16 +1124,16 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
               helpSent={helpAlreadySent(helpSentFor, task.id)} />
           </>
         ) : task.type === 'sequence' ? (
-          <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen}
+          <SequenceRunner key={task.id} task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen}
             prefill={fillFor(task.id)} onSubmit={sequenceStep} />
         ) : task.type === 'survey' ? (
-          <SurveyEntry task={task} busy={frozen} onSubmit={answer} />
+          <SurveyEntry key={task.id} task={task} busy={frozen} onSubmit={answer} />
         ) : task.smart?.captureKind === 'audio' ? (
-          <AudioEntry busy={frozen} onSubmit={audio} />
+          <AudioEntry key={task.id} busy={frozen} onSubmit={audio} />
         ) : task.smart?.captureKind === 'video' ? (
-          <VideoEntry smart={task.smart} busy={frozen} onSubmit={video} />
+          <VideoEntry key={task.id} smart={task.smart} busy={frozen} onSubmit={video} />
         ) : (
-          <PhotoEntry busy={frozen} onSubmit={photo} />
+          <PhotoEntry key={task.id} busy={frozen} onSubmit={photo} />
         )}
       </div>
 
@@ -1123,9 +1161,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           (no key at its PlayScreen call site — everything here resets via effects
           keyed on taskId instead). Without this key, a menu left open on one
           mission would still be open the instant the poll reassigns the next one.
-          Same pattern as ExpiryCountdown/OrderingEntry above. */}
+          Same pattern as ExpiryCountdown/OrderingEntry above — note the key is
+          PREFIXED, because ExpiryCountdown is a sibling under the same <Card>. */}
       <MissionExtras
-        key={task.id}
+        key={`extras-${task.id}`}
         hasLocation={!!navigationTarget(task)}
         hasHint={!!task.hasHint && !hint}
         hintFree={!!task.hintFreeNow}

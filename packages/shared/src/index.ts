@@ -7,6 +7,7 @@ export * from './mapStyle';
 export * from './perfBudget';
 export * from './registration';
 export * from './freeMode';
+export * from './templateVisibility';
 export * from './staffThrottle';
 export * from './rateLimit';
 // Which hostnames report to Google Analytics, and how the tag is hardened

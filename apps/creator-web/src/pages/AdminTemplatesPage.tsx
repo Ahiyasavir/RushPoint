@@ -189,6 +189,30 @@ export default function AdminTemplatesPage() {
   }
 
   /**
+   * Take this template out of the creator picker, or put it back.
+   *
+   * `isTemplate` stays TRUE either way — that is the whole point of the feature:
+   * the template keeps living in this list, editable, while creators stop being
+   * offered it (change: template-visibility). Clearing `isTemplate` instead is
+   * what used to be the only option, and it removed the template from this page
+   * as well.
+   */
+  async function toggleHidden(g: Game) {
+    setSavingMeta(true);
+    try {
+      await setGameTemplateFlag({
+        gameId: g.id, isTemplate: true, templateHidden: g.templateHidden !== true,
+      });
+      void load();
+    } catch (e) {
+      console.error('[adminTemplates] visibility toggle failed:', e);
+      toast.error(at.hideFailed);
+    } finally {
+      setSavingMeta(false);
+    }
+  }
+
+  /**
    * Lift this template's setup instructions OUT of the prose participants read and
    * into הקמה מהירה (change: quick-setup-wizard).
    *
@@ -336,6 +360,13 @@ export default function AdminTemplatesPage() {
                   <div className="text-2xl leading-none shrink-0">{g.templateEmoji || '🧩'}</div>
                   <div className="min-w-0">
                     <div className="font-medium text-[--ink-1] truncate" dir="auto">{g.title}</div>
+                    {/* An admin scanning this list is asking "can people see
+                        this", so the state is on the row rather than one click in. */}
+                    {g.templateHidden === true && (
+                      <div className="inline-block mt-0.5 rounded-full bg-[--surface-2] text-[--ink-2] text-[12px] px-2 py-0.5">
+                        {at.hiddenBadge}
+                      </div>
+                    )}
                     <div className="text-[13px] text-[--ink-3]">{at.templateMeta(stageCount, taskCount)}</div>
                     {g.templateLang && <div className="text-[12px] text-[--ink-3]">{at.langBadge(g.templateLang)}</div>}
                   </div>
@@ -374,6 +405,16 @@ export default function AdminTemplatesPage() {
                       className="text-xs px-2 py-1 rounded-lg border border-[--rp-border] text-[--ink-1] disabled:opacity-40"
                     >
                       {extractingId === g.id ? q.extractBusy : q.extractCta}
+                    </button>
+                    {/* Neutral, never alert-coloured: the delete control is its
+                        immediate neighbour and hiding is fully reversible
+                        (change: template-visibility, design D7). */}
+                    <button
+                      onClick={() => void toggleHidden(g)}
+                      disabled={savingMeta}
+                      className="text-xs px-2 py-1 rounded-lg border border-[--rp-border] text-[--ink-1] disabled:opacity-40"
+                    >
+                      {g.templateHidden === true ? at.unhideCta : at.hideCta}
                     </button>
                     <button
                       onClick={() => void removeTemplate(g)}

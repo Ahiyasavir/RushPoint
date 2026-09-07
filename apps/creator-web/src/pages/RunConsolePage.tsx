@@ -52,6 +52,7 @@ import {
   type PanelId, type RunStatus, type GroupSummary, type SectionId, type RunConsoleSection,
   type ColumnLayout, type SummaryChipKey,
 } from '../lib/runConsoleLayout';
+import { downloadCsv as saveCsv, downloadUrl } from '../lib/downloadFile';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import {
   runActionVariant, runActionConsequence, runActionNeedsConfirm, teamRowActions,
@@ -832,7 +833,18 @@ export default function RunConsolePage() {
   async function confirmAction(id: RunActionId): Promise<boolean> {
     if (!runActionNeedsConfirm(id)) return true;
     const key = runActionConsequence(id).copyKey as keyof typeof rc.consequence;
-    return dialog.confirm(rc.consequence[key], rc.confirmTitle, classifyRunAction(id) === 'destructive');
+    // The BUTTON names the action; the heading is the heading. These were the same
+    // string until now (change: confirm-button-says-what-it-does), so "start all
+    // teams", "publish the standings" and "end the run" all offered a button
+    // reading "Before you go ahead" — on the screen a host uses mid-event, for the
+    // actions the console itself classifies as irreversible.
+    const cta = (rc.confirmCta as Partial<Record<string, string>>)[key];
+    return dialog.confirm(
+      rc.consequence[key],
+      cta,
+      classifyRunAction(id) === 'destructive',
+      { title: rc.confirmTitle },
+    );
   }
 
   async function adjustScore(team: RunTeamRow) {
@@ -2551,13 +2563,9 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
     setDownloading(true);
     try {
       for (const row of rows) {
-        const link = document.createElement('a');
-        link.href = row.photoUrl;
-        link.download = `${row.teamId}-${row.taskId}`;
-        link.rel = 'noreferrer';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+        // This was the ONE call site that already did it correctly (attach → click
+        // → remove); it is now the shared helper, so the correctness travels.
+        downloadUrl(row.photoUrl, `${row.teamId}-${row.taskId}`);
         await new Promise((resolve) => setTimeout(resolve, MEDIA_DOWNLOAD_DELAY_MS));
       }
     } finally {
@@ -3025,15 +3033,9 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
       task.completionRate.toFixed(4), task.medianMs, task.p90Ms, task.hintCount, task.skips,
     ]);
     const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
-    // Prepend a UTF-8 BOM so Excel opens Hebrew/Unicode correctly.
-    const bom = String.fromCharCode(0xfeff);
-    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `run-analytics-${accessCode}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // The helper owns the UTF-8 BOM (so Excel opens Hebrew correctly) and the
+    // deferred revoke (so the file actually arrives outside Chrome).
+    saveCsv(csv, `run-analytics-${accessCode}.csv`);
   }
 
   return (

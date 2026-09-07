@@ -17,6 +17,18 @@ interface DialogRequest {
   kind: DialogKind;
   message: string;
   defaultValue?: string;
+  /**
+   * Optional heading above the message (change: confirm-button-says-what-it-does).
+   *
+   * This slot did not exist, and its absence caused a live bug: RunConsolePage
+   * wanted a heading ("Before you go ahead") and the only place to put a string
+   * was the second positional argument — which is the CONFIRM BUTTON label. So
+   * every confirmed run action (start all teams, publish standings, reveal
+   * standings, end the run) rendered a button reading "Before you go ahead"
+   * instead of saying what it was about to do, on the screen a host uses under
+   * time pressure.
+   */
+  title?: string;
   confirmLabel?: string;
   danger?: boolean;
   resolve: (value: boolean | string | null) => void;
@@ -25,7 +37,7 @@ interface DialogRequest {
 let counter = 0;
 let listener: ((req: DialogRequest | null) => void) | null = null;
 
-function push(kind: DialogKind, message: string, opts?: { defaultValue?: string; confirmLabel?: string; danger?: boolean }) {
+function push(kind: DialogKind, message: string, opts?: { defaultValue?: string; title?: string; confirmLabel?: string; danger?: boolean }) {
   return new Promise<boolean | string | null>((resolve) => {
     const req: DialogRequest = { id: ++counter, kind, message, resolve, ...opts };
     // No host mounted (e.g. very early) → fall back to a resolved default so nothing hangs.
@@ -36,8 +48,10 @@ function push(kind: DialogKind, message: string, opts?: { defaultValue?: string;
 
 export const dialog = {
   alert: (message: string) => push('alert', message).then(() => undefined),
-  confirm: (message: string, confirmLabel?: string, danger?: boolean) =>
-    push('confirm', message, { confirmLabel, danger }) as Promise<boolean>,
+  // `confirmLabel` is what the BUTTON says, so it must name the action. Pass a
+  // heading via `opts.title` instead of squeezing it in here.
+  confirm: (message: string, confirmLabel?: string, danger?: boolean, opts?: { title?: string }) =>
+    push('confirm', message, { confirmLabel, danger, ...opts }) as Promise<boolean>,
   prompt: (message: string, defaultValue = '') =>
     push('prompt', message, { defaultValue }) as Promise<string | null>,
 };
@@ -78,6 +92,9 @@ export function DialogHost() {
       onClick={(e) => { if (e.target === e.currentTarget && req.kind === 'alert') onConfirm(); }}
     >
       <Card className="w-full max-w-sm p-6 space-y-4">
+        {req.title && (
+          <h2 className="text-base font-bold text-[--ink-1]">{req.title}</h2>
+        )}
         <p className="text-sm text-[--ink-1] whitespace-pre-line">{req.message}</p>
 
         {req.kind === 'prompt' && (

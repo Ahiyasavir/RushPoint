@@ -16,6 +16,7 @@ import { requireAuth, assertAdmin } from '../auth';
 import { enforceRateLimit } from '../rateLimitStore';
 import { loadOwnedLiveGame } from '../games/lifecycle';
 import { cloneTemplateStagesWithMap } from '../lib/cloneTemplateStages';
+import { isTemplateHidden } from '@rushpoint/shared';
 import { countStagesAndTasks } from '../lib/templateCounts';
 import {
   FIRESTORE_PATHS,
@@ -65,11 +66,11 @@ export const setGameTemplateFlag = loggedCallable('setGameTemplateFlag', async (
 
   const {
     gameId, isTemplate, templateEmoji, templateOrder, templateGroupKey, templateLang,
-    templateGenre,
+    templateGenre, templateHidden,
   } = (data ?? {}) as {
     gameId?: unknown; isTemplate?: unknown; templateEmoji?: unknown;
     templateOrder?: unknown; templateGroupKey?: unknown; templateLang?: unknown;
-    templateGenre?: unknown;
+    templateGenre?: unknown; templateHidden?: unknown;
   };
 
   if (typeof gameId !== 'string' || !gameId.trim()) {
@@ -97,6 +98,14 @@ export const setGameTemplateFlag = loggedCallable('setGameTemplateFlag', async (
     && (typeof templateGenre !== 'string' || !KNOWN_TEMPLATE_GENRES.has(templateGenre))) {
     throw new functions.https.HttpsError('invalid-argument', 'templateGenre must be story or missions');
   }
+  // OPTIONAL AND STICKY (change: template-visibility, design D6). Absent means
+  // "leave it alone", so editing a hidden template's emoji cannot un-hide it.
+  // Nothing is coerced: `null` — which is what the callable transport turns an
+  // `undefined` into — is refused rather than read as "make it visible", because
+  // there is no clear-this meaning for a field whose absent state IS the default.
+  if (templateHidden !== undefined && typeof templateHidden !== 'boolean') {
+    throw new functions.https.HttpsError('invalid-argument', 'templateHidden must be a boolean');
+  }
 
   // The admin must own the game they're flagging — this is "edit it like a
   // regular game", not a way to hijack another admin's content.
@@ -119,6 +128,7 @@ export const setGameTemplateFlag = loggedCallable('setGameTemplateFlag', async (
   }
 
   const update: Record<string, unknown> = { updatedAt: new Date().toISOString(), isTemplate };
+  if (typeof templateHidden === 'boolean') update.templateHidden = templateHidden;
   if (isTemplate) {
     // Stamp the picker's two counts now, so listGameTemplates never has to load
     // this game's stages to draw one menu row.
@@ -262,11 +272,16 @@ function toVariant(game: Game): TemplateVariant {
 // Adding a field to the picker/wizard payload means adding it HERE TOO —
 // `templateGenre` was copied by `toVariant` and still arrived undefined at the
 // client until it was listed here, and nothing about that failure was loud.
-const TEMPLATE_LIST_FIELDS = [
+// Exported so scripts/test-template-visibility.ts can assert MEMBERSHIP rather
+// than trusting review: a field the creator-facing filter reads but the mask
+// omits arrives `undefined` on every document, and the filter then passes
+// everything. That has already shipped once, with `templateGenre`.
+export const TEMPLATE_LIST_FIELDS = [
   'id', 'ownerUid', 'title', 'description', 'mode', 'scoringPreset',
   'templateEmoji', 'templateOrder', 'templateGroupKey', 'templateLang',
   'templateGenre',
   'templateStageCount', 'templateTaskCount', 'deletedAt',
+  'templateHidden',
 ] as const;
 
 /** The counts as stored, or `null` when this document predates them. */
@@ -303,9 +318,19 @@ export const listGameTemplates = loggedCallable('listGameTemplates', async (_dat
 
   // Tombstones are filtered in memory for the same reason listGames does it:
   // `where('deletedAt','==',null)` does NOT match documents that lack the field.
+  //
+  // Hidden templates ride the SAME pass, for exactly the same reason: a
+  // `where('templateHidden','==',false)` clause would silently exclude every
+  // template authored before the field existed — which today is all of them
+  // (change: template-visibility, design D2). It also needs no new index.
+  //
+  // The filter runs BEFORE the grouping below, and that order is load-bearing: a
+  // group whose only variant is hidden is then never constructed, so no empty
+  // group reaches the picker.
   const rows = snap.docs
     .map((d) => ({ ref: d.ref, data: d.data() as Partial<Game> }))
-    .filter((r) => !isGameDeleted(r.data as Game));
+    .filter((r) => !isGameDeleted(r.data as Game))
+    .filter((r) => !isTemplateHidden(r.data));
 
   // Only the documents that have no stored counts are read in full, and each one
   // is stamped as we go, so this shrinks to nothing after the first call.
@@ -411,6 +436,19 @@ export const createGameFromTemplate = loggedCallable('createGameFromTemplate', a
   );
   if (!template) {
     throw new functions.https.HttpsError('invalid-argument', 'Unknown or non-template templateGameId');
+  }
+
+  // Removing a template from a LISTING is not an access control: this callable
+  // takes an id, and a creator who saw that id before it was hidden — or whose
+  // cached menu is up to 24h stale — would otherwise still instantiate it
+  // (change: template-visibility, design D5).
+  //
+  // No owner exemption. An admin works on a hidden template by opening it in the
+  // Builder, which is what "still in my builder" means; a privileged instantiate
+  // path would be a second way to mint games from unfinished content.
+  if (isTemplateHidden(template)) {
+    throw new functions.https.HttpsError(
+      'failed-precondition', 'This template is not available right now');
   }
 
   // The id map is what keeps the template's הקמה מהירה steps pointing at THIS copy

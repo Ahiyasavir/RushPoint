@@ -20,6 +20,7 @@ import { CSS } from '@dnd-kit/utilities';
 import PacingBar from './PacingBar';
 import { useT } from './LanguageContext';
 import { useIsMobile } from '../hooks/useMediaQuery';
+import { stageRailTitle } from '../lib/stageRailTitle';
 
 /** Rail id namespace — a stage is both a sortable ITEM (its own id) and a task
  *  drop TARGET (this prefixed id), so the two never collide in one context. */
@@ -113,6 +114,11 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
     >⠿</span>
   );
 
+  // The stage's name, or '' when it merely restates the positional label beside
+  // it (change: stage-name-shown-twice). Computed once, above the compact early
+  // return, so both layouts obey the same rule.
+  const railTitle = stageRailTitle(stage.title, b.stageLabel(index + 1));
+
   // ── Phone: ONE line (change: builder-mobile-simplification) ───────────────
   // The card shape spends ~110px per stage on a pacing bar 40px wide and a task
   // count the pill can carry inline, and the strip then costs ~150px of an 844px
@@ -132,7 +138,13 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
         <span className="text-[12px] font-semibold text-[--ink-3] tabular-nums shrink-0">
           {b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}
         </span>
-        <span className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{stage.title || b.untitledStage}</span>
+        {/* Only when it says something the label did not — the default title IS
+            the label, so this pill used to read "שלב 1  שלב 1" on every stage
+            (change: stage-name-shown-twice). On a 60vw pill that is half the
+            line spent repeating what is already on it. */}
+        {railTitle && (
+          <span className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{railTitle}</span>
+        )}
         <span className="text-[12px] text-[--ink-3] shrink-0 tabular-nums">{stage.tasks.length}</span>
       </div>
     );
@@ -152,7 +164,9 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
         {handle}
         <span className="text-[12px] font-semibold uppercase tracking-wide text-[--ink-3]">{b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}</span>
       </div>
-      <div className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{stage.title || b.untitledStage}</div>
+      {railTitle && (
+        <div className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{railTitle}</div>
+      )}
       <div className="mt-1.5"><PacingBar tasks={stage.tasks} /></div>
       <div className="text-[12px] text-[--ink-3] mt-1">{b.taskCount(stage.tasks.length)}</div>
     </div>

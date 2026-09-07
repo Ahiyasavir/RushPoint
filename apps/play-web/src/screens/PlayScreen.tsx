@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { shouldSendPing } from '../lib/pingGate';
 import { db, ensureAuth, uid } from '../services/firebase';
@@ -8,6 +8,8 @@ import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { syncErrorVerdict } from '../lib/syncError';
+import { shareOutcomeFeedback } from '../lib/shareFeedback';
+import { loadChunk } from '../lib/loadChunk';
 // Why a not-yet-started team is not started (change: held-team-visibility).
 import { heldNotice } from '../lib/holdNotice';
 // Which sealed hidden missions may be drawn as a search circle
@@ -46,11 +48,8 @@ import { formatDuration } from '../lib/boardTime';
 import { feedback, feedbackIfQuiet, isRankUp } from '../lib/sound';
 import { missionProgress, type MissionProgress } from '../lib/missionProgress';
 import { crossedMilestone, type Milestone } from '../lib/milestones';
+import { creatorUrl } from '../lib/creatorUrl';
 
-// Creator app — viral CTA baked into every shared progress card.
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
@@ -84,6 +83,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // powerUps.log grows across polls (ref-compared), for both award types.
   const [powerUpToast, setPowerUpToast] = useState<'double_points' | 'bonus_points' | null>(null);
   const powerUpLogLen = useRef<number | null>(null);
+  // Outcome of the mid-run brag share (change: share-ladder-unification). This
+  // button used to `await shareStoryCard(...)` and ignore the result entirely, so
+  // it was silent on EVERY outcome — success included. A player tapped 📸, the
+  // card was built, and nothing on screen ever acknowledged it.
+  const [shareNote, setShareNote] = useState<'ok' | 'copied' | null>(null);
   // Audio/haptic cue baselines (change: audio-haptic-feedback) — ref-compared
   // across polls, like the power-up toast. null/undefined = not yet observed, so a
   // mid-run reload records the baseline instead of replaying past events.
@@ -341,6 +345,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return () => window.clearTimeout(id);
   }, [powerUpToast]);
 
+  // Same shape, same reason as the power-up timer above: keyed on the note value
+  // itself, so a poll landing inside the window cannot run this effect's cleanup
+  // and clear the pending timeout, leaving the note stuck on screen.
+  useEffect(() => {
+    if (!shareNote) return;
+    const id = window.setTimeout(() => setShareNote(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [shareNote]);
+
   // Task-complete cue: fire when the total count of completed tasks grows across
   // polls. Counting the server-confirmed 'completed' status (not the callable
   // return) covers every task type from one place AND correctly stays silent for a
@@ -446,19 +459,31 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         game: name,
         rankPart: rank ? t.play.shareRankPart({ rank }) : '',
         score: team.score,
-        url: CREATOR_URL.replace(/^https?:\/\//, ''),
+        url: creatorUrl().replace(/^https?:\/\//, ''),
       });
-      const { shareStoryCard } = await import('../lib/storyCard');
-      await shareStoryCard({
+      // See lib/loadChunk.ts: a redeploy mid-run renames this chunk, and a bare
+      // import would reject into nothing at all.
+      const mod = await loadChunk(() => import('../lib/storyCard'));
+      if (!mod) { setShareNote('copied'); try { await navigator.clipboard.writeText(creatorUrl()); } catch { /* the notice still stands */ } return; }
+      const result = await mod.shareStoryCard({
         gameName: name,
         teamName: team.displayName,
         score: team.score,
         rank,
         stagesDone: `${done}/${team.stages.length}`,
-        ctaUrl: CREATOR_URL,
+        ctaUrl: creatorUrl(),
         headline,
         scoreLabel: t.play.pointsSoFar,
       }, text);
+      // 'silent' means the player dismissed the OS sheet — they know. Anything
+      // else gets an acknowledgement, so the button is never a no-op again.
+      const verdict = shareOutcomeFeedback(result);
+      if (verdict === 'fallback') {
+        try { await navigator.clipboard.writeText(creatorUrl()); } catch { /* still show the notice */ }
+        setShareNote('copied');
+      } else if (verdict === 'confirm') {
+        setShareNote('ok');
+      }
     }
   }
 
@@ -654,6 +679,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
+      <ShareNoteToast note={shareNote} />
       {/* ONE compact strip (change: play-card-simplification). Identity, score,
           progress, streak and every utility used to be EIGHT stacked full-width
           rows before the map — so on a phone the player scrolled past their own
@@ -1436,6 +1462,23 @@ function ElapsedClock({ startedAt }: { startedAt?: string }) {
   }, []);
   const sec = startedAt ? Math.max(0, (now - new Date(startedAt).getTime()) / 1000) : 0;
   return <span className="text-ink-fire font-mono">{formatDuration(sec)}</span>;
+}
+
+// Acknowledges the mid-run brag share. Deliberately the LOWEST-priority overlay:
+// the player initiated it a moment ago, so it must never sit above an offline
+// banner or a reconnect pill. 'copied' is the honest "that channel failed, here
+// is the link instead" — the case the old silent handler could not express.
+function ShareNoteToast({ note }: { note: 'ok' | 'copied' | null }) {
+  const { t } = useT();
+  if (!note) return null;
+  return (
+    <TopOverlay kind="share">
+      <div role="status" aria-live="polite"
+        className={`max-w-[calc(100%-2rem)] rounded-full text-sm font-semibold px-4 py-2 shadow-lg ${note === 'ok' ? 'bg-ink-fire text-white' : 'bg-zinc-800/90 text-zinc-100'}`}>
+        {note === 'ok' ? t.play.shareSaved : t.play.shareFailed}
+      </div>
+    </TopOverlay>
+  );
 }
 
 // Power-ups (change: power-ups): a transient award toast at the top of the screen.

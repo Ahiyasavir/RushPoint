@@ -5,6 +5,7 @@
 // a branded caption — a share never throws.
 import { resolveShareQrTarget } from '@rushpoint/shared';
 import { loadImage, stampBrand } from './brandWatermark';
+import { routeShare, nativeShare, copyText, canNativeShare, type ShareOutcome, type ShareNav } from './shareLadder';
 
 export interface PhotoShareBrand {
   playBaseUrl: string;
@@ -15,34 +16,18 @@ export interface PhotoShareBrand {
   logoSrc?: string;
 }
 
-type ShareResult = 'shared' | 'downloaded' | 'copied' | 'failed';
 
-type ShareNav = Navigator & {
-  share?: (d: { title?: string; text?: string; url?: string; files?: File[] }) => Promise<void>;
-  canShare?: (d: { files?: File[] }) => boolean;
-};
-
-async function routeBlob(blob: Blob, caption: string): Promise<ShareResult> {
-  const nav = navigator as ShareNav;
-  const file = new File([blob], 'rushpoint-photo.png', { type: 'image/png' });
-  if (nav.share && nav.canShare?.({ files: [file] })) {
-    try { await nav.share({ files: [file], text: caption }); return 'shared'; } catch { return 'failed'; }
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'rushpoint-photo.png'; a.click();
-  URL.revokeObjectURL(url);
-  return 'downloaded';
-}
-
-async function shareUrlFallback(photoUrl: string, caption: string): Promise<ShareResult> {
+async function shareUrlFallback(photoUrl: string, caption: string): Promise<ShareOutcome> {
   const nav = navigator as ShareNav;
   const text = `${caption}\n${photoUrl}`;
-  if (nav.share) { try { await nav.share({ title: 'RushPoint', text }); return 'shared'; } catch { return 'failed'; } }
-  try { await navigator.clipboard.writeText(text); return 'copied'; } catch { return 'failed'; }
+  if (canNativeShare(nav)) {
+    const r = await nativeShare(nav, { title: 'RushPoint', text });
+    if (r !== 'failed') return r;
+  }
+  return copyText(text, nav);
 }
 
-export async function sharePhoto(photoUrl: string, brand: PhotoShareBrand): Promise<ShareResult> {
+export async function sharePhoto(photoUrl: string, brand: PhotoShareBrand): Promise<ShareOutcome> {
   const qrTarget = resolveShareQrTarget({ accessCode: brand.accessCode, gameId: brand.gameId, playBaseUrl: brand.playBaseUrl });
   try {
     const img = await loadImage(photoUrl);
@@ -62,7 +47,9 @@ export async function sharePhoto(photoUrl: string, brand: PhotoShareBrand): Prom
           try { canvas.toBlob((b) => resolve(b), 'image/png', 0.92); } catch { resolve(null); }
         });
         if (blob) {
-          const result = await routeBlob(blob, brand.caption);
+          const result = await routeShare({ blob, filename: 'rushpoint-photo.png', text: brand.caption });
+          // A dismissal is the user's answer, not a broken channel: never fall
+          // through to re-sharing the raw URL behind their back.
           if (result !== 'failed') return result;
         }
       }

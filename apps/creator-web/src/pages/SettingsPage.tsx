@@ -24,6 +24,7 @@ import {
 } from '../lib/signInMethods';
 import { updateMyProfile, exportMyData, deleteMyAccount } from '../services/calls';
 import { restartCreatorTour } from '../components/CreatorTour';
+import { downloadJson } from '../lib/downloadFile';
 
 type Status = { kind: 'ok' | 'err'; msg: string } | null;
 
@@ -431,14 +432,11 @@ function DataCard({ s }: { s: T['settings'] }) {
     setBusy(true); setStatus(null);
     try {
       const data = await exportMyData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `rushpoint-data-${data.account.uid}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus({ kind: 'ok', msg: s.dataExported });
+      // A legal obligation, so it must not silently produce nothing: the helper
+      // reports whether the browser actually took the file, and the status line
+      // reflects that instead of assuming success.
+      const saved = downloadJson(data, `rushpoint-data-${data.account.uid}.json`);
+      setStatus(saved ? { kind: 'ok', msg: s.dataExported } : { kind: 'err', msg: s.dataExportFailed });
     } catch (e) {
       setStatus({ kind: 'err', msg: authMsg(s, e) });
     } finally {

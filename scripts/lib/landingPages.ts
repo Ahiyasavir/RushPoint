@@ -99,6 +99,14 @@ export type LandingLanguage = typeof LANDING_LANGUAGES[number];
  * `other` from that file is deliberately absent. It is the neutral "we were not told what
  * this event is" answer, which biases nothing and shapes nothing, and there is no search
  * intent behind it.
+ *
+ * `home-activities` and `education` are the exception to the paragraph above: they are NOT
+ * composer occasions (change: marketing-home-occasion-doors). They exist because the
+ * marketing homepage opens four doors and a door has to lead somewhere linkable and
+ * findable, and these two are the doors the composer's occasion list happens not to name.
+ * The product supports both without any new feature: `home-activities` is the existing
+ * location free task type, and `education` is the same field game run by a teacher. Do not
+ * assume every subject here maps to an `OccasionId`; that stopped being true here.
  */
 export const LANDING_SUBJECTS = [
   'home',
@@ -107,6 +115,8 @@ export const LANDING_SUBJECTS = [
   'wedding',
   'team-building',
   'youth-group',
+  'home-activities',
+  'education',
 ] as const;
 export type LandingSubject = typeof LANDING_SUBJECTS[number];
 
@@ -154,6 +164,8 @@ export const SUBJECT_SLUGS: Record<LandingSubject, string> = {
   wedding: 'hatuna',
   'team-building': 'gibush-tzevet',
   'youth-group': 'tnuat-noar',
+  'home-activities': 'pe-ilut-babayit',
+  education: 'chinuch',
 };
 
 // ── THE COPY ─────────────────────────────────────────────────────────────────
@@ -170,10 +182,10 @@ export const SUBJECT_SLUGS: Record<LandingSubject, string> = {
 
 const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slug'>> = {
   home: {
-    title: 'בונים משחק שדה אמיתי לכל אירוע, RushPoint',
-    description: 'פלטפורמה לבניית משחקי שדה בשטח: מסלול משימות אמיתי, ניווט אוטומטי בין תחנות, ניקוד בזמן אמת וטבלת מובילים חיה. בלי אפליקציה להתקין ובלי שופטים.',
-    headline: 'המשחק יוצא החוצה',
-    intro: 'בונים משחק שדה משלכם, משתפים קוד כניסה אחד, והשחקנים יוצאים לשטח. הניקוד קורה לבד.',
+    title: 'בונים משחק משימות אמיתי לכל אירוע, RushPoint',
+    description: 'פלטפורמה לבניית משחקי משימות לקבוצות. מסלול אמיתי, ניווט אוטומטי בין תחנות, ניקוד בזמן אמת וטבלת מובילים חיה. בשכונה, בכיתה או בסלון, בלי אפליקציה להתקין ובלי שופטים.',
+    headline: 'משחק אחד, בכל מקום שתבחרו',
+    intro: 'בונים מסלול משימות משלכם, משתפים קוד כניסה אחד, והקבוצות מתחילות לשחק. הניקוד קורה מעצמו.',
     sections: [
       {
         heading: 'איך זה עובד',
@@ -192,17 +204,18 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
       {
         heading: 'לכל סוג אירוע',
         paragraphs: [
-          'יום הולדת, בר מצווה, חתונה, גיבוש צוות או פעולה בתנועת נוער. לכל אירוע יש קצב אחר, קהל אחר וכמות זמן אחרת, והמערכת בונה מסלול שמתאים לו.',
+          'יום הולדת, בר מצווה, חתונה, גיבוש צוות, פעולה בתנועת נוער, פעילות בכיתה או ערב משפחתי בסלון. לכל אירוע יש קצב אחר, קהל אחר וכמות זמן אחרת, והמערכת בונה מסלול שמתאים לו.',
+          'משימה לא חייבת נקודה על המפה. משימה חופשית נפתחת מכל מקום ונבדקת בדיוק כמו כל אחת אחרת, ולכן אותו מסלול עובד גם בשכונה שלמה וגם בתוך דירה אחת.',
         ],
       },
     ],
     ctaLabel: 'בונים משחק עכשיו',
   },
   birthday: {
-    title: 'משחק שדה ליום הולדת עם מסלול משימות בשכונה',
-    description: 'יום הולדת שיוצא מהסלון. מסלול משימות אמיתי בשכונה או בפארק, עם צילומים, אתגרים וניקוד אוטומטי. מתאים לילדים ולנוער, ומוכן תוך דקות.',
-    headline: 'יום הולדת שיוצא מהסלון',
-    intro: 'מסלול משימות בשכונה, בפארק או בכל מקום שאתם מכירים. קצר, רועש, ומלא תמונות.',
+    title: 'משחק משימות ליום הולדת לילדים ולנוער',
+    description: 'יום הולדת עם מסלול משימות אמיתי, בשכונה, בפארק או בתוך הבית עצמו. צילומים, אתגרים וניקוד אוטומטי. מתאים לילדים ולנוער, ומוכן תוך דקות.',
+    headline: 'יום הולדת שמדברים עליו אחר כך',
+    intro: 'מסלול משימות בשכונה, בפארק, או בתוך הבית אם לא יוצאים. קצר, רועש, ומלא תמונות.',
     sections: [
       {
         heading: 'למה זה עובד ליום הולדת',
@@ -312,14 +325,60 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ],
     ctaLabel: 'בונים פעולה',
   },
+  'home-activities': {
+    title: 'משחק משימות בבית למשפחה ולילדים',
+    description: 'מסלול משימות שרץ בתוך הבית, בלי לצאת ובלי ציוד. משימות לילדים, ערב משפחתי או ערב זוגי, עם ניקוד אוטומטי וטלפון אחד לכל קבוצה.',
+    headline: 'המשחק שקורה בתוך הבית',
+    intro: 'אותו מסלול משימות, בלי מפה ובלי לצאת מהדלת. החדרים הם התחנות.',
+    sections: [
+      {
+        heading: 'משימה לא חייבת מיקום',
+        paragraphs: [
+          'משימה יכולה להיות חופשית לגמרי, בלי נקודה על המפה. היא נפתחת מכל מקום, נפתרת בסלון, ונבדקת בדיוק כמו כל משימה אחרת. זה מה שמאפשר למסלול שלם לרוץ בתוך דירה.',
+          'מי שרוצה יכול בכל זאת להשתמש בחדרים כתחנות. קוד סודי מודבק מאחורי דלת, חידה שהתשובה שלה מסתתרת במטבח, או משימת צילום שדורשת את כל המשפחה בפריים אחד.',
+        ],
+      },
+      {
+        heading: 'שלושה ערבים שונים לגמרי',
+        paragraphs: [
+          'משימות לילדים, כשצריך שהבית יסתדר וגם שיהיה כיף. סידור החדר הופך לתחנה עם ניקוד, והתחרות עושה את העבודה שהבקשה לא עשתה.',
+          'ערב משפחתי או ערב זוגי, כשכולם בבית ואף אחד לא מתכוון לצאת. מסלול קצר של חידות וצילומים, בלי הכנה מראש ובלי לקנות כלום.',
+        ],
+      },
+    ],
+    ctaLabel: 'בונים משחק לבית',
+  },
+  education: {
+    title: 'משחק משימות לכיתה ולפעילות חינוכית',
+    description: 'פעילות לימודית שרצה כמו משחק. מסלול משימות לכיתה, לשכבה או לקבוצת סטודנטים, עם התוכן שלכם בתוך החידות וניקוד שנבדק לבד.',
+    headline: 'שיעור שנראה כמו משחק',
+    intro: 'מבית ספר יסודי ועד אוניברסיטה. אותו מסלול משימות, רק שהתוכן הוא החומר שלכם.',
+    sections: [
+      {
+        heading: 'התוכן יושב בתוך המשחק',
+        paragraphs: [
+          'משימה שמרגישה כמו מבחן מפסיקה לעבוד ברגע שהיא מזוהה. לכן החומר יושב בתוך חידה, בתוך קוד שצריך לפצח או בתוך נקודה שצריך למצוא, והתלמיד פוגש אותו כשהוא כבר בתוך המשחק.',
+          'שאלה אמריקאית, שאלה פתוחה, שאלה מספרית או משימת צילום. כל אחת נבדקת מול השרת, כך שאף אחד לא יושב בסוף עם ארבעים מחברות.',
+        ],
+      },
+      {
+        heading: 'עובד בכיתה ועובד בחוץ',
+        paragraphs: [
+          'פעילות בסוף שיעור יכולה לרוץ בתוך הכיתה עצמה, בלי מפה ובלי לצאת. יום שיא, טיול שכבתי או סיור בקמפוס רצים על אותה מערכת עם תחנות אמיתיות.',
+          'אתם רואים מסך אחד עם כל הקבוצות. מי התקדם, מי תקוע ומי ענה מה. בסוף יש דוח מלא של התשובות, ואפשר לייצא אותו לגיליון.',
+        ],
+      },
+    ],
+    ctaLabel: 'בונים פעילות לכיתה',
+  },
 };
 
 const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slug'>> = {
   home: {
-    title: 'Build a real world field game for any event, RushPoint',
-    description: 'Build your own outdoor team game: real missions on a map, automatic routing between stops, live scoring and a leaderboard that updates itself. No app to install and no judges.',
-    headline: 'The game goes outside',
-    intro: 'Build a field game, share one access code, and send players into the street. The scoring takes care of itself.',
+    title: 'Build a real world mission game for any event, RushPoint',
+    description: 'Build your own team mission game: real missions, automatic routing between stops, live scoring and a leaderboard that updates itself. Around a neighbourhood, inside a classroom or across a living room, with no app to install and no judges.',
+    headline: 'One game, wherever you are',
+    intro: 'Build a mission route, share one access code, and the teams start playing. The scoring takes care of itself.',
     sections: [
       {
         heading: 'How it works',
@@ -338,17 +397,18 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
       {
         heading: 'Built for the occasion',
         paragraphs: [
-          'A birthday, a bar mitzvah, a wedding, a team building day or a youth movement session. Each one has a different pace, a different crowd and a different amount of time, and the route is shaped to match.',
+          'A birthday, a bar mitzvah, a wedding, a team building day, a youth movement session, a lesson or a family evening at home. Each one has a different pace, a different crowd and a different amount of time, and the route is shaped to match.',
+          'A mission does not have to sit on a map. A location free mission opens anywhere and is checked exactly like any other, which is why the same route works across a whole neighbourhood or inside a single flat.',
         ],
       },
     ],
     ctaLabel: 'Start building',
   },
   birthday: {
-    title: 'Birthday scavenger hunt on a real mission route nearby',
-    description: 'A birthday party that leaves the living room. A real mission route around your neighbourhood or park, with photo challenges and automatic scoring. Built for kids and teens, ready in minutes.',
-    headline: 'A birthday that leaves the living room',
-    intro: 'A mission route through your neighbourhood, a park, or anywhere you already know. Short, loud, and full of photos.',
+    title: 'Birthday scavenger hunt on a real mission route',
+    description: 'A birthday with a real mission route, around your neighbourhood, through a park, or inside the house itself. Photo challenges and automatic scoring. Built for kids and teens, ready in minutes.',
+    headline: 'The birthday they talk about afterwards',
+    intro: 'A mission route through your neighbourhood, a park, or the house itself if nobody is going out. Short, loud, and full of photos.',
     sections: [
       {
         heading: 'Why it works for a birthday',
@@ -457,6 +517,52 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
       },
     ],
     ctaLabel: 'Build a session',
+  },
+  'home-activities': {
+    title: 'Indoor mission game at home for families and kids',
+    description: 'A mission route that runs inside the house, with nothing to go out for and nothing to buy. Chores for the kids, a family evening or a night in for two, with automatic scoring and one phone per team.',
+    headline: 'The game that happens indoors',
+    intro: 'The same mission route, with no map and without leaving the front door. The rooms are the stops.',
+    sections: [
+      {
+        heading: 'A mission does not need a location',
+        paragraphs: [
+          'A mission can be entirely location free, with no point on a map. It opens anywhere, it is solved on the sofa, and it is checked exactly like every other mission. That is what lets a whole route run inside a flat.',
+          'You can still use the rooms as stops if you want to. A secret code taped behind a door, a riddle whose answer is hiding in the kitchen, or a photo mission that needs the whole family in one frame.',
+        ],
+      },
+      {
+        heading: 'Three completely different evenings',
+        paragraphs: [
+          'Chores for the kids, when the house has to get sorted and it may as well be fun. Tidying a room becomes a scored stop, and the competition does the work that asking did not.',
+          'A family evening or a night in for two, when everyone is home and nobody is going anywhere. A short route of riddles and photos, with no preparation and nothing bought.',
+        ],
+      },
+    ],
+    ctaLabel: 'Build a game for home',
+  },
+  education: {
+    title: 'Classroom mission game for teaching and campus activities',
+    description: 'A lesson that runs like a game. A mission route for a class, a year group or a group of students, with your own material inside the riddles and answers checked automatically.',
+    headline: 'A lesson that looks like a game',
+    intro: 'From primary school to university. The same mission route, except the content is your material.',
+    sections: [
+      {
+        heading: 'The content sits inside the game',
+        paragraphs: [
+          'A mission that feels like a test stops working the moment it is recognised. So the material sits inside a riddle, inside a code to crack, or inside a point that has to be found, and the student meets it while already inside the game.',
+          'Multiple choice, a written answer, a numeric answer or a photo. Each is checked against the server, so nobody ends the day with forty exercise books to mark.',
+        ],
+      },
+      {
+        heading: 'Works in the room and works outside it',
+        paragraphs: [
+          'An end of lesson activity can run inside the classroom itself, with no map and without going anywhere. An activity day, a year group trip or a campus tour runs on the same system with real stops.',
+          'You watch one screen with every group on it. Who has moved on, who is stuck, and who answered what. At the end there is a full report of the answers, and it exports to a spreadsheet.',
+        ],
+      },
+    ],
+    ctaLabel: 'Build a classroom activity',
   },
 };
 
@@ -665,6 +771,8 @@ const NAV_LABEL: Record<LandingLanguage, Record<LandingSubject, string>> = {
     wedding: 'חתונה',
     'team-building': 'גיבוש צוות',
     'youth-group': 'תנועת נוער',
+    'home-activities': 'פעילויות בבית',
+    education: 'חינוך',
   },
   en: {
     home: 'Home',
@@ -673,6 +781,8 @@ const NAV_LABEL: Record<LandingLanguage, Record<LandingSubject, string>> = {
     wedding: 'Wedding',
     'team-building': 'Team building',
     'youth-group': 'Youth group',
+    'home-activities': 'At home',
+    education: 'Education',
   },
 };
 

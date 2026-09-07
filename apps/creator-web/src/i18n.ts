@@ -950,6 +950,7 @@ const HE = {
     dataExportBtn:'ייצא את הנתונים שלי',
     dataExporting:'מכין ייצוא…',
     dataExported: 'הנתונים הורדו.',
+    dataExportFailed: 'הדפדפן חסם את ההורדה. נסו שוב או השתמשו בדפדפן אחר.',
 
     // Legal documents
     legalLabel: 'מסמכים משפטיים',
@@ -1350,6 +1351,22 @@ const HE = {
 
     // ── מה הכפתור הזה באמת עושה (change: run-console-clarity) ──
     confirmTitle: 'רגע לפני שממשיכים',
+    // What the CONFIRM BUTTON says (change: confirm-button-says-what-it-does).
+    // confirmTitle is the heading. It used to be passed as the button label, so
+    // every confirmed action showed a button that did not name the action.
+    // One entry per action with confirm: true in runConsoleActions.ts.
+    confirmCta: {
+      startTeams: 'כן, התחילו את כולם',
+      publishStandings: 'כן, פרסמו את הדירוג',
+      revealStandings: 'כן, חשפו את הדירוג',
+      deleteZone: 'כן, מחקו את האזור',
+      hideFeedPhoto: 'כן, הסתירו את התמונה',
+      finalizeRun: 'כן, סיימו את הריצה',
+      acknowledgeAlert: 'כן, סמנו כטופל',
+      skipStage: 'כן, דלגו על השלב',
+      skipTask: 'כן, דלגו על המשימה',
+      adjustTeamScore: 'כן, עדכנו את הניקוד',
+    },
     consequence: {
       startTeams: 'מפעיל את השעון של כל הקבוצות שהצטרפו, והמשחק מתחיל להן. אי אפשר לעצור את השעון אחורה.',
       publishStandings: 'הופך את הדירוג לגלוי לכל המשתתפים ולכל מי שיש לו את הקישור הפומבי.',
@@ -1792,6 +1809,7 @@ const HE = {
     issueStageHasNoTask: 'שלב בלי משימות',
     issueTaskNotCompletable: 'למשימה חסרה תשובה או קוד',
     issueTaskNotPlaced: 'למשימה אין נקודה על המפה',
+    issueTaskNotNamed: 'למשימה אין שם',
     issueStageUnwinnable: 'השלב דורש להשלים יותר משימות ממה שאפשר',
     launchBlockedSeeReadiness: 'יש דברים לתקן לפני ההשקה. פתחו את לוח המוכנות בראש המסך כדי לראות את כולם.',
     testDriveNotReadyBody: (n: number) => n === 1
@@ -2137,6 +2155,9 @@ const HE = {
     ],
     taskNotCompletable: (title: string) => `למשימה "${title}" חסרה תשובה או קוד, ולכן אי אפשר להשלים אותה. השלימו אותה לפני ההשקה.`,
     taskNeedsLocation: (title: string) => `למשימה "${title}" לא נקבע מיקום על המפה. סמנו נקודה, או הפכו אותה למשימה ללא מיקום, לפני ההשקה.`,
+    // readiness-requires-a-name: ה-Builder כבר לא מרשה להתקדם בעורך בלי שם, אז גם
+    // המוכנות דורשת אותו. השחקן רואה את הכותרת כמו שהיא, ושם ריק זה משימה בלי כותרת.
+    taskNeedsName: 'למשימה אחת עדיין אין שם. תנו לה שם לפני ההשקה, אחרת השחקנים יקבלו משימה בלי כותרת.',
     stageUnwinnable: (title: string) => `השלב "${title}" דורש להשלים יותר משימות ממה שאפשר להשלים בו. תקנו את מספר המשימות הנדרש לפני ההשקה.`,
     saveFailed: 'שמירת המשחק נכשלה. בדקו את החיבור ונסו שוב.',
     // The failed-save banner + its indicator word (change: creator-no-silent-failures).
@@ -2276,6 +2297,9 @@ const HE = {
     helpLabel: 'פתיחת הסיור המודרך',
     next: 'הבא',
     back: 'הקודם',
+    // מוצג במקום 'הבא' כששלב ממתין לפעולה: הוא מדלג על כל הרצף החסום בבת אחת,
+    // במקום להעביר את היוצר בשבעה כרטיסים שחוזרים על אותה בקשה עצמה.
+    skipAhead: 'המשיכו בלי זה',
     skip: 'דילוג על הסיור',
     finish: 'סיימתי',
     restart: 'הפעלת הסיור מחדש',
@@ -2470,6 +2494,13 @@ const HE = {
   adminTemplates: {
     title:            'תבניות משחק',
     subtitle:         'תבניות שמוצגות לכל יוצר במסך "משחק חדש". כל תבנית היא משחק רגיל, עורכים אותה בבילדר בדיוק כמו כל משחק אחר.',
+    // Phrased for what it does to CREATORS, not to the document
+    // (change: template-visibility, design D7). The destructive neighbour on
+    // this page is delete, so these must not read alike.
+    hiddenBadge:      'לא מוצגת ליוצרים',
+    hideCta:          'הסתרה מיוצרים',
+    unhideCta:        'הצגה ליוצרים',
+    hideFailed:       'לא הצלחנו לשנות את מצב התצוגה. נסו שוב.',
     deniedTitle:      'הדף הזה מוגבל למנהלי הפלטפורמה',
     deniedBody:       'לחשבון שלך אין הרשאת מנהל.',
     loading: [
@@ -3456,6 +3487,7 @@ const EN: typeof HE = {
     dataExportBtn:'Export my data',
     dataExporting:'Preparing export…',
     dataExported: 'Data downloaded.',
+    dataExportFailed: 'The browser blocked the download. Try again, or use another browser.',
 
     legalLabel: 'Legal',
     legalDesc:  'RushPoint\'s privacy policy and terms of service. They open in a new tab.',
@@ -3857,6 +3889,22 @@ const EN: typeof HE = {
 
     // ── What this control actually does (change: run-console-clarity) ──
     confirmTitle: 'Before you go ahead',
+    // What the CONFIRM BUTTON says (change: confirm-button-says-what-it-does).
+    // confirmTitle is the heading. It used to be passed as the button label, so
+    // every confirmed action showed a button that did not name the action.
+    // One entry per action with confirm: true in runConsoleActions.ts.
+    confirmCta: {
+      startTeams: 'Yes, start everyone',
+      publishStandings: 'Yes, publish the standings',
+      revealStandings: 'Yes, reveal the standings',
+      deleteZone: 'Yes, delete the zone',
+      hideFeedPhoto: 'Yes, hide the photo',
+      finalizeRun: 'Yes, end the run',
+      acknowledgeAlert: 'Yes, mark it handled',
+      skipStage: 'Yes, skip the stage',
+      skipTask: 'Yes, skip the mission',
+      adjustTeamScore: 'Yes, update the score',
+    },
     consequence: {
       startTeams: 'Starts the clock for every team that has joined, and the game begins for them. The clock cannot be wound back.',
       publishStandings: 'Makes the standings visible to every player and to anyone holding the public link.',
@@ -4299,6 +4347,7 @@ const EN: typeof HE = {
     issueStageHasNoTask: 'Stage with no missions',
     issueTaskNotCompletable: 'Mission has no answer or code',
     issueTaskNotPlaced: 'Mission has no point on the map',
+    issueTaskNotNamed: 'Mission has no name',
     issueStageUnwinnable: 'Stage requires completing more missions than it can yield',
     launchBlockedSeeReadiness: 'Some things need fixing before launch. Open launch readiness at the top of the screen to see them all.',
     testDriveNotReadyBody: (n: number) => n === 1
@@ -4646,6 +4695,9 @@ const EN: typeof HE = {
     ],
     taskNotCompletable: (title: string) => `Mission "${title}" has no answer or code, so it can't be completed. Finish it before launching.`,
     taskNeedsLocation: (title: string) => `Mission "${title}" has no map location set. Drop a pin, or make it a locationless mission, before launching.`,
+    // readiness-requires-a-name: the mission editor already refuses to move past an
+    // empty title, so readiness asks for one too. Players see the title verbatim.
+    taskNeedsName: 'One mission still has no name. Name it before launching, or players get a mission with a blank heading.',
     stageUnwinnable: (title: string) => `Stage "${title}" requires completing more missions than teams can finish. Fix the required mission count before launching.`,
     saveFailed: 'Saving the game failed. Check your connection and try again.',
     saveFailedShort:  'Save failed',
@@ -4785,6 +4837,10 @@ const EN: typeof HE = {
     helpLabel: 'Open the guided tour',
     next: 'Next',
     back: 'Back',
+    // Replaces 'Next' while a step is waiting on an action: it jumps the whole
+    // blocked run at once, instead of paging through seven cards repeating the
+    // same request.
+    skipAhead: 'Continue without it',
     skip: 'Skip the tour',
     finish: 'Done',
     restart: 'Play the tour again',
@@ -4980,6 +5036,11 @@ const EN: typeof HE = {
   adminTemplates: {
     title:            'Game templates',
     subtitle:         'Templates shown to every creator on the "new game" screen. Each one is an ordinary game, edit it in the Builder like any other.',
+    // See the Hebrew note above.
+    hiddenBadge:      'Not shown to creators',
+    hideCta:          'Hide from creators',
+    unhideCta:        'Show to creators',
+    hideFailed:       'We could not change the visibility. Try again.',
     deniedTitle:      'This page is restricted to platform admins',
     deniedBody:       'Your account does not have admin access.',
     loading: [

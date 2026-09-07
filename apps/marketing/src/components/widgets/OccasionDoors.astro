@@ -1,0 +1,56 @@
+---
+/**
+ * The occasion doors (change: marketing-home-occasion-doors).
+ *
+ * WHY THIS ROW EXISTS. The hero above it borrows one familiar image so a stranger
+ * understands the product in a beat. That works, and it costs breadth: someone who came
+ * about a family evening indoors does not see themselves in a race. This row is the
+ * repayment. Four ways in, each ending in a catch all clause, so the page can be specific
+ * at the top without being narrow.
+ *
+ * IT IS ADDITIVE AND MUST STAY THAT WAY. A visitor who ignores it scrolls past and loses
+ * nothing: every section that was on this page before is still below. Do not turn this
+ * into a dialog, an interstitial, or anything pinned over the page, and do not preselect
+ * a door. A preselected door is a guess about who the visitor is, which is the guessing
+ * this row exists to stop. scripts/test-marketing-home-cro.ts PART H enforces all of it.
+ *
+ * NO PROSE HERE. This site has no `t.*` dictionary, so a string typed into this file is a
+ * string that cannot switch language. Everything visible arrives through `content`.
+ */
+interface Door {
+  title: string;
+  examples: string;
+  href: string;
+}
+
+interface Props {
+  title: string;
+  doors: Door[];
+}
+
+const { title, doors } = Astro.props as Props;
+---
+
+<section class="mx-auto max-w-6xl px-4 pb-4 pt-10 sm:px-6 lg:px-8">
+  <h2 class="mb-5 text-center text-sm font-bold uppercase tracking-wider text-muted">
+    {title}
+  </h2>
+
+  <ul class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    {
+      doors.map((door) => (
+        <li>
+          <a
+            class="group flex h-full flex-col gap-1.5 rounded-2xl border border-line bg-page p-5 text-start transition hover:border-secondary hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary dark:hover:border-primary dark:focus-visible:outline-primary"
+            href={door.href}
+          >
+            <span class="font-heading text-lg font-bold text-heading group-hover:text-secondary dark:group-hover:text-primary">
+              {door.title}
+            </span>
+            <span class="text-sm leading-relaxed text-muted">{door.examples}</span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</section>

@@ -19,13 +19,57 @@
       "target": "creator",
       "public": "apps/creator-web/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "headers": [
+        {
+          "source": "/assets/**",
+          "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+        },
+        {
+          "source": "/",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "**/*.html",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "/manifest.webmanifest",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "/sw.js",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        }
+      ]
     },
     {
       "target": "play",
       "public": "apps/play-web/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "headers": [
+        {
+          "source": "/assets/**",
+          "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+        },
+        {
+          "source": "/",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "**/*.html",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "/manifest.webmanifest",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "/sw.js",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        }
+      ]
     },
     {
       "target": "marketing",
@@ -47,6 +91,10 @@
         { "source": "/he/tnuat-noar/", "destination": "https://player.rush-point.com/he/tnuat-noar/", "type": 301 },
         { "source": "/he/yom-huledet", "destination": "https://player.rush-point.com/he/yom-huledet/", "type": 301 },
         { "source": "/he/yom-huledet/", "destination": "https://player.rush-point.com/he/yom-huledet/", "type": 301 },
+        { "source": "/he/pe-ilut-babayit", "destination": "https://player.rush-point.com/he/pe-ilut-babayit/", "type": 301 },
+        { "source": "/he/pe-ilut-babayit/", "destination": "https://player.rush-point.com/he/pe-ilut-babayit/", "type": 301 },
+        { "source": "/he/chinuch", "destination": "https://player.rush-point.com/he/chinuch/", "type": 301 },
+        { "source": "/he/chinuch/", "destination": "https://player.rush-point.com/he/chinuch/", "type": 301 },
         { "source": "/en/bar-mitzva", "destination": "https://player.rush-point.com/en/bar-mitzva/", "type": 301 },
         { "source": "/en/bar-mitzva/", "destination": "https://player.rush-point.com/en/bar-mitzva/", "type": 301 },
         { "source": "/en/gibush-tzevet", "destination": "https://player.rush-point.com/en/gibush-tzevet/", "type": 301 },
@@ -56,7 +104,11 @@
         { "source": "/en/tnuat-noar", "destination": "https://player.rush-point.com/en/tnuat-noar/", "type": 301 },
         { "source": "/en/tnuat-noar/", "destination": "https://player.rush-point.com/en/tnuat-noar/", "type": 301 },
         { "source": "/en/yom-huledet", "destination": "https://player.rush-point.com/en/yom-huledet/", "type": 301 },
-        { "source": "/en/yom-huledet/", "destination": "https://player.rush-point.com/en/yom-huledet/", "type": 301 }
+        { "source": "/en/yom-huledet/", "destination": "https://player.rush-point.com/en/yom-huledet/", "type": 301 },
+        { "source": "/en/pe-ilut-babayit", "destination": "https://player.rush-point.com/en/pe-ilut-babayit/", "type": 301 },
+        { "source": "/en/pe-ilut-babayit/", "destination": "https://player.rush-point.com/en/pe-ilut-babayit/", "type": 301 },
+        { "source": "/en/chinuch", "destination": "https://player.rush-point.com/en/chinuch/", "type": 301 },
+        { "source": "/en/chinuch/", "destination": "https://player.rush-point.com/en/chinuch/", "type": 301 }
       ]
     }
   ],

@@ -987,6 +987,145 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   `?code=` / `?game=` / `?board=` / `?staff` to the participant host: every link minted before the
   move, printed QR codes included, still arrives at the apex.
 
+- **A user-initiated action that resolves "failed" and shows nothing is a DEAD BUTTON, and a
+  cancellation resolving "failed" is what makes call sites build one.** `navigator.share()` rejects
+  with `AbortError` when the player dismisses the OS sheet, which is the most common outcome of
+  tapping share. Five surfaces had each hand-rolled the same share/download/clipboard ladder and
+  only two mapped that to `'cancelled'`; the other three returned `'failed'`, so call sites
+  suppressed the notice on `'failed'` altogether to avoid a false "couldn't share" after every
+  cancel — and a GENUINE failure then showed nothing at all, on the finish screen the whole viral
+  loop runs through. `PlayScreen`'s mid-run brag ignored the result entirely and was silent on
+  every outcome, success included. The ladder now lives once in
+  `apps/play-web/src/lib/shareLadder.ts`, always returns the full five-member union, and
+  `shareOutcomeFeedback` turns it into confirm / silent / visible-fallback. **Adding a share
+  surface means calling `routeShare`, never re-deriving the sequence.** Two traps it also closes:
+  `URL.revokeObjectURL` on the same tick as `a.click()` races the browser's read of the blob and
+  silently downloads NOTHING outside Chrome (the creator's four exports had it too, GDPR "export my
+  data" included — `apps/creator-web/src/lib/downloadFile.ts` now owns that, plus the Excel BOM);
+  and `if (nav.share)` is always-true to TypeScript, because lib.dom types `Navigator.share` as
+  REQUIRED, so the capability check has to be a runtime `typeof`. Pinned by
+  `scripts/test-share-ladder.ts` + `scripts/test-download-file.ts`.
+- **React keys only have to be unique among SIBLINGS — and two siblings keyed to the same id is
+  UNDEFINED behaviour, not a lint nit.** `<ExpiryCountdown key={task.id}>` and
+  `<MissionExtras key={task.id}>` are both direct children of the same `<Card>` in `TaskRunner`,
+  each keyed to force a per-mission remount, each with a comment explaining why. Together they gave
+  one parent two children with the identical key: React logged *"Encountered two children with the
+  same key … may cause children to be duplicated and/or omitted"* twelve times on the first mission
+  of the flagship demo, which voids the exact guarantee both keys were added for. Prefix them
+  (`expiry-${task.id}`, `extras-${task.id}`). Found by RUNNING the app — no gate sees it, because it
+  is a console warning in a render that otherwise looks healthy.
+- **TaskRunner does not remount between missions, so an entry component's local state crosses the
+  mission boundary unless it is keyed.** The parent resets itself with
+  `useEffect(…, [assignedRec?.taskId])` — that is the proof the instance survives. Two of the nine
+  entry components were keyed (each with a comment describing this failure for its own case) and
+  seven were not, so the number typed for the previous numeric task, the station code, the
+  half-typed sequence answer and — worst — `PhotoEntry`'s captured `file` AND `preview` survived
+  into the next mission, primed to submit. A player photographs mission A, a staff skip routes them
+  to mission B, and B is already holding A's picture with nothing on screen saying it is stale.
+  Every branch of that JSX now carries `key={task.id}`; `scripts/test-task-entry-keying.ts` fails
+  when a new task type is added without one.
+- **A `disabled` primary button explains nothing, cannot fire, and therefore cannot tell the user
+  what it wants.** The join form's submit was disabled while any required field was blank, so a
+  group standing in a car park with one phone tapped the big orange button and it simply did not
+  respond — the submit path that highlights the missing field is unreachable by construction, and
+  `disabled` also removes the control from the tab order. It stays ENABLED now and ANSWERS:
+  `joinReadiness` (`apps/play-web/src/lib/joinReadiness.ts`) names what is missing, marks every
+  offending field, and focuses the first in visual order. The Builder had already reached the same
+  conclusion for its mission editor ("Never disabled: the first press reveals every unrevealed
+  blocker"); the rule simply had not travelled. **Prefer an answering button to a disabled one
+  wherever the reason is not visible right beside the control.**
+- **Readiness that measures only STRUCTURE will call an unauthored game launch-ready.** The four
+  original codes checked shape (a stage with tasks, an answer key, a pin, a winnable count) and
+  nothing checked that anything had been NAMED — while `canGoNext('details', …)` in the very same
+  Builder refuses to advance past an empty mission title. So closing the auto-opened editor with ✕
+  left an untitled mission and the panel announced "everything is ready to launch"; players see
+  `task.title` verbatim, i.e. a mission with a blank heading. `taskNotNamed` is a blocking issue
+  now, and deliberately NOT a test-drive blocker (rehearsing is when a creator is still naming
+  things, and `launchRun` accepts it). **A new readiness rule changes what can LAUNCH — decide
+  explicitly whether it is hard or soft, and add it to `TEST_DRIVE_HARD_CODES` or not.**
+- **`dialog.confirm(message, confirmLabel, danger)` puts its SECOND argument on the BUTTON.** The
+  Run Console wanted a heading, the dialog had no title slot, so `rc.confirmTitle` went there — and
+  every confirmed run action offered a button reading *"Before you go ahead"*: start all teams,
+  publish the standings, reveal the standings, end the run. Ten actions, most classified by the
+  console itself as irreversible, none of whose buttons named the action, on the screen a host uses
+  under time pressure. The dialog has a real `title` slot now and each action a verb
+  (`rc.confirmCta`); `scripts/test-confirm-cta.ts` fails if an action gains `confirm: true` without
+  gaining one.
+- **A safety callable with two entry points will drift, and the silent one is the dangerous one.**
+  `triggerSOS` is called from PlayScreen's SOS button (which always alerted on failure) and from
+  TaskRunner's "I'm stuck" affordance, whose catch read `/* let the player tap again; nothing
+  persisted */`. Nothing WAS persisted — that is the problem: `setHelpSentFor` is only reached on
+  success, so a failed distress call left the button and the screen unchanged, for a player who is
+  already stuck. Same shape in StaffConsole's chat reply ("the listener reconciles" is false for a
+  message that was never sent). `scripts/test-safety-call-feedback.ts` declares both call sites.
+- **A default that equals the label beside it is a duplicate, not a default.** `stageLabel(n)` and
+  `stageDefaultTitle(n)` are both the same string, and the stage rail draws them side by side, so
+  every stage read "שלב 1  שלב 1" until renamed — on a `max-w-[60vw]` phone pill that truncates, so
+  half a scarce line repeated what was already on it. Fixed as a DISPLAY rule
+  (`apps/creator-web/src/lib/stageRailTitle.ts`), not a data change: rewriting the stored default
+  would leave every existing game duplicating, and `stage.title` is read by several surfaces that
+  read better with a real value. The blank-game default was also a hardcoded Hebrew literal, i.e. a
+  Hebrew stage title shipped to an English creator.
+- **A tour step that cannot reach its surface must not be shown seven times.** `tourNavIntent`
+  correctly turns every Builder step into `awaitAction` for a creator with no game — but there are
+  SEVEN consecutive Builder steps, so Next walked a brand-new creator through seven cards carrying
+  the identical prompt, pointing at the same button, none able to show what they described. The
+  prompt said the game was needed *to continue* while Next continued anyway. A blocked RUN is one
+  situation, not seven: `nextReachableTourIndex` lands on the first reachable step, and the button
+  says "Continue without it" rather than "Next".
+- **`npm run verify` piped into `head`/`tail` reports the PAGER's exit code.** This file already
+  says it for `verify:emulator`; it bit again here, in the shape
+  `npm run verify > log 2>&1; echo "EXIT=$?"; grep … | head`. The harness reported exit 0 for the
+  pipeline while the unit lane had in fact been failing for several changes in a row. Redirect,
+  make the `$?` capture the LAST statement, and read the number — never trust a summary line.
+- **Editing files with a tool that rewrites line endings turns a five-line change into a whole-file
+  diff.** Python's text-mode write translates `\n` to `os.linesep`, so on Windows a scripted edit can
+  flip a file LF→CRLF; with `core.autocrlf=false` and no `.gitattributes`, git then stores the flip.
+  It made a 65-line TaskRunner change read as 5,041 changed lines and buried the real edit. Use
+  `newline=''` (or write bytes) for any scripted edit.
+  **This tree is MIXED, so "is it LF?" is the wrong question** — plenty of files are legitimately
+  CRLF in HEAD (creator-web's `i18n.ts`, `DashboardPage.tsx`, `creatorOnboarding.ts`,
+  `services/calls.ts`, several `scripts/test-*.ts`), and "normalising" those would itself be churn.
+  The right check compares a file against ITS OWN HEAD — `git show HEAD:<f> | tr -cd '\r' | wc -c`
+  against the same count on the working copy — or just read `git diff --numstat`: a whole-file
+  `+N -N` where the edit was five lines is the tell. A repo-level `.gitattributes` with
+  `* text=auto eol=lf` would end the ambiguity, at the cost of one normalising commit.
+- **A hash that folds each character into the LOW bits collides structurally on SHORT inputs, and
+  short inputs are the realistic ones.** `hashAnswerForReplay` used djb2 (`h1*33 ^ c`) plus a
+  Bernstein-ish roll (`h2*31 + c`). Both are linear enough that a difference in an early character
+  is exactly cancelled by a difference in a later one — `31·c₁ + c₂` is equal whenever c₁ moves by
+  1 and c₂ by −31 — so `"0p"`/`"22"`, `"1p"`/`"32"`, `"1q"`/`"33"` all hashed the same. **16
+  collisions in the exhaustive 1-2 character space; 4,572 across the 100,000 shortest base36
+  strings**, under a doc comment promising "vanishingly unlikely". Long wordy answers were clean,
+  which is exactly why it went unnoticed: numeric replies and short codes are what collide, and
+  they are what players actually type. `submitTaskAnswer` compares this hash to the team's stored
+  `lastHash` to recognise a replay and returns early with "no attempt recorded, no points charged,
+  no cooldown" — so two different wrong answers in a row that collide hand out a free wrong guess
+  and quietly weaken the attempt cap the replay guard's own comment leans on ("a brute-forcer
+  submits DIFFERENT answers by definition"). Now FNV-1a for h1 and a murmur3 round for h2 (each
+  multiplies the WHOLE word every step, so one bit avalanches) plus an fmix finalizer keyed on the
+  length, zero-padded to a fixed 14 chars so the two halves cannot bleed into one another. Zero
+  collisions across every space measured. **A finalizer alone does not fix this** — it is a
+  per-value function, so inputs that already agree still agree; the mixing has to happen inside the
+  loop. Two lessons beyond the hash: the property lane's `N = 300` is a floor, not a proof (raising
+  it is how this surfaced, and the short-input case wants an EXHAUSTIVE sweep rather than sampling);
+  and that test's own collision assertion compared RAW strings, so two inputs that normalize to the
+  same answer — which SHOULD share a hash — would have failed it for the wrong reason.
+- **The port-offset lane removes PORT contention, not CPU contention — and the load sim fails on
+  CPU.** `RUSHPOINT_EMULATOR_PORT_OFFSET=1000 npm run verify:emulator` really does run beside a live
+  stack without fighting for 8080/9099/5001, but it is still the same laptop. Run beside `dev:all`
+  (its own emulator + two Vite servers + a browser) the gauntlet reached the load sim and reported
+  `VIOLATION no player callable surfaced INTERNAL under load :: 2× [completeTask]`, exit 1. Nothing
+  was wrong with the product: the documented diagnostic separated it cleanly — **2 INTERNAL = 2
+  "Your function timed out" = 2 "socket hang up"**, the timeouts were on `onRunFinalized` (a
+  background trigger, not the callable that surfaced INTERNAL), and of 326 logged `callable.error`
+  records **zero** carried `errorCode: "internal"`, i.e. no product code threw. Re-running the same
+  phase with the dev stack stopped: `✅ LOAD SIM CONSISTENT`, 0 INTERNAL, 0 timeouts, and **68s of
+  wall time against 131s** — the second number is the tell, because it says the machine, not the
+  code, was the variable. So: the offset lane is for a gate that must not DISTURB a live playtest;
+  it is not a way to get a trustworthy `simulate` result while the machine is busy. Stop the other
+  stack before believing a load-sim violation, and always run the 1:1:1 count before chasing one.
+
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```
 apps/creator-web/.env   # VITE_FIREBASE_* (+ VITE_MAPTILER_KEY)

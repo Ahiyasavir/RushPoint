@@ -5,6 +5,7 @@ import Features from '~/components/widgets/Features.astro';
 import Steps from '~/components/widgets/Steps.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
 import TryMission from '~/components/widgets/TryMission.astro';
+import OccasionDoors from '~/components/widgets/OccasionDoors.astro';
 import MissionIdeas from '~/components/widgets/MissionIdeas.astro';
 import GamePlanner from '~/components/widgets/GamePlanner.astro';
 import FAQs from '~/components/widgets/FAQs.astro';
@@ -72,6 +73,31 @@ const metadata = {
       { text: t.secondaryAction, href: `#${TRY_MISSION_ID}` },
     ]}
   />
+
+  {
+    /*
+      Four ways in, directly under the hero (change: marketing-home-occasion-doors).
+
+      The headline above borrows ONE image so a stranger gets it in a beat, which is
+      worth doing and is also narrowing: whoever came about a family evening indoors
+      does not see themselves in a race. This row pays that back, and each door leads
+      to a real landing page so it can be shared and found in search on its own.
+
+      ADDITIVE, NEVER A GATE. Ignoring this row must cost a visitor nothing: every
+      section below still renders, in order, with nothing over it. Do not make it a
+      dialog and do not preselect a door.
+    */
+    t.occasionDoors && (
+      <OccasionDoors
+        title={t.occasionDoors.title}
+        doors={t.occasionDoors.doors.map((door) => ({
+          title: door.title,
+          examples: door.examples,
+          href: landingPageUrl(language, door.slug),
+        }))}
+      />
+    )
+  }
 
   {
     /*

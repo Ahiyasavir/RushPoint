@@ -30,7 +30,7 @@ import {
   SMART_BUILD_PREP_LEVELS,
   SMART_BUILD_DURATIONS,
   SMART_BUILD_GROUP_SIZES,
-  SMART_BUILD_PREFERRED_TAGS,
+  preferredTagOptions,
   SMART_BUILD_AREAS,
   SMART_BUILD_QUESTION_ORDER,
   hasLeftSmartBuild,
@@ -234,9 +234,10 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
       title: w.preferredTitle,
       subtitle: w.preferredSub,
       render: () => (
+        /* Options depend on the AREAS answer: `chores` is only offered at home. */
         <MultiChoiceCardRow
           label={w.preferredLabel}
-          options={SMART_BUILD_PREFERRED_TAGS}
+          options={preferredTagOptions(a.areas)}
           values={a.preferredTags}
           onToggle={(tag) => dispatch({ type: 'togglePreferred', tag })}
           render={(v) => tagLabel(v)}

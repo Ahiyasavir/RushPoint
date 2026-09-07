@@ -136,6 +136,28 @@ export const SMART_BUILD_DURATIONS = DURATION_BANDS;
 export const SMART_BUILD_PREFERRED_TAGS: readonly BankTagId[] = ACTIVITY_TAG_IDS;
 
 /**
+ * The activity chips THIS creator should see, given where they said the game
+ * happens.
+ *
+ * `chores` is the one activity that is not universally playable: a mission that
+ * has the family clear a real surface or match a real pile of socks only exists
+ * indoors, in a home. Offering it to somebody running a game in a park would be
+ * offering a preference the pool cannot satisfy, which scores nothing and reads
+ * as a broken filter (the same failure `bankTags.ts` warns about for a tag no
+ * mission carries).
+ *
+ * Total, and conservative in the right direction: anything that is not a real
+ * list of areas hides the chip rather than showing it, because a creator who
+ * never said `home` has not asked for housework.
+ */
+export function preferredTagOptions(
+  areas: readonly AreaTagId[] | null | undefined,
+): readonly BankTagId[] {
+  const atHome = Array.isArray(areas) && areas.includes('home');
+  return atHome ? SMART_BUILD_PREFERRED_TAGS : SMART_BUILD_PREFERRED_TAGS.filter((t) => t !== 'chores');
+}
+
+/**
  * The kinds of place a creator can say their event has.
  *
  * Multi-select and skippable: real events span more than one (a school trip is
@@ -314,6 +336,10 @@ export function smartBuildReducer(state: SmartBuildState, action: SmartBuildActi
 
     case 'togglePreferred': {
       if (!isBankTagId(a.tag)) return s;
+      // A chip the current answers do not offer cannot be turned ON. Turning one
+      // OFF stays legal so a stale value is always retractable.
+      if (!preferredTagOptions(s.answers.areas).includes(a.tag)
+        && !s.answers.preferredTags.includes(a.tag)) return s;
       const current = s.answers.preferredTags;
       const next = current.includes(a.tag)
         ? current.filter((t) => t !== a.tag)
@@ -327,7 +353,13 @@ export function smartBuildReducer(state: SmartBuildState, action: SmartBuildActi
       const next = current.includes(a.area)
         ? current.filter((t) => t !== a.area)
         : [...current, a.area];
-      return { ...s, answers: { ...s.answers, areas: next } };
+      // Turning `home` off has to take a `chores` preference with it. The chip is
+      // only OFFERED at home (see `preferredTagOptions`), so a preference left
+      // behind by a creator who changed their mind would be invisible on screen
+      // and still scored by the composer — an answer nobody can see or retract.
+      const stillOffered = preferredTagOptions(next);
+      const preferredTags = s.answers.preferredTags.filter((t) => stillOffered.includes(t));
+      return { ...s, answers: { ...s.answers, areas: next, preferredTags } };
     }
 
     default:

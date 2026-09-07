@@ -258,7 +258,16 @@ check('D · the content scan reached a non zero number of fields', fieldsScanned
   // reads `ideas[0].occasions[0]` and would not match an anchor that expects the key to be
   // last. Without it the exemption silently covered nothing for exactly the fields it was
   // added for.
-  const NOT_PROSE = /(^|\.)(src|poster|icon|kind|id|occasions|places|visual)(\[\d+\])?$/;
+  //
+  // `slug` joins them (change: marketing-home-occasion-doors): an occasion door carries the
+  // slug of the landing page it opens. It is a URL segment, deliberately Latin in BOTH
+  // languages (SUBJECT_SLUGS in scripts/lib/landingPages.ts explains why: Hebrew has two
+  // valid Unicode encodings and a percent encoded path that mixes them matches nothing,
+  // silently). A Hebrew door pointing at a Hebrew page still carries a Latin slug, so this
+  // check would otherwise read a correct URL as English leaking into Hebrew copy. That the
+  // two languages of one door MUST carry the same slug is asserted instead by
+  // scripts/test-marketing-home-cro.ts, which also checks each slug against the registry.
+  const NOT_PROSE = /(^|\.)(src|poster|icon|kind|id|occasions|places|visual|slug)(\[\d+\])?$/;
 
   for (const file of pageFiles) {
     const language = file.split('.')[1] as Language;

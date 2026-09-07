@@ -2,6 +2,7 @@
 // — the viral artifact participants post to Instagram/WhatsApp stories. Drawn on
 // a canvas at share time, so there are no static assets and no server round-trip.
 import { stampBrand } from './brandWatermark';
+import { routeShare, type ShareOutcome } from './shareLadder';
 
 export interface StoryCardData {
   gameName: string;
@@ -17,7 +18,9 @@ export interface StoryCardData {
   rankLabel?: string; // chip label; defaults to RANK
   timeLabel?: string; // chip label; defaults to TIME
   stagesLabel?: string; // chip label; defaults to STAGES
-  ctaText?: string; // tagline; defaults to 'Build your own field game'
+  ctaText?: string; // tagline; defaults to 'Build your own live race'. Every real
+                     // caller supplies this from shareCardLabels.ts, so the default
+                     // below is a last resort, not a shipped string.
 }
 
 const W = 1080;
@@ -122,7 +125,7 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   // shared brand stamp on the bottom edge, so every share is one scan from joining.
   ctx.fillStyle = '#ffffff';
   ctx.font = '700 48px Outfit, Inter, sans-serif';
-  ctx.fillText(data.ctaText ?? 'Build your own field game', W / 2, 1690);
+  ctx.fillText(data.ctaText ?? 'Build your own live race', W / 2, 1690);
 
   await stampBrand(ctx, {
     width: W,
@@ -137,27 +140,12 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
 
 // Build the card and share it: mobile → native share sheet (Instagram/WhatsApp/
 // stories); desktop or no file-share support → downloads the PNG / copies the
-// text. Returns 'shared' | 'downloaded' | 'copied' | 'failed' so callers can
-// show the right confirmation. `text` is the caption + viral CTA fallback.
-export async function shareStoryCard(data: StoryCardData, text: string): Promise<'shared' | 'downloaded' | 'copied' | 'failed'> {
+// text. The ladder itself lives in lib/shareLadder.ts so a cancelled share sheet
+// stays distinguishable from a broken one (it used to return 'failed' for both,
+// which made the finish screen's share button dead on real failures).
+export async function shareStoryCard(data: StoryCardData, text: string): Promise<ShareOutcome> {
   try {
-    const navAny = navigator as Navigator & {
-      share?: (d: { title?: string; text?: string; files?: File[] }) => Promise<void>;
-      canShare?: (d: { files?: File[] }) => boolean;
-    };
     const blob = await buildStoryCard(data);
-    if (blob) {
-      const file = new File([blob], 'rushpoint.png', { type: 'image/png' });
-      if (navAny.share && navAny.canShare?.({ files: [file] })) {
-        try { await navAny.share({ files: [file], text }); return 'shared'; } catch { /* cancelled */ return 'failed'; }
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'rushpoint.png'; a.click();
-      URL.revokeObjectURL(url);
-      return 'downloaded';
-    }
-    if (navAny.share) { try { await navAny.share({ title: 'RushPoint', text }); return 'shared'; } catch { /* cancelled */ return 'failed'; } }
-    await navigator.clipboard.writeText(text); return 'copied';
+    return await routeShare({ blob, filename: 'rushpoint.png', text });
   } catch { return 'failed'; }
 }

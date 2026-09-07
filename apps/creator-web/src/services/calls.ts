@@ -390,6 +390,10 @@ export const setGameTemplateFlag = callable<
     // What kind of game this template is, so the new-game wizard's conceptual
     // question can resolve to it (change: guided-new-game-wizard).
     templateGenre?: TemplateGenre;
+    // Out of the creator picker, still in the admin's builder
+    // (change: template-visibility). OPTIONAL AND STICKY: omitting it leaves the
+    // stored state alone, so an emoji edit cannot un-hide a parked template.
+    templateHidden?: boolean;
   },
   { ok: boolean; gameId: string; isTemplate: boolean }
 >('setGameTemplateFlag');

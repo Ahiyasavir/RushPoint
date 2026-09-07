@@ -46,6 +46,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { hasEnglishWord, hasHebrew } from './lib/i18nLeak.ts';
+import { SUBJECT_SLUGS } from './lib/landingPages.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const MARKETING = join(ROOT, 'apps', 'marketing');
@@ -73,6 +74,7 @@ const COMPONENTS = {
   taste: 'src/components/HeroMissionTaste.astro',
   phone: 'src/components/PhoneFrame.astro',
   video: 'src/components/FounderVideo.astro',
+  doors: 'src/components/widgets/OccasionDoors.astro',
 } as const;
 
 for (const [what, rel] of Object.entries(COMPONENTS)) {
@@ -426,6 +428,159 @@ for (const [what, rel] of Object.entries(COMPONENTS)) {
       'reduced-motion branch',
     );
   }
+}
+
+// ── H. The anchor and the occasion doors ─────────────────────────────────────
+//
+// (change: marketing-home-occasion-doors)
+//
+// WHY THE ANCHOR IS PINNED PER LANGUAGE. The headline borrows a format the reader
+// already holds, and the two languages borrow DIFFERENT ones on purpose: מירוץ למיליון
+// carries nothing outside Israel and Amazing Race carries nothing inside it. That is an
+// anchor swap, not a translation, and it is exactly the kind of intentional asymmetry a
+// future "let us make the two files match" tidy-up would quietly destroy. So both halves
+// are asserted by name.
+//
+// WHY THE SUBHEAD IS ASSERTED NEGATIVELY. Three feature-specific subheads were written
+// and rejected during design, each because it was false for a real supported use:
+// automatic scoring is false for a game that does not score, "no production crew" is
+// meaningless at home, and "runs by itself" contradicts the live run console that exists
+// so a person CAN intervene. The subhead's job is to promise removed difficulty in
+// general. This check is what stops the fourth attempt at a clever feature claim.
+//
+// WHY THE SLUGS ARE CHECKED AGAINST THE REGISTRY. A card whose slug has a typo renders a
+// perfectly good link to a 404. Nothing else on the page notices: the build succeeds, the
+// component is fine, and the failure is one visitor at a time discovering a dead door.
+
+const DOOR_COUNT = 4;
+const HE_FORBIDDEN: readonly RegExp[] = [/ניקוד אוטומטי/, /בלי שופטים/, /(^|\s)לבד([\s.,]|$)/];
+const EN_FORBIDDEN: readonly RegExp[] = [/automatic/i, /no staff/i, /by itself/i, /runs itself/i];
+const CATCH_ALL: Record<string, RegExp> = { he: /וכל/, en: /and any/i };
+const ANCHOR: Record<string, string> = { he: 'מירוץ למיליון', en: 'Amazing Race' };
+
+const KNOWN_SLUGS = new Set(Object.values(SUBJECT_SLUGS).filter((s) => s !== ''));
+
+interface Door {
+  title?: unknown;
+  examples?: unknown;
+  slug?: unknown;
+}
+
+const doorSlugs: Record<string, string[]> = {};
+
+for (const language of ['he', 'en']) {
+  const page = pages[language];
+  if (!page) continue;
+
+  const headline = typeof page.headline === 'string' ? page.headline : '';
+  check(
+    `H · the ${language} headline carries its own anchor`,
+    headline.includes(ANCHOR[language]),
+    `expected ${ANCHOR[language]} :: got ${headline || '(missing)'}`,
+  );
+
+  const subhead = typeof page.subhead === 'string' ? page.subhead : '';
+  const forbidden = language === 'he' ? HE_FORBIDDEN : EN_FORBIDDEN;
+  const hit = forbidden.find((re) => re.test(subhead));
+  check(
+    `H · the ${language} subhead makes no feature claim`,
+    subhead !== '' && hit === undefined,
+    hit ? `matched ${hit} :: ${subhead}` : subhead || '(missing)',
+  );
+
+  const block = page.occasionDoors as { doors?: unknown } | undefined;
+  const doors = Array.isArray(block?.doors) ? (block.doors as Door[]) : null;
+
+  check(
+    `H · the ${language} page carries exactly ${DOOR_COUNT} occasion doors`,
+    doors !== null && doors.length === DOOR_COUNT,
+    doors === null ? 'occasionDoors.doors missing' : `${doors.length} door(s)`,
+  );
+
+  if (!doors) continue;
+  doorSlugs[language] = [];
+
+  doors.forEach((door, i) => {
+    const title = typeof door.title === 'string' ? door.title.trim() : '';
+    const examples = typeof door.examples === 'string' ? door.examples.trim() : '';
+    const slug = typeof door.slug === 'string' ? door.slug.trim() : '';
+    doorSlugs[language].push(slug);
+
+    check(`H · ${language} door ${i} has a title`, title !== '', title || '(empty)');
+    check(`H · ${language} door ${i} has an examples line`, examples !== '', examples || '(empty)');
+
+    // The catch all is what lets four doors stand in for an open set. Without it a
+    // visitor whose occasion is not one of the four reads the row as a list of the only
+    // things this product is for, which is the exact narrowing the strip exists to undo.
+    check(
+      `H · ${language} door ${i} ends its examples in a catch all`,
+      CATCH_ALL[language].test(examples),
+      `expected ${CATCH_ALL[language]} :: ${examples || '(empty)'}`,
+    );
+
+    check(
+      `H · ${language} door ${i} points at a generated landing page`,
+      KNOWN_SLUGS.has(slug),
+      `${slug || '(empty)'} :: known ${[...KNOWN_SLUGS].join(', ')}`,
+    );
+  });
+}
+
+// A slug identifies the SUBJECT, so the Hebrew and English cards of one door must resolve
+// to the two languages of the SAME page. Divergence here sends a Hebrew reader to an
+// English destination, which is the failure the landing page registry is built to prevent
+// and which would be reintroduced here, one level up, by a copy paste.
+if (doorSlugs.he && doorSlugs.en) {
+  check(
+    'H · both languages of a door share one slug',
+    doorSlugs.he.join('|') === doorSlugs.en.join('|'),
+    `he [${doorSlugs.he.join(', ')}] en [${doorSlugs.en.join(', ')}]`,
+  );
+}
+
+if (homepage) {
+  const doorsAt = homepage.indexOf('<OccasionDoors');
+  const heroAt = homepage.indexOf('<HeroField');
+  const tryAt = homepage.indexOf('<TryMission');
+
+  check('H · the homepage renders the occasion doors', doorsAt >= 0, 'OccasionDoors');
+  check(
+    'H · the doors sit between the hero and the playable mission',
+    doorsAt >= 0 && heroAt >= 0 && tryAt >= 0 && doorsAt > heroAt && doorsAt < tryAt,
+    `HeroField@${heroAt} OccasionDoors@${doorsAt} TryMission@${tryAt}`,
+  );
+
+  // Every section that existed before this change must still be here. The strip is
+  // additive; a visitor who ignores it loses nothing, and that promise is only as good as
+  // the page still containing everything it contained.
+  for (const tag of ['TryMission', 'Features', 'Steps', 'MissionIdeas', 'GamePlanner', 'FAQs', 'CallToAction']) {
+    check(`H · ${tag} survived the change`, homepage.includes(`<${tag}`), tag);
+  }
+}
+
+const doorsSource = read(COMPONENTS.doors);
+if (doorsSource === null) {
+  check('H · the occasion doors component could be scanned', false, COMPONENTS.doors);
+} else {
+  // NOT A GATE. The whole design rests on a visitor being able to ignore the strip and
+  // keep reading. A dialog, or anything pinned over the page, converts an offer into a
+  // toll booth, and it would do so without failing any other check on this page.
+  check('H · the strip is not a dialog', !/<dialog[\s>]/i.test(doorsSource), 'no <dialog>');
+  check(
+    'H · the strip claims no dialog role',
+    !/role\s*=\s*["']dialog["']/i.test(doorsSource),
+    'no role="dialog"',
+  );
+  check(
+    'H · the strip does not pin itself over the page',
+    !/position:\s*fixed/i.test(doorsSource) && !/\bfixed\s+inset-0\b/.test(doorsSource),
+    'no fixed positioning',
+  );
+  check(
+    'H · the doors are real links',
+    /<a\b/.test(doorsSource) && /href=/.test(doorsSource),
+    'anchor elements',
+  );
 }
 
 console.log('');

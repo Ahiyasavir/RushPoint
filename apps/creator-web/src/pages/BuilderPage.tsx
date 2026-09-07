@@ -22,6 +22,7 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile, loadPop
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
+import { downloadJson } from '../lib/downloadFile';
 import { resolveWizardTarget, type TemplateWizardStep } from '@rushpoint/shared';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, TagChips, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
@@ -487,12 +488,7 @@ export default function BuilderPage() {
     if (!(await save())) { await dialog.alert(b.saveFailed); return; }
     try {
       const { file } = await exportGameFile({ gameId: game.id });
-      const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = gameFileFilename(game.title);
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadJson(file, gameFileFilename(game.title));
     } catch (e) {
       await dialog.alert(e instanceof Error ? e.message : b.exportFailed);
     }
@@ -1510,6 +1506,7 @@ function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true
     stageHasNoTask: b.issueStageHasNoTask,
     taskNotCompletable: b.issueTaskNotCompletable,
     taskNotPlaced: b.issueTaskNotPlaced,
+    taskNotNamed: b.issueTaskNotNamed,
     stageUnwinnable: b.issueStageUnwinnable,
   };
   const where = (issue: ReadinessIssue): string => {

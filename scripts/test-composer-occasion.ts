@@ -15,9 +15,13 @@
 //
 // The three things it moves, and the guarantee each one has to keep:
 //
-//   • MISSION FIT — a soft, bounded, additive bonus. It must never exclude a
-//     mission, because the creator's other answers have already narrowed the
-//     pool and an occasion that empties it drops the whole game.
+//   • MISSION FIT — a soft, bounded, additive bonus. The BONUS must never
+//     exclude a mission, because the creator's other answers have already
+//     narrowed the pool and a preference that empties it drops the whole game.
+//     (Separate and deliberate, added 2026-09-06: `TaskBankEntry.occasions` IS a
+//     hard exclusion. It is a different mechanism on a different field — a
+//     declaration that the mission's own text names something only one kind of
+//     event has — and section 10 pins it. The bonus stays soft.)
 //   • STAGE STRUCTURE — the occasion's own blueprint when the mission budget can
 //     hold it, today's random pick when it cannot. Both branches must consume
 //     the SAME number of RNG draws, or a seed stops pinning the composition.
@@ -294,6 +298,48 @@ console.log('\n── 9. seeded composition stays reproducible ─────�
     }
   }
   eq('the same seed and the same occasion compose the identical game', drifted, '');
+}
+
+// ── 10. `TaskBankEntry.occasions` is a HARD gate, in both directions ────────
+//
+// The one exclusion in this file, and it is not the bonus. Four missions in the
+// bank name something only a birthday has — a celebrant, a cake — and none of
+// them could say so: the tag vocabulary describes WHO is playing and WHERE, and
+// "is there a birthday here" is neither. `backwards-name` is tagged for office,
+// mall, forest and beach, and a composed park game for a mixed audience really
+// was handed "say the celebrant's name backwards". Nothing was mis-tagged; the
+// fact had nowhere to live.
+//
+// Both directions matter equally. Locked OUT of every other occasion, INCLUDING
+// the neutral one — "we were not told what this event is" is not permission to
+// assume a birthday — and still reachable AT its own, or the fix has merely
+// deleted four missions with extra steps.
+console.log('\n── 10. occasion-locked missions ───────────────────────────');
+{
+  const locked = TASK_BANK.filter((e) => (e.occasions?.length ?? 0) > 0);
+  ok(`the bank really holds some (${locked.length})`, locked.length > 0);
+
+  // Every non-declared occasion, plus the neutral one, plus no answer at all.
+  const leaked: string[] = [];
+  for (const entry of locked) {
+    for (const occasion of [...OCCASION_IDS, undefined]) {
+      if (occasion !== undefined && entry.occasions!.includes(occasion)) continue;
+      const ctx = buildFitContext({ ...BASE, occasion } as ComposerAnswers);
+      if (fitScore(entry, ctx) > -Infinity) leaked.push(`${entry.key} @ ${occasion ?? 'none'}`);
+    }
+  }
+  eq('no locked mission is eligible outside its own occasions', leaked.slice(0, 8), []);
+
+  // …and it is still reachable where it belongs. Scored, not composed: whether a
+  // given seed happens to draw it is the sampler's business, not this gate's.
+  const unreachable = locked.filter((entry) => entry.occasions!.every((occasion) =>
+    fitScore(entry, buildFitContext({
+      ...BASE, occasion,
+      // The lock is the only thing under test, so hand each mission the audience
+      // and prep budget it was written for rather than one fixed answer set.
+      audience: 'mixed', ageBandId: 'band-8-10', prepEffort: 5,
+    } as ComposerAnswers)) === -Infinity)).map((e) => e.key);
+  eq('every locked mission is eligible at an occasion it declares', unreachable, []);
 }
 
 console.log('');

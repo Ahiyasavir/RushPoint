@@ -31,12 +31,22 @@ export function lazyWithRetry<P extends object>(
       return mod;
     }).catch((err) => {
       const flag = `rushpoint.chunkReload.${key}`;
-      let already = true;
+      // The guard is a TIMESTAMP, not a one-shot flag. A one-shot flag conflates
+      // "we just reloaded and it failed again, so this is real" with "this route
+      // hit one flaky moment an hour ago", and the second reading permanently
+      // pinned a healthy route to the crash screen for the rest of the session —
+      // a lazy chunk fails for a blip far more often than it fails for good. A
+      // reload-and-fail lands within a second or two, so anything inside the
+      // cooldown is a genuine error worth rethrowing, and anything outside it
+      // gets its own fresh self-heal.
+      const COOLDOWN_MS = 60_000;
+      let recentlyReloaded = true;
       try {
-        already = sessionStorage.getItem(flag) === '1';
-        if (!already) sessionStorage.setItem(flag, '1');
+        const at = Number(sessionStorage.getItem(flag));
+        recentlyReloaded = Number.isFinite(at) && at > 0 && Date.now() - at < COOLDOWN_MS;
+        if (!recentlyReloaded) sessionStorage.setItem(flag, String(Date.now()));
       } catch { /* private mode — fall through and rethrow */ }
-      if (!already) {
+      if (!recentlyReloaded) {
         window.location.reload();
         return new Promise<{ default: ComponentType<P> }>(() => { /* never resolves; the reload takes over */ });
       }

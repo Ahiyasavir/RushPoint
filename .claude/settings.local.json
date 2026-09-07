@@ -28,7 +28,14 @@
       "Bash(curl -s \"https://www.rush-point.com/he/story/\" -o /tmp_s.html -w \"status:%{http_code}\\\\n\")",
       "Bash(grep -c \"נוצצת\" /tmp_s.html)",
       "Bash(grep -c \"ספר ילדים\" /tmp_s.html)",
-      "Bash(rm -f /tmp_s.html)"
+      "Bash(rm -f /tmp_s.html)",
+      "Bash(ssh -o ConnectTimeout=10 root@31.70.107.184 \"sleep 8 && curl -sS -o /dev/null -w '%{http_code}\\\\n' https://api.rush-point.com/healthz && cd /root/RushPoint && git rev-parse --short HEAD && docker compose -f docker-compose.api.yml ps --format '{{.Name}} {{.Status}}'\")",
+      "Bash(cat)",
+      "Bash(python -c ' *)",
+      "Bash(curl -sS -o /dev/null -w \"player: %{http_code} -> %{redirect_url}\\\\n\" https://player.rush-point.com/?code=S3L6BF)",
+      "Bash(curl -sS -o /dev/null -w \"apex: %{http_code} -> %{redirect_url}\\\\n\" https://rush-point.com/)",
+      "Bash(curl -sS -o /dev/null -w \"api: %{http_code}\\\\n\" https://api.rush-point.com/)",
+      "WebSearch"
     ]
   }
 }

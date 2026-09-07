@@ -4,11 +4,8 @@ import { Button, Card, Screen } from '../components/ui';
 import { LoadingView } from '../components/LoadingView';
 import { useT } from '../i18nContext';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
-import { CANONICAL_CREATOR_URL } from '@rushpoint/shared';
+import { creatorUrl } from '../lib/creatorUrl';
 
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
@@ -215,7 +212,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
       </div>
 
       <Button variant="ghost" className="mt-4" onClick={share}>{copied ? t.board.linkCopied : t.board.share}</Button>
-      <a href={CREATOR_URL} target="_blank" rel="noreferrer"
+      <a href={creatorUrl()} target="_blank" rel="noreferrer"
         className="block text-center text-sm font-semibold py-3 hover:underline bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent"
       >
         {t.board.buildOwn}

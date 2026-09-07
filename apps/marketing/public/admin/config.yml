@@ -167,6 +167,24 @@ collections:
               - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
           - { label: 'כותרת הקריאה לפעולה', name: ctaTitle, widget: string }
           - { label: 'משפט הקריאה לפעולה', name: ctaSubtitle, widget: text }
+          - label: 'דלתות הכניסה (מתחת לכותרת)'
+            name: occasionDoors
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              שורת הכרטיסיות מתחת לכותרת הראשית. כל כרטיסייה מובילה לעמוד נחיתה. אפשר להשאיר ריק והשורה לא תופיע.
+            fields:
+              - { label: 'הכותרת מעל השורה', name: title, widget: string }
+              - label: 'הכרטיסיות'
+                name: doors
+                widget: list
+                hint: >-
+                  שורת הדוגמאות צריכה להסתיים במשהו כללי (למשל "וכל חגיגה שרוצים שיזכרו"), כדי שמי שהאירוע שלו לא ברשימה עדיין ירגיש שייך. המזהה הוא כתובת של עמוד נחיתה קיים, באנגלית, ואסור להמציא אותו.
+                fields:
+                  - { label: 'שם הכרטיסייה', name: title, widget: string }
+                  - { label: 'שורת הדוגמאות', name: examples, widget: text }
+                  - { label: 'מזהה עמוד הנחיתה', name: slug, widget: string }
           - label: 'המשימה לניסיון (המשחק בתוך העמוד)'
             name: tryMission
             widget: object
@@ -431,6 +449,24 @@ collections:
               - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
           - { label: 'כותרת הקריאה לפעולה', name: ctaTitle, widget: string }
           - { label: 'משפט הקריאה לפעולה', name: ctaSubtitle, widget: text }
+          - label: 'The occasion doors (under the headline)'
+            name: occasionDoors
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              The row of cards under the main headline. Each card opens a landing page. Leave it empty and the row does not appear.
+            fields:
+              - { label: 'The line above the row', name: title, widget: string }
+              - label: 'The cards'
+                name: doors
+                widget: list
+                hint: >-
+                  End each examples line with something open (for example "and any celebration you want remembered") so a visitor whose occasion is not listed still feels included. The slug is the address of an EXISTING landing page. Do not invent one.
+                fields:
+                  - { label: 'Card name', name: title, widget: string }
+                  - { label: 'Examples line', name: examples, widget: text }
+                  - { label: 'Landing page slug', name: slug, widget: string }
           - label: 'Try a mission (the playable demo)'
             name: tryMission
             widget: object

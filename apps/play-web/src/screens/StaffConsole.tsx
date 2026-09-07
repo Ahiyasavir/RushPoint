@@ -954,6 +954,11 @@ function StaffChatSection({
 
   const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
 
+  // Visible outcome for a failed reply (see below). Cleared on every new attempt
+  // and whenever the staff member switches threads, so it can never outlive the
+  // message it describes.
+  const [replyErr, setReplyErr] = useState('');
+
   function expand(teamId: string, messages: ChatMessage[]) {
     setOpenTeam((cur) => {
       const next = cur === teamId ? null : teamId;
@@ -961,15 +966,25 @@ function StaffChatSection({
       return next;
     });
     setDraft('');
+    setReplyErr('');
   }
 
   async function reply(teamId: string) {
     const clean = draft.trim();
     if (!clean) return;
+    setReplyErr('');
     try {
       await sendTeamChatMessage({ ...ctx, teamId, text: clean, senderName });
       setDraft('');
-    } catch { /* the listener reconciles; keep the draft for a retry */ }
+    } catch {
+      // Keeping the draft for a retry is right; staying SILENT about it was not.
+      // "The listener reconciles" only holds for a message that was actually
+      // sent — a failed send produces nothing to reconcile, so the only signal
+      // was that the box did not clear. During a live event that is ambiguous
+      // with a slow network, and a staff member cannot tell whether the team
+      // they are answering got the reply.
+      setReplyErr(t.staff.replyFailed);
+    }
   }
   // Guarded so a double-tapped send (or Enter held down) can't post the same reply
   // twice (change: wave-b/async-action-guard).
@@ -1048,6 +1063,11 @@ function StaffChatSection({
                         {t.chat.chatSend}
                       </button>
                     </div>
+                    {replyErr && (
+                      <p role="status" aria-live="polite" className="mt-1.5 text-xs font-semibold text-ink-alert">
+                        ⚠ {replyErr}
+                      </p>
+                    )}
                   </div>
                 )}
               </Card>

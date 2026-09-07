@@ -32,6 +32,7 @@ import {
   tourNavIntent, TOUR_ACTION_ANCHORS,
   tourRecordFor, tourReducer, tourStorageKey, writeTourRecord,
   type TourAction, type TourRect, type TourState,
+  nextReachableTourIndex,
 } from '../lib/creatorOnboarding';
 
 /** Event the header help button and the Settings card fire to replay the tour. */
@@ -354,11 +355,24 @@ export default function CreatorTour() {
             {tour.back}
           </button>
           <button
-            onClick={() => dispatch({ type: 'next' })}
-            aria-label={isLast ? tour.finish : tour.next}
+            // While a step is WAITING on the creator (they have no game yet, so
+            // every Builder step is unreachable), Next jumps past the whole
+            // blocked run instead of paging through seven cards that each repeat
+            // the same 👆 prompt and none of which can show what they describe.
+            // See nextReachableTourIndex — and note the label changes too, because
+            // the prompt says the game is needed "to continue" and a plain "Next"
+            // made that visibly untrue.
+            onClick={() => {
+              if (intent.kind === 'awaitAction') {
+                dispatch({ type: 'jump', index: nextReachableTourIndex(steps, state.index, { firstGameId, liveRunPath: null }, pathname) });
+              } else {
+                dispatch({ type: 'next' });
+              }
+            }}
+            aria-label={isLast ? tour.finish : intent.kind === 'awaitAction' ? tour.skipAhead : tour.next}
             className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-rp-fire to-rp-amber shadow-sm hover:brightness-105 active:brightness-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
           >
-            {isLast ? tour.finish : tour.next}
+            {isLast ? tour.finish : intent.kind === 'awaitAction' ? tour.skipAhead : tour.next}
           </button>
         </div>
       </div>

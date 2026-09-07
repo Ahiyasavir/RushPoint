@@ -1,7 +1,7 @@
 {
-  "name": "RushPoint Field Game",
+  "name": "RushPoint Live Race",
   "short_name": "RushPoint",
-  "description": "Join a live real world team field game and play on your phone.",
+  "description": "Join a live team race and play on your phone.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
