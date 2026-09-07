@@ -41,7 +41,7 @@
     </script>
     <style>
 :root { color-scheme: light dark; --ink: #1c1917; --muted: #57534e; --bg: #fffbf5;
-  --card: #ffffff; --line: #e7e0d6;
+  --card: #ffffff; --line: #e7e0d6; --hero: #fdf3e7;
   /* --brand is the FILL, --brand-ink is brand-coloured TEXT, and --cta-ink is what
      sits on the fill. One token was doing all three and failed as two of them:
      #EA580C measured 3.56:1 under white and 3.45:1 as link text, where both need
@@ -56,67 +56,135 @@
      product's colour rather than a third orange that happens to pass. */
   --brand: #b03a0b; --brand-ink: #b03a0b; --cta-ink: #ffffff; }
 @media (prefers-color-scheme: dark) { :root { --ink: #f5f5f4; --muted: #a8a29e;
-  --bg: #0c0a09; --card: #1c1917; --line: #292524;
+  --bg: #0c0a09; --card: #1c1917; --line: #292524; --hero: #1a1210;
   /* In dark the fill is a LIGHT orange, so white on it was 2.26:1, the worst
      pairing on either page set. The fix is the TEXT, not the fill: the page's own
      near-black on that orange is 8.73:1 and the fill is unchanged. */
   --brand: #fb923c; --brand-ink: #fb923c; --cta-ink: #0c0a09; } }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.7;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-main, header, footer { max-width: 46rem; margin-inline: auto; padding-inline: 1.25rem; }
-header { padding-block: 2.5rem 1rem; }
-.brand { font-weight: 700; letter-spacing: .02em; color: var(--brand-ink); text-decoration: none; }
-h1 { font-size: clamp(1.9rem, 5vw, 2.75rem); line-height: 1.2; margin-block: .75rem .5rem; }
-h2 { font-size: 1.3rem; margin-block: 2.25rem .5rem; }
-.intro { font-size: 1.15rem; color: var(--muted); margin-block: 0 1.5rem; }
-p { margin-block: 0 1rem; }
-.cta { display: inline-block; background: var(--brand); color: var(--cta-ink); text-decoration: none;
-  font-weight: 600; padding: .85rem 1.6rem; border-radius: .6rem; margin-block: 1.5rem; }
+
+/* One measure for every band, so the hero, the body and the footer line up down a
+   single edge instead of each choosing its own. The band paints edge to edge and the
+   wrapper inside it holds the text, which is what lets the hero carry a background
+   colour without the copy drifting away from the content below it. */
+.wrap { max-width: 52rem; margin-inline: auto; padding-inline: 1.25rem; }
+
+.hero { background: var(--hero); border-block-end: 1px solid var(--line);
+  padding-block-end: 3rem; }
+.topbar { display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding-block: .75rem 2.25rem; }
+.brand { font-weight: 800; font-size: 1.05rem; letter-spacing: .02em;
+  color: var(--brand-ink); text-decoration: none; }
+/* A real 44px target, not line-height tall: these are text styled links and the
+   product already learned that lesson the expensive way on the join screen. */
+.topbar a, footer a { display: inline-flex; align-items: center; min-height: 44px; }
+.lang { color: var(--muted); text-decoration: none; font-size: .95rem; }
+.lang:hover { color: var(--brand-ink); }
+
+h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.15; margin-block: 0 .75rem;
+  max-width: 22ch; }
+.intro { font-size: clamp(1.05rem, 2.4vw, 1.25rem); color: var(--muted);
+  margin-block: 0 1.75rem; max-width: 46ch; }
+.cta { display: inline-flex; align-items: center; justify-content: center; min-height: 48px;
+  background: var(--brand); color: var(--cta-ink); text-decoration: none;
+  font-weight: 700; padding: .8rem 1.75rem; border-radius: .75rem; }
 .cta:hover { filter: brightness(1.08); }
-nav.more { border-top: 1px solid var(--line); margin-block-start: 3rem; padding-block-start: 1.25rem; }
+.facts { list-style: none; margin: 2rem 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: .5rem; }
+.facts li { background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: .35rem 1rem; font-size: .9rem; color: var(--muted); }
+
+main { padding-block: 2.5rem 1rem; }
+/* Each section is a card on the warm ground rather than one unbroken column of prose.
+   Same words, but a reader scanning for the paragraph that answers their question can
+   see where one answer ends and the next begins. */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 1rem;
+  padding: 1.5rem 1.5rem .5rem; margin-block-end: 1rem; }
+h2 { font-size: 1.25rem; line-height: 1.35; margin-block: 0 .75rem; }
+p { margin-block: 0 1rem; }
+
+.closer { background: var(--hero); border: 1px solid var(--line); border-radius: 1rem;
+  padding: 2.25rem 1.5rem; margin-block: 2rem 0; text-align: center; }
+.closer p { font-size: 1.15rem; font-weight: 600; margin-block: 0 1.25rem; }
+
+nav.more { border-block-start: 1px solid var(--line); margin-block-start: 2.5rem;
+  padding-block-start: 1.5rem; }
+nav.more h2 { font-size: .95rem; font-weight: 600; color: var(--muted); margin-block-end: .9rem; }
 nav.more ul { list-style: none; padding-inline-start: 0; margin: 0;
-  display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; }
-nav.more a { color: var(--brand-ink); }
-footer { border-top: 1px solid var(--line); margin-block-start: 2rem; padding-block: 1.25rem 3rem;
-  color: var(--muted); font-size: .9rem; display: flex; flex-wrap: wrap; gap: 1rem; }
-footer a { color: var(--brand-ink); }
+  display: flex; flex-wrap: wrap; gap: .5rem; }
+nav.more a { display: inline-flex; align-items: center; min-height: 40px;
+  padding: .25rem 1rem; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--brand-ink); text-decoration: none; font-size: .95rem; }
+nav.more a:hover { border-color: var(--brand-ink); }
+
+footer { border-block-start: 1px solid var(--line); background: var(--card);
+  margin-block-start: 3rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: .25rem 1.5rem;
+  padding-block: 1rem 2.5rem; }
+footer a { color: var(--muted); text-decoration: none; font-size: .9rem; }
+footer a:hover { color: var(--brand-ink); text-decoration: underline; }
+
+/* Keyboard users get to see where they are. The page has no script, so this is the
+   only affordance there is. */
+a:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 3px;
+  border-radius: .4rem; }
     </style>
   </head>
   <body>
-    <header>
-      <a class="brand" href="https://player.rush-point.com/he/">RushPoint</a>
-      <h1>שיעור שנראה כמו משחק</h1>
-      <p class="intro">מבית ספר יסודי ועד אוניברסיטה. אותו מסלול משימות, רק שהתוכן הוא החומר שלכם.</p>
-      <a class="cta" href="https://creator.rush-point.com/">בונים פעילות לכיתה</a>
+    <header class="hero">
+      <div class="wrap">
+        <nav class="topbar" aria-label="ניווט ראשי">
+          <a class="brand" href="https://rush-point.com/he/">RushPoint</a>
+          <a class="lang" href="https://player.rush-point.com/en/chinuch/" hreflang="en">English</a>
+        </nav>
+        <h1>שיעור שנראה כמו משחק</h1>
+        <p class="intro">מבית ספר יסודי ועד אוניברסיטה. אותו מסלול משימות, רק שהתוכן הוא החומר שלכם.</p>
+        <a class="cta" href="https://creator.rush-point.com/?start=game">בונים פעילות לכיתה</a>
+        <ul class="facts">
+          <li>בלי התקנה, פותחים קישור</li>
+          <li>טלפון אחד לכל קבוצה</li>
+          <li>ניקוד אוטומטי, בלי שופטים</li>
+        </ul>
+      </div>
     </header>
-    <main>
-      <h2>התוכן יושב בתוך המשחק</h2>
-      <p>משימה שמרגישה כמו מבחן מפסיקה לעבוד ברגע שהיא מזוהה. לכן החומר יושב בתוך חידה, בתוך קוד שצריך לפצח או בתוך נקודה שצריך למצוא, והתלמיד פוגש אותו כשהוא כבר בתוך המשחק.</p>
-      <p>שאלה אמריקאית, שאלה פתוחה, שאלה מספרית או משימת צילום. כל אחת נבדקת מול השרת, כך שאף אחד לא יושב בסוף עם ארבעים מחברות.</p>
-      <h2>עובד בכיתה ועובד בחוץ</h2>
-      <p>פעילות בסוף שיעור יכולה לרוץ בתוך הכיתה עצמה, בלי מפה ובלי לצאת. יום שיא, טיול שכבתי או סיור בקמפוס רצים על אותה מערכת עם תחנות אמיתיות.</p>
-      <p>אתם רואים מסך אחד עם כל הקבוצות. מי התקדם, מי תקוע ומי ענה מה. בסוף יש דוח מלא של התשובות, ואפשר לייצא אותו לגיליון.</p>
-      <p><a class="cta" href="https://creator.rush-point.com/">בונים פעילות לכיתה</a></p>
+    <main class="wrap">
+      <section class="card">
+        <h2>התוכן יושב בתוך המשחק</h2>
+        <p>משימה שמרגישה כמו מבחן מפסיקה לעבוד ברגע שהיא מזוהה. לכן החומר יושב בתוך חידה, בתוך קוד שצריך לפצח או בתוך נקודה שצריך למצוא, והתלמיד פוגש אותו כשהוא כבר בתוך המשחק.</p>
+        <p>שאלה אמריקאית, שאלה פתוחה, שאלה מספרית או משימת צילום. כל אחת נבדקת מול השרת, כך שאף אחד לא יושב בסוף עם ארבעים מחברות.</p>
+      </section>
+      <section class="card">
+        <h2>עובד בכיתה ועובד בחוץ</h2>
+        <p>פעילות בסוף שיעור יכולה לרוץ בתוך הכיתה עצמה, בלי מפה ובלי לצאת. יום שיא, טיול שכבתי או סיור בקמפוס רצים על אותה מערכת עם תחנות אמיתיות.</p>
+        <p>אתם רואים מסך אחד עם כל הקבוצות. מי התקדם, מי תקוע ומי ענה מה. בסוף יש דוח מלא של התשובות, ואפשר לייצא אותו לגיליון.</p>
+      </section>
+      <section class="closer">
+        <p>המשחק הראשון שלכם מוכן תוך כמה דקות.</p>
+        <a class="cta" href="https://creator.rush-point.com/?start=game">בונים פעילות לכיתה</a>
+      </section>
       <nav class="more">
         <h2>עוד סוגי אירועים</h2>
         <ul>
-        <li><a href="https://player.rush-point.com/he/">ראשי</a></li>
-        <li><a href="https://player.rush-point.com/he/yom-huledet/">יום הולדת</a></li>
-        <li><a href="https://player.rush-point.com/he/bar-mitzva/">בר מצווה</a></li>
-        <li><a href="https://player.rush-point.com/he/hatuna/">חתונה</a></li>
-        <li><a href="https://player.rush-point.com/he/gibush-tzevet/">גיבוש צוות</a></li>
-        <li><a href="https://player.rush-point.com/he/tnuat-noar/">תנועת נוער</a></li>
-        <li><a href="https://player.rush-point.com/he/pe-ilut-babayit/">פעילויות בבית</a></li>
+          <li><a href="https://player.rush-point.com/he/">לכל אירוע</a></li>
+          <li><a href="https://player.rush-point.com/he/yom-huledet/">יום הולדת</a></li>
+          <li><a href="https://player.rush-point.com/he/bar-mitzva/">בר מצווה</a></li>
+          <li><a href="https://player.rush-point.com/he/hatuna/">חתונה</a></li>
+          <li><a href="https://player.rush-point.com/he/gibush-tzevet/">גיבוש צוות</a></li>
+          <li><a href="https://player.rush-point.com/he/tnuat-noar/">תנועת נוער</a></li>
+          <li><a href="https://player.rush-point.com/he/pe-ilut-babayit/">פעילויות בבית</a></li>
         </ul>
       </nav>
     </main>
     <footer>
-      <a href="https://player.rush-point.com/en/chinuch/" hreflang="en">English</a>
-      <a href="https://rush-point.com/he/">על RushPoint</a>
-      <a href="https://player.rush-point.com/">הצטרפות למשחק</a>
-      <a href="https://player.rush-point.com/privacy">פרטיות</a>
-      <a href="https://player.rush-point.com/terms">תנאים</a>
+      <div class="wrap">
+        <a href="https://rush-point.com/he/">על RushPoint</a>
+        <a href="https://player.rush-point.com/">הצטרפות למשחק</a>
+        <a href="https://player.rush-point.com/privacy">פרטיות</a>
+        <a href="https://player.rush-point.com/terms">תנאים</a>
+      </div>
     </footer>
   </body>
 </html>

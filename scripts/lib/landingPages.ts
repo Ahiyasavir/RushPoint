@@ -49,8 +49,26 @@
  */
 export const LANDING_ORIGIN = 'https://player.rush-point.com';
 
-/** Where the call to action sends a creator: the console's logged out landing page. */
+/** The creator console's origin. */
 export const CREATOR_ORIGIN = 'https://creator.rush-point.com';
+
+/**
+ * Where every call to action on these pages actually sends a creator.
+ *
+ * NOT the bare origin. The bare origin is the console's own logged out landing page,
+ * which is a SECOND pitch shown to somebody who just read this one and clicked anyway;
+ * what they see is a sign in screen wearing marketing copy, which is indistinguishable
+ * from a link that went to the wrong place.
+ *
+ * `?start=game` is the contract the creator app already publishes: `readStartIntent` in
+ * apps/creator-web/src/lib/creatorOnboarding.ts records the arrival, the AuthGate drops
+ * its landing copy and shows the auth card alone, and the Dashboard opens the new game
+ * wizard the moment it mounts. The marketing site has linked this way since change
+ * marketing-cta-straight-to-build (`CREATOR_BUILD_URL` in apps/marketing/src/navigation.ts)
+ * and these pages simply never adopted it, so the highest intent traffic on the site was
+ * the traffic landing furthest from the thing it came to do.
+ */
+export const CREATOR_BUILD_URL = `${CREATOR_ORIGIN}/?start=game`;
 
 /**
  * The marketing site (change: marketing-site).
@@ -762,10 +780,19 @@ const MORE_LABEL: Record<LandingLanguage, string> = {
   en: 'More occasions',
 };
 
-/** A short nav label per subject, for the sibling links. */
+/**
+ * A short nav label per subject, for the sibling links.
+ *
+ * The general page is labelled by what it COVERS, not "home". Under a heading that
+ * reads "more occasions", a link called "home" promises the site's front door and
+ * delivers another page of the same shape, which is the single most confusing link
+ * in the set: the reader clicks it expecting to leave and arrives somewhere that
+ * looks like where they started. The site's actual front door is the brand wordmark
+ * at the top, which goes to the marketing site.
+ */
 const NAV_LABEL: Record<LandingLanguage, Record<LandingSubject, string>> = {
   he: {
-    home: 'ראשי',
+    home: 'לכל אירוע',
     birthday: 'יום הולדת',
     mitzvah: 'בר מצווה',
     wedding: 'חתונה',
@@ -775,7 +802,7 @@ const NAV_LABEL: Record<LandingLanguage, Record<LandingSubject, string>> = {
     education: 'חינוך',
   },
   en: {
-    home: 'Home',
+    home: 'Any occasion',
     birthday: 'Birthday',
     mitzvah: 'Bar mitzvah',
     wedding: 'Wedding',
@@ -784,6 +811,41 @@ const NAV_LABEL: Record<LandingLanguage, Record<LandingSubject, string>> = {
     'home-activities': 'At home',
     education: 'Education',
   },
+};
+
+/**
+ * The three things every one of these pages can promise, whatever its subject.
+ *
+ * Deliberately generic and deliberately TRUE of the product as built: participants open
+ * a link with nothing to install, a team plays from one phone, and scoring is automatic
+ * with no judge. They sit under the headline as the answer to the question a reader has
+ * before any of the body copy: what is this going to cost me to run.
+ *
+ * Shared chrome rather than per page copy, because a subject specific promise would have
+ * to be authored eight times in two languages and the eighth would be the one that
+ * quietly overstated something.
+ */
+const FACTS: Record<LandingLanguage, readonly string[]> = {
+  he: ['בלי התקנה, פותחים קישור', 'טלפון אחד לכל קבוצה', 'ניקוד אוטומטי, בלי שופטים'],
+  en: ['No install, just a link', 'One phone per team', 'Automatic scoring, no judges'],
+};
+
+/** The line above the closing call to action. */
+const CLOSER_LEAD: Record<LandingLanguage, string> = {
+  he: 'המשחק הראשון שלכם מוכן תוך כמה דקות.',
+  en: 'Your first game is ready in a few minutes.',
+};
+
+/** The footer link for a visitor who came to PLAY rather than to build. */
+const JOIN_LABEL: Record<LandingLanguage, string> = {
+  he: 'הצטרפות למשחק',
+  en: 'Join a game',
+};
+
+/** Screen reader name for the top bar, per language. */
+const TOPBAR_LABEL: Record<LandingLanguage, string> = {
+  he: 'ניווט ראשי',
+  en: 'Main navigation',
 };
 
 /** `og:locale` per language. */
@@ -803,7 +865,7 @@ const OG_LOCALE: Record<LandingLanguage, string> = { he: 'he_IL', en: 'en_US' };
  */
 const STYLE = `
 :root { color-scheme: light dark; --ink: #1c1917; --muted: #57534e; --bg: #fffbf5;
-  --card: #ffffff; --line: #e7e0d6;
+  --card: #ffffff; --line: #e7e0d6; --hero: #fdf3e7;
   /* --brand is the FILL, --brand-ink is brand-coloured TEXT, and --cta-ink is what
      sits on the fill. One token was doing all three and failed as two of them:
      #EA580C measured 3.56:1 under white and 3.45:1 as link text, where both need
@@ -818,31 +880,81 @@ const STYLE = `
      product's colour rather than a third orange that happens to pass. */
   --brand: #b03a0b; --brand-ink: #b03a0b; --cta-ink: #ffffff; }
 @media (prefers-color-scheme: dark) { :root { --ink: #f5f5f4; --muted: #a8a29e;
-  --bg: #0c0a09; --card: #1c1917; --line: #292524;
+  --bg: #0c0a09; --card: #1c1917; --line: #292524; --hero: #1a1210;
   /* In dark the fill is a LIGHT orange, so white on it was 2.26:1, the worst
      pairing on either page set. The fix is the TEXT, not the fill: the page's own
      near-black on that orange is 8.73:1 and the fill is unchanged. */
   --brand: #fb923c; --brand-ink: #fb923c; --cta-ink: #0c0a09; } }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.7;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-main, header, footer { max-width: 46rem; margin-inline: auto; padding-inline: 1.25rem; }
-header { padding-block: 2.5rem 1rem; }
-.brand { font-weight: 700; letter-spacing: .02em; color: var(--brand-ink); text-decoration: none; }
-h1 { font-size: clamp(1.9rem, 5vw, 2.75rem); line-height: 1.2; margin-block: .75rem .5rem; }
-h2 { font-size: 1.3rem; margin-block: 2.25rem .5rem; }
-.intro { font-size: 1.15rem; color: var(--muted); margin-block: 0 1.5rem; }
-p { margin-block: 0 1rem; }
-.cta { display: inline-block; background: var(--brand); color: var(--cta-ink); text-decoration: none;
-  font-weight: 600; padding: .85rem 1.6rem; border-radius: .6rem; margin-block: 1.5rem; }
+
+/* One measure for every band, so the hero, the body and the footer line up down a
+   single edge instead of each choosing its own. The band paints edge to edge and the
+   wrapper inside it holds the text, which is what lets the hero carry a background
+   colour without the copy drifting away from the content below it. */
+.wrap { max-width: 52rem; margin-inline: auto; padding-inline: 1.25rem; }
+
+.hero { background: var(--hero); border-block-end: 1px solid var(--line);
+  padding-block-end: 3rem; }
+.topbar { display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding-block: .75rem 2.25rem; }
+.brand { font-weight: 800; font-size: 1.05rem; letter-spacing: .02em;
+  color: var(--brand-ink); text-decoration: none; }
+/* A real 44px target, not line-height tall: these are text styled links and the
+   product already learned that lesson the expensive way on the join screen. */
+.topbar a, footer a { display: inline-flex; align-items: center; min-height: 44px; }
+.lang { color: var(--muted); text-decoration: none; font-size: .95rem; }
+.lang:hover { color: var(--brand-ink); }
+
+h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.15; margin-block: 0 .75rem;
+  max-width: 22ch; }
+.intro { font-size: clamp(1.05rem, 2.4vw, 1.25rem); color: var(--muted);
+  margin-block: 0 1.75rem; max-width: 46ch; }
+.cta { display: inline-flex; align-items: center; justify-content: center; min-height: 48px;
+  background: var(--brand); color: var(--cta-ink); text-decoration: none;
+  font-weight: 700; padding: .8rem 1.75rem; border-radius: .75rem; }
 .cta:hover { filter: brightness(1.08); }
-nav.more { border-top: 1px solid var(--line); margin-block-start: 3rem; padding-block-start: 1.25rem; }
+.facts { list-style: none; margin: 2rem 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: .5rem; }
+.facts li { background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: .35rem 1rem; font-size: .9rem; color: var(--muted); }
+
+main { padding-block: 2.5rem 1rem; }
+/* Each section is a card on the warm ground rather than one unbroken column of prose.
+   Same words, but a reader scanning for the paragraph that answers their question can
+   see where one answer ends and the next begins. */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 1rem;
+  padding: 1.5rem 1.5rem .5rem; margin-block-end: 1rem; }
+h2 { font-size: 1.25rem; line-height: 1.35; margin-block: 0 .75rem; }
+p { margin-block: 0 1rem; }
+
+.closer { background: var(--hero); border: 1px solid var(--line); border-radius: 1rem;
+  padding: 2.25rem 1.5rem; margin-block: 2rem 0; text-align: center; }
+.closer p { font-size: 1.15rem; font-weight: 600; margin-block: 0 1.25rem; }
+
+nav.more { border-block-start: 1px solid var(--line); margin-block-start: 2.5rem;
+  padding-block-start: 1.5rem; }
+nav.more h2 { font-size: .95rem; font-weight: 600; color: var(--muted); margin-block-end: .9rem; }
 nav.more ul { list-style: none; padding-inline-start: 0; margin: 0;
-  display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; }
-nav.more a { color: var(--brand-ink); }
-footer { border-top: 1px solid var(--line); margin-block-start: 2rem; padding-block: 1.25rem 3rem;
-  color: var(--muted); font-size: .9rem; display: flex; flex-wrap: wrap; gap: 1rem; }
-footer a { color: var(--brand-ink); }
+  display: flex; flex-wrap: wrap; gap: .5rem; }
+nav.more a { display: inline-flex; align-items: center; min-height: 40px;
+  padding: .25rem 1rem; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--brand-ink); text-decoration: none; font-size: .95rem; }
+nav.more a:hover { border-color: var(--brand-ink); }
+
+footer { border-block-start: 1px solid var(--line); background: var(--card);
+  margin-block-start: 3rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: .25rem 1.5rem;
+  padding-block: 1rem 2.5rem; }
+footer a { color: var(--muted); text-decoration: none; font-size: .9rem; }
+footer a:hover { color: var(--brand-ink); text-decoration: underline; }
+
+/* Keyboard users get to see where they are. The page has no script, so this is the
+   only affordance there is. */
+a:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 3px;
+  border-radius: .4rem; }
 `.trim();
 
 /**
@@ -880,9 +992,6 @@ export function renderLandingPage(page: LandingPage): string {
   const counterpart = LANDING_PAGES.find(
     (p) => p.subject === page.subject && p.language !== page.language,
   )!;
-  const home = LANDING_PAGES.find(
-    (p) => p.subject === HOME_SUBJECT && p.language === page.language,
-  )!;
   // Siblings in the same language, minus this page. This is what keeps the set
   // internally connected instead of twelve dead ends that each only Google can reach.
   const siblings = LANDING_PAGES.filter(
@@ -893,15 +1002,24 @@ export function renderLandingPage(page: LandingPage): string {
     .map((a) => `    <link rel="alternate" hreflang="${a.hreflang}" href="${a.href}" />`)
     .join('\n');
 
+  // One card per section rather than one unbroken column. The words are the registry's,
+  // untouched; only the container changed, and a reader scanning for the paragraph that
+  // answers their own question can now see where one answer stops and the next starts.
   const sections = page.sections
     .map((s) => [
-      `      <h2>${esc(s.heading)}</h2>`,
-      ...s.paragraphs.map((t) => `      <p>${esc(t)}</p>`),
+      '      <section class="card">',
+      `        <h2>${esc(s.heading)}</h2>`,
+      ...s.paragraphs.map((t) => `        <p>${esc(t)}</p>`),
+      '      </section>',
     ].join('\n'))
     .join('\n');
 
+  const facts = FACTS[page.language]
+    .map((f) => `          <li>${esc(f)}</li>`)
+    .join('\n');
+
   const siblingLinks = siblings
-    .map((p) => `        <li><a href="${landingPageUrl(p)}">${esc(NAV_LABEL[page.language][p.subject])}</a></li>`)
+    .map((p) => `          <li><a href="${landingPageUrl(p)}">${esc(NAV_LABEL[page.language][p.subject])}</a></li>`)
     .join('\n');
 
   return `<!DOCTYPE html>
@@ -934,15 +1052,26 @@ ${STYLE}
     </style>
   </head>
   <body>
-    <header>
-      <a class="brand" href="${landingPageUrl(home)}">RushPoint</a>
-      <h1>${esc(page.headline)}</h1>
-      <p class="intro">${esc(page.intro)}</p>
-      <a class="cta" href="${CREATOR_ORIGIN}/">${esc(page.ctaLabel)}</a>
+    <header class="hero">
+      <div class="wrap">
+        <nav class="topbar" aria-label="${esc(TOPBAR_LABEL[page.language])}">
+          <a class="brand" href="${MARKETING_ORIGIN}/${page.language}/">RushPoint</a>
+          <a class="lang" href="${landingPageUrl(counterpart)}" hreflang="${hreflangFor(counterpart.language)}">${esc(COUNTERPART_LABEL[counterpart.language])}</a>
+        </nav>
+        <h1>${esc(page.headline)}</h1>
+        <p class="intro">${esc(page.intro)}</p>
+        <a class="cta" href="${CREATOR_BUILD_URL}">${esc(page.ctaLabel)}</a>
+        <ul class="facts">
+${facts}
+        </ul>
+      </div>
     </header>
-    <main>
+    <main class="wrap">
 ${sections}
-      <p><a class="cta" href="${CREATOR_ORIGIN}/">${esc(page.ctaLabel)}</a></p>
+      <section class="closer">
+        <p>${esc(CLOSER_LEAD[page.language])}</p>
+        <a class="cta" href="${CREATOR_BUILD_URL}">${esc(page.ctaLabel)}</a>
+      </section>
       <nav class="more">
         <h2>${esc(MORE_LABEL[page.language])}</h2>
         <ul>
@@ -951,11 +1080,12 @@ ${siblingLinks}
       </nav>
     </main>
     <footer>
-      <a href="${landingPageUrl(counterpart)}" hreflang="${hreflangFor(counterpart.language)}">${esc(COUNTERPART_LABEL[counterpart.language])}</a>
-      <a href="${MARKETING_ORIGIN}/${page.language}/">${esc(MARKETING_LABEL[page.language])}</a>
-      <a href="${LANDING_ORIGIN}/">${esc(page.language === 'he' ? 'הצטרפות למשחק' : 'Join a game')}</a>
-      <a href="${LANDING_ORIGIN}/privacy">${esc(page.language === 'he' ? 'פרטיות' : 'Privacy')}</a>
-      <a href="${LANDING_ORIGIN}/terms">${esc(page.language === 'he' ? 'תנאים' : 'Terms')}</a>
+      <div class="wrap">
+        <a href="${MARKETING_ORIGIN}/${page.language}/">${esc(MARKETING_LABEL[page.language])}</a>
+        <a href="${LANDING_ORIGIN}/">${esc(JOIN_LABEL[page.language])}</a>
+        <a href="${LANDING_ORIGIN}/privacy">${esc(page.language === 'he' ? 'פרטיות' : 'Privacy')}</a>
+        <a href="${LANDING_ORIGIN}/terms">${esc(page.language === 'he' ? 'תנאים' : 'Terms')}</a>
+      </div>
     </footer>
   </body>
 </html>
