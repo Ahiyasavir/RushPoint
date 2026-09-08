@@ -1935,6 +1935,11 @@ const HE = {
     mediaField: 'תמונות וסרטונים (אופציונלי)',
     mediaUpload: 'העלה קובץ מהמחשב',
     mediaUploadError: 'ההעלאה נכשלה, נסו שוב',
+    // גרירה של תמונה (change: drop-media-onto-the-editor). הרמז מזכיר גם קובץ
+    // מהמחשב וגם תמונה מלשונית אחרת, כי אלה שני מסלולים שונים לגמרי מתחת לפני השטח.
+    mediaDropHint: 'או גררו לכאן קובץ, או תמונה מלשונית אחרת',
+    // האתר שממנו נגררה התמונה הוא זה שחוסם, לא אנחנו — ולכן המשפט אומר מה כן עובד.
+    mediaDropBlocked: 'האתר שממנו גררתם לא מרשה לשלוף את התמונה. שמרו אותה ואז גררו את הקובץ, או השתמשו בהעלאה.',
     mediaYouTubePlaceholder: 'הדביקו קישור YouTube',
     mediaAddYouTube: 'הוסף',
     mediaYouTubeError: 'קישור YouTube לא תקין',
@@ -4508,6 +4513,12 @@ const EN: typeof HE = {
     mediaField: 'Images & videos (optional)',
     mediaUpload: 'Upload from computer',
     mediaUploadError: 'Upload failed, try again',
+    // Dragging a picture in (change: drop-media-onto-the-editor). The hint names
+    // both routes because they are entirely different paths underneath.
+    mediaDropHint: 'or drop a file here, or a picture from another tab',
+    // The SITE you dragged from is what blocks this, not us — so the sentence says
+    // what does work instead.
+    mediaDropBlocked: 'That site would not release the picture. Save it and drop the file, or use upload.',
     mediaYouTubePlaceholder: 'Paste a YouTube link',
     mediaAddYouTube: 'Add',
     mediaYouTubeError: 'Not a valid YouTube link',

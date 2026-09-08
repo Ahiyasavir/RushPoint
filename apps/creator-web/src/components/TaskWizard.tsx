@@ -8,7 +8,7 @@
 // gate, placement is last and never blocks. Validation messages are withheld
 // until the creator dirties the field group they concern or presses the finish
 // control, so a brand new task is never greeted by its own errors.
-import { useEffect, useRef, useState, type ReactNode, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type ChangeEvent, type DragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Task, TaskStep, TaskType, TaskMedia } from '@rushpoint/shared';
 import {
@@ -1247,12 +1247,21 @@ function MediaSection({ task, set, b, gameId, replace }: {
   // parallel uploads. A ref is the only thing here that is current at await-resolution.
   const latest = useRef(task);
   latest.current = task;
+  const [dragOver, setDragOver] = useState(false);
+  // A boolean, not a one-member string union: there is exactly one way this can
+  // fail from the creator's side (the source site would not release the picture),
+  // and a literal like 'blocked' in a .tsx reads to the i18n scanner as UI copy
+  // that bypasses the dictionary. It was right to flag it.
+  const [dropBlocked, setDropBlocked] = useState(false);
 
-  const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-picking the same file
-    if (!file) return;
+  // ONE ingest path for every source (change: drop-media-onto-the-editor). The
+  // file picker, a file dragged from the desktop and a picture dragged out of
+  // another browser tab all end here, so the durability rules below — the
+  // server's own accept predicate, and reading `latest.current` rather than the
+  // render closure — cannot apply to one route and not another.
+  const ingestFile = async (file: File) => {
     setUploadError(false);
+    setDropBlocked(false);
     setUploadPct(0);
     try {
       const { url, kind } = await uploadTaskMedia(file, { gameId: gameId ?? 'draft', taskId: task.id }, setUploadPct);
@@ -1268,6 +1277,72 @@ function MediaSection({ task, set, b, gameId, replace }: {
     } catch {
       setUploadError(true);
     } finally {
+      setUploadPct(null);
+    }
+  };
+
+  const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    await ingestFile(file);
+  };
+
+  // ── Drop ────────────────────────────────────────────────────────────────────
+  //
+  // Two different things arrive on a drop, and conflating them is what makes this
+  // feature feel broken:
+  //
+  //   A FILE — dragged from the desktop, Photos, Finder/Explorer. `files` is
+  //   populated and this is exactly the picker's path. Always works.
+  //
+  //   A URL — dragged out of another browser TAB. The browser hands over
+  //   `text/uri-list` (and `text/html`) and `files` is EMPTY: the page never gives
+  //   up the bytes. So the picture has to be fetched, and a cross-origin image is
+  //   only readable if its host sends CORS headers. Wikimedia and Unsplash do;
+  //   Google Images thumbnails do not. That is a property of the SOURCE, not of
+  //   this code, so the failure is reported as what it is rather than as a generic
+  //   upload error — and `mediaDropBlocked` tells the creator the one thing that
+  //   always works instead.
+  //
+  // Storing the foreign URL directly is not an option worth considering: the
+  // server's accept-set is compiled to our own upload origins, so it would save
+  // "successfully" and then be dropped on a later autosave — the exact silent
+  // data loss `normalizeStagesMedia` exists to prevent.
+  const dropUrlFrom = (dt: DataTransfer): string | null => {
+    const uri = dt.getData('text/uri-list') || dt.getData('text/plain') || '';
+    const direct = uri.split('\n').map((l) => l.trim()).find((l) => /^https?:\/\//i.test(l));
+    if (direct) return direct;
+    // Some sources only offer the dragged element's markup.
+    const html = dt.getData('text/html') || '';
+    const m = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+    return m && /^https?:\/\//i.test(m[1]) ? m[1] : null;
+  };
+
+  const onDrop = async (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (uploadPct !== null) return;
+    const dt = e.dataTransfer;
+    const file = dt.files?.[0];
+    if (file) { await ingestFile(file); return; }
+    const url = dropUrlFrom(dt);
+    if (!url) return;
+    setDropBlocked(false);
+    setUploadError(false);
+    setUploadPct(0);
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) throw new Error('fetch failed');
+      const blob = await res.blob();
+      if (!/^(image|video)\//.test(blob.type)) { setDropBlocked(true); setUploadPct(null); return; }
+      const name = (url.split('/').pop() || 'image').split('?')[0] || 'image';
+      setUploadPct(null);
+      await ingestFile(new File([blob], name, { type: blob.type }));
+    } catch {
+      // Almost always CORS. Naming it "the site would not release the picture"
+      // beats a generic failure the creator cannot act on.
+      setDropBlocked(true);
       setUploadPct(null);
     }
   };
@@ -1332,14 +1407,28 @@ function MediaSection({ task, set, b, gameId, replace }: {
         </ul>
       )}
 
-      {/* Upload from computer */}
-      <div className="flex items-center gap-2">
-        <label className="cursor-pointer self-start text-xs text-ink-fire hover:underline">
-          + {b.mediaUpload}
-          <input type="file" accept="image/*,video/*" className="hidden" onChange={onPickFile} disabled={uploadPct !== null} />
-        </label>
-        {uploadPct !== null && <span className="text-[13px] text-[--ink-3]">{uploadPct}%</span>}
-        {uploadError && <span className="text-[13px] text-neon-red">{b.mediaUploadError}</span>}
+      {/* Upload from computer, or DROP onto this zone (change:
+          drop-media-onto-the-editor). The whole box is the target, not the link:
+          a drop target the size of a text link is one a creator misses. */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        className={`rounded-xl border-2 border-dashed px-3 py-3 transition-colors ${
+          dragOver ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="cursor-pointer text-xs text-ink-fire hover:underline">
+            + {b.mediaUpload}
+            <input type="file" accept="image/*,video/*" className="hidden" onChange={onPickFile} disabled={uploadPct !== null} />
+          </label>
+          <span className="text-[13px] text-[--ink-3]">{b.mediaDropHint}</span>
+          {uploadPct !== null && <span className="text-[13px] text-[--ink-3]">{uploadPct}%</span>}
+          {uploadError && <span className="text-[13px] text-neon-red">{b.mediaUploadError}</span>}
+        </div>
+        {dropBlocked && (
+          <p className="text-[13px] text-neon-red mt-1.5">{b.mediaDropBlocked}</p>
+        )}
       </div>
 
       {/* YouTube link */}
