@@ -3098,18 +3098,28 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 onDelete={activeStage.tasks.length > 1
                   ? (taskId) => { void removeTask(activeStage.id, taskId); }
                   : undefined}
+                /* ADD SITS AT THE END OF THE LIST, NOT BELOW THE CANVAS
+                   (change: add-a-mission-follows-the-missions).
+ 
+                   This row used to be a sibling under TaskCanvas, which is
+                   `flex-1` — so on a stage with ONE mission it sat 380px below it
+                   on an 812px phone. Nearly half the screen between the list and
+                   the button that adds to it, with the void reading as the end of
+                   the page. Passed as the canvas's own list footer it follows the
+                   last mission and scrolls with it, and it still renders on an
+                   empty stage (see TaskCanvas's early return).
+ 
+                   `mb-12` on a phone keeps it clear of <ActiveRunBar>, a
+                   `fixed … bottom-20 start-4` pill that floats over whatever the
+                   canvas's last row happens to be. It only appears while a run is
+                   live, and when it does it landed squarely on "add a mission". */
+                footer={(
+                  <div className="flex gap-2 mt-2.5 mb-12 sm:mb-0">
+                    <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
+                    <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
+                  </div>
+                )}
               />
-            </div>
-            {/* `mb-12` on a phone keeps this row clear of <ActiveRunBar>, which is
-                a `fixed … bottom-20 start-4` pill and therefore floats over
-                whatever the canvas's last row happens to be. It only ever appears
-                while a run is live, but when it does it landed squarely on "add a
-                mission" — and the canvas reclaiming ~350px (change:
-                builder-mobile-simplification) is exactly what pushed this row down
-                to meet it. */}
-            <div className="flex gap-2 shrink-0 mb-12 sm:mb-0">
-              <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
-              <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
             </div>
           </>
         )}
