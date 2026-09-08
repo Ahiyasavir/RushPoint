@@ -218,7 +218,7 @@ export function QuickSetupWelcome({ remaining, onBegin, onSkip }: {
  */
 export function QuickSetupBar({
   step, index, total, copyKey, taskTitle, summary, scope,
-  onNext, onBack, onDefer, onClose, inline = false, besidePanel = false,
+  onNext, onBack, onDefer, onClose, inline = false,
 }: {
   step: TemplateWizardStep;
   index: number;
@@ -233,20 +233,6 @@ export function QuickSetupBar({
    */
   summary?: string;
   scope?: 'game' | 'stage' | 'task';
-  /**
-   * The mission editor is open BESIDE this card, as an inline column
-   * (change: quick-setup-one-card).
-   *
-   * Only meaningful for the floating variant, and only from `lg` up, where the
-   * editor is a neighbour rather than a full-screen sheet. Centred across the
-   * whole viewport, this card sat on top of the editor's own header — measured:
-   * the card spans x 272-1008 and the header 28-506, so the mission-type chip and
-   * the way out of guided mode were both underneath it. The editor pane is pinned
-   * to the inline END (SlidePanel), so reserving that width on the end side moves
-   * the card over the dimmed canvas, which is the half of the screen with nothing
-   * on it. Mirrors correctly in LTR for the same reason.
-   */
-  besidePanel?: boolean;
   onNext: () => void;
   /**
    * One step back, or undefined at the first step — where there is nothing to go
@@ -339,12 +325,15 @@ export function QuickSetupBar({
         : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] max-h-[60vh] overflow-y-auto px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
       // The logical insets only mean anything for the floating variant; in flow the
       // element is already laid out by its parent.
-      // `insetInlineEnd` reserves the mission editor pane's own width — the exact
-      // expression SlidePanel sizes itself with, so the two cannot drift.
-      style={inline ? undefined : {
-        insetInlineStart: 0,
-        insetInlineEnd: besidePanel ? 'min(500px, calc(100vw - 1.5rem))' : 0,
-      }}
+      //
+      // This used to reserve the mission editor pane's width on the end side, via a
+      // `besidePanel` prop. That prop was DEAD and had been since the card moved
+      // inline: the floating variant renders only when the editor is CLOSED
+      // (`!qsCardInline`), and the prop was passed `missionEditorOpen`, so it was
+      // provably always false. It is deleted rather than left as a documented
+      // maybe — a prop that cannot fire is a claim about the layout that no longer
+      // holds, and the next reader has to prove it dead all over again.
+      style={inline ? undefined : { insetInlineStart: 0, insetInlineEnd: 0 }}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-fire">

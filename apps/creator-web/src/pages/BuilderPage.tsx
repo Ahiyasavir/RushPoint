@@ -1064,9 +1064,6 @@ export default function BuilderPage() {
           taskTitle={quickSetupPresentation(qsStep).taskTitle}
           summary={quickSetupPresentation(qsStep).summary}
           scope={quickSetupPresentation(qsStep).scope}
-          /* The editor is open beside this card (desktop widths): keep the card
-             off the pane it would otherwise cover. */
-          besidePanel={missionEditorOpen}
           onNext={() => dispatchQs({ type: 'next' })}
           onBack={qsState.index > 0 ? () => dispatchQs({ type: 'back' }) : undefined}
           onDefer={() => dispatchQs({ type: 'defer' })}
@@ -3342,7 +3339,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
   // (flex-1 min-w-0) yields the space; no separate title bar here (the close control
   // lives in the wizard's tab row, reclaiming ~45px of chrome for the content).
   return (
-    <SlidePanel shown={shown} variant="fullscreen">
+    <SlidePanel shown={shown} variant="fullscreen" wide={!!guided}>
       {/* הקמה מהירה, rendered IN FLOW at the top of the editor rather than as a
           floating bar over it (change: builder-mission-editor-route, design D5).
           The bar used to be a separate fixed z-50 element claiming the same corner
@@ -3352,13 +3349,45 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
           recorded in the change: painting the sheet over the bar hid the
           instruction, painting it under hid the editor's own tab row. Neither can
           happen to something that is inside the editor. */}
-      {quickSetupStep}
-      <div className="flex-1 min-h-0 p-2.5">
-        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
-          focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
-          guided={!!guided} guidedAnchor={guided?.anchor ?? null} onExitGuided={guided?.onExit} />
-        {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
-      </div>
+      {/* GUIDED, ON A WIDE SCREEN, THE INSTRUCTION SITS BESIDE THE WORK — NOT ON TOP
+          OF IT (change: guided-uses-the-whole-screen).
+ 
+          Stacked, the card is `shrink-0` above a `flex-1` body, so its height comes
+          straight out of the control the step is about. Measured on the map step at
+          a 620px window: card 201px, leaving the wizard's scroller 247px, so the
+          map block's own `min-h-[280px]` could not be honoured and the map rendered
+          202px tall — a strip you cannot place a pin on, which is the whole purpose
+          of that step. The pane is 946px wide while guided and the card needs ~320
+          of them, so the height was being spent on a column that had width to
+          spare.
+ 
+          Beside, the card costs the map NOTHING vertically: same card, same copy,
+          same component — only the axis changes, and only from `lg` up, where the
+          pane is an inline column. Below `lg` the pane is the whole phone screen
+          and stacking is the only thing that fits, which is why this is
+          `lg:flex-row` and not a second layout. */}
+      {guided ? (
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row lg:items-stretch">
+          <div className="shrink-0 lg:w-[20rem] lg:overflow-y-auto flex flex-col">{quickSetupStep}</div>
+          <div className="flex-1 min-h-0 p-2.5">
+            <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+              focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
+              guided={!!guided} guidedAnchor={guided?.anchor ?? null} onExitGuided={guided?.onExit} />
+          </div>
+        </div>
+      ) : (
+        <>
+          {quickSetupStep}
+          <div className="flex-1 min-h-0 p-2.5">
+            <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+              focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
+              /* This branch is the NOT-guided one, so these are constants — the
+                 optional chains that used to be here narrowed to `never`. */
+              guided={false} guidedAnchor={null} onExitGuided={undefined} />
+          </div>
+          {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
+        </>
+      )}
     </SlidePanel>
   );
 }
@@ -3404,10 +3433,38 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
 // this and has `.rp-safe-t`; creator-web has no equivalent, and a full-screen surface
 // is the first thing here that reaches the physical top edge, so the insets are
 // applied directly.
-function SlidePanel({ shown, children, variant = 'sheet' }: {
+/**
+ * How wide the inline pane is, from `lg` up (change: guided-uses-the-whole-screen).
+ *
+ * Declared ONCE. It used to be the same expression typed out in three places, under
+ * a comment claiming the copies "cannot drift" — which is a hope, not a mechanism.
+ *
+ * `PANEL_W` is the ordinary pane: narrow on purpose, because the canvas behind it is
+ * live and is what the creator is going back to.
+ *
+ * `PANEL_W_GUIDED` is the pane while Quick Setup is driving. There the canvas behind
+ * is covered by the focus scrim and is INERT — it is not context you can use, it is
+ * dead space, and at a 1266px viewport it was two thirds of the screen. The creator's
+ * words: the map should get that room. So the pane takes it and every step benefits,
+ * not only the map one — the sequence editor, the media picker and the quiz choices
+ * are all cramped in 500px for the same reason.
+ *
+ * Widening the ONE pane rather than moving the map out into the canvas area is
+ * deliberate: a map that renders in two different containers is two mount points and
+ * two lifecycles for one MapLibre instance, and this repo has paid for that shape
+ * before. `20rem` of canvas is left showing so "where am I" still has an answer.
+ * Below `lg` neither value is used — `max-lg:!w-full` makes the pane full-screen.
+ */
+const PANEL_W = 'min(500px, calc(100vw - 1.5rem))';
+const PANEL_W_GUIDED = 'min(1000px, calc(100vw - 20rem))';
+
+function SlidePanel({ shown, children, variant = 'sheet', wide = false }: {
   shown: boolean; children: ReactNode; variant?: 'sheet' | 'fullscreen';
+  /** Quick Setup is driving: take the room the inert canvas is wasting. */
+  wide?: boolean;
 }) {
   const full = variant === 'fullscreen';
+  const width = wide ? PANEL_W_GUIDED : PANEL_W;
   return (
     <aside
       // `lg:relative lg:z-30` is load-bearing, not decoration (change:
@@ -3430,12 +3487,12 @@ function SlidePanel({ shown, children, variant = 'sheet' }: {
         ${full
           ? 'max-lg:inset-y-0 max-lg:h-[100dvh]'
           : 'max-lg:bottom-0 max-lg:top-auto max-lg:h-[88dvh]'}`}
-      style={{ width: shown ? 'min(500px, calc(100vw - 1.5rem))' : 0 }}
+      style={{ width: shown ? width : 0 }}
     >
       <div
         style={{
           willChange: 'transform',
-          width: 'min(500px, calc(100vw - 1.5rem))',
+          width,
           // Full-screen is the only surface in this console that reaches the
           // device's physical top and bottom edges, so it is the only one that has
           // to know about the notch and the home indicator. Inline rather than a
