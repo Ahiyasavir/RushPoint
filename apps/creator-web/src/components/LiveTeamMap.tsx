@@ -6,7 +6,7 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
@@ -50,7 +50,7 @@ export default function LiveTeamMap({
   const markersById = useRef<Map<string, maplibregl.Marker>>(new Map());
   // The set of teamIds we last framed to — reframe only when the set changes.
   const framedKey = useRef<string>('');
-  const [mode, setMode] = useState<MapMode>('topo');
+  const [mode, setMode] = useState<MapMode>(DEFAULT_MAP_MODE);
   const [locs, setLocs] = useState<TeamLoc[]>([]);
 
   // Resolve a team id → display name for popups.

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
 
@@ -32,7 +32,7 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: Ro
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
-  const [mode, setMode] = useState<MapMode>('topo');
+  const [mode, setMode] = useState<MapMode>(DEFAULT_MAP_MODE);
 
   // Located tasks in play order (stage order → task order).
   const stops = stages

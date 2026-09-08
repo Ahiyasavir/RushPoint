@@ -77,6 +77,14 @@ export default function NavMap({
   const markers = useRef<maplibregl.Marker[]>([]);
   const meMarker = useRef<maplibregl.Marker | null>(null);
   const fitted = useRef(false);
+  // PARTICIPANTS STAY ON TOPO (change: maps-open-on-satellite). The creator's
+  // maps now open on satellite — imagery answers "is this the right spot on the
+  // ground?", which is the authoring question. A racing phone asks a different
+  // one, and satellite tiles are markedly heavier: this map is open for the whole
+  // run, on the player's own data, on a battery that has to last it. The toggle is
+  // right there for anyone who wants imagery. Deliberately a literal, not
+  // DEFAULT_MAP_MODE, so flipping the creator's default cannot silently flip
+  // every player's.
   const [mode, setMode] = useState<MapMode>('topo');
 
   const valid = targets.filter((t) => isValidCoord(t.lat, t.lng) && (t.lat !== 0 || t.lng !== 0));

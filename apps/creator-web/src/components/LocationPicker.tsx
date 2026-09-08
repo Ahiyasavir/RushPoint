@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, type MapMode } from '@rushpoint/shared';
+import { resolveMapStyle, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
 import { resolveInitialView, isPlacedCoord, type LatLng } from '../lib/mapAnchor';
 import { geocodePlaces, type GeoResult } from '../lib/geocode';
 import MapModeToggle from './MapModeToggle';
@@ -73,7 +73,7 @@ export default function LocationPicker({
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
-  const [mode, setMode] = useState<MapMode>('topo');
+  const [mode, setMode] = useState<MapMode>(DEFAULT_MAP_MODE);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
