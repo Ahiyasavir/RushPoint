@@ -1,12 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: An occasion page offers concrete starting points, not only prose
-
-Carrying starting points is OPTIONAL per subject: a subject with none renders exactly as it did
-before this change, generic call to action included. This is what lets effort be scoped to a
-declared focus without a gate treating an un-prioritised occasion as broken.
-
-Where an occasion landing page DOES carry starting points, it SHALL present them as its primary
+Carrying starting points is OPTIONAL per subject: a subject with none renders exactly as it did before this change, generic call to action included. This is what lets effort be scoped to a declared focus without a gate treating an un-prioritised occasion as broken.  Where an occasion landing page DOES carry starting points, it SHALL present them as its primary
 action, placed before its body prose rather than after it.
 
 Each starting point SHALL name a specific game a visitor could run, in that visitor's own terms

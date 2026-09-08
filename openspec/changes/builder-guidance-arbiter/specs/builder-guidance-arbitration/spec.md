@@ -32,8 +32,7 @@ been mounted.
 - **THEN** no guidance surface is rendered and the Builder is unobstructed
 
 ### Requirement: A requested tour is deferred, never dropped
-When the creator explicitly requests the guided tour — the help control — while a
-higher-priority surface is on screen, the system SHALL NOT draw the tour over it and SHALL NOT
+When the creator explicitly requests the guided tour — the help control — while a higher-priority surface is on screen, the system SHALL NOT draw the tour over it and SHALL NOT
 silently discard the request. The request SHALL be held and the tour SHALL start once no
 higher-priority surface is on screen.
 
