@@ -93,6 +93,9 @@ export * from './locationLeak';
 export * from './runCapacity';
 export * from './taskCompletability';
 export * from './mutualExclusion';
+// Benched missions (change: mission-card-actions) — a mission kept in the
+// template that takes no part in the game until it is un-benched.
+export * from './hiddenTask';
 // Skipping ONE mission for ONE team (change: skip-single-task) — the decision that
 // keeps the skip inside the stage and keeps the stage winnable afterwards.
 export * from './taskSkip';

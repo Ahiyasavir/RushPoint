@@ -156,7 +156,7 @@ export const DELIBERATELY_EXCLUDED_STAGE_KEYS: readonly (keyof Stage)[] = [];
 export const EXPORTED_TASK_KEYS = [
   'id', 'title', 'description', 'type', 'coordinates', 'difficulty',
   'estimatedMinutes', 'expectedDurationMinutes', 'pointValue', 'maxConcurrentTeams',
-  'status', 'maxDurationMinutes', 'smart', 'triggerMode', 'locationless',
+  'status', 'maxDurationMinutes', 'smart', 'triggerMode', 'locationless', 'hidden',
   'hideLocation', 'locationClue', 'locationClueHe', 'hint', 'hintPenalty',
   'hintAutoRevealMinutes', 'hintAutoRevealAttempts', 'choices', 'answers',
   'orderItems', 'surveyChoices', 'numericAnswer', 'numericTolerance',
@@ -375,6 +375,10 @@ const TASK_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   releaseAfterMinutes: 'number',
   expiresAfterMinutes: 'number',
   locationless: 'boolean',
+  // mission-card-actions: a benched mission must stay benched across an
+  // export/import round trip — a file that silently un-benched every hidden
+  // mission would put them all back into the next run.
+  hidden: 'boolean',
   hideLocation: 'boolean',
   requirePresence: 'boolean',
   // pause-clock-tasks: a boolean or nothing. A file saying `"yes"` is REFUSED by

@@ -6,9 +6,8 @@
 // than a form validator working through a checklist:
 //
 //   • QuickSetupWelcome     — the one-time invitation on a fresh template
-//   • QuickSetupIntro       — "here's the mission we're about to set up", BEFORE
-//                             any control is touched (context-first navigation)
-//   • QuickSetupBar         — the running step bar, with a real progress trail
+//   • QuickSetupBar         — the ONE card per step: which mission, what to do
+//                             here, and a real progress trail
 //   • QuickSetupCelebration — a small, genuine "you did it" moment at the end
 //   • QuickSetupPill        — the persistent "נותרו N שדות" indicator
 //   • QuickSetupBlocked     — the launch refusal, one activatable row per missing field
@@ -25,8 +24,8 @@ import type { TemplateWizardStep } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { Button } from './ui';
 import ConfettiBurst from './ConfettiBurst';
-import { TAP_TARGET } from '../lib/interaction';
 import type { QuickSetupCopyKey } from '../lib/quickSetup';
+import { TAP_TARGET } from '../lib/interaction';
 
 /** How long the ring stays on the target after we focus it. */
 const PULSE_MS = 2600;
@@ -189,100 +188,78 @@ export function QuickSetupWelcome({ remaining, onBegin, onSkip }: {
 }
 
 /**
- * The context card — "here's the mission we're about to work on" — shown BEFORE
- * any control is touched.
+ * The step card — the ONE message about one change (change: quick-setup-one-card).
  *
- * This is the fix for the flow feeling robotic: version one jumped straight into
- * an input the instant a step activated. Landing on THIS card first, every time
- * the flow crosses into a new mission (never between two fields of the SAME one —
- * see `quickSetupChapterKey`), gives the creator a beat to read where they are
- * before the canvas asks anything of them.
- */
-export function QuickSetupIntro({ step, index, total, taskTitle, summary, scope, onBegin, onDefer, onClose }: {
-  step: TemplateWizardStep;
-  index: number;
-  total: number;
-  /** Resolved mission title, or `''` for an untitled one. `null` for a game-level step. */
-  taskTitle: string | null;
-  /**
-   * What players actually do in this mission, in the creator's own words — the
-   * mission's description, trimmed to its first sentence. `''` when the mission has
-   * no description yet, which is precisely the case the generic line covers.
-   */
-  summary: string;
-  scope: 'game' | 'stage' | 'task';
-  onBegin: () => void;
-  onDefer: () => void;
-  onClose: () => void;
-}) {
-  const q = useT().quickSetup;
-  const isTask = scope === 'task' && taskTitle !== null;
-  const heading = isTask ? q.introTaskLabel(taskTitle) : q.introGameLabel;
-  const fallback = isTask ? q.introFallback(taskTitle) : q.introGameFallback;
-  return (
-    <div
-      role="region"
-      aria-label={q.title}
-      className={`fixed z-50 top-2 mx-auto w-[min(30rem,calc(100%-1rem))] p-4 ${GLASS_CARD}`}
-      style={{ insetInlineStart: 0, insetInlineEnd: 0 }}
-    >
-      <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-fire">
-        <span aria-hidden>🧭</span>
-        <span>{q.introEyebrow(index + 1, total)}</span>
-        <span className={`rounded px-1.5 py-0.5 ${step.isRequired ? 'bg-rp-fire/10 text-ink-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
-          {step.isRequired ? q.requiredBadge : q.optionalBadge}
-        </span>
-      </div>
-      <h3 className="text-base font-bold text-[--ink-1] mt-1.5" dir="auto">{heading}</h3>
-      {/* The creator's own description when there is one — authored CONTENT, hence
-          dir="auto"; the generic line only when the mission has nothing to say yet. */}
-      {summary
-        ? <p className="text-sm text-[--ink-1] leading-snug mt-1" dir="auto">{summary}</p>
-        : <p className="text-sm text-[--ink-1] leading-snug mt-1">{fallback}</p>}
-      <div className="flex items-center gap-2 justify-end mt-3.5">
-        <button type="button" onClick={onDefer} className="text-xs text-[--ink-1] underline underline-offset-2">
-          {q.defer}
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={q.close}
-          title={q.close}
-          className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}
-        >
-          ✕
-        </button>
-        <Button onClick={onBegin}>{q.introCta}</Button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The running step bar.
+ * It used to be two. A separate context card ("here is the mission we are about to
+ * set up") came first whenever the flow crossed into a new mission, and the step
+ * card came after it. The reasoning was sound — landing inside an input with no
+ * idea which mission it belongs to reads as a machine driving the screen — but the
+ * cure asked the creator to read and dismiss two screens to learn one thing, and
+ * the creator said so plainly: all the information about one change belongs in a
+ * single message. So the mission context moved in here, above the instruction, and
+ * the second card is gone.
  *
- * The HEADLINE is product copy — one short line written for whoever is about to
- * touch this specific control (`copyKey`). The template's own `instructionPrompt`
- * is kept, but demoted to a quiet secondary line: nothing an author wrote is
- * discarded, it simply stops being the voice the product speaks in. That authored
- * text is CONTENT, not copy, so only it renders with dir="auto".
+ * The card carries, top to bottom:
+ *
+ *   • WHERE we are — stop N of M, required or optional;
+ *   • WHICH mission — its name and, when it has one, the creator's own first line
+ *     about it (authored CONTENT, hence dir="auto");
+ *   • WHAT to do here — product copy for this exact control (`copyKey`);
+ *   • the template author's note, when there is one, LABELLED as a quotation.
+ *     That label is the whole point: the note is prose someone else wrote, often
+ *     in the other language, and unlabelled directly beneath a Hebrew headline it
+ *     read as one broken bilingual paragraph the product had written. The comment
+ *     at the top of this file has claimed the note was "quietly labelled" since
+ *     the day it was written; the markup never labelled it at all.
  *
  * Fixed to the top of the Builder rather than docked into the header: it has to
  * stay legible while the creator is typing into a control anywhere on the page,
  * including inside the mission drawer, which the header sits behind.
  */
-export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, onClose, inline = false }: {
+export function QuickSetupBar({
+  step, index, total, copyKey, taskTitle, summary, scope,
+  onNext, onBack, onDefer, onClose, inline = false, besidePanel = false,
+}: {
   step: TemplateWizardStep;
   index: number;
   total: number;
   copyKey: QuickSetupCopyKey;
+  /** Resolved mission title, or `''` for an untitled one. `null` for a game-level step. */
+  taskTitle?: string | null;
+  /**
+   * What players actually do in this mission, in the creator's own words — the
+   * mission's description, trimmed to its first sentence. `''` when the mission
+   * has none yet, which is precisely the case the generic line covers.
+   */
+  summary?: string;
+  scope?: 'game' | 'stage' | 'task';
+  /**
+   * The mission editor is open BESIDE this card, as an inline column
+   * (change: quick-setup-one-card).
+   *
+   * Only meaningful for the floating variant, and only from `lg` up, where the
+   * editor is a neighbour rather than a full-screen sheet. Centred across the
+   * whole viewport, this card sat on top of the editor's own header — measured:
+   * the card spans x 272-1008 and the header 28-506, so the mission-type chip and
+   * the way out of guided mode were both underneath it. The editor pane is pinned
+   * to the inline END (SlidePanel), so reserving that width on the end side moves
+   * the card over the dimmed canvas, which is the half of the screen with nothing
+   * on it. Mirrors correctly in LTR for the same reason.
+   */
+  besidePanel?: boolean;
   onNext: () => void;
+  /**
+   * One step back, or undefined at the first step — where there is nothing to go
+   * back TO, and a control that can only explain its own refusal is worse than no
+   * control.
+   */
+  onBack?: () => void;
   onDefer: () => void;
   onClose: () => void;
   /**
    * Render IN FLOW instead of floating (change: builder-mission-editor-route).
    *
-   * While the mission editor is full-screen on a phone, this bar lives inside it
+   * While the mission editor is full-screen on a phone, this card lives inside it
    * rather than over it. As a `fixed z-50` element it claimed the same corner as
    * the editor's own surface, and the two negotiated by hand — the editor gave up
    * a third of its height so both could be seen. Nothing inside the editor has to
@@ -296,11 +273,18 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
 }) {
   const q = useT().quickSetup;
   const headline = copyLine(q.copy, copyKey);
+  const isTask = scope === 'task' && typeof taskTitle === 'string';
+  const where = isTask ? q.introTaskLabel(taskTitle as string) : scope ? q.introGameLabel : '';
+  // The mission's own words, when it has any. NO generic fallback here: the
+  // sentence this joins already names the mission and already asks for something,
+  // so "בואו נשלים פרט קטן במשימה X" would only repeat the title back and push the
+  // ask further down the line.
+  const context = isTask && summary && summary.trim() !== '' ? summary : '';
   return (
     <div
       role="region"
       aria-label={q.title}
-      // Logical inset (not left/right) so the bar centres identically in RTL and
+      // Logical inset (not left/right) so the card centres identically in RTL and
       // LTR; the inline style carries it because Tailwind has no logical-inset
       // utility and a template-string class would not exist at build time.
       // STACKED on a phone, side-by-side from `sm` up. As one row it was unreadable
@@ -314,20 +298,53 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
         : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
       // The logical insets only mean anything for the floating variant; in flow the
       // element is already laid out by its parent.
-      style={inline ? undefined : { insetInlineStart: 0, insetInlineEnd: 0 }}
+      // `insetInlineEnd` reserves the mission editor pane's own width — the exact
+      // expression SlidePanel sizes itself with, so the two cannot drift.
+      style={inline ? undefined : {
+        insetInlineStart: 0,
+        insetInlineEnd: besidePanel ? 'min(500px, calc(100vw - 1.5rem))' : 0,
+      }}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-fire">
-          <span>{q.title}</span>
+          <span>{q.introEyebrow(index + 1, total)}</span>
           <span className={`rounded px-1.5 py-0.5 ${step.isRequired ? 'bg-rp-fire/10 text-ink-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
             {step.isRequired ? q.requiredBadge : q.optionalBadge}
           </span>
         </div>
-        <p className="text-sm text-[--ink-1] font-medium leading-snug mt-1">{headline}</p>
-        {/* The template author's own note, kept but quiet — authored CONTENT, not
-            copy, so it alone renders with dir="auto". */}
+        {/* ONE SENTENCE: which mission, what it is, and what to do — in that order,
+            in a single paragraph (change: quick-setup-one-card).
+ 
+            Merging the two CARDS was not enough. The card still opened with the
+            mission's name on its own line, the mission's description on a second,
+            and only then the ask — which reads as an explanation followed by an
+            instruction, and the creator's verdict is the one every product person
+            eventually learns: *"people skip explanations when you are not asking
+            them to do anything."* An explanation nobody reads is worse than none,
+            because it pushes the ask below the fold of attention.
+ 
+            So the explanation stops being a preamble and becomes the opening of
+            the instruction itself. The mission is named in bold INSIDE the
+            sentence, its own description follows in the same flow, and the ask
+            closes it. Every step therefore explains its mission — which is the
+            other half of what was asked — without ever being a block that can be
+            skipped separately from the request. */}
+        <p className="text-sm text-[--ink-1] leading-snug mt-1.5">
+          {where !== '' && (
+            <span className="font-semibold" dir="auto">{where} </span>
+          )}
+          {/* The creator's own words about the mission: CONTENT, hence dir="auto"
+              even mid-sentence, so a Hebrew description inside an English UI (and
+              the reverse) still reads in its own direction. */}
+          {context !== '' && <span className="text-[--ink-2]" dir="auto">{context} </span>}
+          <span className="font-medium">{headline}</span>
+        </p>
+        {/* The template author's own note — a QUOTATION, and marked as one. */}
         {step.instructionPrompt && step.instructionPrompt !== headline && (
-          <p className="text-xs text-[--ink-1] leading-snug mt-0.5" dir="auto">{step.instructionPrompt}</p>
+          <p className="text-xs text-[--ink-2] leading-snug mt-1 ps-2 border-s-2 border-[--rp-border]" dir="auto">
+            <span className="text-[--ink-3]">{q.templateNote} </span>
+            {step.instructionPrompt}
+          </p>
         )}
         <QuickSetupProgressTrail index={index} total={total} />
       </div>
@@ -341,7 +358,16 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
         >
           {q.defer}
         </button>
-        <Button onClick={onNext}>{q.next}</Button>
+        {/* BACK. Arrowed like the mission editor's own footer so the pair reads as
+            navigation rather than as two unrelated buttons, and rendered only when
+            there IS a previous step — see the reducer's `back` case. The arrow is
+            a logical direction: `←` points backwards in RTL, which is the language
+            this console is used in, and the editor beside it has spelled it that
+            way since it was written. */}
+        {onBack && (
+          <Button variant="ghost" onClick={onBack}>← {q.back}</Button>
+        )}
+        <Button onClick={onNext}>{q.next} →</Button>
         <button
           type="button"
           onClick={onClose}

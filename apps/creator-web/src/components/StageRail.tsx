@@ -13,6 +13,7 @@
 // A drag is disambiguated by `active.data.current.type` ('task' | 'stage'), so
 // the old TASK_DND_MIME dataTransfer sniffing is gone.
 import type { Stage } from '@rushpoint/shared';
+import { playableTasks } from '@rushpoint/shared';
 import { closestCenter, useDroppable } from '@dnd-kit/core';
 import type { CollisionDetection } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -145,7 +146,11 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
         {railTitle && (
           <span className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{railTitle}</span>
         )}
-        <span className="text-[12px] text-[--ink-3] shrink-0 tabular-nums">{stage.tasks.length}</span>
+        {/* The PLAYABLE count (change: mission-card-actions): the rail is the
+            creator's map of the game, and a benched mission is not in it. The
+            mission itself is still visible — with its own "out of play" label —
+            on the stage's canvas. */}
+        <span className="text-[12px] text-[--ink-3] shrink-0 tabular-nums">{playableTasks(stage).length}</span>
       </div>
     );
   }
@@ -168,7 +173,7 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
         <div className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{railTitle}</div>
       )}
       <div className="mt-1.5"><PacingBar tasks={stage.tasks} /></div>
-      <div className="text-[12px] text-[--ink-3] mt-1">{b.taskCount(stage.tasks.length)}</div>
+      <div className="text-[12px] text-[--ink-3] mt-1">{b.taskCount(playableTasks(stage).length)}</div>
     </div>
   );
 }

@@ -60,6 +60,15 @@ export interface SharedTaskView {
   maxConcurrentTeams?: number;
   triggerMode?: TriggerMode;
   locationless?: boolean;
+  /**
+   * BENCHED (change: mission-card-actions). Projected rather than withheld: this
+   * link is how a creator shows the game to someone who will comment on it, and a
+   * mission that is in the template but takes no part in the game is exactly the
+   * kind of thing that reader must not mistake for a stop teams will visit.
+   * Dropping it instead would be worse than saying nothing — the mission would
+   * still be listed, silently, as if it were in play.
+   */
+  hidden?: boolean;
   hideLocation?: boolean;
   locationClue?: string;
   locationClueHe?: string;
@@ -170,6 +179,7 @@ export function sanitizeTaskForShare(task: Task, revealAnswers = false): SharedT
   put(t, 'maxConcurrentTeams', task.maxConcurrentTeams);
   put(t, 'triggerMode', task.triggerMode);
   put(t, 'locationless', task.locationless);
+  put(t, 'hidden', task.hidden);
   put(t, 'hideLocation', task.hideLocation);
   put(t, 'locationClue', task.locationClue);
   put(t, 'locationClueHe', task.locationClueHe);

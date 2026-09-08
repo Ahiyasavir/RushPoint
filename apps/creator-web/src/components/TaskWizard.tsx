@@ -66,7 +66,6 @@ import {
 import {
   guidedEditorView, guidedLocationView, GUIDED_BODY_CLASS, GUIDED_KEEP_CLASS,
 } from '../lib/guidedEditor';
-import { missionSummaryLine } from '../lib/quickSetup';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -345,66 +344,53 @@ export default function TaskWizard({
       )}
 
       {/* ── The guided header (change: quick-setup-guided-editor) ───────────────
-          While the flow is driving, this REPLACES the editor's tab row: it is the
-          only thing between the instruction and the single control the step asks
-          for, so it answers "what am I setting up?" and nothing else.
+          While the flow is driving, this REPLACES the editor's tab row. It is one
+          line, and it answers only what the card above it does not:
 
-          A header, not a card. It was a filled, bordered box, which put three
-          stacked boxes on screen — the flow's instruction card, this, then the
-          control — and the eye had to decide which of the three it was being
-          asked to act on. A hairline underneath says "everything below belongs to
-          this" without competing for the same attention.
+            • WHAT KIND of mission this is — read-only by design. The kind is the
+              template's decision and no Quick Setup step can target `task.type`
+              (it is not in QUICK_SETUP_FIELDS), so offering the picker here would
+              be offering to undo work nobody asked about. It is LABELLED rather
+              than left as a bare chip: an unlabelled chip beside a title looks
+              exactly like the pickable chips two steps away, and a creator who
+              taps it and gets nothing has been told the screen is broken.
+            • the way OUT, because "hidden until you leave the flow" is only fair
+              if leaving is one tap;
+            • the editor's own close, moved here from the tab row — hiding the tabs
+              and the ⋯ menu left that row holding a single unlabelled ✕ against
+              44px of empty width.
 
-          Read-only by design: the kind of mission is the template's decision and
-          no Quick Setup step can target `task.type` (it is not in
-          QUICK_SETUP_FIELDS), so offering the picker here would be offering to
-          undo work nobody asked about. It is LABELLED "מה סוג המשימה" rather than
-          left as a bare chip: an unlabelled chip beside a title looks exactly like
-          the pickable chips two steps away, and a creator who taps it and gets
-          nothing has been told the screen is broken. The exit sits right beside
-          it, because "hidden until you leave the flow" is only fair if leaving is
-          one tap. */}
+          It does NOT name the mission. It used to, with the mission's summary
+          under it, and then the step card directly above grew the same two lines
+          when the flow's two cards were merged into one (change:
+          quick-setup-one-card) — so the mission was being named twice, an inch
+          apart. The card is the one that says it, because that is the message the
+          creator is meant to read. */}
       {view.showContextStrip && (
-        <div role="group" aria-label={b.guidedGroupAria} className="shrink-0 mb-2.5 pb-2 border-b border-[--rp-border]">
-          <div className="flex items-start gap-1.5">
-            <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-semibold text-[--ink-1] leading-snug" dir="auto">
-                {task.title?.trim() || b.untitledTask}
-              </p>
-              {missionSummaryLine(task.description) !== '' && (
-                <p className="text-[13px] text-[--ink-2] leading-snug mt-0.5" dir="auto">
-                  {missionSummaryLine(task.description)}
-                </p>
-              )}
-            </div>
-            {/* The editor's own close, moved here from the row above. */}
-            <button onClick={onClose} aria-label={closeLabel}
-              className="shrink-0 -mt-1.5 -me-1.5 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
-              ✕
+        <div role="group" aria-label={b.guidedGroupAria} className="shrink-0 mb-2.5 pb-1.5 flex items-center gap-2 border-b border-[--rp-border]">
+          <span className="inline-flex items-center gap-1.5 min-w-0 rounded-full bg-[--surface-2] border border-[--rp-border] ps-2 pe-2.5 py-1 text-[13px] text-[--ink-2]">
+            <span className="text-[--ink-3] shrink-0">{b.guidedTypeLabel}</span>
+            <BuilderIcon name={TYPE_ICON_NAME[task.type]} className="w-3.5 h-3.5 shrink-0" />
+            <span className="font-medium text-[--ink-1] truncate">{typeMetaOf(b)[task.type].label}</span>
+          </span>
+          {onExitGuided && (
+            /* A REAL 44px target (lib/interaction's lesson, applied here by hand):
+               styled down to inline text this is line-height tall, and it is the
+               only door out of guided mode inside the editor. Given a border rather
+               than an underline for the same reason the chip is labelled — it is
+               the one thing on this row that DOES something. */
+            <button
+              type="button"
+              onClick={onExitGuided}
+              className="ms-auto shrink-0 min-h-[44px] px-2.5 rounded-lg border border-[--rp-border] text-[13px] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+            >
+              {b.guidedEditEverything}
             </button>
-          </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 min-w-0 rounded-full bg-[--surface-2] border border-[--rp-border] ps-2 pe-2.5 py-1 text-[13px] text-[--ink-2]">
-              <span className="text-[--ink-3] shrink-0">{b.guidedTypeLabel}</span>
-              <BuilderIcon name={TYPE_ICON_NAME[task.type]} className="w-3.5 h-3.5 shrink-0" />
-              <span className="font-medium text-[--ink-1] truncate">{typeMetaOf(b)[task.type].label}</span>
-            </span>
-            {onExitGuided && (
-              /* A REAL 44px target (lib/interaction's lesson, applied here by
-                 hand): styled down to inline text this is line-height tall, and
-                 it is the only door out of guided mode inside the editor. Given a
-                 border rather than an underline for the same reason the chip is
-                 labelled — it is the one thing on this header that DOES something,
-                 and it should not read as the quietest mark on the row. */
-              <button
-                type="button"
-                onClick={onExitGuided}
-                className="ms-auto shrink-0 min-h-[44px] px-2.5 rounded-lg border border-[--rp-border] text-[13px] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
-              >
-                {b.guidedEditEverything}
-              </button>
-            )}
-          </div>
+          )}
+          <button onClick={onClose} aria-label={closeLabel}
+            className={`${TAP_TARGET} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none${onExitGuided ? '' : ' ms-auto'}`}>
+            ✕
+          </button>
         </div>
       )}
 
@@ -764,12 +750,26 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
               button on the search button (top) and then on the coordinates input
               (bottom) — two bugs from the same wrong assumption. `cornerControl`
               places it in the map's own coordinate space, beside MapModeToggle. */}
-          <LocationStep coordinates={task.coordinates} onChange={onChange} fill anchors={gameAnchors}
+          {/* `cooperativeGestures`: a wheel scroll over this map now scrolls the
+              PANEL, and zooms only with ctrl/⌘ held. This map lives inside a
+              scrolling step, so it used to swallow every scroll aimed at bringing
+              the rest of itself into view — the creator's "super uncomfortable"
+              (change: quick-setup-one-card). Which makes the enlarge control the
+              real answer to "let me see all of it", so it stops being a 28px
+              translucent glyph. */}
+          <LocationStep coordinates={task.coordinates} onChange={onChange} fill anchors={gameAnchors} cooperativeGestures
             cornerControl={(
+              /* A LABELLED, opaque, 44px control. It was a `w-7 h-7` ⛶ on a
+                 `bg-[--surface-1]/90` wash over map tiles: 28px against the house
+                 minimum of 44 (lib/interaction), no text, and an icon that reads as
+                 a decoration at that size over a busy topo map. The creator's
+                 verdict was that it is "almost invisible" — and it is the control
+                 that answers their other complaint, so it has to be findable. */
               <button type="button" onClick={() => setExpanded(true)}
-                aria-label={b.enlargeMap} title={b.enlargeMap}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-[--rp-border] bg-[--surface-1]/90 backdrop-blur text-[--ink-2] hover:text-[--ink-1] shadow-soft">
-                <span className="text-sm leading-none">⛶</span>
+                title={b.enlargeMap}
+                className="min-h-[44px] px-3 flex items-center gap-1.5 rounded-xl border border-[--rp-border] bg-[--surface-1] text-[13px] font-medium text-[--ink-1] hover:bg-[--surface-2] shadow-soft">
+                <span aria-hidden className="text-sm leading-none">⛶</span>
+                <span>{b.enlargeMap}</span>
               </button>
             )} />
         </div>

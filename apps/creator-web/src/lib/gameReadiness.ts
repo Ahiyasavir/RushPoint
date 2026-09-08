@@ -16,7 +16,7 @@
 // Splitting readiness into blocking issues and non blocking advisories would
 // change what can launch, and is deliberately left to a follow up.
 import type { Game, Stage, Task } from '@rushpoint/shared';
-import { validateUnlockGraph, requiredTaskCountProblem } from '@rushpoint/shared';
+import { validateUnlockGraph, requiredTaskCountProblem, playableTasks } from '@rushpoint/shared';
 import { isTaskInteractionValid, isTaskLocationValid } from './wizardLogic';
 
 export type ReadinessCode =
@@ -55,7 +55,12 @@ export function computeGameReadiness(game: ReadableGame): ReadinessIssue[] {
   for (const stage of stages) {
     const stageId = stage.id;
     const stageTitle = stage.title ?? '';
-    const tasks: Task[] = stage.tasks ?? [];
+    // BENCHED MISSIONS ARE NOT PART OF THE GAME (change: mission-card-actions), so
+    // readiness must not demand a name, an answer key or a pin for one — the whole
+    // point of benching a half-written mission is to launch without finishing it.
+    // A stage whose every mission is benched has nothing to hand out and is
+    // reported as empty, which is exactly what it is once the run is built.
+    const tasks: Task[] = playableTasks(stage) as Task[];
 
     if (tasks.length === 0) {
       issues.push({ code: 'stageHasNoTask', stageId, stageTitle });

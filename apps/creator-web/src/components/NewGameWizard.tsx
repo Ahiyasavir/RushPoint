@@ -152,7 +152,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
         <Input
           value={state.name}
           autoFocus
-          dir="auto"
+          dir={state.name.trim() ? 'auto' : t.dir}
           placeholder={w.namePlaceholder}
           onChange={(e) => { dispatch({ type: 'setName', name: e.target.value }); setNameTouched(true); }}
           onKeyDown={(e) => { if (e.key === 'Enter') dispatch({ type: 'next' }); }}

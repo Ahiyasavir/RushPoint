@@ -62,7 +62,8 @@ function SortableTask({ task, stageId, style: outerStyle, measureRef, index, chi
 }
 
 export default function TaskCanvas({
-  tasks, activeTaskId, onSelect, stageId, moveTargets, onMoveToStage, groupOf,
+  tasks, activeTaskId, onSelect, stageId, moveTargets, onMoveToStage,
+  onDuplicate, onToggleHidden, onDelete, groupOf,
 }: {
   tasks: Task[];
   activeTaskId?: string;
@@ -72,6 +73,10 @@ export default function TaskCanvas({
   stageId: string;
   /** Other stages, offered as the non-drag "move to stage" fallback. */
   moveTargets?: MoveTarget[];
+  /** The rest of the card's ⋯ menu (change: mission-card-actions). See TaskCard. */
+  onDuplicate?: (taskId: string) => void;
+  onToggleHidden?: (taskId: string) => void;
+  onDelete?: (taskId: string) => void;
   onMoveToStage?: (taskId: string, toStageId: string) => void;
   /** Exclusive-group membership per task, precomputed by BuilderPage from the
    *  shared `effectiveExclusiveGroups`, so the badge shows exactly what the
@@ -95,6 +100,9 @@ export default function TaskCanvas({
       group={groupOf?.(t.id)}
       handleProps={handleProps}
       moveTargets={moveTargets}
+      onDuplicate={onDuplicate ? () => onDuplicate(t.id) : undefined}
+      onToggleHidden={onToggleHidden ? () => onToggleHidden(t.id) : undefined}
+      onDelete={onDelete ? () => onDelete(t.id) : undefined}
       onMoveToStage={onMoveToStage ? (toStageId) => onMoveToStage(t.id, toStageId) : undefined}
       onClick={() => onSelect(t.id)}
     />

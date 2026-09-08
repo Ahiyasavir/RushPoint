@@ -327,6 +327,22 @@ export interface Task {
   // A general task with no fixed map location — can be done from anywhere
   // (no travel, no map marker, no distance). Routing treats transit as zero.
   locationless?: boolean;
+  // BENCHED (change: mission-card-actions). The mission stays in the template —
+  // authored, editable, exportable, restorable in one click — and takes no part in
+  // the game: `buildInitialStages` leaves it out of every run it launches, so no
+  // team is ever routed to it, it is not published to the gallery, and readiness
+  // does not demand a name or a pin for it.
+  //
+  // Distinct from `Run.taskStatusOverrides` (live-task-pause), which says "this
+  // stop is closed TODAY" about one run and is deliberately not on the template.
+  // This says "not part of the game YET", about the template itself, and it is
+  // exactly what a creator reaches for instead of deleting a mission they may want
+  // back — which is the operation the Builder had no answer for.
+  //
+  // Read through `isTaskHidden` / `playableTasks` (shared/hiddenTask), never as a
+  // bare truthy check: absent must mean PLAYABLE everywhere, so that no reader that
+  // has never heard of this field can accidentally bench a mission.
+  hidden?: boolean;
   // Hidden-location (treasure-hunt) flag: the task keeps real `coordinates` +
   // geofence radius SERVER-SIDE, but they are NEVER sent to the participant —
   // sanitizeTaskForParticipant strips them and emits `locationHidden`. The map

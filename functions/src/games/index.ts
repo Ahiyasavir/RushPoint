@@ -68,6 +68,8 @@ import {
   normalizeWizardSteps,
   extractQuickSetupSteps,
   pruneWizardSteps,
+  // Benched missions (change: mission-card-actions) — never published.
+  playableTasks,
 } from '@rushpoint/shared';
 import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
 // Read-only share links for an unpublished game (change: game-share-link).
@@ -401,7 +403,7 @@ export const createGame = loggedCallable('createGame', async (data, context) => 
  * the gallery describing a layout the game no longer has.
  */
 function resyncPublicGameSummary(gameId: string, merged: Game, updatedAt: string): void {
-  const allTasks = merged.stages.flatMap((s) => s.tasks);
+  const allTasks = merged.stages.flatMap((s) => playableTasks(s));
   db.doc(`publicGames/${gameId}`).update({
     title: merged.title,
     description: merged.description,
@@ -1019,8 +1021,15 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
     if (problems.length > 0) {
       throw new functions.https.HttpsError('failed-precondition', problems.join(' · '));
     }
-    // Compute summary stats
-    const allTasks = game.stages.flatMap((s) => s.tasks);
+    // Compute summary stats.
+    // BENCHED MISSIONS ARE NOT PUBLISHED (change: mission-card-actions). A mission
+    // the creator has taken out of the game must not appear in the world-readable
+    // gallery, must not be counted in the game's own mission total, and must not
+    // be copyable out of the task library — publishing one would advertise a stop
+    // no run will ever send a team to. `playableTasks` is the single predicate;
+    // the stale `publicTasks` sweep below (which deletes the documents this loop
+    // did not write) is what un-publishes one that was benched after publishing.
+    const allTasks = game.stages.flatMap((s) => playableTasks(s));
     const estimatedTotalMinutes = sumEstimatedMinutes(allTasks);
 
     // Get creator display name

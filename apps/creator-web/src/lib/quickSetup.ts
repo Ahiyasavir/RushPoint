@@ -72,10 +72,92 @@ const SYNTHETIC_GAME_TITLE_STEP: TemplateWizardStep = {
  */
 export function quickSetupSteps(game: QuickSetupGame | null | undefined): TemplateWizardStep[] {
   if (!game) return [];
-  const real = orderQuickSetupSteps(game, game.wizardSteps);
+  const authored = Array.isArray(game.wizardSteps) ? game.wizardSteps : [];
+  // DOES THIS GAME PARTICIPATE AT ALL? Asked of the AUTHORED steps alone, and
+  // before anything is synthesized: a game with no template notes has no Quick
+  // Setup, and it must not acquire one just because it has missions without pins
+  // — that is the readiness surface's job. Ordering twice is the price of asking
+  // that question first, and it is worth paying explicitly; the alternative
+  // (checking the merged list) turns every ordinary hand-built game into a Quick
+  // Setup candidate, which is exactly what the test below caught.
+  if (orderQuickSetupSteps(game, authored).length === 0) return [];
+  // A template that mentions a mission's location produced a step for it; nothing
+  // produced one for the missions its author never wrote a note about. See
+  // `syntheticLocationSteps` — the gap that left is a game launched with missions
+  // that have no pin, never mentioned once.
+  const real = orderQuickSetupSteps(game, [...authored, ...syntheticLocationSteps(game, authored)]);
   if (real.length === 0) return real;
   const hasGameTitleStep = real.some((s) => s.stageId === '' && s.taskId === '' && s.targetFieldPath === 'title');
   return hasGameTitleStep ? real : [SYNTHETIC_GAME_TITLE_STEP, ...real];
+}
+
+/** The id a synthesized location step gets, so a caller can recognise one. */
+export function syntheticLocationStepId(stageId: string, taskId: string): string {
+  return `qs-synthetic-coordinates:${stageId}:${taskId}`;
+}
+
+/**
+ * A "put this mission on the map" step for every LOCATED mission the template's
+ * own notes never mentioned.
+ *
+ * The gap this closes, in the creator's words: *"I don't see missions asking for a
+ * location, which is strange — the first thing the user should do is give the
+ * missions a location."* Quick Setup's steps came ENTIRELY from extraction, which
+ * reads the operator notes a template author happened to leave behind. A mission
+ * with no note produced no step — and a mission's pin is exactly the thing a
+ * template cannot know and the creator must supply, so the flow walked past
+ * unplaced mission after unplaced mission and then the launch was refused for
+ * `taskNotPlaced` with no explanation of when it could have been avoided.
+ *
+ * Three rules hold it together:
+ *
+ * 1. SYNTHESIZED FROM A STABLE PROPERTY, NOT FROM "IS IT DONE YET". The set keys
+ *    off `locationless`, which the creator changes deliberately — never off
+ *    whether the pin is filled in. A list that shrank as fields were filled would
+ *    renumber itself under a creator standing on step 7, because the reducer's
+ *    index points INTO this list. "Filled in or not" is `isWizardStepConfigured`'s
+ *    job, exactly as it is for every authored step.
+ * 2. NEVER A DUPLICATE. A mission whose template already carries a `coordinates`
+ *    step keeps the authored one, with its author's own wording.
+ * 3. NEVER TURNS A NON-TEMPLATE GAME INTO A TEMPLATE ONE. `quickSetupSteps` still
+ *    returns `[]` when ordering yields nothing, so a game that does not
+ *    participate in Quick Setup does not start participating because it has
+ *    missions with no pins — that is the readiness surface's job, not a flow's.
+ *
+ * `isRequired: true` matches what already happens: `computeGameReadiness` raises
+ * `taskNotPlaced` for exactly these missions and the launch is refused, so this
+ * changes what the creator is ASKED, never what the game is allowed to do.
+ */
+function syntheticLocationSteps(
+  game: QuickSetupGame,
+  authored: readonly TemplateWizardStep[],
+): TemplateWizardStep[] {
+  const already = new Set(
+    authored
+      .filter((s) => s?.targetFieldPath === 'coordinates')
+      .map((s) => `${s.stageId ?? ''}|${s.taskId ?? ''}`),
+  );
+  const out: TemplateWizardStep[] = [];
+  for (const stage of game.stages ?? []) {
+    for (const task of stage?.tasks ?? []) {
+      if (!stage?.id || !task?.id) continue;
+      // A mission played from anywhere has no pin to place, and asking for one
+      // would be asking the creator to undo the template's decision.
+      if (task.locationless === true || task.triggerMode === 'locationless') continue;
+      if (already.has(`${stage.id}|${task.id}`)) continue;
+      out.push({
+        id: syntheticLocationStepId(stage.id, task.id),
+        stageId: stage.id,
+        taskId: task.id,
+        targetFieldPath: 'coordinates',
+        // No authored note to quote — the flow's own `coordinates` copy line is
+        // the whole instruction, same as the synthetic game-title step.
+        instructionPrompt: '',
+        isRequired: true,
+      });
+    }
+  }
+  return out;
 }
 
 /** The ids of the steps whose target field is still unconfigured. */
@@ -111,21 +193,30 @@ export function firstQuickSetupBlocker(game: QuickSetupGame | null | undefined):
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * The five things the flow can be doing.
+ * The four things the flow can be doing.
  *
  *   idle     — never entered
  *   welcome  — the opening invitation, shown ONCE per creator per game
- *   intro    — a context card naming the mission we are about to work on
- *   running  — the creator is at a control, the step bar is up
+ *   running  — the creator is at a control, the step card is up
  *   closed   — dismissed; the pill still tells the truth
  *   done     — nothing outstanding, celebrate
  *
- * `welcome` and `intro` are not decoration. Every jump this flow makes moves the
- * canvas, opens a drawer and puts a caret somewhere — and arriving inside an input
- * with no idea which mission it belongs to is exactly what made the first version
- * read as a machine driving the screen rather than as help.
+ * THERE WAS A FIFTH, `intro`: a context card naming the mission, shown BEFORE the
+ * step card whenever the flow crossed into a new mission. It was added for a real
+ * reason — arriving inside an input with no idea which mission it belongs to reads
+ * as a machine driving the screen — and it solved that by making the creator read
+ * TWO cards, in sequence, to learn one thing. The creator's verdict: *"I want all
+ * the information about one change to be in a single message, not in two like it
+ * was — an explanation about the mission and then the change."* So the mission
+ * context moved INTO the step card (`QuickSetupBar` now names the mission it is
+ * about), and the orientation is delivered without a second screen to dismiss.
+ *
+ * Keeping the status but never producing it would leave a state machine with an
+ * unreachable node, so it is gone from the union. Nothing has to migrate:
+ * `readQuickSetupRecord` only ever accepted `idle`/`running`/`closed`/`done`, so
+ * no stored record can name it.
  */
-export type QuickSetupStatus = 'idle' | 'welcome' | 'intro' | 'running' | 'closed' | 'done';
+export type QuickSetupStatus = 'idle' | 'welcome' | 'running' | 'closed' | 'done';
 
 export interface QuickSetupState {
   status: QuickSetupStatus;
@@ -139,6 +230,7 @@ export type QuickSetupAction =
   | { type: 'open' }
   | { type: 'begin' }
   | { type: 'next' }
+  | { type: 'back' }
   | { type: 'defer' }
   | { type: 'jump'; index: number }
   | { type: 'close' }
@@ -170,38 +262,6 @@ function entryIndex(state: QuickSetupState, ctx: QuickSetupContext): number {
 }
 
 /**
- * Which mission does this step belong to? Two steps sharing a key are the same
- * "chapter" of the flow and need no card between them.
- *
- * Keyed on stage + mission rather than on the mission alone, so two missions that
- * somehow share an id across stages still read as separate chapters.
- */
-export function quickSetupChapterKey(step: TemplateWizardStep | null | undefined): string {
-  if (!step) return '';
-  const stageId = typeof step.stageId === 'string' ? step.stageId.trim() : '';
-  const taskId = typeof step.taskId === 'string' ? step.taskId.trim() : '';
-  return `${stageId}|${taskId}`;
-}
-
-/**
- * The status to land in when the flow moves from `fromIndex` to `toIndex`.
- *
- * A move that CHANGES chapter earns a context card; a move between two fields of
- * the SAME mission goes straight to the control, because the creator is already
- * looking at that mission and a card per field would be noise, not orientation.
- * That distinction is the whole difference between "guided" and "interrogated".
- */
-function statusForMove(
-  steps: readonly TemplateWizardStep[],
-  fromIndex: number,
-  toIndex: number,
-): 'intro' | 'running' {
-  const from = steps[clampIndex(fromIndex, steps)];
-  const to = steps[clampIndex(toIndex, steps)];
-  return quickSetupChapterKey(from) === quickSetupChapterKey(to) ? 'running' : 'intro';
-}
-
-/**
  * Pure transition table. Never mutates its input, never produces an out-of-range
  * index, and tolerates an EMPTY step list (a game with no quick setup at all).
  *
@@ -210,9 +270,10 @@ function statusForMove(
  *   • `next` off the end does NOT finish while a deferred step is still
  *     unconfigured — it re-enters that step. "Come back to this later" that never
  *     comes back is just a slower way of losing the instruction.
- *   • Every ENTRY into the flow (`open`, `resume`, `jump`) lands on `intro`, never
- *     on `running`. Entering means the creator's screen is about to move somewhere
- *     they did not choose, which is precisely when they need to be told where.
+ *   • Every ENTRY into the flow (`open`, `resume`, `jump`) lands on `running` —
+ *     which is now also where the creator is told WHERE they have been taken,
+ *     because the step card names its own mission. That naming is not optional:
+ *     entering means the screen moves somewhere the creator did not choose.
  */
 export function quickSetupReducer(
   state: QuickSetupState,
@@ -233,57 +294,63 @@ export function quickSetupReducer(
     case 'open':
     case 'resume':
       if (empty) return { ...state, status: 'done', index: 0 };
-      return { ...state, status: 'intro', index: entryIndex(state, ctx) };
+      return { ...state, status: 'running', index: entryIndex(state, ctx) };
 
-    // "Yes, take me there." Two different sources, two different destinations:
-    // the WELCOME card has not shown a single mission yet, so it steps down to
-    // that mission's INTRO first — skipping straight to `running` would mean the
-    // very first mission of the whole flow never gets its context card, which is
-    // exactly the "landed inside a field with no idea why" failure this flow
-    // exists to fix. An INTRO card, by contrast, has already oriented the
-    // creator, so its own `begin` goes the rest of the way, into `running`.
+    // "Yes, take me there." One destination now: the step card itself, which names
+    // the mission it is about, so the orientation the old two-card sequence
+    // delivered arrives in the same message as the request.
     case 'begin':
       if (empty) return { ...state, status: 'done', index: 0 };
-      if (state.status === 'welcome') return { ...state, status: 'intro', index: clampIndex(state.index, steps) };
-      if (state.status !== 'intro') return state;
+      if (state.status !== 'welcome') return state;
       return { ...state, status: 'running', index: clampIndex(state.index, steps) };
 
-    // `next` fires only from the RUNNING bar — the intro card's forward button is
-    // `begin`, not `next`, so a chapter's introduction can never be stepped past
-    // without being seen. `defer` is different: it is offered on BOTH surfaces,
-    // because "not this mission, not now" is a decision a creator can reasonably
-    // make from the context card, before touching anything.
     case 'next': {
       if (state.status !== 'running') return state;
       if (empty) return { ...state, status: 'done', index: 0 };
-      if (state.index < last) {
-        const index = clampIndex(state.index + 1, steps);
-        return { ...state, status: statusForMove(steps, state.index, index), index };
-      }
+      if (state.index < last) return { ...state, index: clampIndex(state.index + 1, steps) };
       // Off the end: go back for anything postponed and still unconfigured.
       const outstanding = new Set(ctx.outstanding);
       const pending = steps.findIndex((s) => state.deferred.includes(s.id) && outstanding.has(s.id));
-      if (pending >= 0) return { ...state, status: statusForMove(steps, state.index, pending), index: pending };
+      if (pending >= 0) return { ...state, index: pending };
       return { ...state, status: 'done', index: last };
     }
 
+    // One step BACK, and nothing else (change: quick-setup-one-card).
+    //
+    // The flow had no way back at all: next, defer and close each moved forward or
+    // left, so a creator who realised the previous answer was wrong could only
+    // close the flow and hunt for that field by hand. Their words: "it is a
+    // problem that you cannot go back".
+    //
+    // Deliberately NOT undo. It re-enters the previous step and touches nothing
+    // else, not the game and not the deferral list, so a creator who walks back
+    // into a step they postponed finds it exactly as they left it and postponing
+    // it again is a no-op rather than a second entry.
+    //
+    // At the first step there is no previous one, so this is a no-op and the
+    // control is not rendered at all. That is the one case where saying nothing is
+    // honest: a back button whose only job is to explain that it cannot go back
+    // should not be on screen.
+    case 'back':
+      if (state.status !== 'running') return state;
+      if (empty) return { ...state, status: 'done', index: 0 };
+      if (state.index <= 0) return state;
+      return { ...state, index: clampIndex(state.index - 1, steps) };
+
     case 'defer': {
-      if (state.status !== 'running' && state.status !== 'intro') return state;
+      if (state.status !== 'running') return state;
       if (empty) return { ...state, status: 'done', index: 0 };
       const current = steps[clampIndex(state.index, steps)];
       const deferred = current && !state.deferred.includes(current.id)
         ? [...state.deferred, current.id]
         : state.deferred;
-      if (state.index < last) {
-        const index = clampIndex(state.index + 1, steps);
-        return { ...state, deferred, status: statusForMove(steps, state.index, index), index };
-      }
+      if (state.index < last) return { ...state, deferred, index: clampIndex(state.index + 1, steps) };
       return { ...state, deferred, status: 'done', index: last };
     }
 
     case 'jump':
       if (empty) return { ...state, status: 'done', index: 0 };
-      return { ...state, status: 'intro', index: clampIndex(action.index, steps) };
+      return { ...state, status: 'running', index: clampIndex(action.index, steps) };
 
     // Closing is a decision about the OVERLAY only: it changes nothing in the game
     // and keeps every deferral, so the pill still tells the truth afterwards.
@@ -304,22 +371,6 @@ export function currentQuickSetupStep(
   steps: readonly TemplateWizardStep[],
 ): TemplateWizardStep | null {
   if (!state || state.status !== 'running') return null;
-  if (!steps || steps.length === 0) return null;
-  return steps[clampIndex(state.index, steps)] ?? null;
-}
-
-/**
- * The step the CONTEXT CARD is about, or null.
- *
- * Separate from `currentQuickSetupStep` on purpose: the two are mutually exclusive
- * by status, so the bar and the card can never be on screen together and neither
- * has to know the other exists.
- */
-export function quickSetupIntroStep(
-  state: QuickSetupState,
-  steps: readonly TemplateWizardStep[],
-): TemplateWizardStep | null {
-  if (!state || state.status !== 'intro') return null;
   if (!steps || steps.length === 0) return null;
   return steps[clampIndex(state.index, steps)] ?? null;
 }

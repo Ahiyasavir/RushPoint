@@ -1719,6 +1719,15 @@ const HE = {
     // (change: builder-mission-editor-route).
     guidedEditEverything: 'עריכת כל השדות',
     untitledTask: 'משימה ללא שם',
+    // תפריט הפעולות של כרטיס המשימה בקנבס (change: mission-card-actions).
+    taskActionsMenu: 'פעולות על המשימה',
+    duplicateTask: 'שכפול המשימה',
+    duplicatedTaskTitle: (title: string) => `${title} (עותק)`,
+    hideTask: 'הוצאה מהמשחק',
+    hideTaskHelp: 'המשימה נשמרת כאן, ולא תופיע באף ריצה עד שתחזירו אותה.',
+    unhideTask: 'החזרה למשחק',
+    unhideTaskHelp: 'המשימה תשתתף שוב בריצות הבאות.',
+    taskHiddenBadge: 'מחוץ למשחק',
     stageTitlePlaceholder: 'שם השלב',
     finalLabel: 'אחרון',
     stageSettings: 'הגדרות שלב',
@@ -2254,12 +2263,16 @@ const HE = {
 
     // ── כרטיס מעבר: מוצג לפני שנוגעים בשדה, לא בתוכו ──
     introEyebrow: (n: number, total: number) => `תחנה ${n} מתוך ${total}`,
-    introCta: 'הבנתי, קדימה',
-    introTaskLabel: (task: string) => `המשימה: ${task}`,
-    introGameLabel: 'הגדרות המשחק',
+    // מה שכתב מחבר התבנית — ציטוט, ולכן מסומן ככזה. בלי התווית הוא נקרא כאילו
+    // המוצר עצמו כתב פסקה חצי-אנגלית מתחת לכותרת העברית (change: quick-setup-one-card).
+    templateNote: 'מהתבנית:',
+    back: 'הקודם',
+    // Ends in its own full stop: this line now OPENS the instruction sentence
+    // rather than heading a card, so the punctuation that joins it to what
+    // follows belongs here, with the rest of the copy (change: quick-setup-one-card).
+    introTaskLabel: (task: string) => `המשימה: ${task}.`,
+    introGameLabel: 'הגדרות המשחק.',
     // רדיפה חופשית (fallback) לכרטיס מעבר על שדה שאין לו כותרת ייעודית.
-    introFallback: (task: string) => `בואו נשלים פרט קטן במשימה "${task}".`,
-    introGameFallback: 'בואו נשלים פרט קטן בהגדרות המשחק.',
 
     // ── שורה ראשונה לכל שדה: קצרה, שיחתית, לא ההוראה הגולמית של התבנית ──
     copy: {
@@ -4265,6 +4278,15 @@ const EN: typeof HE = {
     // (change: builder-mission-editor-route).
     guidedEditEverything: 'Edit every field',
     untitledTask: 'Untitled mission',
+    // The mission card's action menu on the canvas (change: mission-card-actions).
+    taskActionsMenu: 'Mission actions',
+    duplicateTask: 'Duplicate mission',
+    duplicatedTaskTitle: (title: string) => `${title} (copy)`,
+    hideTask: 'Take out of the game',
+    hideTaskHelp: 'The mission is kept here and joins no run until you bring it back.',
+    unhideTask: 'Bring back into the game',
+    unhideTaskHelp: 'The mission will take part in future runs again.',
+    taskHiddenBadge: 'Out of play',
     stageTitlePlaceholder: 'Stage name',
     finalLabel: 'final',
     stageSettings: 'Stage settings',
@@ -4802,11 +4824,14 @@ const EN: typeof HE = {
 
     // ── Transition card: shown BEFORE touching a field, never inside one ──
     introEyebrow: (n: number, total: number) => `Stop ${n} of ${total}`,
-    introCta: "Got it, let's go",
-    introTaskLabel: (task: string) => `Mission: ${task}`,
-    introGameLabel: 'Game settings',
-    introFallback: (task: string) => `Let's fill in a small detail on "${task}".`,
-    introGameFallback: "Let's fill in a small detail in the game settings.",
+    // The template author's own note — a quotation, and marked as one. Unlabelled
+    // it read as a paragraph the product itself had written, often in the other
+    // language (change: quick-setup-one-card).
+    templateNote: 'From the template:',
+    back: 'Back',
+    // Ends in its own full stop — see the Hebrew note above.
+    introTaskLabel: (task: string) => `Mission: ${task}.`,
+    introGameLabel: 'Game settings.',
 
     // ── The first line for each field: short, conversational, not the raw template note ──
     copy: {

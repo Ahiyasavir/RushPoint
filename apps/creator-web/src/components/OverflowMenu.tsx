@@ -97,7 +97,17 @@ export function OverflowMenu({ label, ariaLabel, children, triggerClassName = 'm
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={ariaLabel}
-        onClick={() => setOpen((v) => !v)}
+        // The trigger swallows the event rather than letting it reach whatever it
+        // sits inside (change: mission-card-actions). This menu now lives on the
+        // Builder's mission CARD, whose body opens the mission editor and whose
+        // row is a drag source — so a press meant for "⋯" would also open the
+        // editor, and a pointer-down would start a drag. Stopping it HERE, on the
+        // real button, rather than on a wrapper the caller adds: a `<span onClick>`
+        // around the trigger is a clickable non-interactive element, which is a
+        // finding scripts/lib/creatorA11yScan.ts is right to count.
+        onPointerDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
       >
         {label}
       </Button>
@@ -116,7 +126,23 @@ export function OverflowMenu({ label, ariaLabel, children, triggerClassName = 'm
               visibility: coords ? 'visible' : 'hidden',
             }}
             className="z-[60] min-w-[11rem] rounded-xl border border-[--rp-border] bg-[--surface-0] dark:bg-app-card p-1.5 shadow-lg flex flex-col gap-1"
-            onClick={close}
+            // `stopPropagation` here is NOT redundant with the trigger's
+            // (change: mission-card-actions). This menu is a PORTAL to
+            // document.body, and a React portal bubbles events up the REACT tree,
+            // not the DOM tree — so a click on a menu item travels to whatever
+            // JSX ancestor rendered this menu, however far away it is on screen.
+            // On the Builder's mission card that ancestor is a `role="button"`
+            // div: picking "bring back into the game" also opened the mission
+            // editor, every time. Observed, not theorised — the URL gained
+            // `?task=…` on a press that never touched the card.
+            //
+            // It belongs on the container rather than on each item so a caller
+            // cannot forget it, and it is why the same caller does NOT need a
+            // wrapper of its own (which would be a clickable non-interactive
+            // element, a finding the creator a11y scan counts).
+            onClick={(e) => { e.stopPropagation(); close(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
           >
             {children}
           </div>

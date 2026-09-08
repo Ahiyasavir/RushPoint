@@ -74,13 +74,15 @@ function MapSkeleton({ label, className }: { label: string; className: string })
   );
 }
 
-export default function LocationStep({ coordinates, onChange, mapClassName = 'h-44', fill = false, cornerControl, anchors }: {
+export default function LocationStep({ coordinates, onChange, mapClassName = 'h-44', fill = false, cornerControl, anchors, cooperativeGestures }: {
   coordinates: { lat: number; lng: number };
   onChange: (lat: number, lng: number) => void;
   mapClassName?: string;
   fill?: boolean;
   /** Passed straight through to the map's bottom-end corner. See LocationPicker. */
   cornerControl?: ReactNode;
+  /** See LocationPicker — a wheel scroll passes to the page unless ctrl/⌘ is held. */
+  cooperativeGestures?: boolean;
   /**
    * Where the surrounding game is already placed — decides the view an UNPLACED
    * mission's map opens on (change: location-picker-game-anchor). Optional at
@@ -104,7 +106,7 @@ export default function LocationStep({ coordinates, onChange, mapClassName = 'h-
         <div className="flex-1 min-h-0 flex flex-col">
           <Suspense fallback={<MapSkeleton label={b.loadingMap} className="flex-1 min-h-0" />}>
             <LocationPicker lat={coordinates.lat} lng={coordinates.lng} onChange={onChange} fill
-              cornerControl={cornerControl} anchors={anchors} />
+              cornerControl={cornerControl} anchors={anchors} cooperativeGestures={cooperativeGestures} />
           </Suspense>
         </div>
         <details className="shrink-0 text-xs">

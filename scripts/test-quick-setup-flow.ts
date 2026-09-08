@@ -28,8 +28,7 @@ import {
   quickSetupLaunchBlockers,
   firstQuickSetupBlocker,
   currentQuickSetupStep,
-  quickSetupIntroStep,
-  quickSetupChapterKey,
+  syntheticLocationStepId,
   shouldAutoOpenQuickSetup,
   JUST_CREATED_NAV_STATE,
   isJustCreatedNavState,
@@ -107,8 +106,17 @@ const ready = game([
       media: [{ id: 'm', kind: 'image', url: 'https://x/y.png' }] as Task['media'],
     })],
   } as Stage,
-  { id: 's2', order: 1, title: 'שלב 2', tasks: [task({ id: 't2', type: 'quiz', answers: ['כחול'] })] } as Stage,
+  {
+    id: 's2', order: 1, title: 'שלב 2',
+    // Placed, deliberately: `quickSetupSteps` synthesizes a location step for
+    // every located mission, so a "fully configured" fixture has to configure the
+    // pin the template's own notes never mentioned.
+    tasks: [task({ id: 't2', type: 'quiz', answers: ['כחול'], coordinates: { lat: 31.79, lng: 35.22 } })],
+  } as Stage,
 ], STEPS);
+
+/** The step the flow invents for the mission whose template never mentioned a pin. */
+const T2_PIN = syntheticLocationStepId('s2', 't2');
 
 // ── 1. Derived outstanding work ─────────────────────────────────────────────
 console.log('\nremaining is derived from the game');
@@ -118,9 +126,9 @@ console.log('\nremaining is derived from the game');
   // it still appears in the ordered list, first, because a real title step would
   // too.
   eq('the flow orders fields by "explain then place", the synthetic game name always first',
-    quickSetupSteps(raw).map((s) => s.id), ['qs-synthetic-game-title', 'pic', 'pin', 'ans', 'tip']);
-  eq('nothing filled in yet ⇒ everything outstanding', outstandingQuickSetupIds(raw).sort(), ['ans', 'pic', 'pin', 'tip']);
-  eq('the pill counts outstanding steps', quickSetupRemainingCount(raw), 4);
+    quickSetupSteps(raw).map((s) => s.id), ['qs-synthetic-game-title', 'pic', 'pin', T2_PIN, 'ans', 'tip']);
+  eq('nothing filled in yet ⇒ everything outstanding', outstandingQuickSetupIds(raw).sort(), ['ans', 'pic', 'pin', T2_PIN, 'tip'].sort());
+  eq('the pill counts outstanding steps', quickSetupRemainingCount(raw), 5);
   eq('a configured game leaves only the optional hint', outstandingQuickSetupIds(ready), ['tip']);
   eq('a game with no steps has nothing outstanding', quickSetupRemainingCount(game([], [])), 0);
   noThrow('a game with no wizardSteps at all is inert', () => quickSetupRemainingCount({ ...raw, wizardSteps: undefined }));
@@ -129,7 +137,7 @@ console.log('\nremaining is derived from the game');
 // ── 2. Launch guard ─────────────────────────────────────────────────────────
 console.log('\nlaunch guard');
 {
-  eq('required and unconfigured steps block a launch', quickSetupLaunchBlockers(raw).map((s) => s.id), ['pic', 'pin', 'ans']);
+  eq('required and unconfigured steps block a launch', quickSetupLaunchBlockers(raw).map((s) => s.id), ['pic', 'pin', T2_PIN, 'ans']);
   eq('the first blocker is the first in recommended order', firstQuickSetupBlocker(raw)?.id, 'pic');
   eq('an optional outstanding step never blocks', quickSetupLaunchBlockers(ready), []);
   eq('no blockers ⇒ null', firstQuickSetupBlocker(ready), null);
@@ -139,86 +147,94 @@ console.log('\nlaunch guard');
 }
 
 // ── 3. The state machine ────────────────────────────────────────────────────
-// `quickSetupSteps(raw)` is now 5-long: the synthetic game-name step (already
-// configured, since `raw.title` is set) always leads, then pic+pin share a
-// chapter (s1/t1), then ans+tip share a chapter (s2/t2). Context-first: every
-// ENTRY into the flow lands on the chapter's INTRO, never straight on a field,
-// and moving between two fields of the SAME chapter never re-shows it.
-console.log('\nquickSetupReducer — context-first');
+// `quickSetupSteps(raw)` is 6-long: the synthetic game-name step (already
+// configured, since `raw.title` is set) leads, then mission t1's picture and pin,
+// then the pin the flow SYNTHESIZED for t2, then t2's answer and hint.
+//
+// ONE CARD PER STEP (change: quick-setup-one-card). There used to be a second
+// status, `intro`, and a second card with it: entering the flow, or crossing into
+// a new mission, landed on a context card first and reached the field only after
+// the creator dismissed it. The creator's verdict was that one change should be
+// one message, so every entry and every move now lands directly on `running` and
+// the step card names its own mission. What follows pins that: there is no
+// transition in this machine that produces anything but `running` on the way to a
+// field.
+console.log('\nquickSetupReducer — one card per step');
 {
   const ctx = { steps: quickSetupSteps(raw), outstanding: outstandingQuickSetupIds(raw) };
   const run = (state: typeof INITIAL_QUICK_SETUP_STATE, ...actions: Parameters<typeof quickSetupReducer>[1][]) =>
     actions.reduce((s, a) => quickSetupReducer(s, a, ctx), state);
 
   eq('the synthetic game name leads, ahead of every mission', ctx.steps[0].id, 'qs-synthetic-game-title');
-  eq('pic and pin share a chapter', quickSetupChapterKey(ctx.steps[1]), quickSetupChapterKey(ctx.steps[2]));
-  ok('pic and ans do not', quickSetupChapterKey(ctx.steps[1]) !== quickSetupChapterKey(ctx.steps[3]));
 
   const invited = run(INITIAL_QUICK_SETUP_STATE, { type: 'invite' });
   // entryIndex skips the ALREADY-CONFIGURED synthetic step (raw.title is set) and
   // lands on the first genuinely outstanding field, 'pic' — index 1, not 0.
   eq('invite opens the welcome card, touching nothing yet', [invited.status, invited.index], ['welcome', 1]);
-  eq('no bar and no intro card while on welcome', [currentQuickSetupStep(invited, ctx.steps), quickSetupIntroStep(invited, ctx.steps)], [null, null]);
+  eq('no step card while the welcome card is up', currentQuickSetupStep(invited, ctx.steps), null);
 
   const opened = run(INITIAL_QUICK_SETUP_STATE, { type: 'open' });
-  eq('open lands on the chapter intro, not on the field', [opened.status, opened.index], ['intro', 1]);
-  eq('the intro card names the right step', quickSetupIntroStep(opened, ctx.steps)?.id, 'pic');
-  eq('no bar is shown while the intro card is up', currentQuickSetupStep(opened, ctx.steps), null);
+  eq('open lands straight on the field, no card in between', [opened.status, opened.index], ['running', 1]);
+  eq('and that card is the right step', currentQuickSetupStep(opened, ctx.steps)?.id, 'pic');
 
-  const begun = run(opened, { type: 'begin' });
-  eq('begin moves from intro into the bar, same field', [begun.status, begun.index], ['running', 1]);
+  const begun = run(invited, { type: 'begin' });
+  eq('welcome → begin reaches the step card in ONE move', [begun.status, begun.index], ['running', 1]);
   eq('current step is the one at the index', currentQuickSetupStep(begun, ctx.steps)?.id, 'pic');
-  eq('progress is one-based, out of all five (incl. the game name)', quickSetupProgress(begun, ctx.steps), { step: 2, total: 5 });
-  // The welcome card has not shown a single mission's context yet, so its own
-  // `begin` steps DOWN to that mission's intro card rather than skipping straight
-  // to the bar — otherwise the very first OUTSTANDING mission would be the one
-  // mission that never gets oriented.
-  const welcomeBegun = run(invited, { type: 'begin' });
-  eq('welcome → begin lands on the first outstanding mission\'s intro, not the bar', [welcomeBegun.status, welcomeBegun.index], ['intro', 1]);
-  eq('and intro → begin from there reaches the bar', run(welcomeBegun, { type: 'begin' }).status, 'running');
+  eq('progress is one-based, out of all six (incl. the game name)', quickSetupProgress(begun, ctx.steps), { step: 2, total: 6 });
+  eq('begin is inert once the flow is already running', run(begun, { type: 'begin' }), begun);
 
-  const withinChapter = run(begun, { type: 'next' });
-  eq('next within the same mission goes straight to the next field', [withinChapter.status, withinChapter.index], ['running', 2]);
+  const withinMission = run(begun, { type: 'next' });
+  eq('next within the same mission advances one step', [withinMission.status, withinMission.index], ['running', 2]);
 
-  const acrossChapter = run(withinChapter, { type: 'next' });
-  eq('next INTO a new mission returns to that mission\'s intro card first', [acrossChapter.status, acrossChapter.index], ['intro', 3]);
+  const acrossMission = run(withinMission, { type: 'next' });
+  eq('next INTO a new mission also advances one step, no card in between',
+    [acrossMission.status, acrossMission.index], ['running', 3]);
 
-  eq('next cannot step past an intro card the creator has not acknowledged', run(acrossChapter, { type: 'next' }), acrossChapter);
-  // "Not this mission, not now" is a decision a creator may make FROM the context
-  // card, so defer is live on both surfaces — unlike next.
-  const deferredFromIntro = run(acrossChapter, { type: 'defer' });
-  eq('defer works from the intro card too', [deferredFromIntro.deferred, deferredFromIntro.index], [['ans'], 4]);
-
-  eq('jump always re-introduces the target mission', run(begun, { type: 'jump', index: 99 }).status, 'intro');
-  eq('jump clamps out-of-range', run(begun, { type: 'jump', index: 99 }).index, 4);
-  // Jumping to index 0 now lands on the (already-configured) synthetic step — a
-  // valid clamp target regardless, since clamping only bounds the index.
-  eq('jump clamps negatives', run(begun, { type: 'jump', index: -4 }).index, 0);
+  // ── BACK ────────────────────────────────────────────────────────────────
+  // The flow had no way back at all: a creator who realised the previous answer
+  // was wrong could only close it and hunt for the field by hand.
+  eq('back returns to the previous step', run(acrossMission, { type: 'back' }).index, 2);
+  eq('back is a plain move, not an undo — the status is unchanged',
+    run(acrossMission, { type: 'back' }).status, 'running');
+  eq('back and next are inverses', run(acrossMission, { type: 'back' }, { type: 'next' }), acrossMission);
+  eq('back at the first step is a no-op, not a wrap-around',
+    run({ status: 'running', index: 0, deferred: [] }, { type: 'back' }), { status: 'running', index: 0, deferred: [] });
+  eq('back keeps every deferral', run({ status: 'running', index: 3, deferred: ['pic'] }, { type: 'back' }).deferred, ['pic']);
+  eq('back does nothing while the welcome card is up', run(invited, { type: 'back' }), invited);
+  eq('back with no steps at all finishes rather than throwing',
+    quickSetupReducer({ status: 'running', index: 0, deferred: [] }, { type: 'back' }, { steps: [], outstanding: [] }).status, 'done');
 
   const deferred = run(begun, { type: 'defer' });
-  eq('defer records the step and advances within the mission', [deferred.deferred, deferred.status, deferred.index], [['pic'], 'running', 2]);
-  eq('deferring twice does not duplicate', run(deferred, { type: 'jump', index: 1 }, { type: 'begin' }, { type: 'defer' }).deferred, ['pic']);
+  eq('defer records the step and advances', [deferred.deferred, deferred.status, deferred.index], [['pic'], 'running', 2]);
+  eq('deferring twice does not duplicate', run(deferred, { type: 'jump', index: 1 }, { type: 'defer' }).deferred, ['pic']);
+  eq('defer does nothing from the welcome card', run(invited, { type: 'defer' }), invited);
+
+  eq('jump goes straight to the target step', run(begun, { type: 'jump', index: 99 }).status, 'running');
+  eq('jump clamps out-of-range', run(begun, { type: 'jump', index: 99 }).index, 5);
+  // Jumping to index 0 lands on the (already-configured) synthetic step — a valid
+  // clamp target regardless, since clamping only bounds the index.
+  eq('jump clamps negatives', run(begun, { type: 'jump', index: -4 }).index, 0);
 
   // DEFERRAL IS NOT ABANDONMENT.
-  const atEnd = run(deferred, { type: 'jump', index: 4 }, { type: 'begin' }, { type: 'next' });
-  eq('advancing off the end returns to the deferred step\'s intro', [atEnd.status, atEnd.index], ['intro', 1]);
+  const atEnd = run(deferred, { type: 'jump', index: 5 }, { type: 'next' });
+  eq('advancing off the end returns to the deferred step', [atEnd.status, atEnd.index], ['running', 1]);
 
-  const noneDeferred = run(begun, { type: 'jump', index: 4 }, { type: 'begin' }, { type: 'next' });
+  const noneDeferred = run(begun, { type: 'jump', index: 5 }, { type: 'next' });
   eq('with nothing deferred, advancing off the end finishes', noneDeferred.status, 'done');
 
   // A deferred step the creator filled in elsewhere must not be re-offered.
-  // `ready.title` is configured too, so `quickSetupSteps(ready)` is the same
-  // 5-long shape; index 4 is its LAST step ('tip').
+  // `ready` is configured throughout, so `quickSetupSteps(ready)` has the same
+  // 6-long shape; index 5 is its LAST step ('tip').
   const doneCtx = { steps: quickSetupSteps(ready), outstanding: outstandingQuickSetupIds(ready) };
-  const stale = quickSetupReducer({ status: 'running', index: 4, deferred: ['pic'] }, { type: 'next' }, doneCtx);
+  const stale = quickSetupReducer({ status: 'running', index: 5, deferred: ['pic'] }, { type: 'next' }, doneCtx);
   eq('a deferred step that is now configured is not revisited', stale.status, 'done');
 
   const closed = run(begun, { type: 'close' });
   eq('close stops the flow but keeps the deferrals', [closed.status, closed.deferred], ['closed', []]);
-  eq('resume reopens on the intro card, not mid-field', run(closed, { type: 'resume' }).status, 'intro');
+  eq('resume reopens straight on a field', run(closed, { type: 'resume' }).status, 'running');
   eq('resume prefers a deferred step', quickSetupReducer(
     { status: 'closed', index: 0, deferred: ['ans'] }, { type: 'resume' }, ctx,
-  ).index, 3);
+  ).index, 4);
   eq('reset clears everything', run(deferred, { type: 'reset' }), INITIAL_QUICK_SETUP_STATE);
 
   // Totality.
@@ -227,9 +243,59 @@ console.log('\nquickSetupReducer — context-first');
   eq('invite with no steps finishes immediately', quickSetupReducer(INITIAL_QUICK_SETUP_STATE, { type: 'invite' }, empty).status, 'done');
   eq('next with no steps is inert', quickSetupReducer({ status: 'running', index: 0, deferred: [] }, { type: 'next' }, empty).status, 'done');
   eq('current step of an idle flow is null', currentQuickSetupStep(INITIAL_QUICK_SETUP_STATE, ctx.steps), null);
-  eq('intro step of an idle flow is null', quickSetupIntroStep(INITIAL_QUICK_SETUP_STATE, ctx.steps), null);
   eq('progress of an empty flow is zeroes', quickSetupProgress(begun, []), { step: 0, total: 0 });
   noThrow('an unknown action is inert', () => quickSetupReducer(begun, { type: 'nope' } as never, ctx));
+}
+
+// ── 3b. The synthesized location steps ──────────────────────────────────────
+// The gap: Quick Setup's steps came ENTIRELY from a template author's operator
+// notes, so a mission nobody wrote a note about was never mentioned — including
+// its pin, which is the one thing a template cannot know and the creator must
+// supply. The flow walked past unplaced missions and the launch was then refused
+// for `taskNotPlaced` with no hint of when that could have been avoided.
+console.log('\nevery located mission is asked for its pin');
+{
+  eq('a mission whose template never mentioned a pin gets one anyway',
+    quickSetupSteps(raw).some((s) => s.id === T2_PIN), true);
+  eq('and it is a required, location-targeting step',
+    quickSetupSteps(raw).filter((s) => s.id === T2_PIN).map((s) => [s.targetFieldPath, s.isRequired, s.instructionPrompt]),
+    [['coordinates', true, '']]);
+  eq('it is ordered inside its own mission, before that mission\'s answer key',
+    quickSetupSteps(raw).findIndex((s) => s.id === T2_PIN) < quickSetupSteps(raw).findIndex((s) => s.id === 'ans'), true);
+
+  // NEVER A DUPLICATE: t1's template already carries a `coordinates` step.
+  eq('a mission the template DID mention keeps the authored step and gains nothing',
+    quickSetupSteps(raw).filter((s) => s.targetFieldPath === 'coordinates' && s.taskId === 't1').map((s) => s.id), ['pin']);
+
+  // STABLE. The set keys off `locationless`, never off "is the pin filled in" — a
+  // list that shrank as fields were filled would renumber itself under a creator
+  // standing on step 7, because the reducer's index points INTO this list.
+  eq('placing the pin does NOT remove the step (only marks it configured)',
+    quickSetupSteps(ready).some((s) => s.id === T2_PIN), true);
+  eq('and once placed it stops being outstanding', outstandingQuickSetupIds(ready).includes(T2_PIN), false);
+
+  // A mission played from anywhere has no pin to place, and asking for one would
+  // be asking the creator to undo the template's decision.
+  const anywhere = game([
+    { id: 's1', order: 0, title: 'שלב 1', tasks: [task({ id: 't1' })] } as Stage,
+    { id: 's2', order: 1, title: 'שלב 2', tasks: [task({ id: 't2', type: 'quiz', answers: ['כחול'], locationless: true })] } as Stage,
+  ], STEPS);
+  eq('a locationless mission is never asked for a pin',
+    quickSetupSteps(anywhere).some((s) => s.id === T2_PIN), false);
+  const triggerless = game([
+    { id: 's1', order: 0, title: 'שלב 1', tasks: [task({ id: 't1' })] } as Stage,
+    { id: 's2', order: 1, title: 'שלב 2', tasks: [task({ id: 't2', type: 'quiz', answers: ['כחול'], triggerMode: 'locationless' })] } as Stage,
+  ], STEPS);
+  eq('nor is one whose triggerMode says so',
+    quickSetupSteps(triggerless).some((s) => s.id === T2_PIN), false);
+
+  // NEVER TURNS A NON-TEMPLATE GAME INTO A TEMPLATE ONE. A game with no authored
+  // steps does not start participating in Quick Setup because it has missions
+  // with no pins — that is the readiness surface's job, not a flow's.
+  eq('a game with no wizardSteps stays out of Quick Setup entirely',
+    quickSetupSteps(game([
+      { id: 's1', order: 0, title: 'שלב 1', tasks: [task({ id: 't1' })] } as Stage,
+    ], [])), []);
 }
 
 // ── 3a. The synthetic game-name step ────────────────────────────────────────

@@ -26,6 +26,7 @@ const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
 export default function LocationPicker({
   lat, lng, onChange, className = '', fill = false, cornerControl, anchors,
+  cooperativeGestures = false,
 }: {
   lat: number;
   lng: number;
@@ -50,6 +51,23 @@ export default function LocationPicker({
    * of which happened. Only in here does "the corner of the map" mean the map.
    */
   cornerControl?: ReactNode;
+  /**
+   * Let a plain wheel scroll pass THROUGH to the page (change:
+   * quick-setup-one-card).
+   *
+   * A map inside a scrolling panel eats the wheel: the creator scrolls to bring
+   * the rest of the map into view, the pointer is over the map, and the map zooms
+   * instead — so the panel never moves and the map ends up at a zoom nobody asked
+   * for. Their words: scrolling to see the whole map is "super uncomfortable".
+   * MapLibre's own answer is `cooperativeGestures`: wheel zooms only with
+   * ctrl/⌘ held, touch pans only with two fingers, and it draws its own hint when
+   * a gesture is refused.
+   *
+   * OFF by default, and deliberately off for the enlarged map: there the map IS
+   * the page, nothing is behind it to scroll, and making a full-screen map demand
+   * a modifier key to zoom would be the same mistake in the other direction.
+   */
+  cooperativeGestures?: boolean;
 }) {
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
@@ -96,6 +114,7 @@ export default function LocationPicker({
             fitBoundsOptions: { maxZoom: view.maxZoom, padding: view.padding },
           }),
       attributionControl: { compact: true },
+      cooperativeGestures,
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 

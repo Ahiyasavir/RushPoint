@@ -15,6 +15,8 @@
 // NOT a secret: which tasks are alternatives is player-visible, so nothing here
 // needs sanitizing.
 
+import { isTaskHidden } from './hiddenTask';
+
 /** One authored group (mirrors the `ExclusiveTaskGroup` schema shape). */
 export interface ExclusiveGroupLike {
   id: string;
@@ -23,13 +25,26 @@ export interface ExclusiveGroupLike {
 
 /** Minimal stage shape these helpers need (id-bearing tasks + the groups). */
 export interface ExclusionStage {
-  tasks: { id: string }[];
+  tasks: { id: string; hidden?: boolean }[];
   exclusiveGroups?: ExclusiveGroupLike[];
   requiredTaskCount?: number;
 }
 
+/**
+ * The stage's task ids, BENCHED MISSIONS EXCLUDED (change: mission-card-actions).
+ *
+ * Every helper in this module is defined on top of this one, so filtering here is
+ * what makes a benched mission invisible to all of them at once: it does not count
+ * toward `maxCompletableTasks`, it cannot keep an exclusive group alive, and
+ * `requiredTaskCountProblem` measures the stage the run will actually contain. That
+ * last one is the reason this could not be left to the caller — the server's
+ * `stagesProblems` and the Builder's readiness both read it, and a stage requiring
+ * 3 of 3 with one mission benched is a stage no team can finish.
+ */
 function stageTaskIds(stage: ExclusionStage): string[] {
-  return Array.isArray(stage?.tasks) ? stage.tasks.map((t) => t?.id).filter((id): id is string => !!id) : [];
+  return Array.isArray(stage?.tasks)
+    ? stage.tasks.filter((t) => !isTaskHidden(t)).map((t) => t?.id).filter((id): id is string => !!id)
+    : [];
 }
 
 /**

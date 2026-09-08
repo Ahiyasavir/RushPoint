@@ -7,7 +7,7 @@ import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
 import { gameHasOperatorNotes, extractQuickSetupSteps } from '@rushpoint/shared';
-import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags, pruneDanglingPrerequisites } from '@rushpoint/shared';
+import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags, isTaskHidden, playableTasks, pruneDanglingPrerequisites } from '@rushpoint/shared';
 // Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
@@ -50,12 +50,12 @@ import TaskCard, { GROUP_STYLES, type TaskGroupBadge } from '../components/TaskC
 import ExclusiveGroupsModal from '../components/ExclusiveGroupsModal';
 import TaskWizard from '../components/TaskWizard';
 import {
-  QuickSetupBar, QuickSetupPill, QuickSetupBlocked, QuickSetupWelcome, QuickSetupIntro,
+  QuickSetupBar, QuickSetupPill, QuickSetupBlocked, QuickSetupWelcome,
   QuickSetupCelebration, useQuickSetupFocus,
 } from '../components/QuickSetup';
 import {
   INITIAL_QUICK_SETUP_STATE, quickSetupReducer, quickSetupSteps, outstandingQuickSetupIds,
-  quickSetupLaunchBlockers, currentQuickSetupStep, quickSetupIntroStep, quickSetupProgress,
+  quickSetupLaunchBlockers, currentQuickSetupStep, quickSetupProgress,
   quickSetupFocusPlan, shouldAutoOpenQuickSetup, missionSummaryLine,
   quickSetupStorageKey, readQuickSetupRecord, writeQuickSetupRecord, isJustCreatedNavState,
   type QuickSetupState, type QuickSetupAction, type TaskEditorTab, type TaskOptInGroup,
@@ -802,25 +802,42 @@ export default function BuilderPage() {
   // Mutually exclusive by status: the bar shows on `running`, the context card on
   // `intro`, so the two can never be on screen together.
   const qsStep = currentQuickSetupStep(qsState, qsSteps);
-  const qsIntro = quickSetupIntroStep(qsState, qsSteps);
   // WHICH mission the flow is on, for the guided mission editor (change:
   // quick-setup-guided-editor). Resolved from the step itself so it is right the
-  // moment the flow is on screen, including while an intro card is up and before
-  // the navigation effect has written `quickSetupFocus`.
-  const qsGuidedStep = qsStep ?? qsIntro;
-  const qsGuidedTaskId = game && qsGuidedStep ? resolveWizardTarget(game, qsGuidedStep)?.taskId ?? null : null;
+  // moment the flow is on screen, before the navigation effect has written
+  // `quickSetupFocus` — a creator who reloads mid-flow has no such state yet.
+  const qsGuidedTaskId = game && qsStep ? resolveWizardTarget(game, qsStep)?.taskId ?? null : null;
   // Is the mission editor open? Derived from the SAME URL the editor derives
   // itself from (change: builder-mission-editor-route), so the two cannot
   // disagree about it — this used to be a `qsOverlayActive` boolean passed DOWN
   // to make the sheet shrink itself, which is the negotiation that change removed.
   // What it decides now is only WHERE the הקמה מהירה instruction renders.
   const missionEditorOpen = Boolean(resolveOpenMission(game, readOpenMissionId(location.search)));
+  /**
+   * WHERE the הקמה מהירה card renders (change: quick-setup-one-card).
+   *
+   * INSIDE the mission editor, above its content, at every width — the creator's
+   * own words: *"it also looks better that the setup instructions are above the
+   * mission itself."* And it is the honest reading of the flow: the instruction
+   * and the control it points at are one thing, so they belong in one column that
+   * scrolls together, not a card hovering over a different part of the screen.
+   *
+   * It was briefly floated on desktop while the real defect was still
+   * misdiagnosed: the focus scrim (`.rp-qs-scrim`, `absolute inset-0 z-20` in the
+   * canvas column) has `pointer-events-auto` and the editor pane carried no
+   * z-index from `lg` up, so `document.elementFromPoint` on the card's own "הבא"
+   * returned the scrim and the press advanced the flow about one time in three.
+   * That is fixed where it lives — the pane declares `lg:relative lg:z-30`
+   * (SlidePanel) and the scrim goes inert while the editor is open — so the card
+   * no longer has to run away from it.
+   */
+  const qsCardInline = missionEditorOpen;
 
   // ── Guidance arbitration (change: builder-guidance-arbiter). Each surface below
   //    declares ONLY its own eligibility; `GuidanceProvider` decides which single
   //    one may be on screen, using the order in lib/builderGuidance.ts. Declared
   //    here, above the early returns, because these are hooks (React #300).
-  const qsWantsScreen = qsState.status === 'welcome' || Boolean(qsIntro) || Boolean(qsStep) || qsCelebrating;
+  const qsWantsScreen = qsState.status === 'welcome' || Boolean(qsStep) || qsCelebrating;
   const qsVisible = useGuidanceSlot('quick-setup', qsWantsScreen);
   const nudgeVisible = useGuidanceSlot(
     'ready-nudge',
@@ -837,7 +854,7 @@ export default function BuilderPage() {
   // field, and the stage rail plus the rest of the mission grid competed for
   // attention against it. `StepStages` hides the rail and scrims the canvas
   // behind these three statuses; `closed`/`done`/`idle` restore the ordinary view.
-  const qsFocusMode = qsState.status === 'welcome' || qsState.status === 'intro' || qsState.status === 'running';
+  const qsFocusMode = qsState.status === 'welcome' || qsState.status === 'running';
 
   // Restore this creator's postponements for THIS game. Per uid and per game, so
   // two accounts on one browser, or two games of one account, never share them.
@@ -869,7 +886,7 @@ export default function BuilderPage() {
       setQsState(rec
         // Never restore INTO the running flow: a bar that reappears on load would
         // interrupt a creator who came back to do something else entirely.
-        ? { status: rec.status === 'running' || rec.status === 'intro' || rec.status === 'welcome' ? 'closed' : rec.status, index: rec.index, deferred: rec.deferred }
+        ? { status: rec.status === 'running' || rec.status === 'welcome' ? 'closed' : rec.status, index: rec.index, deferred: rec.deferred }
         : INITIAL_QUICK_SETUP_STATE);
     } catch { setQsState(INITIAL_QUICK_SETUP_STATE); }
   }, [game?.id, qsLoadedFor, user?.uid]);
@@ -1034,34 +1051,24 @@ export default function BuilderPage() {
           onSkip={() => dispatchQs({ type: 'close' })}
         />
       )}
-      {/* Context before controls: the card naming the mission we are about to set
-          up. Only when the flow CROSSES into a new mission — two fields of the same
-          one run straight on, because the creator is already looking at it. */}
-      {qsVisible && qsIntro && (
-        <QuickSetupIntro
-          step={qsIntro}
-          index={quickSetupProgress(qsState, qsSteps).step - 1}
-          total={qsSteps.length}
-          taskTitle={quickSetupPresentation(qsIntro).taskTitle}
-          summary={quickSetupPresentation(qsIntro).summary}
-          scope={quickSetupPresentation(qsIntro).scope}
-          onBegin={() => dispatchQs({ type: 'begin' })}
-          onDefer={() => dispatchQs({ type: 'defer' })}
-          onClose={() => dispatchQs({ type: 'close' })}
-        />
-      )}
-      {/* The step bar floats ONLY while the mission editor is closed. With the
-          editor open the same bar renders inside it (see `quickSetupInlineBar`
-          below), so exactly ONE instruction is ever on screen — which is what let
-          `reserveTop` and the 62dvh/88dvh height branch be deleted rather than
-          re-tuned (change: builder-mission-editor-route, design D5). */}
-      {qsVisible && qsStep && !missionEditorOpen && (
+      {/* The step card floats unless it is rendering INSIDE the editor sheet (see
+          `qsCardInline`), so exactly ONE instruction is ever on screen — which is
+          what let `reserveTop` and the 62dvh/88dvh height branch be deleted rather
+          than re-tuned (change: builder-mission-editor-route, design D5). */}
+      {qsVisible && qsStep && !qsCardInline && (
         <QuickSetupBar
           step={qsStep}
           index={quickSetupProgress(qsState, qsSteps).step - 1}
           total={qsSteps.length}
           copyKey={quickSetupPresentation(qsStep).copyKey}
+          taskTitle={quickSetupPresentation(qsStep).taskTitle}
+          summary={quickSetupPresentation(qsStep).summary}
+          scope={quickSetupPresentation(qsStep).scope}
+          /* The editor is open beside this card (desktop widths): keep the card
+             off the pane it would otherwise cover. */
+          besidePanel={missionEditorOpen}
           onNext={() => dispatchQs({ type: 'next' })}
+          onBack={qsState.index > 0 ? () => dispatchQs({ type: 'back' }) : undefined}
           onDefer={() => dispatchQs({ type: 'defer' })}
           onClose={() => dispatchQs({ type: 'close' })}
         />
@@ -1510,14 +1517,18 @@ export default function BuilderPage() {
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
         {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
-          quickSetupInlineBar={qsVisible && qsStep && missionEditorOpen ? (
+          quickSetupInlineBar={qsVisible && qsStep && qsCardInline ? (
             <QuickSetupBar
               inline
               step={qsStep}
               index={quickSetupProgress(qsState, qsSteps).step - 1}
               total={qsSteps.length}
               copyKey={quickSetupPresentation(qsStep).copyKey}
+              taskTitle={quickSetupPresentation(qsStep).taskTitle}
+              summary={quickSetupPresentation(qsStep).summary}
+              scope={quickSetupPresentation(qsStep).scope}
               onNext={() => dispatchQs({ type: 'next' })}
+              onBack={qsState.index > 0 ? () => dispatchQs({ type: 'back' }) : undefined}
               onDefer={() => dispatchQs({ type: 'defer' })}
               onClose={() => dispatchQs({ type: 'close' })}
             />
@@ -2620,6 +2631,130 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     ? game.stages.flatMap((s) => s.tasks).find((t) => t.id === activeDrag.id)
     : undefined;
 
+  /**
+   * Delete ONE mission, with every consequence its stage carries
+   * (change: mission-card-actions).
+   *
+   * Extracted from the mission editor's own ✕ menu, where it had lived inline,
+   * because the mission CARD now offers the same action and a second copy of this
+   * would be a second chance to forget one of the three cleanups: a dangling
+   * prerequisite id fails save-time validation and wedges the autosave, a
+   * now-oversized `requiredTaskCount` leaves the stage unwinnable, and a group
+   * quietly shrunk to one member stops being exclusive with nothing on screen
+   * saying so. One implementation, two call sites.
+   *
+   * Refuses the LAST mission of a stage: a stage with no missions is a readiness
+   * blocker, and offering an action whose only outcome is a new error is not an
+   * action. The callers hide the control in that case.
+   */
+  async function removeTask(stageId: string, taskId: string): Promise<void> {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const task = stage?.tasks.find((t) => t.id === taskId);
+    if (!stage || !task || stage.tasks.length <= 1) return;
+    // ASK FIRST (change: builder-mobile-simplification). Name the thing, then act
+    // — the same posture as confirmRemoveStage, deleteGame and skipTaskForTeam.
+    const ok = await dialog.confirm(
+      b.deleteTaskConfirm(task.title?.trim() || b.untitledTask),
+      b.deleteTask,
+      true,
+    );
+    if (!ok) return;
+    const nextTasks = stage.tasks
+      .filter((x) => x.id !== taskId)
+      .map((x) => {
+        if (!x.unlockAfterTaskIds?.includes(taskId)) return x;
+        const rest = x.unlockAfterTaskIds.filter((id) => id !== taskId);
+        return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
+      });
+    const nextGroups = stage.exclusiveGroups
+      ? removeTaskFromGroups(stage.exclusiveGroups, taskId)
+      : undefined;
+    updateStage(stage.id, {
+      tasks: nextTasks,
+      // Clamped against what the stage can YIELD, not its raw task count
+      // (change: stage-winnability) — and against the POST-delete groups.
+      requiredTaskCount: clampRequiredTaskCount(
+        stage.requiredTaskCount,
+        maxCompletableTasks({ tasks: nextTasks, exclusiveGroups: nextGroups }),
+      ),
+      ...(stage.exclusiveGroups ? { exclusiveGroups: nextGroups } : {}),
+    });
+    if (openMission?.task.id === taskId) setEditing(null);
+  }
+
+  /**
+   * Copy a mission into the same stage, right after the original
+   * (change: mission-card-actions).
+   *
+   * A FRESH id, and deliberately nothing else carried over that is keyed to the
+   * old one: `unlockAfterTaskIds` is dropped, because a copy that inherits "only
+   * after mission 3" is a copy the creator did not ask for and would have to
+   * discover. The copy is NOT added to any exclusive group either — joining a
+   * "pick one of these" set is an authoring decision, and silently making the
+   * duplicate an alternative of its own original would change what the stage
+   * yields without a word on screen.
+   *
+   * The title is marked as a copy so two identical rows are distinguishable at a
+   * glance; everything else is verbatim, which is the point of the action.
+   */
+  function duplicateTask(stageId: string, taskId: string): void {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const at = stage?.tasks.findIndex((t) => t.id === taskId) ?? -1;
+    if (!stage || at < 0) return;
+    const source = stage.tasks[at];
+    const copy: Task = {
+      ...source,
+      id: crypto.randomUUID(),
+      title: b.duplicatedTaskTitle(source.title?.trim() || b.untitledTask),
+      unlockAfterTaskIds: undefined,
+    };
+    const tasks = [...stage.tasks.slice(0, at + 1), copy, ...stage.tasks.slice(at + 1)];
+    updateStage(stage.id, { tasks });
+    setSettingsOpen(false);
+    setEditing({ taskId: copy.id });
+  }
+
+  /**
+   * Bench a mission, or bring it back (change: mission-card-actions).
+   *
+   * The Builder's only answer to "not this one, not this time" was DELETE, which
+   * loses the work. A benched mission stays in the template — authored, editable,
+   * exported, one click from returning — and takes no part in the game: it is left
+   * out of every run `launchRun` builds, it is not published to the gallery, and
+   * readiness stops demanding a name or a pin for it. See shared/hiddenTask.
+   *
+   * `undefined` rather than `false` when un-benching, so the field goes back to
+   * ABSENT: `buildSavePayload` drops undefined keys inside `stages`, and absent is
+   * what every reader of this field treats as playable. Writing `false` would work
+   * too, but it would leave the mark of a decision on a mission that no longer
+   * carries one.
+   *
+   * The stage's `requiredTaskCount` is re-clamped on the way in: benching a
+   * mission lowers what the stage can yield, and "complete 3 of 3" with one
+   * benched is a stage no team can finish. Coming back OUT does not raise it —
+   * the creator's authored number is theirs, and a count that grew on its own
+   * would be a change nobody asked for.
+   */
+  function toggleTaskHidden(stageId: string, taskId: string): void {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const task = stage?.tasks.find((t) => t.id === taskId);
+    if (!stage || !task) return;
+    const nextHidden = !isTaskHidden(task);
+    const tasks = stage.tasks.map((t) => (t.id === taskId ? { ...t, hidden: nextHidden || undefined } : t));
+    updateStage(stage.id, {
+      tasks,
+      ...(nextHidden
+        ? {
+            requiredTaskCount: clampRequiredTaskCount(
+              stage.requiredTaskCount,
+              maxCompletableTasks({ tasks, exclusiveGroups: stage.exclusiveGroups }),
+            ),
+          }
+        : {}),
+    });
+    if (nextHidden && openMission?.task.id === taskId) setEditing(null);
+  }
+
   function addTask(stageId: string) {
     const stage = game.stages.find((s) => s.id === stageId);
     if (!stage) return;
@@ -2651,7 +2786,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
       : b.breadcrumbStage(breadcrumbState.stageNumber, breadcrumbState.stageName)
   );
 
-  const m = activeStage ? activeStage.tasks.length : 0;
+  // The PLAYABLE count, not the raw one (change: mission-card-actions). Every
+  // "N of M" the Builder shows has to be the M the run will actually contain —
+  // a benched mission still counted here told the creator "4 of 7" while the
+  // launched run held 6, which is the Builder contradicting itself about the
+  // game it just built.
+  const m = activeStage ? playableTasks(activeStage).length : 0;
   const isLastStage = !!activeStage && game.stages[game.stages.length - 1]?.id === activeStage.id;
   // Scheduled-release: the first stage opens at run start, so timed release only
   // applies to later stages (a timed "drop" of a chapter mid-game / on day N).
@@ -2954,6 +3094,13 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                   .map((s, i) => ({ id: s.id, label: s.title || b.stageLabel(i + 1) }))
                   .filter((s) => s.id !== activeStage.id)}
                 onMoveToStage={(taskId, toStageId) => moveTaskToStage(activeStage.id, taskId, toStageId)}
+                onDuplicate={(taskId) => duplicateTask(activeStage.id, taskId)}
+                onToggleHidden={(taskId) => toggleTaskHidden(activeStage.id, taskId)}
+                /* Withheld for the last mission of a stage: a stage with none is a
+                   readiness blocker, so the only outcome would be a new error. */
+                onDelete={activeStage.tasks.length > 1
+                  ? (taskId) => { void removeTask(activeStage.id, taskId); }
+                  : undefined}
               />
             </div>
             {/* `mb-12` on a phone keeps this row clear of <ActiveRunBar>, which is
@@ -2970,10 +3117,30 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           </>
         )}
         {/* Quick Setup FOCUS MODE scrim (change: quick-setup-wizard). A translucent,
-            blurred layer over the canvas ONLY — never over the mission editor,
-            which is this div's sibling. `pointer-events-auto` deliberately blocks
-            interaction with the dimmed grid: the creator's attention belongs on
-            the floating card, not on a task card they can half-see behind it. */}
+            blurred layer over the canvas, meant to sit UNDER the mission editor,
+            which is this div's sibling.
+ 
+            IT SWALLOWED THE FLOW'S OWN "NEXT" (change: quick-setup-one-card). The
+            scrim is `absolute inset-0 z-20` inside the canvas column and spans the
+            whole canvas area; the editor pane overlaps that area and, from `lg`
+            up, carried no z-index at all. With `pointer-events-auto` on the scrim,
+            `document.elementFromPoint` on the Quick Setup card's own "הבא" button
+            — which renders INSIDE that pane — returned `DIV.rp-qs-scrim`. The
+            press advanced the flow roughly one time in three, which reads as an
+            app that has stopped responding, not as a stacking bug, and it is a
+            large part of why the flow felt broken. The pane now declares
+            `lg:relative lg:z-30` (see SlidePanel) so it paints above.
+ 
+            AND the scrim stops eating clicks whenever the editor is open. Blocking
+            the dimmed grid is worth something — a half-seen task card behind the
+            scrim is not where the creator's attention belongs, and opening a
+            different mission mid-flow desyncs the card from the canvas — but it is
+            worth much less than a primary button that works two presses out of
+            three. While the editor is open the flow's controls live inside it, so
+            the scrim goes inert and any stacking surprise costs a stray click on
+            the canvas rather than a dead button. With no editor open (the welcome
+            card, a game-level step) nothing of ours is over the canvas and the
+            block still holds. */}
         {quickSetupFocusMode && (
           <div
             aria-hidden
@@ -2981,7 +3148,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             // cannot apply an opacity modifier to an arbitrary CSS custom
             // property, so that class compiled to no rule and the "scrim" was
             // actually fully transparent (blur only, no tint).
-            className="rp-qs-scrim absolute inset-0 z-20 rounded-xl pointer-events-auto transition-opacity duration-300"
+            className={`rp-qs-scrim absolute inset-0 z-20 rounded-xl transition-opacity duration-300 ${
+              quickSetupInlineBar ? 'pointer-events-none' : 'pointer-events-auto'}`}
           />
         )}
       </div>
@@ -3037,63 +3205,21 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
              came back under the card. An editor opened beside a flow aimed at a
              different mission still stays whole.
 
-             EITHER id counts, and both are needed. The step's target alone misses
-             the other half of the same flash: a chapter intro card names the NEXT
-             mission while this editor still holds the one just finished (the
-             navigation happens when the card is dismissed), so the editor would
-             un-strip for exactly as long as the card is up. `quickSetupFocus`
-             alone misses the reload case above. Together they say "this editor
-             belongs to the flow", which is the question being asked. */
+             EITHER id counts, and both are needed. `quickSetupFocus` alone misses
+             the reload case above; the step's target alone misses the frame or two
+             between a step advancing and the navigation effect swapping the open
+             mission, where the editor still holds the previous one. Together they
+             say "this editor belongs to the flow", which is the question being
+             asked. */
           guided={quickSetupGuided
             && (quickSetupGuided.taskId === editingTask.id || quickSetupFocus?.taskId === editingTask.id)
             ? quickSetupGuided : null}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
+          /* The SAME delete the mission card's ⋯ menu runs (change:
+             mission-card-actions) — see `removeTask`, which owns the confirm and
+             the three stage-level cleanups a delete drags behind it. */
           onRemove={editingStage.tasks.length > 1
-            ? async () => {
-                // ASK FIRST (change: builder-mobile-simplification). This was the
-                // only destructive control in the Builder that fired straight into
-                // the delete — and it lived in the editor's footer between "back"
-                // and "next", so a mis-tap aimed at navigation destroyed a mission
-                // the creator had just written. Same posture as confirmRemoveStage,
-                // deleteGame and skipTaskForTeam: name the thing, then act.
-                const ok = await dialog.confirm(
-                  b.deleteTaskConfirm(editingTask.title?.trim() || b.untitledTask),
-                  b.deleteTask,
-                  true,
-                );
-                if (!ok) return;
-                // Also strip the removed task's id from any sibling's prerequisite
-                // gate (unlockable-tasks) — a dangling id would fail save-time
-                // validation and wedge the autosave.
-                const nextTasks = editingStage.tasks
-                  .filter((x) => x.id !== editingTask.id)
-                  .map((x) => {
-                    if (!x.unlockAfterTaskIds?.includes(editingTask.id)) return x;
-                    const rest = x.unlockAfterTaskIds.filter((id) => id !== editingTask.id);
-                    return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
-                  });
-                // Clamp a now-oversized requiredTaskCount: dropping a task below the
-                // required count would leave the stage unwinnable (and the count
-                // select would show a value not in its options). `undefined` = all.
-                // Drop the removed id from any exclusive group too (wave-b task 5).
-                // A dangling id is inert by contract, but leaving it would silently
-                // shrink a group to one member (= no exclusivity) with no UI trace.
-                const nextGroups = editingStage.exclusiveGroups
-                  ? removeTaskFromGroups(editingStage.exclusiveGroups, editingTask.id)
-                  : undefined;
-                const patch: Partial<Stage> = {
-                  tasks: nextTasks,
-                  // Clamped against what the stage can YIELD, not its raw task count
-                  // (change: stage-winnability) — and against the POST-delete groups.
-                  requiredTaskCount: clampRequiredTaskCount(
-                    editingStage.requiredTaskCount,
-                    maxCompletableTasks({ tasks: nextTasks, exclusiveGroups: nextGroups }),
-                  ),
-                  ...(editingStage.exclusiveGroups ? { exclusiveGroups: nextGroups } : {}),
-                };
-                updateStage(editingStage.id, patch);
-                setEditing(null);
-              }
+            ? () => { void removeTask(editingStage.id, editingTask.id); }
             : undefined}
           onClose={() => setEditing(null)}
         />
@@ -3153,15 +3279,37 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
-  const [shown, setShown] = useState(false);
+  /**
+   * MOUNTED ALREADY OPEN (change: quick-setup-one-card).
+   *
+   * This used to start `false` and be flipped by a mount effect, so the panel's
+   * VISIBILITY — not just its animation — depended on a second render landing:
+   * until the flip, SlidePanel holds it at `max-lg:translate-y-full`, a full
+   * viewport below the fold. When that flip did not land, the mission editor, the
+   * Quick Setup card inside it and its "next" button were all off-screen with
+   * nothing on the page saying why. Measured repeatedly while stepping through
+   * the flow: the panel's computed transform read `translateY(604px)` in a 604px
+   * viewport, on some remounts and not others.
+   *
+   * It was `requestAnimationFrame` first (throttled to zero on a tab that is not
+   * compositing — the trap `useQuickSetupFocus` documents at length), then a
+   * `setTimeout`, which still failed on some remounts. The pattern is the bug:
+   * every step of the flow REMOUNTS this component (`key={editingTask.id}`), so a
+   * 200 ms entrance was being re-run dozens of times per session and only had to
+   * miss once to strand the creator.
+   *
+   * So the entrance is gone rather than repaired. The panel is open when it is
+   * mounted, which is the only state that was ever correct; `shown` stays as
+   * SlidePanel's prop because the stage-settings pane and the desktop
+   * width-animation still read it, and because a future entrance belongs in CSS —
+   * where the resting state is on-screen and an animation that never runs costs
+   * nothing.
+   */
+  const [shown] = useState(true);
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Slide in on mount.
-  useEffect(() => {
-    const r = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(r);
-  }, []);
+
 
   // Safety flush on unmount — normally a no-op since every edit flushes live, but
   // guards against any edit that hasn't reached global state yet (close or switch).
@@ -3262,7 +3410,22 @@ function SlidePanel({ shown, children, variant = 'sheet' }: {
   const full = variant === 'fullscreen';
   return (
     <aside
-      className={`shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out
+      // `lg:relative lg:z-30` is load-bearing, not decoration (change:
+      // quick-setup-one-card). Below `lg` this aside is `fixed … z-40`, which is
+      // already above the Quick Setup focus scrim; from `lg` up it was an INLINE
+      // pane with no z-index at all, while the scrim — its sibling, inside the
+      // canvas column — is `absolute inset-0 z-20`. The scrim spans the whole
+      // canvas area, this pane overlaps it, and `auto` loses to `20`, so on a
+      // desktop the scrim painted OVER the mission editor. The scrim also carries
+      // `pointer-events-auto` by design (it blocks the dimmed grid behind it), so
+      // it swallowed clicks aimed at the editor — including the Quick Setup card's
+      // own "next", which renders INSIDE this pane. `document.elementFromPoint` on
+      // that button returned `DIV.rp-qs-scrim`. The symptom was a flow whose
+      // primary button worked about one press in three, which reads as an app that
+      // has stopped responding rather than as a stacking bug. The scrim's own
+      // comment already said it must never cover the editor; this is what makes
+      // that true.
+      className={`shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out lg:relative lg:z-30
         max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:!w-full max-lg:p-0 max-lg:shadow-soft
         ${full
           ? 'max-lg:inset-y-0 max-lg:h-[100dvh]'
@@ -3312,19 +3475,17 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
   identity?: { isLastStage: boolean; canDelete: boolean; onDelete: () => void };
 }) {
   const b = useT().builder;
-  const m = stage.tasks.length;
+  // Playable only — see the note on the Builder's own `m` above.
+  const m = playableTasks(stage).length;
   // What the stage can actually YIELD (change: stage-winnability). Exclusive groups
   // are alternatives, so three pairs yield three completions, never six — the
   // control must not offer a value the game can never satisfy.
   const ceiling = maxCompletableTasks(stage);
   const req = stage.requiredTaskCount ?? m;
-  const [shown, setShown] = useState(false);
+  // Mounted already open — see the note on the task editor's `shown`.
+  const [shown] = useState(true);
 
-  // Slide in on mount (drives the shared shell's width + transform).
-  useEffect(() => {
-    const r = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(r);
-  }, []);
+
 
   // Esc closes the pane, matching the task editor.
   useEffect(() => {
@@ -3498,8 +3659,10 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 // ── Step 3: Preview ──
 function StepPreview({ game }: { game: Game }) {
   const b = useT().builder;
-  const taskCount = game.stages.reduce((s, st) => s + st.tasks.length, 0);
-  const estMin = game.stages.flatMap((s) => s.tasks).reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0);
+  // This tab answers "what IS this game", so it counts and times only what will
+  // be played (change: mission-card-actions).
+  const taskCount = game.stages.reduce((s, st) => s + playableTasks(st).length, 0);
+  const estMin = game.stages.flatMap((s) => playableTasks(s)).reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0);
   const modeLabel: Record<GameMode, string> = { individual: b.modeIndividual, team: b.modeTeam };
   return (
     <Card className="p-5 space-y-4">
@@ -3520,7 +3683,7 @@ function StepPreview({ game }: { game: Game }) {
             <span className="w-6 h-6 rounded-full bg-rp-fire/15 text-ink-fire text-xs flex items-center justify-center">{i + 1}</span>
             <span className="text-sm text-[--ink-2]" dir="auto">{s.title}</span>
             <span className="text-xs text-[--ink-3]">
-              {b.taskCount(s.tasks.length)}{s.tasks.length > 1 ? b.routedSuffix : ''}
+              {b.taskCount(playableTasks(s).length)}{playableTasks(s).length > 1 ? b.routedSuffix : ''}
               {s.isFinal ? ` · 🏁 ${b.finalTag}` : ''}
             </span>
           </li>

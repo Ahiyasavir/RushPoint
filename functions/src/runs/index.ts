@@ -108,6 +108,9 @@ import {
   evaluateSafeZoneStatus,
   type SafeZone,
   COLLECTIONS,
+  // Benched missions (change: mission-card-actions) — filtered out of every run
+  // this module launches, in buildInitialStages.
+  playableTasks,
 } from '@rushpoint/shared';
 import {
   scoreFixedPointsSpeed,
@@ -241,21 +244,37 @@ async function uniqueCode(): Promise<string> {
 function buildInitialStages(game: Game): RunStageRecord[] {
   return game.stages
     .sort((a, b) => a.order - b.order)
-    .map((stage, idx) => ({
-      stageId: stage.id,
-      order: stage.order,
-      status: (idx === 0 ? 'active' : 'locked') as StageStatus,
-      // Clamp to [1, tasks.length]; undefined means "all tasks".
-      requiredTaskCount:
-        stage.requiredTaskCount != null
-          ? Math.max(1, Math.min(stage.requiredTaskCount, stage.tasks.length))
-          : undefined,
-      tasks: stage.tasks.map((task, tIdx) => ({
-        taskId: task.id,
-        taskIndex: tIdx,
-        status: 'unassigned' as const,
-      })),
-    }));
+    .map((stage, idx) => {
+      // BENCHED MISSIONS NEVER ENTER A RUN (change: mission-card-actions). This is
+      // the ONE choke point for `Task.hidden` on the gameplay side: routing, the
+      // completion path, stage unlock, the leaderboard and the participant payload
+      // all work from these stage records, so a mission that is not in them takes
+      // no part in the game and nothing downstream has to know the field exists.
+      // Filtering here rather than in each of those readers is deliberate — the
+      // alternative is a condition sprinkled through the run code, where the one
+      // place it is forgotten routes a team to a mission the creator benched.
+      //
+      // The snapshot is taken at LAUNCH, so benching a mission does not disturb a
+      // run already in flight: that run's teams keep the records they were given.
+      const tasks = playableTasks(stage);
+      return {
+        stageId: stage.id,
+        order: stage.order,
+        status: (idx === 0 ? 'active' : 'locked') as StageStatus,
+        // Clamp to [1, tasks.length]; undefined means "all tasks". `tasks` is the
+        // PLAYABLE count, so a stage authored as "3 of 4" with one mission benched
+        // asks for 3 of 3 rather than for a fourth that will never be handed out.
+        requiredTaskCount:
+          stage.requiredTaskCount != null
+            ? Math.max(1, Math.min(stage.requiredTaskCount, tasks.length))
+            : undefined,
+        tasks: tasks.map((task, tIdx) => ({
+          taskId: task.id,
+          taskIndex: tIdx,
+          status: 'unassigned' as const,
+        })),
+      };
+    });
 }
 
 // ─── launchRun ────────────────────────────────────────────────────────────────

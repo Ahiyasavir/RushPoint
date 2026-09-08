@@ -431,7 +431,7 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     id: true, title: true, description: true, type: true, coordinates: true, difficulty: true,
     estimatedMinutes: true, expectedDurationMinutes: true, pointValue: true, maxConcurrentTeams: true,
     currentTeamCount: true, status: true, maxDurationMinutes: true, smart: true, triggerMode: true,
-    locationless: true, hideLocation: true, locationClue: true, locationClueHe: true, hint: true,
+    locationless: true, hidden: true, hideLocation: true, locationClue: true, locationClueHe: true, hint: true,
     hintPenalty: true, hintAutoRevealMinutes: true, hintAutoRevealAttempts: true, choices: true,
     answers: true, orderItems: true, surveyChoices: true, numericAnswer: true, numericTolerance: true,
     geofenceRadiusMeters: true, requirePresence: true, steps: true, media: true, releaseAt: true,

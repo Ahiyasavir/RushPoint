@@ -6,7 +6,9 @@
 import type { HTMLAttributes } from 'react';
 import type { Task, TaskType } from '@rushpoint/shared';
 import { normalizeTriggerMode } from '@rushpoint/shared';
+import { isTaskHidden } from '@rushpoint/shared';
 import { taskPreviewLine, TYPE_FAMILY_COLOR, type PreviewLabels } from '../lib/taskCardPreview';
+import { OverflowMenu } from './OverflowMenu';
 import { GROUP_STYLES } from '../lib/groupStyles';
 import { useT } from './LanguageContext';
 import { BuilderIcon, TRIGGER_ICON_NAME } from './builderIcons';
@@ -36,7 +38,10 @@ function DifficultyDots({ difficulty }: { difficulty: number }) {
 /** A stage this card can be moved into (the non-drag / touch fallback). */
 export interface MoveTarget { id: string; label: string }
 
-export default function TaskCard({ task, active, onClick, dragging, moveTargets, onMoveToStage, group, handleProps }: {
+export default function TaskCard({
+  task, active, onClick, dragging, moveTargets, onMoveToStage,
+  onDuplicate, onToggleHidden, onDelete, group, handleProps,
+}: {
   task: Task;
   active?: boolean;
   onClick: () => void;
@@ -46,6 +51,16 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
   /** Other stages, for the "move to stage" fallback. Empty/undefined hides it. */
   moveTargets?: MoveTarget[];
   onMoveToStage?: (stageId: string) => void;
+  /**
+   * The rest of the ⋯ menu (change: mission-card-actions). Each is optional and a
+   * missing one simply drops its row, so the menu never offers an action this card
+   * cannot perform — `onDelete` is withheld for the last mission of a stage, and
+   * `moveTargets` is empty in a one-stage game.
+   */
+  onDuplicate?: () => void;
+  /** Bench this mission, or bring it back. See shared/hiddenTask. */
+  onToggleHidden?: () => void;
+  onDelete?: () => void;
   /** Exclusive-group membership, for the badge + ring (change: builder-dnd-groups). */
   group?: TaskGroupBadge;
   /** dnd-kit sortable listeners/attributes (plus its activator `ref`), spread on
@@ -54,6 +69,7 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
   handleProps?: HTMLAttributes<HTMLElement> & { ref?: (el: HTMLElement | null) => void };
 }) {
   const b = useT().builder;
+  const hidden = isTaskHidden(task);
   const style = group ? GROUP_STYLES[group.index % GROUP_STYLES.length] : null;
   const color = TYPE_FAMILY_COLOR[task.type];
   const mode = normalizeTriggerMode(task);
@@ -135,38 +151,77 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
           >{group.letter}</span>
         )}
         <span className="text-sm font-semibold text-[--ink-1] truncate" dir="auto">{task.title || b.untitledTask}</span>
+        {/* BENCHED (change: mission-card-actions). Said in words, not by a dimmed
+            card: "this one is faded" is indistinguishable from "this one is
+            disabled" or from a rendering glitch, and the whole promise of the
+            action is that the mission is still HERE. The card stays fully legible
+            and carries a label that names its state. */}
+        {hidden && (
+          <span className="shrink-0 rounded-full border border-[--rp-border] bg-[--surface-2] px-2 py-0.5 text-[12px] font-medium text-[--ink-2]">
+            {b.taskHiddenBadge}
+          </span>
+        )}
         <BuilderIcon name={TRIGGER_ICON_NAME[mode]} className="w-4 h-4 ms-auto shrink-0 text-[--ink-3]" />
-        {/* Non-drag fallback (screen readers / keyboard / tablets): move this task
-            to another stage without dragging. Lives behind a ⋯ menu that is
-            revealed on hover or focus, so it costs no width on the card face. */}
-        {onMoveToStage && moveTargets && moveTargets.length > 0 && (
-          <select
-            value=""
-            aria-label={b.moveTaskTo}
-            title={b.moveTaskTo}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              const id = e.target.value;
-              e.target.value = '';
-              if (id) onMoveToStage(id);
-            }}
-            // A NATIVE select on purpose: its popup is rendered by the browser, so
-            // it can never be clipped by the canvas scroll container, it is a real
-            // listbox for screen readers, and it becomes the OS picker on a tablet.
-            // Collapsed it is just a ⋯ glyph, so it costs ~2rem instead of the 8rem
-            // the labelled version ate; opacity reveals it on hover or focus while
-            // the reserved width keeps the row from shifting.
-            className="shrink-0 w-8 appearance-none text-center cursor-pointer rounded border border-[--rp-border]
-              bg-[--surface-2] text-[--ink-3] text-[13px] leading-none px-0 py-0.5 opacity-60
-              transition-opacity group-hover/card:opacity-100 focus:opacity-100 focus-visible:opacity-100"
-          >
-            <option value="">⋯</option>
-            {moveTargets.map((s) => (
-              <option key={s.id} value={s.id}>{s.label}</option>
-            ))}
-          </select>
+        {/* Everything a creator can do to one mission WITHOUT opening it
+            (change: mission-card-actions): duplicate it, move it to another stage,
+            bench it, delete it.
+
+            It was a native `<select>` offering "move to stage" and nothing else —
+            chosen because a browser-rendered popup cannot be clipped by the canvas
+            scroller. `OverflowMenu` clears that bar too (it portals to the body and
+            positions itself against the viewport), so the menu can now be a real
+            menu: four actions, each named, with the destructive one last and
+            styled as such. */}
+        {/* The card body opens the editor and the ⠿ handle starts a drag; the menu
+            must do neither. That is stopped inside OverflowMenu, on its own trigger
+            button — a `<span onClick>` wrapper here would be a clickable
+            non-interactive element, which the creator a11y scan counts and is right
+            to. */}
+        {(onDuplicate || onToggleHidden || onDelete || (onMoveToStage && moveTargets && moveTargets.length > 0)) && (
+          <span className="shrink-0 opacity-60 transition-opacity group-hover/card:opacity-100 focus-within:opacity-100">
+            <OverflowMenu
+              label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
+              ariaLabel={b.taskActionsMenu}
+              triggerClassName="w-8 h-8 justify-center rounded border border-[--rp-border] bg-[--surface-2] text-[--ink-3] text-[13px] leading-none px-0"
+            >
+              {onDuplicate && (
+                <button role="menuitem" onClick={onDuplicate}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-[--ink-1] rounded-lg hover:bg-[--surface-2] transition-colors">
+                  {b.duplicateTask}
+                </button>
+              )}
+              {onToggleHidden && (
+                <button role="menuitem" onClick={onToggleHidden}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-[--ink-1] rounded-lg hover:bg-[--surface-2] transition-colors">
+                  {hidden ? b.unhideTask : b.hideTask}
+                  <span className="block text-[12px] text-[--ink-3] leading-snug">
+                    {hidden ? b.unhideTaskHelp : b.hideTaskHelp}
+                  </span>
+                </button>
+              )}
+              {onMoveToStage && moveTargets && moveTargets.length > 0 && (
+                <>
+                  {/* The stages themselves ARE the rows — the creator asked for
+                      "move to…" to open the stage list, and a submenu here would
+                      be a second popup inside a portal for a list this short. */}
+                  <p className="px-3 pt-2 pb-1 text-[12px] font-semibold text-[--ink-3]">{b.moveTaskTo}</p>
+                  {moveTargets.map((s) => (
+                    <button key={s.id} role="menuitem" onClick={() => onMoveToStage(s.id)}
+                      className="w-full text-start px-3 py-2.5 text-[13px] text-[--ink-1] rounded-lg hover:bg-[--surface-2] transition-colors truncate"
+                      dir="auto">
+                      {s.label}
+                    </button>
+                  ))}
+                </>
+              )}
+              {onDelete && (
+                <button role="menuitem" onClick={onDelete}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-ink-alert rounded-lg hover:bg-rp-alert/10 transition-colors">
+                  {b.deleteTask}
+                </button>
+              )}
+            </OverflowMenu>
+          </span>
         )}
       </div>
       <div className="flex items-center gap-3 min-w-0 text-xs text-[--ink-3]">
