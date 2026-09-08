@@ -821,7 +821,10 @@ export default function DashboardPage() {
       />
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden mb-10 pb-10 border-b border-[--rp-border]">
+      {/* Spacing is HALVED below `sm` (change: phone-dashboard-shows-your-games).
+          `mb-10 pb-10` is 80px of nothing on a 375px phone, spent above the list
+          the creator opened the app to see. */}
+      <div className="relative overflow-hidden mb-5 pb-5 sm:mb-10 sm:pb-10 border-b border-[--rp-border]">
         <div className="absolute -top-8 -left-8 w-96 h-48 bg-gradient-radial from-rp-fire/8 to-transparent pointer-events-none" />
 
         <div className="relative flex flex-col sm:flex-row sm:items-end justify-between gap-6">
@@ -832,7 +835,12 @@ export default function DashboardPage() {
             <h1 className="font-brand text-3xl sm:text-4xl font-extrabold tracking-tight leading-none bg-gradient-to-r from-rp-fire via-rp-amber to-rp-amber bg-clip-text text-transparent">
               {d.title}
             </h1>
-            <p className="text-[--ink-3] mt-3 text-base max-w-sm">{d.subtitle}</p>
+            {/* Desktop only (change: phone-dashboard-shows-your-games). This
+                sentence explains what RushPoint is — to someone already signed in,
+                looking at their own games, on the screen with the least room to
+                spare. Kept from `sm` up rather than deleted: it earns its place on
+                an empty first-run desktop, where there is nothing else to read. */}
+            <p className="hidden sm:block text-[--ink-3] mt-3 text-base max-w-sm">{d.subtitle}</p>
           </div>
 
           <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
@@ -884,8 +892,17 @@ export default function DashboardPage() {
         </div>
 
         {/* Stats row */}
+        {/* THREE ACROSS ON A PHONE, not three stacked
+            (change: phone-dashboard-shows-your-games). At `grid-cols-1` these
+            were three full-width tiles totalling 257px — and the comment below
+            already says two of the three are inert because "they summarise what
+            is already on this page". Two inert summaries were taking 170px
+            directly above the thing they summarise, on the one screen with no
+            room to give. Three numbers side by side is 64px and reads the same:
+            these are glanceable figures, and a phone reads them in a row the way
+            it reads any other row of counters. */}
         {games.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+          <div className="grid grid-cols-3 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 mt-5 sm:mt-8">
             {/* The runs tile is a LINK (change: post-run-player-report). It counted
                 the one thing a creator most wants to look back at and did nothing
                 when clicked, while finished runs had no route into them at all.
@@ -900,20 +917,26 @@ export default function DashboardPage() {
                 <>
                   <div className={`absolute inset-0 bg-gradient-to-br ${s.tint} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
                   <div className="relative flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
+                    {/* The icon square is the first thing to go on a phone: at three
+                       across, 36px of decoration would leave the number and its label
+                       about 60px to share. It returns from `sm` up. */}
+                    <div className="hidden sm:flex w-9 h-9 rounded-xl items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
                     <div className="min-w-0 text-start">
-                      <div className="font-brand text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
-                      <div className="text-[13px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
+                      <div className="font-brand text-xl sm:text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
+                      <div className="text-[11px] sm:text-[13px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
                     </div>
                     {s.to && (
-                      <div className="relative ms-auto text-[13px] text-[--ink-3] group-hover:text-ink-signal transition-colors shrink-0">
+                      /* Hidden below `sm`: at a third of a 375px screen there is no
+                         room for a call to action beside the number, and the tile is
+                         still the button — the whole 68px box navigates. */
+                      <div className="relative ms-auto hidden sm:block text-[13px] text-[--ink-3] group-hover:text-ink-signal transition-colors shrink-0">
                         {d.statTotalPlaysCta}
                       </div>
                     )}
                   </div>
                 </>
               );
-              const shell = `group relative overflow-hidden w-full rounded-2xl border border-[--rp-border] bg-[--surface-0]/80 dark:bg-white/[0.03] backdrop-blur-sm px-4 py-3.5 transition-all duration-200 hover:-translate-y-0.5 ${s.ring}`;
+              const shell = `group relative overflow-hidden w-full rounded-2xl border border-[--rp-border] bg-[--surface-0]/80 dark:bg-white/[0.03] backdrop-blur-sm px-2.5 py-3 sm:px-4 sm:py-3.5 transition-all duration-200 hover:-translate-y-0.5 ${s.ring}`;
               return s.to ? (
                 <button
                   key={s.label}
