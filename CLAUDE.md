@@ -3,6 +3,10 @@
 > Coding guidelines & Firestore path rules: [INSTRUCTIONS.md](INSTRUCTIONS.md) ·
 > Architecture: [TECH_SPEC.md](TECH_SPEC.md) · Directory map: [STRUCTURE.md](STRUCTURE.md) ·
 > **Going live + payments: [DEPLOY.md](DEPLOY.md)**
+>
+> Per-file indexes: [scripts/README.md](scripts/README.md) (what each script is, and which are
+> one-off) · [docs/README.md](docs/README.md) (the point-in-time material) ·
+> [openspec/changes/README.md](openspec/changes/README.md) (what is still open vs archived).
 
 ## ⚙️ How we work — Spec-Driven Development + TDD (mandatory)
 
