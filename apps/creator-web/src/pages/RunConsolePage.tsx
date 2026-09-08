@@ -525,10 +525,40 @@ export default function RunConsolePage() {
     try { setSectionPref(localStorage.getItem(sectionStateKey(runId))); }
     catch { setSectionPref(null); }
   }, [runId]);
+  // OPENING A SECTION TAKES YOU TO IT
+  // (change: run-console-signal-actually-goes-there).
+  //
+  // `goToPanel` scrolled + flashed for a PINNED target and, for a section one,
+  // called this and returned. So on a phone the triage chip was a dead press:
+  // measured on a live run at 375x812, tapping "1 קבוצות תקועות ›" at y=178 grew
+  // the document by 214px and left `scrollY` at 0, with the panel it had just
+  // opened sitting at y=1541 — two screens down, nothing on screen changed. On a
+  // three-column desktop the opened section is usually already in view, which is
+  // why this survived: the defect is invisible at the width it was built at.
+  //
+  // Every caller of this is a deliberate act — the section rail, a triage chip,
+  // and the staff invite whose own comment says "a host must never have to hunt
+  // for what they just created" — so the reveal belongs HERE rather than at each
+  // call site. The localStorage restore on mount sets `sectionPref` directly and
+  // does NOT come through here, so opening the console never yanks the page.
+  //
+  // A NONCE, not the section id, drives the effect: asking for the section that
+  // is already active must still take you there, and keying on `activeSection`
+  // alone would do nothing in exactly that case — which is the most common one
+  // during a live run, when the chip and the panel belong to the same section.
+  const sectionPaneRef = useRef<HTMLElement | null>(null);
+  const [revealNonce, setRevealNonce] = useState(0);
   const openSection = useCallback((id: SectionId) => {
     setSectionPref(id);
+    setRevealNonce((n) => n + 1);
     try { localStorage.setItem(sectionStateKey(runId ?? ''), id); } catch { /* storage off */ }
   }, [runId]);
+  useEffect(() => {
+    if (revealNonce === 0) return; // mount, or a restore — never scroll for those
+    // `nearest` moves the minimum: on a desktop where the pane is already in
+    // view this is a no-op, so the fix costs the wide layout nothing.
+    sectionPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [revealNonce]);
   // Live DOM handles for the PINNED panels, so a chip whose target is pinned can
   // scroll it into view + flash it. The registry is populated as the pinned lanes
   // render (see the pinned <PanelLanes panelRef=…>); a section-lane panel is never
@@ -1422,7 +1452,7 @@ export default function RunConsolePage() {
             </nav>
           </aside>
 
-          <section aria-label={groupTitles[activeSection]} className="flex-1 min-w-0 space-y-3">
+          <section ref={sectionPaneRef} aria-label={groupTitles[activeSection]} className="flex-1 min-w-0 space-y-3">
             {/* Named in the pane too: on a phone the rail scrolls out of view. */}
             <h2 className="text-sm font-semibold text-[--ink-1] px-1">{groupTitles[activeSection]}</h2>
             {/* The console used to TELEPORT: a section that emptied under the
