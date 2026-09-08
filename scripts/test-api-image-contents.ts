@@ -47,11 +47,38 @@ check('Dockerfile.api has a runtime stage', runtimeStart !== -1,
   '', 'the stage name changed; this check is reading the wrong half of the file');
 const runtimeStage = runtimeStart === -1 ? '' : dockerfile.slice(runtimeStart);
 
-// Local requires in server.js: `require('./x.js')`, not package requires.
-const required = [...serverSource.matchAll(/require\((['"])(\.\/[^'"]+)\1\)/g)]
-  .map((m) => m[2]);
+// Local requires, followed TRANSITIVELY (change: server-side-url-ingest).
+//
+// This used to scan server.js alone, and that is one level too shallow: a sibling
+// server.js requires can itself require another sibling, and THAT file is just as
+// absent from the image and just as fatal — the container crash-loops on boot with
+// the same MODULE_NOT_FOUND. It nearly shipped that way: ingestUrlRoute.js was
+// caught because server.js names it, while urlIngestGuard.js, which only
+// ingestUrlRoute.js names, would have sailed straight through.
+//
+// Walks from server.js through every local require, so what gets checked is
+// "everything the runtime can reach", not "everything the entry file mentions".
+const LOCAL_REQUIRE = /require\((['"])(\.\/[^'"]+)\1\)/g;
+const localRequires = (source: string): string[] =>
+  [...source.matchAll(LOCAL_REQUIRE)].map((m) => m[2]);
 
-check('the scan found server.js\'s local requires', required.length > 0,
+const required: string[] = [];
+const queue: string[] = localRequires(serverSource);
+const seen = new Set<string>();
+while (queue.length > 0) {
+  const spec = queue.shift() as string;
+  if (seen.has(spec)) continue;
+  seen.add(spec);
+  required.push(spec);
+  if (EXEMPT.has(spec)) continue; // a directory (lib/) — nothing to walk into
+  let childSource = '';
+  try {
+    childSource = readFileSync(path.join('functions', path.posix.basename(spec)), 'utf8');
+  } catch { /* not a plain sibling file — nothing to walk */ }
+  for (const next of localRequires(childSource)) if (!seen.has(next)) queue.push(next);
+}
+
+check('the scan found the runtime\'s local requires, transitively', required.length > 0,
   `${required.length} found: ${required.join(', ')}`,
   `no require('./…') matched in ${SERVER_PATH} — the pattern is stale`);
 

@@ -47,6 +47,11 @@ const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 // lives in uploadRoute.js so it can be tested without this file's built-bundle
 // and Admin-SDK dependencies.
 const { createUploadHandler, sweepStaleTempUploads } = require('./uploadRoute.js');
+// Server-side fetch of a picture dragged from another tab (change:
+// server-side-url-ingest). See urlIngestGuard.js for the SSRF rules — this
+// endpoint makes THIS box an HTTP client for an address a caller chose.
+const { createIngestUrlHandler } = require('./ingestUrlRoute.js');
+const dns = require('dns').promises;
 
 // The marketing CMS's GitHub token exchange. Same reasoning: a self-contained
 // route factored out so it can be tested without this file's dependencies.
@@ -161,6 +166,39 @@ app.put('/upload', createUploadHandler({
       || CANONICAL_UPLOAD_ORIGIN
       || `${fwdProto || req.protocol}://${req.get('host')}`;
   },
+  onResponse: reflectCors,
+}));
+
+// ── POST /ingest-url ────────────────────────────────────────────────────────
+// Same auth, same ownership check, same content-type allowlist, same size caps
+// and the same staged temp->rename write as PUT /upload — by calling those very
+// functions, not by restating them. What is new is the address guard.
+app.options('/ingest-url', (req, res) => {
+  reflectCors(req, res);
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.set('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+// No route-level body parser: `express.json` is already mounted app-wide above,
+// and a second one is a no-op on an already-parsed body — so a `limit` here
+// would read as enforced while doing nothing. The global 1mb cap bounds the
+// body; the real bound on this route is `validateIngestUrl`, which refuses a
+// URL over 2048 characters before anything is fetched.
+app.post('/ingest-url', createIngestUrlHandler({
+  verifyIdToken: (token) => admin.auth().verifyIdToken(token),
+  uploadDir: UPLOAD_DIR,
+  resolveOrigin: (req) => {
+    const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    return VPS_UPLOAD_ORIGIN
+      || CANONICAL_UPLOAD_ORIGIN
+      || `${fwdProto || req.protocol}://${req.get('host')}`;
+  },
+  // `verbatim: true` so we judge the SAME answers the connection will use, and
+  // `all: true` so a name that returns one public and one private address is
+  // refused rather than sampled.
+  lookupAll: (hostname) => dns.lookup(hostname, { all: true, verbatim: true }),
+  fetchImpl: (...args) => fetch(...args),
   onResponse: reflectCors,
 }));
 

@@ -31,7 +31,7 @@ import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET, TAP_TEXT } from '../lib/interactio
 import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
-import { uploadTaskMedia } from '../services/firebase';
+import { uploadTaskMedia, ingestTaskMediaFromUrl } from '../services/firebase';
 import { useT } from './LanguageContext';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { OverflowMenu } from './OverflowMenu';
@@ -1340,9 +1340,27 @@ function MediaSection({ task, set, b, gameId, replace }: {
       setUploadPct(null);
       await ingestFile(new File([blob], name, { type: blob.type }));
     } catch {
-      // Almost always CORS. Naming it "the site would not release the picture"
-      // beats a generic failure the creator cannot act on.
-      setDropBlocked(true);
+      // The browser could not read it — almost always CORS. Before giving up, ask
+      // the SERVER to fetch it (change: server-side-url-ingest): it is not bound by
+      // the browser's same-origin rules, so this is what makes a drag from Google
+      // Images work at all. Second, not first, so the server is asked to make an
+      // outbound request only when the browser genuinely cannot.
+      try {
+        const viaServer = await ingestTaskMediaFromUrl(url, { gameId: gameId ?? 'draft', taskId: task.id });
+        if (viaServer && isTaskMediaValid(viaServer)) {
+          const current = latest.current;
+          const next = [...(current.media ?? []), { id: uuid(), ...viaServer } as TaskMedia];
+          if (replace) replace({ ...current, media: next });
+          else commit(next);
+          setUploadPct(null);
+          return;
+        }
+        // `null` means there is no self-hosted API here (local dev), so the honest
+        // answer is still the CORS refusal rather than inventing a second one.
+        setDropBlocked(true);
+      } catch {
+        setDropBlocked(true);
+      }
       setUploadPct(null);
     }
   };
