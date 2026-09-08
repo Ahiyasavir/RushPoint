@@ -25,6 +25,7 @@ import { authErrorInfo } from '../lib/authError';
 import { ToastHost } from './toast';
 import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
+import { TAP_TEXT } from '../lib/interaction';
 import { resolvePublicCreatorRoute } from '../lib/publicCreatorPath';
 
 const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
@@ -325,7 +326,7 @@ function LoginScreen() {
           {mode === 'in' && (
             <div className="text-end -mt-1.5">
               <button type="button" onClick={forgotPassword} disabled={busy}
-                className="text-xs text-[--ink-3] hover:text-ink-fire transition-colors disabled:opacity-40">
+                className={`${TAP_TEXT} px-2 -me-2 text-xs text-[--ink-3] hover:text-ink-fire transition-colors disabled:opacity-40`}>
                 {t.auth.forgotPassword}
               </button>
             </div>
@@ -369,7 +370,7 @@ function LoginScreen() {
 
           <p className="text-center text-xs text-[--ink-3] pt-1">
             {mode === 'in' ? t.auth.noAccount : t.auth.haveAccount}{' '}
-            <button className="text-ink-fire font-semibold hover:underline"
+            <button className={`${TAP_TEXT} -my-2 px-1 text-ink-fire font-semibold hover:underline`}
               onClick={() => switchMode(mode === 'in' ? 'up' : 'in')}>
               {mode === 'in' ? t.auth.signUpFree : t.auth.signIn}
             </button>
@@ -445,7 +446,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
           <span className="font-brand text-xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
             RushPoint
           </span>
-          <a href="#signin" className="text-sm text-[--ink-3] hover:text-[--ink-1] transition-colors font-medium">{l.signInNav}</a>
+          <a href="#signin" className={`${TAP_TEXT} px-2 -mx-2 text-sm text-[--ink-3] hover:text-[--ink-1] transition-colors font-medium`}>{l.signInNav}</a>
         </div>
 
         {/* Hero */}
@@ -484,7 +485,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
                 Deliberately the bare join screen, not the demo — they have a code. */}
             <p className="mt-4 text-sm text-[--ink-3]">
               {l.playerCta}{' '}
-              <a href={PLAY_URL} className="font-semibold text-ink-fire underline underline-offset-2 hover:opacity-80">
+              <a href={PLAY_URL} className={`${TAP_TEXT} -my-2 px-1 font-semibold text-ink-fire underline underline-offset-2 hover:opacity-80`}>
                 {l.playerLink}
               </a>
             </p>
@@ -555,11 +556,11 @@ function Landing({ authCard }: { authCard: ReactNode }) {
         <footer className="border-t border-[--rp-border] py-6 text-center text-xs text-[--ink-3] space-y-2">
           <p>{l.footerText}</p>
           <p className="flex items-center justify-center gap-3">
-            <a href="/privacy" target="_blank" rel="noreferrer" className="hover:text-[--ink-1] hover:underline transition-colors">{l.privacyLink}</a>
+            <a href="/privacy" target="_blank" rel="noreferrer" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>{l.privacyLink}</a>
             <span aria-hidden="true">·</span>
-            <a href="/terms" target="_blank" rel="noreferrer" className="hover:text-[--ink-1] hover:underline transition-colors">{l.termsLink}</a>
+            <a href="/terms" target="_blank" rel="noreferrer" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>{l.termsLink}</a>
             <span aria-hidden="true">·</span>
-            <a href="mailto:legal@rushpoint.app" className="hover:text-[--ink-1] hover:underline transition-colors">legal@rushpoint.app</a>
+            <a href="mailto:legal@rushpoint.app" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>legal@rushpoint.app</a>
           </p>
         </footer>
       </div>

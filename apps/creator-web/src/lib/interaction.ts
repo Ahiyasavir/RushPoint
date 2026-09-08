@@ -57,3 +57,21 @@ export const TAP_INLINE = 'inline-flex items-center justify-center w-11 h-11 -m-
  * Pair it with `gap-2` on the container — the spacing is half the rule.
  */
 export const TAP_CLUSTER = 'inline-flex items-center justify-center w-9 h-9';
+
+/**
+ * A TEXT-styled control — a link or a button whose copy is its whole visual.
+ *
+ * Its width comes from the text, so only the height needs declaring: styled down
+ * to inline text a <button> or <a> is line-height tall, ~18-22px, under the WCAG
+ * 2.2 AA floor. Found by MEASURING the deployed landing page in a browser rather
+ * than by reading source — a source scan cannot know a control's rendered height,
+ * which is exactly why scripts/test-creator-tap-targets.ts stays scoped to
+ * glyph-only buttons and does not guess at this case.
+ *
+ * play-web reached the same shape first (its LegalFooter: "Visually quiet, but a
+ * REAL 44px tap target"); this is that decision, written down for this app.
+ *
+ * Inside a SENTENCE, pair it with `-my-2` so a 44px control adds only ~28px to
+ * the line box instead of shoving the paragraph apart.
+ */
+export const TAP_TEXT = 'inline-flex items-center justify-center min-h-11';
