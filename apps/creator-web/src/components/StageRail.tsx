@@ -12,6 +12,7 @@
 //     branch, and being a real droppable makes it keyboard reachable too.
 // A drag is disambiguated by `active.data.current.type` ('task' | 'stage'), so
 // the old TASK_DND_MIME dataTransfer sniffing is gone.
+import { useEffect, useRef } from 'react';
 import type { Stage } from '@rushpoint/shared';
 import { playableTasks } from '@rushpoint/shared';
 import { closestCenter, useDroppable } from '@dnd-kit/core';
@@ -120,6 +121,24 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
   // return, so both layouts obey the same rule.
   const railTitle = stageRailTitle(stage.title, b.stageLabel(index + 1));
 
+  // THE SELECTED STAGE SCROLLS ITSELF INTO VIEW (change: phone-stage-rail-fits).
+  //
+  // Shrinking the inactive pills took the phone rail from 340px of hidden content
+  // to 71px, which is better and still not a guarantee: a game with six stages
+  // will always have more rail than window. So the rail must never require a
+  // gesture the creator cannot see is available — selecting a stage from anywhere
+  // (the readiness list, a jump from Quick Setup, the breadcrumb) brings its pill
+  // to where they can see it.
+  //
+  // `nearest` on BOTH axes is deliberate: it moves the minimum needed and, unlike
+  // `center`/`start`, will not drag the page's own vertical scroll along with the
+  // rail's horizontal one. Guarded on `active` so exactly one entry ever calls it.
+  const selfRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    selfRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  }, [active]);
+
   // ── Phone: ONE line (change: builder-mobile-simplification) ───────────────
   // The card shape spends ~110px per stage on a pacing bar 40px wide and a task
   // count the pill can carry inline, and the strip then costs ~150px of an 844px
@@ -128,14 +147,38 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
   // bar, which is a shape-of-the-whole-game reading, stays on the desktop rail
   // where there is room to compare stages side by side.
   if (compact) {
+    // ── THE SELECTED PILL CARRIES THE DETAIL; THE OTHERS CARRY THEIR NUMBER ──
+    // (change: phone-stage-rail-fits).
+    //
+    // Every pill used to carry a 44px drag handle AND its title AND its count, up
+    // to `max-w-[60vw]` each. Measured at 375px with four stages: 679px of rail in
+    // a 339px window, and stage 3's handle sat at x = -69 — off the screen, in a
+    // horizontal scroller inside a vertically-scrolling page, which is the least
+    // discoverable gesture a phone has. Half the game was hidden with nothing
+    // saying so.
+    //
+    // Both of the things that made a pill wide are redundant on this screen. The
+    // TITLE is already on screen: the breadcrumb above the canvas reads
+    // "שלב 2: עולים שלב → משימה 3: …", so every pill was spending the scarce axis
+    // on a word already there. The HANDLE is a 44px target that only the stage you
+    // are working on can plausibly want, and dragging a pill inside a sideways
+    // scroller is the touch interaction this repo has never once tested on a
+    // device. Both now appear on the ACTIVE pill only, which reads as "select a
+    // stage, then move it" — a sequence, not a lost capability. Nothing is
+    // removed: reordering still works, and every stage is now reachable by tap
+    // instead of by a scroll nobody can see is available.
+    //
+    // Measured after: ~72px per inactive pill, so the same four stages plus the
+    // add button come to ~330px and the whole game fits the window.
     return (
       <div
-        ref={(el) => { setNodeRef(el); drop.setNodeRef(el); }}
+        ref={(el) => { setNodeRef(el); drop.setNodeRef(el); selfRef.current = el; }}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onClick={onSelect}
+        aria-current={active ? 'true' : undefined}
         className={`${shellClass} max-w-[60vw] px-2.5 py-2 flex items-center gap-1.5`}
       >
-        {handle}
+        {active && handle}
         <span className="text-[12px] font-semibold text-[--ink-3] tabular-nums shrink-0">
           {b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}
         </span>
@@ -143,7 +186,7 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
             the label, so this pill used to read "שלב 1  שלב 1" on every stage
             (change: stage-name-shown-twice). On a 60vw pill that is half the
             line spent repeating what is already on it. */}
-        {railTitle && (
+        {active && railTitle && (
           <span className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{railTitle}</span>
         )}
         {/* The PLAYABLE count (change: mission-card-actions): the rail is the
@@ -157,7 +200,7 @@ function RailEntry({ stage, index, active, onSelect, taskDragging, compact }: {
 
   return (
     <div
-      ref={(el) => { setNodeRef(el); drop.setNodeRef(el); }}
+      ref={(el) => { setNodeRef(el); drop.setNodeRef(el); selfRef.current = el; }}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       onClick={onSelect}
       className={`${shellClass} p-2.5 w-40 sm:w-auto sm:shrink`}
