@@ -1517,6 +1517,10 @@ export default function BuilderPage() {
           quickSetupInlineBar={qsVisible && qsStep && qsCardInline ? (
             <QuickSetupBar
               inline
+              /* Guided is the layout that puts this card in its own column from
+                 `lg` up (see ContextPanel), which is where its height cap must
+                 lift (change: guided-card-should-not-scroll). */
+              beside={qsFocusMode}
               step={qsStep}
               index={quickSetupProgress(qsState, qsSteps).step - 1}
               total={qsSteps.length}
@@ -3378,6 +3382,11 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
           `lg:flex-row` and not a second layout. */}
       {guided ? (
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row lg:items-stretch">
+          {/* The column is `lg:w-[20rem]` and owns its own height, so the card
+              inside it is unbounded and never scrolls (change:
+              guided-card-should-not-scroll). `overflow-y-auto` stays on the COLUMN
+              as a last resort for a viewport shorter than the instruction itself —
+              a container that can scroll is not the same as a card that does. */}
           <div className="shrink-0 lg:w-[20rem] lg:overflow-y-auto flex flex-col">{quickSetupStep}</div>
           <div className="flex-1 min-h-0 p-2.5">
             <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}

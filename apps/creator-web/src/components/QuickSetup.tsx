@@ -218,7 +218,7 @@ export function QuickSetupWelcome({ remaining, onBegin, onSkip }: {
  */
 export function QuickSetupBar({
   step, index, total, copyKey, taskTitle, summary, scope,
-  onNext, onBack, onDefer, onClose, inline = false,
+  onNext, onBack, onDefer, onClose, inline = false, beside = false,
 }: {
   step: TemplateWizardStep;
   index: number;
@@ -256,6 +256,17 @@ export function QuickSetupBar({
    * sync, and this one is already translated in two dictionaries.
    */
   inline?: boolean;
+  /**
+   * This card is in its OWN COLUMN beside the work, not stacked above it
+   * (change: guided-card-should-not-scroll).
+   *
+   * The height cap below exists because a stacked card eats the height of the very
+   * control the step is about. Beside, it competes with nothing — the column is
+   * its own — so capping it there bought nothing and cost a scrollbar inside a
+   * three-sentence instruction, on a screen with room to spare. The creator's
+   * words: "you have enough room, you don't need scrolling here."
+   */
+  beside?: boolean;
 }) {
   const q = useT().quickSetup;
   /**
@@ -321,7 +332,14 @@ export function QuickSetupBar({
       // three short sentences into six lines. The breakpoint was answering a
       // question about the window when the constraint was the panel.
       className={inline
-        ? `shrink-0 max-h-[45%] overflow-y-auto m-2 mb-0 px-4 py-3 flex flex-col gap-2 ${GLASS_CARD}`
+        ? `shrink-0 m-2 mb-0 px-4 py-3 flex flex-col gap-2 ${GLASS_CARD} ${
+            // The cap lifts EXACTLY where the parent stops stacking. `beside` means
+            // the guided layout, which is `lg:flex-row` — so below `lg` this card is
+            // still above the mission and the cap is load-bearing, and from `lg` up
+            // it has its own column, competes with nothing, and must not scroll.
+            beside
+              ? 'max-h-[45%] overflow-y-auto lg:max-h-none lg:overflow-visible'
+              : 'max-h-[45%] overflow-y-auto'}`
         : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] max-h-[60vh] overflow-y-auto px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
       // The logical insets only mean anything for the floating variant; in flow the
       // element is already laid out by its parent.
