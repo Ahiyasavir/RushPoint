@@ -9,6 +9,7 @@ import { finalizeRun } from '../services/calls';
 import { useLiveRuns } from '../hooks/useLiveRuns';
 import { barMode, runConsolePath, selectFeaturedRun, shouldShowBar } from '../hooks/liveRunsPolling';
 import { useIsMobile } from '../hooks/useMediaQuery';
+import { TAP_INLINE } from '../lib/interaction';
 
 // Persistent floating control bar for a creator's live run (docs/wave-a/active-run-bar.md).
 // Mounted app-wide as a sibling of DialogHost/ToastHost so it survives route changes:
@@ -121,7 +122,7 @@ export default function ActiveRunBar() {
           onClick={() => setExpanded(false)}
           aria-label={r.collapseBar}
           title={r.collapseBar}
-          className="shrink-0 w-8 h-8 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+          className={`${TAP_INLINE} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}
         >
           <span aria-hidden="true">✕</span>
         </button>

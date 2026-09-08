@@ -17,6 +17,7 @@ import { db } from '../services/firebase';
 import { Badge, Button, TagChips } from './ui';
 import { useT } from './LanguageContext';
 import { buildGalleryGameDetail, buildGalleryGameMissions, type GalleryGameMission } from '../lib/galleryGameDetail';
+import { TAP_TARGET } from '../lib/interaction';
 
 /** Never render an unbounded public list inside a modal. */
 const MISSION_LIST_CAP = 60;
@@ -157,8 +158,8 @@ export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy
               onClick={onClose}
               aria-label={gl.detailClose}
               title={gl.detailClose}
-              className="shrink-0 text-[--ink-3] hover:text-[--ink-1] text-sm rounded
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+              className={`${TAP_TARGET} -me-2 shrink-0 text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-sm rounded-lg
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}
             >✕</button>
           </div>
 

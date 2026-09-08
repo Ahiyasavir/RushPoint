@@ -75,6 +75,7 @@ import { storyFieldCount } from '../lib/wizardSections';
 import { stageSettingsState, stageChips } from '../lib/stageSettings';
 import type { StageSettingsState } from '../lib/stageSettings';
 import { parseTagsInput } from '../lib/tags';
+import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
 import { buildSavePayload } from '../lib/savePayload';
 import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib/gamePresentation';
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
@@ -1161,13 +1162,13 @@ export default function BuilderPage() {
             Desktop only: at phone width these live in the header overflow menu
             below (change: builder-simplification-round-3). */}
         {!isMobile && (
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={undo}
             disabled={!canUndo}
             title={`${b.undo} (Ctrl+Z)`} // i18n-ignore keyboard shortcut
             aria-label={b.undo}
-            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+            className={`${TAP_CLUSTER} rounded-lg border border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors`}
           >
             ↶
           </button>
@@ -1176,7 +1177,7 @@ export default function BuilderPage() {
             disabled={!canRedo}
             title={`${b.redo} (Ctrl+Shift+Z)`} // i18n-ignore keyboard shortcut
             aria-label={b.redo}
-            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+            className={`${TAP_CLUSTER} rounded-lg border border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors`}
           >
             ↷
           </button>
@@ -2257,7 +2258,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
           <label className="flex items-center gap-1 text-xs text-[--ink-3]">
             <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />{b.regRequired}
           </label>
-          {f.id !== 'name' && <button className="text-ink-alert text-xs" aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
+          {f.id !== 'name' && <button className={`${TAP_INLINE} shrink-0 rounded text-ink-alert hover:bg-rp-alert/10 text-xs`} aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
         </div>
       ))}
       <Button variant="subtle" onClick={add}>+ {b.regAddField}</Button>
@@ -2805,7 +2806,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 </label>
               )}
               {game.stages.length > 1 && (
-                <button className="text-neon-red text-sm shrink-0" aria-label={b.deleteStage} title={b.deleteStage}
+                <button className={`${TAP_INLINE} rounded text-neon-red hover:bg-neon-red/10 text-sm shrink-0`} aria-label={b.deleteStage} title={b.deleteStage}
                   onClick={() => void confirmRemoveStage(activeStage)}>✕</button>
               )}
             </div>
@@ -3342,7 +3343,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
             <span className="text-sm font-semibold text-[--ink-1] truncate">{b.stageSettings}</span>
           </div>
           <button onClick={onClose} aria-label={b.closePanel}
-            className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+            className={`${TAP_TARGET} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}>
             ✕
           </button>
         </div>

@@ -27,6 +27,7 @@ import {
 } from '@rushpoint/shared';
 import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
+import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
 import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
@@ -337,7 +338,7 @@ export default function TaskWizard({
           </div>
         )}
         <button onClick={onClose} aria-label={closeLabel}
-          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+          className={`${TAP_TARGET} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}>
           ✕
         </button>
       </div>
@@ -520,7 +521,7 @@ function OptInGroup({ title, onHide, hideLabel, children }: {
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-[--ink-3] uppercase tracking-wider">{title}</span>
         <button type="button" onClick={onHide} aria-label={hideLabel} title={hideLabel}
-          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] leading-none">
+          className={`${TAP_INLINE} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] leading-none`}>
           ✕
         </button>
       </div>
@@ -786,7 +787,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
             <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-[--rp-border]">
               <span className="font-medium text-sm text-[--ink-1]">{b.mapModalTitle}</span>
               <button onClick={() => setExpanded(false)} aria-label={b.closePanel}
-                className="w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">✕</button>
+                className={`${TAP_TARGET} rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}>✕</button>
             </div>
             <div className="flex-1 min-h-0 p-3 flex flex-col">
               <LocationStep coordinates={task.coordinates} onChange={onChange} fill anchors={gameAnchors} />
@@ -892,17 +893,17 @@ function OrderingItemsEditor({ task, set, b, revealError, onTouch }: {
       <Label dense>{b.orderingItemsLead}</Label>
       <div className="space-y-1">
         {rows.map((row, i) => (
-          <div key={row.id} className="flex items-center gap-1.5">
+          <div key={row.id} className="flex items-center gap-2">
             <span className="text-[13px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
             <Input dense value={row.text} dir="auto" className="flex-1 min-w-0"
               onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
             <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={`${b.mediaMoveUp} ${i + 1}`}
-              className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[--surface-2] text-xs">↑</button>
+              className={`${TAP_CLUSTER} text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 rounded hover:bg-[--surface-2] disabled:hover:bg-transparent text-xs`}>↑</button>
             <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label={`${b.mediaMoveDown} ${i + 1}`}
-              className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[--surface-2] text-xs">↓</button>
+              className={`${TAP_CLUSTER} text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 rounded hover:bg-[--surface-2] disabled:hover:bg-transparent text-xs`}>↓</button>
             <button onClick={() => apply(rows.filter((r) => r.id !== row.id))} disabled={rows.length <= 1}
               aria-label={`${b.deleteTask} ${i + 1}`}
-              className="text-neon-red shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs">✕</button>
+              className={`${TAP_CLUSTER} text-neon-red shrink-0 rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>✕</button>
           </div>
         ))}
       </div>
@@ -973,7 +974,7 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
                   onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
                 <button onClick={() => apply(rows.filter((r) => r.id !== row.id))} disabled={rows.length <= SURVEY_CHOICES_MIN}
                   aria-label={`${b.deleteTask} ${i + 1}`}
-                  className="text-neon-red shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs">✕</button>
+                  className={`${TAP_INLINE} text-neon-red shrink-0 rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>✕</button>
               </div>
             ))}
           </div>
@@ -1308,13 +1309,17 @@ function MediaSection({ task, set, b, gameId, replace }: {
                 <Input dense value={m.caption ?? ''} onChange={(e) => setCaption(i, e.target.value)}
                   placeholder={b.mediaCaptionPlaceholder} dir="auto" />
               </div>
-              <div className="flex flex-col gap-1 shrink-0">
+              {/* Three ADJACENT glyph controls, so TAP_CLUSTER (36px) not the 44px
+                  box: stacked 44s would make this row taller than the thumbnail it
+                  belongs to, and `gap-2` keeps the mandated 8px between them so
+                  "reorder" and "delete this picture" can't merge into one strip. */}
+              <div className="flex flex-col gap-2 shrink-0">
                 <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={b.mediaMoveUp}
-                  className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 text-xs">↑</button>
+                  className={`${TAP_CLUSTER} rounded text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>↑</button>
                 <button onClick={() => move(i, 1)} disabled={i === media.length - 1} aria-label={b.mediaMoveDown}
-                  className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 text-xs">↓</button>
+                  className={`${TAP_CLUSTER} rounded text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>↓</button>
                 <button onClick={() => removeAt(i)} aria-label={b.mediaRemove}
-                  className="text-neon-red hover:opacity-70 text-xs">✕</button>
+                  className={`${TAP_CLUSTER} rounded text-neon-red hover:bg-neon-red/10 text-xs`}>✕</button>
               </div>
             </li>
           ))}
@@ -2005,7 +2010,8 @@ function StepsEditor({ steps, onChange, b }: { steps: TaskStep[]; onChange: (s: 
             <Input dense value={s.prompt} onChange={(e) => update(i, { prompt: e.target.value })} placeholder={b.stepPrompt} dir="auto" />
             <Input dense value={s.answer ?? ''} onChange={(e) => update(i, { answer: e.target.value })} placeholder={b.stepAnswer} dir="auto" />
           </div>
-          <button className="text-neon-red text-sm mt-2.5" aria-label={`${b.deleteTask} ${i + 1}`} onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
+          <button className={`${TAP_INLINE} shrink-0 rounded text-neon-red hover:bg-neon-red/10 text-sm mt-1.5`}
+            aria-label={`${b.deleteTask} ${i + 1}`} onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
       <Button variant="ghost" className="text-xs" onClick={() => onChange([...steps, { id: uuid(), prompt: '', answer: '' }])}>

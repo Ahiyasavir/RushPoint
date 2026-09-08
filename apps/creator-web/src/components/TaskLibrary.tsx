@@ -12,6 +12,7 @@ import { useModalDismiss } from '../hooks/useModalDismiss';
 // Extracted so the third field-default seeder in this app can be tested against
 // the other two (see lib/libraryTask.ts for why that matters).
 import { libraryTaskToTask } from '../lib/libraryTask';
+import { TAP_TARGET } from '../lib/interaction';
 
 export default function TaskLibrary({ onInsert, onClose }: {
   onInsert: (task: Task) => void;
@@ -62,7 +63,8 @@ export default function TaskLibrary({ onInsert, onClose }: {
       <Card className="w-full max-w-2xl p-5 max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold">{b.libraryTitle}</h3>
-          <button className="text-[--ink-2] hover:text-[--ink-1] text-sm" aria-label={b.closePanel} title={b.closePanel} onClick={onClose}>✕</button>
+          <button className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] text-sm`}
+            aria-label={b.closePanel} title={b.closePanel} onClick={onClose}>✕</button>
         </div>
         <div className="flex gap-2 mb-4">
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={b.librarySearchPlaceholder}

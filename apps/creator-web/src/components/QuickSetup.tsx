@@ -25,6 +25,7 @@ import type { TemplateWizardStep } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { Button } from './ui';
 import ConfettiBurst from './ConfettiBurst';
+import { TAP_TARGET } from '../lib/interaction';
 import type { QuickSetupCopyKey } from '../lib/quickSetup';
 
 /** How long the ring stays on the target after we focus it. */
@@ -247,7 +248,7 @@ export function QuickSetupIntro({ step, index, total, taskTitle, summary, scope,
           onClick={onClose}
           aria-label={q.close}
           title={q.close}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none"
+          className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}
         >
           ✕
         </button>
@@ -346,7 +347,7 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
           onClick={onClose}
           aria-label={q.close}
           title={q.close}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none"
+          className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}
         >
           ✕
         </button>

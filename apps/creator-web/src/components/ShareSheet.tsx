@@ -5,6 +5,7 @@ import { Button } from './ui';
 import { useT } from './LanguageContext';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
+import { TAP_TARGET } from '../lib/interaction';
 
 // Reusable share modal: QR + copyable link + native share sheet. Used to recruit
 // players to a game's public promo page before an event, and reusable anywhere a
@@ -56,7 +57,10 @@ export function ShareSheet({
       <div className="bg-app-card border border-glass-border rounded-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold">{title}</h3>
-          <button onClick={onClose} aria-label={b.closePanel} title={b.closePanel} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
+          {/* -me-2 pulls the enlarged box back flush with the panel's padding, so
+              the 44px target costs the header no width it did not already have. */}
+          <button onClick={onClose} aria-label={b.closePanel} title={b.closePanel}
+            className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}>✕</button>
         </div>
 
         {notPublic && (

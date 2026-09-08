@@ -18,6 +18,7 @@ import { useT } from './LanguageContext';
 import {
   buildGalleryTaskDetail, type GalleryDetailRowKey, type GalleryTaskTypeKey,
 } from '../lib/galleryTaskDetail';
+import { TAP_TARGET } from '../lib/interaction';
 
 // MapLibre (~500 KB) is pulled by OPENING a detail, not by importing this file,
 // so the Builder's mission picker does not drag the map into its own path.
@@ -136,8 +137,8 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
               onClick={onClose}
               aria-label={gl.detailClose}
               title={gl.detailClose}
-              className="shrink-0 text-[--ink-3] hover:text-[--ink-1] text-sm rounded
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+              className={`${TAP_TARGET} -me-2 shrink-0 text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-sm rounded-lg
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}
             >✕</button>
           </div>
 

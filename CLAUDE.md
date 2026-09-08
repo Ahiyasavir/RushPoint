@@ -306,7 +306,9 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   `test-firestore-op-counter` (per-callable read/write attribution under interleaved calls) ·
   `test-fs-ops-aggregate` (the log aggregator, incl. refusing to invent a record) ·
   `test-heatmap-sampling-fidelity` (a distance-sampled track still ranks cells like the
-  unsampled one — standing still must not become the hottest cell). The runner
+  unsampled one — standing still must not become the hottest cell) ·
+  `test-creator-tap-targets` (every GLYPH-only `<button>` in creator-web declares a real
+  box — see the tap-target gotcha below). The runner
   **auto-discovers** every `scripts/test-*.ts` — drop a file in and it is in the gate.
 
 > ⚠️ **Stop with Ctrl+C** so `--export-on-exit` persists emulator data.
@@ -916,6 +918,29 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   utility naming a token absent from the app's own `tailwind.config.js`, scoped to our own
   namespaces (`app`/`rp`/`ink`/`glass`/`accent`/`danger`) so every finding is certain rather
   than a guess about Tailwind's default palette.
+- **A house tap-target size is only real once it is DECLARED and GATED — the sibling drift
+  above happened again, in the other app.** An audit of creator-web found exactly the shape the
+  entry below describes: two ✕ buttons had been grown to a real 44×44 box, each with a comment
+  explaining why, while **fourteen siblings were still bare glyphs**. A text-styled `<button>`
+  with no size class is only line-height tall — ~16–20px, under the WCAG 2.2 AA floor of 24×24
+  CSS px — and among them were the button that DELETES A STAGE, every modal's close, the toast
+  dismiss and the map's topo⇄satellite switch. Nothing was loud: the class strings are valid,
+  every gate was green, and a screenshot shows a control that merely looks subtle. Fixed
+  structurally, the way play-web already had it: the sizes are declared ONCE in
+  `apps/creator-web/src/lib/interaction.ts` — `TAP_TARGET` (44×44, a control that owns its box),
+  `TAP_INLINE` (44×44 with `-m-2`, so a lone glyph in a dense row keeps a real hit area while
+  contributing only 28px of layout) and `TAP_CLUSTER` (36×36, the DOCUMENTED exception for
+  ADJACENT glyph controls, paired with `gap-2` — three 44px boxes plus gaps is 148px, which on a
+  375px phone pushes the row's own input off the useful part of the screen). They are plain
+  STATIC literals, never an interpolated class builder: Tailwind only sees static strings, so a
+  computed "44px" compiles to no CSS and silently renders at the old size.
+  `scripts/test-creator-tap-targets.ts` gates it, and is scoped to the ONE case that IS decidable
+  from source — a `<button>` whose entire content is a glyph has no text to give it size, so its
+  box is exactly what its own class string says. Anything with a word in it, a dynamic body, or a
+  `// tap-target-ignore` marker is skipped rather than guessed at. The guard imports the real
+  constants, so shrinking one fails the gate instead of moving the goalposts. Measured after the
+  fix in a real browser at 375px: close 44×44, cluster 36×36 at exactly 8px apart, and the
+  ordering row's input still 203px wide.
 - **A 44px tap-target fix applied to one control does not travel to its siblings.** The join
   screen's staff button carries the comment *"Visually 11px to stay quiet, but a REAL 44px tap
   target … styling it down to inline text shrank it to 17px."* Three links in the same

@@ -22,6 +22,7 @@ import {
   createGameShareLink, listGameShareLinks, revokeGameShareLink, updateGameShareLink,
 } from '../services/calls';
 import { sharedGamePath } from '../lib/publicCreatorPath';
+import { TAP_TARGET } from '../lib/interaction';
 
 type LinkRow = GameShareLink & { refusal?: ShareLinkRefusal | null };
 
@@ -154,7 +155,7 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
             onClick={onClose}
             aria-label={s.close}
             title={s.close}
-            className="text-[--ink-3] hover:text-[--ink-1] text-lg leading-none shrink-0"
+            className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}
           >
             ✕
           </button>

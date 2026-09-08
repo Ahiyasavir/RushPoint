@@ -11,6 +11,7 @@ import {
   createGameFromTemplate, importGameFile, type TemplateGroupEntry,
 } from '../services/calls';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
+import { TAP_TARGET } from '../lib/interaction';
 import { composeGame, previewShape, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
 import SmartBuildReveal, { type RevealStage } from '../components/SmartBuildReveal';
 import { readRecentPicks, recordRecentPicks } from '../lib/recentBankPicks';
@@ -1178,7 +1179,7 @@ export default function DashboardPage() {
               </div>
               <button onClick={() => { setPicking(false); setChosen(null); }}
                 aria-label={b.closePanel} title={b.closePanel}
-                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
+                className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors`}>✕</button>
             </div>
             {/* Body — bounded to the modal; the compact cards fit without scrolling
                 on a normal screen, and only this region (never the page) scrolls on
