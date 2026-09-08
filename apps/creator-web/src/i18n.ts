@@ -321,6 +321,10 @@ const HE = {
     emptyBody:  'עצב שלבים, הוסף משימות גיאוגרפיות והשק משחק חי לקבוצה שלך.',
     untitledGame: 'משחק ללא שם',
     loadGamesFailed: 'טעינת המשחקים נכשלה',
+    // כשלון טעינה הוא לא חשבון ריק (change: failed-load-is-not-an-empty-account).
+    // הנוסח אומר במפורש שהמשחקים לא נמחקו, כי זה בדיוק מה שהמסך הקודם שידר.
+    loadFailedBody: 'המשחקים שלכם במקומם. לא הצלחנו להביא אותם כרגע. אפשר לנסות שוב בעוד רגע.',
+    loadFailedRetry: 'ניסיון נוסף',
     loading: [
       'מחממים את משחקי השדה שלך',
       'אוספים את ההרפתקאות האחרונות שלך',
@@ -675,6 +679,9 @@ const HE = {
       'טוענים את מה שאפשר לשחזר',
     ],
     loadFailed:   'טעינת המשחקים שנמחקו נכשלה',
+    // כשלון טעינה הוא לא פח ריק (change: failed-load-is-not-an-empty-account).
+    loadFailedBody: 'לא הצלחנו להביא את הרשימה כרגע. שום דבר לא נמחק לצמיתות בינתיים.',
+    loadFailedRetry: 'ניסיון נוסף',
     restoreFailed:'השחזור נכשל. ייתכן שהמשחק כבר נמחק לצמיתות.',
     purgeFailed:  'המחיקה לצמיתות נכשלה',
     purgeDialogTitle:  'מחיקה לצמיתות',
@@ -2940,6 +2947,11 @@ const EN: typeof HE = {
     emptyBody:  'Design stages, drop in geolocated missions, and launch a live game for your group.',
     untitledGame: 'Untitled game',
     loadGamesFailed: 'Failed to load games',
+    // A failed load is not an empty account (change:
+    // failed-load-is-not-an-empty-account). The copy says outright that nothing
+    // was lost, because that is exactly what the previous screen implied.
+    loadFailedBody: 'Your games are still there. We could not fetch them just now. Try again in a moment.',
+    loadFailedRetry: 'Try again',
     loading: [
       'Warming up your field games',
       'Gathering your latest adventures',
@@ -3242,6 +3254,9 @@ const EN: typeof HE = {
       'Loading what you can restore',
     ],
     loadFailed:   'Could not load your deleted games',
+    // A failed load is not an empty bin (change: failed-load-is-not-an-empty-account).
+    loadFailedBody: 'We could not fetch the list just now. Nothing has been permanently deleted in the meantime.',
+    loadFailedRetry: 'Try again',
     restoreFailed:'Restore failed. The game may already have been erased permanently.',
     purgeFailed:  'Could not delete the game permanently',
     purgeDialogTitle:  'Delete permanently',

@@ -33,15 +33,25 @@ export default function TrashPage() {
   const restoreAction = useAsyncAction(restore, (g: TrashedGame) => g.id);
   const purgeAction = useAsyncAction(purge, (g: TrashedGame) => g.id);
 
+  // COULD NOT LOAD is not AN EMPTY BIN
+  // (change: failed-load-is-not-an-empty-account). RunHistoryPage already states
+  // this rule in its own catch — "'you have no runs' and 'we could not reach the
+  // server' are opposite messages, and a creator shown the wrong one goes looking
+  // for data they think they lost" — and it had not travelled to here or to the
+  // dashboard. It matters most on THIS page: someone opens the trash precisely to
+  // find out whether a deleted game can still be recovered, and a failed load told
+  // them the bin was empty, which reads as "it is gone for good".
+  const [loadFailed, setLoadFailed] = useState(false);
   async function load() {
     try {
       const res = await listDeletedGames();
       setGames(res.games);
       setRetentionDays(res.retentionDays);
+      setLoadFailed(false);
     } catch (e) {
       console.error('[trash] listDeletedGames failed:', e);
       setGames((prev) => prev ?? []);
-      await dialog.alert(tr.loadFailed);
+      setLoadFailed(true);
     }
   }
   useEffect(() => { void load(); }, []);
@@ -93,7 +103,14 @@ export default function TrashPage() {
         <p className="text-[--ink-3] mt-2 text-sm max-w-xl">{tr.subtitle(retentionDays)}</p>
       </div>
 
-      {games.length === 0 ? (
+      {loadFailed && games.length === 0 ? (
+        <EmptyState
+          icon="⚠️"
+          title={tr.loadFailed}
+          body={tr.loadFailedBody}
+          action={<Button onClick={() => { void load(); }}>{tr.loadFailedRetry}</Button>}
+        />
+      ) : games.length === 0 ? (
         <EmptyState icon="🗑️" title={tr.emptyTitle} body={tr.emptyBody} />
       ) : (
         <div className="space-y-3">

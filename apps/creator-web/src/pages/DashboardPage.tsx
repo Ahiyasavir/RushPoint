@@ -217,6 +217,9 @@ export default function DashboardPage() {
   };
 
   const [games, setGames] = useState<Game[] | null>(() => readGamesCache(user?.uid));
+  // COULD NOT LOAD is a different state from HAVE NONE
+  // (change: failed-load-is-not-an-empty-account). See the render below.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [picking, setPicking] = useState(false);
   // The composed game waiting to be revealed (change: smart-build-delight).
   // Non-null only between "the game was created" and "the creator continued", so
@@ -362,10 +365,12 @@ export default function DashboardPage() {
         localStorage.removeItem(TOUR_FIRST_GAME_KEY);
       } catch { /* storage unavailable */ }
       setGames(games);
+      setLoadFailed(false);
     } catch (e) {
       // Escape the spinner on a first-load failure, but never blank an already-
       // loaded dashboard if a post-mutation refresh fails.
       setGames((prev) => prev ?? []);
+      setLoadFailed(true);
       // Never leak a raw Firebase error CODE ("not-found", "unavailable", …) into
       // the UI — a load failure is always technical, not user-actionable. Show the
       // friendly localized message and keep the real error in the console.
@@ -963,7 +968,38 @@ export default function DashboardPage() {
       )}
 
       {/* ── Empty state ───────────────────────────────────────────────────── */}
-      {games.length === 0 ? (
+      {/* "WE COULD NOT LOAD" IS NOT "YOU HAVE NONE"
+          (change: failed-load-is-not-an-empty-account).
+ 
+          A failed `listGames` sets `games` to `[]` so the spinner cannot trap the
+          creator — right — and the ONLY thing that said so was a modal alert. Behind
+          that alert the page rendered the first-run empty state, so dismissing it
+          left a creator with fifteen games looking at "start your first field game"
+          and an invitation to create one. Their work reads as deleted, and the only
+          way back is knowing to reload a page that is not obviously wrong.
+ 
+          This is not a rare path. `listGames` goes to the self-hosted API, and a
+          redeploy of it has a ~40 second window of 503s; the 2026-08-28 Firestore
+          quota exhaustion failed EVERY load for hours. Reproduced here with the
+          emulator down: `functions/internal`, and the screen offered to start a
+          first game.
+ 
+          So the failure keeps its own state and its own words, and it OFFERS THE
+          RETRY rather than requiring a page reload — `load()` is already idempotent
+          and is what the alert should have been able to trigger all along. The
+          empty state now means what it says: this account really has no games. */}
+      {loadFailed && games.length === 0 ? (
+        <EmptyState
+          icon="⚠️"
+          title={d.loadGamesFailed}
+          body={d.loadFailedBody}
+          action={
+            <Button disabled={busy} onClick={() => { void load(); }} className="!px-8 !py-3 !text-base">
+              {d.loadFailedRetry}
+            </Button>
+          }
+        />
+      ) : games.length === 0 ? (
         <EmptyState
           icon="🗺️"
           title={d.emptyTitle}
