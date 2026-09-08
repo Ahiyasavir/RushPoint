@@ -27,7 +27,7 @@ import {
 } from '@rushpoint/shared';
 import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
-import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
+import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET, TAP_TEXT } from '../lib/interaction';
 import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
@@ -621,49 +621,55 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
       {showModeChooser && (
       <div className="shrink-0">
         <Label>{b.fireQuestion}</Label>
-        {/* The two location choices lead (bigger, primary — this is the actual
-            decision), with "Advanced options" as a square toggle trailing them
-            (change: builder-location-step-polish). It used to be a small gear pill
-            squeezed onto the question row, easy to miss and cramped against the
-            question text; a full-height square with its own icon and label is both
-            more visible and reads as what it is — a secondary, optional control
-            beside the primary choice, not a peer of it. `items-stretch` (the flex
-            default) makes it match the choice row's height with no fixed number to
-            keep in sync. DOM order, not left/right classes, decides which SIDE it
-            lands on: RTL puts the first child on the right, so this naturally
-            mirrors correctly in LTR too. */}
-        <div className="flex items-stretch gap-2 mt-1.5">
-          <div className="flex-1 grid grid-cols-2 gap-2">
-            {CHOICES.map((c) => {
-              const active = choice === c.choice;
-              return (
-                <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
-                  className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-4 px-2 transition-colors ${
-                    active
-                      ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
-                      : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
-                  <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-7 h-7" />
-                  <span className="text-[14px] font-semibold leading-tight text-center">{c.label}</span>
-                  <span className="text-[13px] leading-tight text-center opacity-70">{c.sub}</span>
-                </button>
-              );
-            })}
-          </div>
+        {/* THE TWO CHOICES ARE THE ROW; ADVANCED IS NOT ONE OF THEM
+            (change: advanced-options-is-not-a-third-answer).
+ 
+            The previous revision here already said the goal — a control "beside
+            the primary choice, not a peer of it" — and the markup contradicted it.
+            Measured on a 375px phone: the gear rendered at the same y, the same
+            110px height (`items-stretch`), the same `border-2 rounded-xl`, and the
+            same icon-over-label composition as the two answers. Everything a
+            person reads shape from was identical; only the width differed. So the
+            question "where can this mission be done?" appeared to have three
+            answers, one of which was a settings drawer.
+ 
+            It moves out of the row, onto the description line below, as a text
+            control rather than a card. Nothing can be mistaken for an answer if it
+            is not shaped like one and not standing among them. Two consequences,
+            both wanted: the real choices go from 129px to ~160px each on a phone,
+            and the gear keeps a full 44px target via TAP_TEXT rather than being
+            the "small gear pill squeezed onto the question row" this comment's
+            ancestor was right to move away from. */}
+        <div className="grid grid-cols-2 gap-2 mt-1.5">
+          {CHOICES.map((c) => {
+            const active = choice === c.choice;
+            return (
+              <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
+                className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-4 px-2 transition-colors ${
+                  active
+                    ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
+                    : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
+                <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-7 h-7" />
+                <span className="text-[14px] font-semibold leading-tight text-center">{c.label}</span>
+                <span className="text-[13px] leading-tight text-center opacity-70">{c.sub}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-start justify-between gap-3 mt-1.5">
+          <p className="text-[13px] text-[--ink-3] leading-snug">
+            {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
+          </p>
           {choice === 'specific' && (
             <button type="button" onClick={() => setAdvOpen((o) => !o)} aria-expanded={advOpen}
               title={b.locAdvanced}
-              className={`shrink-0 w-20 sm:w-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 px-1.5 transition-colors ${
-                advOpen
-                  ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
-                  : 'border-[--rp-border] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
-              <span aria-hidden className="text-xl leading-none">⚙</span>
-              <span className="text-[13px] font-medium leading-tight text-center">{b.locAdvancedShort}</span>
+              className={`${TAP_TEXT} -my-2 shrink-0 gap-1.5 rounded-lg px-1 text-[13px] font-medium transition-colors ${
+                advOpen ? 'text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
+              <span aria-hidden className="text-base leading-none">⚙</span>
+              <span className="underline underline-offset-2">{b.locAdvancedShort}</span>
             </button>
           )}
         </div>
-        <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">
-          {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
-        </p>
       </div>
       )}
 
