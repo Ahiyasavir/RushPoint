@@ -20,7 +20,7 @@
 // reads the EFFECTIVE groups so a one-member (inert) group is never counted,
 // exactly as the server treats it.
 import type { Stage } from '@rushpoint/shared';
-import { effectiveExclusiveGroups } from '@rushpoint/shared';
+import { effectiveExclusiveGroups, maxCompletableTasks } from '@rushpoint/shared';
 import { storyFieldCount } from './wizardSections';
 
 export interface StageSettingsState {
@@ -53,8 +53,13 @@ export interface StageSettingsState {
 export function stageSettingsState(stage: Stage, opts: { isFirstStage: boolean }): StageSettingsState {
   const taskCount = stage.tasks.length;
 
-  const requiredApplies = taskCount > 1;
   const requiredValue = stage.requiredTaskCount ?? taskCount;
+  // Normally meaningless below two missions — but a STORED count above what the
+  // stage can yield blocks every save of the game, and the pane is the only place
+  // that offers the correction. Hiding the control there left the creator with a
+  // readiness row naming the stage, no control, and an autosave that never
+  // succeeded again. Offer it whenever it is the way out.
+  const requiredApplies = taskCount > 1 || requiredValue > maxCompletableTasks(stage);
   const requiredActive = requiredApplies && requiredValue < taskCount;
 
   const releaseApplies = !opts.isFirstStage;

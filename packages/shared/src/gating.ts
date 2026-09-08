@@ -83,6 +83,40 @@ export function partialStageStarvationWarning(stage: {
   return locationless > 0 && located > 0;
 }
 
+/**
+ * Strip prerequisite ids that are NOT ids of this stage's own tasks (and a task's
+ * reference to itself), returning the repaired task array.
+ *
+ * WHY THIS EXISTS. `unlockAfterTaskIds` is stage-scoped, and validateUnlockGraph
+ * turns a dangling id into a save-blocking ERROR — which the Builder's autosave
+ * surfaces as "stage X requires more missions than it can yield" and then refuses
+ * every subsequent save of the whole game. The creator cannot act on that: the
+ * prerequisite selector only lists missions of the SAME stage, so an id pointing
+ * at a mission that is no longer there is invisible AND unremovable. A dangling
+ * id is the one kind of unlock-graph corruption with no door out, so it is
+ * REPAIRED rather than reported. A self-reference goes with it (the selector never
+ * offers a mission itself, so that id is unreachable too); a CYCLE is deliberately
+ * left to validation — every mission in a cycle is on screen and can be unchecked.
+ *
+ * Pure and total: a non-array gate is left exactly as it is (validation still
+ * judges it), an emptied gate becomes `undefined` rather than `[]` so it reads as
+ * "no gate" everywhere, and a task that needed no repair is returned BY REFERENCE
+ * so a caller can detect "nothing changed" with `===`.
+ */
+export function pruneDanglingPrerequisites<T extends UnlockGraphTask>(
+  tasks: readonly T[] | null | undefined,
+): T[] {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const known = new Set(list.map((t) => t?.id).filter((id): id is string => !!id));
+  return list.map((t) => {
+    const gate = t?.unlockAfterTaskIds;
+    if (!Array.isArray(gate)) return t;
+    const kept = gate.filter((id) => id !== t.id && known.has(id));
+    if (kept.length === gate.length) return t;
+    return { ...t, unlockAfterTaskIds: kept.length > 0 ? kept : undefined };
+  });
+}
+
 export interface UnlockGraphReport {
   /** Save-blocking problems: self-reference, unknown/cross-stage id, cycle. */
   errors: string[];

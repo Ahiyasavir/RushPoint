@@ -7,7 +7,7 @@
 // how many completions a stage can yield is decided in exactly one place and this
 // file must not re-derive it, which is how the Builder came to offer "6 of 6" on a
 // stage of three alternative pairs.
-import { maxCompletableTasks } from '@rushpoint/shared';
+import { maxCompletableTasks, pruneDanglingPrerequisites } from '@rushpoint/shared';
 
 /** Moves the item at `from` to index `to`, returning a new array. Out-of-range or
  *  no-op moves return the original array unchanged. */
@@ -24,7 +24,7 @@ export function moveItem<T>(arr: T[], from: number, to: number): T[] {
  *  dependency-free for the test lane). */
 export interface ReorderStage {
   id: string;
-  tasks: { id: string }[];
+  tasks: { id: string; unlockAfterTaskIds?: string[] }[];
   requiredTaskCount?: number;
   /** Mutually exclusive task groups, stage scoped (change: builder-dnd-groups).
    *  Structurally identical to `ExclusiveTaskGroup` from @rushpoint/shared; kept
@@ -192,9 +192,22 @@ export function moveTaskBetweenStages<S extends ReorderStage>(
   const dest = stages[toStageIdx];
   const moved = source.tasks[taskIdx];
 
-  const sourceTasks = source.tasks.filter((_, i) => i !== taskIdx);
-  const destTasks = dest.tasks.slice();
-  destTasks.splice(clampIndex(toIndex ?? destTasks.length, destTasks.length), 0, moved);
+  // PREREQUISITES ARE STAGE SCOPED, exactly like the exclusive groups below, and
+  // a move breaks them in BOTH directions: the mission that leaves keeps ids of
+  // missions it left behind, and the ones left behind keep the id of the mission
+  // that went. Either dangling id is a save-BLOCKING validateUnlockGraph error
+  // (functions stagesProblems), so the Builder's autosave stops for the whole game
+  // — and the prerequisite selector only lists same-stage missions, so there is
+  // nothing on screen the creator could uncheck to get out of it. Repairing here
+  // costs the moved mission its gate, which is the same call `duplicateTask`
+  // already makes: a gate that named other missions cannot survive leaving them.
+  const sourceTasks = pruneDanglingPrerequisites(source.tasks.filter((_, i) => i !== taskIdx));
+  const destTasks = pruneDanglingPrerequisites(dest.tasks.slice());
+  destTasks.splice(
+    clampIndex(toIndex ?? destTasks.length, destTasks.length),
+    0,
+    moved.unlockAfterTaskIds ? { ...moved, unlockAfterTaskIds: undefined } : moved,
+  );
 
   // The source stage LOSES a task and (below) that task's group membership, so its
   // ceiling has to be recomputed from the post-move shape, not the pre-move one

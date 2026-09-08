@@ -7,7 +7,7 @@ import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
 import { gameHasOperatorNotes, extractQuickSetupSteps } from '@rushpoint/shared';
-import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags } from '@rushpoint/shared';
+import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags, pruneDanglingPrerequisites } from '@rushpoint/shared';
 // Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
@@ -186,6 +186,29 @@ const arrowKeyCoordinates: KeyboardCoordinateGetter = (event, { context, current
   return { x: currentCoordinates.x + (targetRect.left - from.left), y: currentCoordinates.y + (targetRect.top - from.top) };
 };
 
+/**
+ * Structural corruption a creator cannot reach from the editor, repaired on load.
+ *
+ * Today that is exactly one thing: an `unlockAfterTaskIds` entry naming a mission
+ * that is not in the same stage. `validateUnlockGraph` calls it an error, the save
+ * door refuses the WHOLE game for it, and the readiness panel reports it on the
+ * stage as "requires more missions than it can yield" — a sentence about a number
+ * the creator cannot act on, because the id itself is rendered nowhere. Everything
+ * else readiness reports has a control behind it and is deliberately left alone.
+ *
+ * Returns the SAME object when nothing needed repair, so the caller can tell.
+ */
+function repairGame(game: Game): Game {
+  let changed = false;
+  const stages = game.stages.map((s) => {
+    const tasks = pruneDanglingPrerequisites(s.tasks);
+    if (tasks.every((t, i) => t === s.tasks[i])) return s;
+    changed = true;
+    return { ...s, tasks };
+  });
+  return changed ? { ...game, stages } : game;
+}
+
 function blankStage(order: number, title: string): Stage {
   // requiredTaskCount defaults to 1 (change: adaptive-difficulty-routing): a creator
   // who drops several tasks into one level almost always means "each team does ONE
@@ -357,9 +380,19 @@ export default function BuilderPage() {
     setError(null);
     void getGame({ gameId })
       .then(({ game }) => {
-        history.reset(game);
+        // REPAIR ON THE WAY IN (change: builder-dangling-prerequisite-wedge). A
+        // stage carrying a prerequisite id that belongs to no mission of that stage
+        // is refused by `updateGame` — so a game already holding one can never be
+        // saved again, and nothing in the editor shows the offending id (the
+        // prerequisite selector lists same-stage missions only). The move path that
+        // wrote them is fixed, but the games it already wrote are stored; loading
+        // one repaired leaves the game DIRTY, so the ordinary autosave persists the
+        // repair by itself. Reference-equal when there was nothing to repair, so a
+        // healthy game is never marked dirty by merely being opened.
+        const repaired = repairGame(game);
+        history.reset(repaired);
         savedSnapshot.current = serializeGame(game);
-        setStatus('saved');
+        setStatus(repaired === game ? 'saved' : 'unsaved');
       })
       .catch((e) => {
         setError(e instanceof Error ? e.message.replace('Firebase: ', '') : b.cannotLoad);
@@ -1249,7 +1282,12 @@ export default function BuilderPage() {
             if (!issue.stageId) return; // an empty game has nothing to navigate to
             setTab('build');
             setActiveStageId(issue.stageId);
-            if (issue.taskId) setFocusIssue({ stageId: issue.stageId, taskId: issue.taskId, nonce: Date.now() });
+            // A STAGE-level blocker (stageUnwinnable / stageHasNoTask) names no
+            // mission, and this used to simply return — so the row that says
+            // "clicking opens what needs fixing" opened nothing at all, on the one
+            // blocker whose fix is not in a mission editor. It is forwarded with an
+            // empty taskId, which StepStages reads as "open the STAGE".
+            setFocusIssue({ stageId: issue.stageId, taskId: issue.taskId ?? '', nonce: Date.now() });
           }}
         />
 
@@ -2653,6 +2691,15 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   // message already visible.
   useEffect(() => {
     if (!focusIssue) return;
+    // No mission named ⇒ the blocker is the STAGE's own (an unreachable completion
+    // count, an empty stage). The fix lives in the stage settings pane, so open
+    // THAT — closing it, which is what this effect did for every issue alike, left
+    // the creator on a stage with no indication of what to change.
+    if (!focusIssue.taskId) {
+      setEditing(null);
+      setSettingsOpen(true);
+      return;
+    }
     setSettingsOpen(false);
     setEditing({ taskId: focusIssue.taskId, revealAll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
