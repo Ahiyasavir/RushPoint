@@ -964,6 +964,31 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   inside the cutout. Invisible in a browser tab, where the inset is 0 and browser chrome hides
   it, so no desktop screenshot can ever show it. `.rp-safe-t` / `.rp-safe-t-flush` fix it;
   `scripts/test-top-overlay-stack.ts` keeps every full-height shell declaring its intent.
+- **A `sm:`/`lg:` breakpoint asks about the WINDOW, so a component inside a fixed-width panel
+  must not use one — and a component that renders both floating and in-panel needs two
+  answers, not one.** The Quick Setup step card is rendered in two places: floating (it really
+  does span the viewport) and inline at the top of the mission editor's column, whose width is
+  `min(500px, calc(100vw - 1.5rem))`. It carried ONE class string with `sm:flex-row`. On a
+  1400px viewport that row applied to a 482px card, so the `shrink-0` action cluster — a full
+  Hebrew sentence plus two buttons and a close box — took ~250px and left the text ~230px,
+  wrapping three short sentences into six lines. Nothing was loud: the classes are valid, the
+  breakpoint is CORRECT for the floating variant, and every gate was green. Combined with two
+  pieces of unbounded authored prose (the mission's description and the template author's
+  note, both rendered open), the card measured **387px of the column's 510px — 76%, leaving
+  113px for the mission it was instructing about**. The creator's words were "it completely
+  hides the whole mission", and they were describing the arithmetic exactly. Three fixes, all
+  three needed to reach 201px / 39%: inline always stacks; the template note is a disclosure,
+  collapsed, reset per step INSIDE the component (neither call site keys it — the same
+  crossing-state failure this file records for TaskRunner's entry components, and a reset in
+  the component cannot be forgotten by a third call site); and the inline variant is capped at
+  `max-h-[45%] overflow-y-auto`, so the mission keeps the majority of its own column for prose
+  nobody has written yet. **Two rules generalise. A card that carries authored text of unknown
+  length, above the thing it is instructing about, must be BOUNDED — clamping or collapsing is
+  what makes it short in practice, a cap is what makes it short in principle. And when a
+  component's width comes from its container rather than the viewport, a media query is
+  answering the wrong question: branch on the placement prop, not the breakpoint.** Measured
+  in a real browser at 1400x620, 1000x620 and 390x740 — a source scan cannot know a rendered
+  height, which is why no gate saw any of it.
 - **`text-zinc-*` is REVERSED in creator-web** (`tailwind.config.js` maps `zinc-700` → `#d6d3d1`),
   a leftover from the dark theme. On the light "Warm Trail" surfaces that is pale grey on beige
   (~1.2:1) — the map search results looked like a disabled control, which is most of why search
