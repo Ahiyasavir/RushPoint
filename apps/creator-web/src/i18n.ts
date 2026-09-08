@@ -2266,6 +2266,10 @@ const HE = {
     // מה שכתב מחבר התבנית — ציטוט, ולכן מסומן ככזה. בלי התווית הוא נקרא כאילו
     // המוצר עצמו כתב פסקה חצי-אנגלית מתחת לכותרת העברית (change: quick-setup-one-card).
     templateNote: 'מהתבנית:',
+    // ההערה של מחבר התבנית מקופלת כברירת מחדל (change: quick-setup-card-height).
+    // הכפתור אומר מה מסתתר מאחוריו, לא ״עוד״, כדי שאפשר יהיה להחליט בלי לפתוח.
+    templateNoteShow: 'הצגת ההערה מהתבנית',
+    templateNoteHide: 'הסתרת ההערה מהתבנית',
     back: 'הקודם',
     // Ends in its own full stop: this line now OPENS the instruction sentence
     // rather than heading a card, so the punctuation that joins it to what
@@ -4828,6 +4832,11 @@ const EN: typeof HE = {
     // it read as a paragraph the product itself had written, often in the other
     // language (change: quick-setup-one-card).
     templateNote: 'From the template:',
+    // Collapsed by default (change: quick-setup-card-height). The toggle names
+    // what is behind it rather than saying "more", so the choice can be made
+    // without opening it.
+    templateNoteShow: 'Show the template note',
+    templateNoteHide: 'Hide the template note',
     back: 'Back',
     // Ends in its own full stop — see the Hebrew note above.
     introTaskLabel: (task: string) => `Mission: ${task}.`,

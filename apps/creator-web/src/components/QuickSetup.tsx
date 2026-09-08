@@ -19,13 +19,13 @@
 // template author's note: nothing authored is thrown away, it just stops being the
 // voice the product itself speaks in. That authored text IS content, not a
 // dictionary key, so it alone renders with dir="auto".
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { TemplateWizardStep } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { Button } from './ui';
 import ConfettiBurst from './ConfettiBurst';
 import type { QuickSetupCopyKey } from '../lib/quickSetup';
-import { TAP_TARGET } from '../lib/interaction';
+import { TAP_TARGET, TAP_TEXT } from '../lib/interaction';
 
 /** How long the ring stays on the target after we focus it. */
 const PULSE_MS = 2600;
@@ -272,6 +272,20 @@ export function QuickSetupBar({
   inline?: boolean;
 }) {
   const q = useT().quickSetup;
+  /**
+   * Is the template author's note expanded? (change: quick-setup-card-height)
+   *
+   * Collapsed by default, and reset HERE on every step rather than by a `key` at
+   * the call site. This component is NOT remounted between steps — neither call
+   * site keys it, and the flow advances by swapping the `step` prop — so without
+   * this the note stayed open from one mission into the next and the card arrived
+   * at its tallest on a mission the creator had not asked to see a note about.
+   * That is the failure CLAUDE.md already records for TaskRunner's entry
+   * components; the reset lives inside the component because a third call site
+   * cannot forget it.
+   */
+  const [noteOpen, setNoteOpen] = useState(false);
+  useEffect(() => { setNoteOpen(false); }, [step.id]);
   const headline = copyLine(q.copy, copyKey);
   const isTask = scope === 'task' && typeof taskTitle === 'string';
   const where = isTask ? q.introTaskLabel(taskTitle as string) : scope ? q.introGameLabel : '';
@@ -287,15 +301,42 @@ export function QuickSetupBar({
       // Logical inset (not left/right) so the card centres identically in RTL and
       // LTR; the inline style carries it because Tailwind has no logical-inset
       // utility and a template-string class would not exist at build time.
-      // STACKED on a phone, side-by-side from `sm` up. As one row it was unreadable
-      // on a narrow screen: the action cluster below is `shrink-0` and holds a full
-      // Hebrew sentence ("חזור לזה מאוחר יותר") plus a button and a close box, so on
-      // a ~390px viewport it claimed almost the whole width and left the text column
-      // — `flex-1 min-w-0`, which is allowed to shrink to nothing — about two words
-      // per line, turning three sentences into a tall ribbon down one edge.
+      // FLOATING: stacked on a phone, side-by-side from `sm` up. As one row it was
+      // unreadable on a narrow screen: the action cluster below is `shrink-0` and
+      // holds a full Hebrew sentence ("חזור לזה מאוחר יותר") plus a button and a
+      // close box, so on a ~390px viewport it claimed almost the whole width and
+      // left the text column — `flex-1 min-w-0`, which is allowed to shrink to
+      // nothing — about two words per line, turning three sentences into a tall
+      // ribbon down one edge. The viewport breakpoint is right HERE, where the
+      // card really does span the viewport, and wrong inline (see below).
+      // THE CARD MAY NOT EAT THE COLUMN IT INSTRUCTS ABOUT
+      // (change: quick-setup-card-height). Inline, this sits at the top of the
+      // mission editor's own column, `shrink-0`, above the mission it is talking
+      // about — and it carries two pieces of prose nobody here wrote: the
+      // mission's description and the template author's note. Measured in the
+      // editor's 500px column at a 620px viewport: the card was 387px of the
+      // column's 510px, 76%, leaving 113px for the mission itself. The creator's
+      // words for it were "it completely hides the whole mission", and they were
+      // describing the arithmetic exactly.
+      //
+      // Collapsing the template note (below) and stacking (next paragraph) are
+      // what make the card short in practice — measured on the same step, same
+      // window: 387px down to 201px, 76% of the column down to 39%. This cap is
+      // what makes "it can never take the column" TRUE for content nobody has
+      // written yet, in a language whose lines are longer, on a shorter window.
+      // 45% leaves the mission the majority of its own column by construction,
+      // and `overflow-y-auto` is the honest way to hold a note that still will
+      // not fit, because the alternative is pushing the ask off the card.
+      // INLINE ALWAYS STACKS. `sm:flex-row` is a VIEWPORT query, and inline this
+      // card's width is its COLUMN's — the mission editor pane, `min(500px, …)`.
+      // On a 1400px viewport the row applied to a 482px card: the action cluster
+      // is `shrink-0` and holds a full Hebrew sentence plus two buttons and a
+      // close box, so it took ~250px and left the text column ~230px, wrapping
+      // three short sentences into six lines. The breakpoint was answering a
+      // question about the window when the constraint was the panel.
       className={inline
-        ? `shrink-0 m-2 mb-0 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`
-        : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
+        ? `shrink-0 max-h-[45%] overflow-y-auto m-2 mb-0 px-4 py-3 flex flex-col gap-2 ${GLASS_CARD}`
+        : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] max-h-[60vh] overflow-y-auto px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
       // The logical insets only mean anything for the floating variant; in flow the
       // element is already laid out by its parent.
       // `insetInlineEnd` reserves the mission editor pane's own width — the exact
@@ -339,12 +380,41 @@ export function QuickSetupBar({
           {context !== '' && <span className="text-[--ink-2]" dir="auto">{context} </span>}
           <span className="font-medium">{headline}</span>
         </p>
-        {/* The template author's own note — a QUOTATION, and marked as one. */}
+        {/* The template author's own note — a QUOTATION, marked as one, and
+            COLLAPSED (change: quick-setup-card-height).
+ 
+            It is the single longest thing on this card and the least urgent: prose
+            somebody else wrote, about a mission the sentence above already names,
+            frequently in the other language. Open by default it was most of the
+            card's height — a paragraph of English under a Hebrew instruction, sat
+            between the ask and the mission the creator came here to edit.
+ 
+            A disclosure, not a deletion: the note is often the only place a
+            template says WHY a stop matters, and a creator who wants it must be
+            able to have it without leaving the flow. The toggle names what is
+            behind it rather than saying "more", so the choice can be made without
+            opening it. */}
         {step.instructionPrompt && step.instructionPrompt !== headline && (
-          <p className="text-xs text-[--ink-2] leading-snug mt-1 ps-2 border-s-2 border-[--rp-border]" dir="auto">
-            <span className="text-[--ink-3]">{q.templateNote} </span>
-            {step.instructionPrompt}
-          </p>
+          <div className="mt-1">
+            <button
+              type="button"
+              onClick={() => setNoteOpen((v) => !v)}
+              aria-expanded={noteOpen}
+              /* A text-styled button's width comes from its copy, so only the
+                 height needs declaring; `-my-2` keeps a 44px target from shoving
+                 the card's own rows apart. Same shape as the front door's links
+                 (commit b69e20f) — the rule travels or it is not a rule. */
+              className={`${TAP_TEXT} -my-2 text-xs text-[--ink-3] underline underline-offset-2 hover:text-[--ink-1]`}
+            >
+              {noteOpen ? q.templateNoteHide : q.templateNoteShow}
+            </button>
+            {noteOpen && (
+              <p className="text-xs text-[--ink-2] leading-snug mt-1 ps-2 border-s-2 border-[--rp-border]" dir="auto">
+                <span className="text-[--ink-3]">{q.templateNote} </span>
+                {step.instructionPrompt}
+              </p>
+            )}
+          </div>
         )}
         <QuickSetupProgressTrail index={index} total={total} />
       </div>
