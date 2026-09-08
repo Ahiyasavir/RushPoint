@@ -547,6 +547,10 @@ export default function RunConsolePage() {
   // alone would do nothing in exactly that case — which is the most common one
   // during a live run, when the chip and the panel belong to the same section.
   const sectionPaneRef = useRef<HTMLElement | null>(null);
+  // The rail's own active tab, so it can scroll ITSELF into view — the rail is a
+  // horizontal scroller on a phone and the pane is not, so bringing the pane into
+  // view says nothing about whether you can see which section you are in.
+  const activeSectionTabRef = useRef<HTMLButtonElement | null>(null);
   const [revealNonce, setRevealNonce] = useState(0);
   const openSection = useCallback((id: SectionId) => {
     setSectionPref(id);
@@ -558,6 +562,9 @@ export default function RunConsolePage() {
     // `nearest` moves the minimum: on a desktop where the pane is already in
     // view this is a no-op, so the fix costs the wide layout nothing.
     sectionPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // `inline: 'nearest'` on the tab moves the RAIL's horizontal scroll only, and
+    // `block: 'nearest'` keeps it from fighting the pane's vertical scroll above.
+    activeSectionTabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   }, [revealNonce]);
   // Live DOM handles for the PINNED panels, so a chip whose target is pinned can
   // scroll it into view + flash it. The registry is populated as the pinned lanes
@@ -1433,20 +1440,41 @@ export default function RunConsolePage() {
               aria-label={rc.sectionsHeader}
               className="flex lg:flex-col items-stretch gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0"
             >
+              {/* PHONE: A ROW OF NAMES, NOT A ROW OF CARDS
+                  (change: run-console-rail-fits).
+ 
+                  Measured on a live run at 375px: five `w-44` cards with a summary
+                  line each came to 912px of rail in a 343px window — under two
+                  sections visible, the other three behind a sideways scroll inside
+                  a vertically-scrolling page, during a live event. This is the
+                  same defect the Builder's stage rail had, in the other component;
+                  the fix had not travelled.
+ 
+                  The summary line goes below `lg`, not because it is unimportant
+                  but because it is REDUNDANT THERE: the "needs you now" chip strip
+                  directly above this rail already ranks every urgency, and it is
+                  what a host actually reads under pressure. Dropping it here takes
+                  the card from 176px to its title's own width.
+ 
+                  Five Hebrew section names still cannot all fit 343px, so the
+                  guarantee is the same one the stage rail makes: the ACTIVE
+                  section scrolls itself into view, so you can always see where you
+                  are even when you cannot see everywhere you could go. */}
               {sections.map((s: RunConsoleSection) => (
                 <button
                   key={s.id}
+                  ref={s.id === activeSection ? activeSectionTabRef : undefined}
                   type="button"
                   aria-current={s.id === activeSection ? 'true' : undefined}
                   onClick={() => openSection(s.id)}
-                  className={`text-start rounded-xl border p-2.5 transition-colors w-44 shrink-0 lg:w-auto lg:shrink ${
+                  className={`text-start rounded-xl border px-3 py-2 lg:p-2.5 transition-colors shrink-0 lg:w-auto lg:shrink ${
                     s.id === activeSection
                       ? 'border-rp-fire bg-rp-fire/10'
                       : 'border-[--rp-border] hover:bg-[--surface-2]'
                   }`}
                 >
-                  <div className="text-sm font-medium text-[--ink-1]">{groupTitles[s.id]}</div>
-                  <div className="mt-1">{groupMeta(s.summary)}</div>
+                  <div className="text-sm font-medium text-[--ink-1] whitespace-nowrap lg:whitespace-normal">{groupTitles[s.id]}</div>
+                  <div className="mt-1 hidden lg:block">{groupMeta(s.summary)}</div>
                 </button>
               ))}
             </nav>
