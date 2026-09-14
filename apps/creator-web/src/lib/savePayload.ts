@@ -53,6 +53,14 @@ export const BUILDER_EDITABLE_FIELDS = [
   'photoFeedEnabled',
   // Power-ups (change: power-ups). Undefined means off (default).
   'powerUpsEnabled',
+  // change: late-joiner-autostart. MUST be here: buildSavePayload copies only these
+  // fields AND the Builder diffs the payload, so a field missing from this list never
+  // saves *and* never registers as a change - the control round-trips through local
+  // state and looks perfectly alive.
+  'autoStartLateJoiners',
+  'autoApproveAllMedia',
+  // change: every-member-plays.
+  'requireAllMembersOnline',
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Undefined means
   // off (default) = finalizeRun auto publishes, the prior behaviour.
   'manualLeaderboardReveal',

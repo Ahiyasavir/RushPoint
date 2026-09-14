@@ -438,6 +438,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     registrationFields, branding, tags, coverImage, approxLocation,
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
+    autoStartLateJoiners, autoApproveAllMedia, requireAllMembersOnline,
     instructions, pinnedFirst, wizardSteps,
   } = data as UpdateGamePayload;
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
@@ -543,6 +544,14 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
   if (powerUpsEnabled !== undefined)    updates.powerUpsEnabled = powerUpsEnabled;
+  // change: late-joiner-autostart. `autoStartLateJoiners` starts a team playing
+  // without being asked, so it is stored as a STRICT boolean: a legacy truthy value
+  // must never be read as the creator having asked for that.
+  if (autoStartLateJoiners !== undefined) updates.autoStartLateJoiners = autoStartLateJoiners === true;
+  if (autoApproveAllMedia !== undefined)  updates.autoApproveAllMedia = autoApproveAllMedia === true;
+  // change: every-member-plays. STRICT boolean for the same reason as above: this one
+  // holds a team out of a game they turned up to play.
+  if (requireAllMembersOnline !== undefined) updates.requireAllMembersOnline = requireAllMembersOnline === true;
   // Task-library priority (change: task-library-priority-boost). Cascades into
   // every published task's PublicTask.pinnedFirst on the next publishGame call —
   // this write alone has no gallery effect until the game is (re-)published.

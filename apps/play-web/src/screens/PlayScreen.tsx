@@ -583,7 +583,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
             <div className="w-full max-w-sm rounded-xl bg-app-raised border border-rp-amber/40 px-4 py-3 text-start space-y-1.5">
               <p className="text-sm font-bold text-ink-amber">{t.play.heldTitle}</p>
               <p className="text-sm text-zinc-400">
-                {hold.kind === 'guardian_consent' ? t.play.heldConsent : t.play.heldGeneric}
+                {hold.kind === 'guardian_consent' ? t.play.heldConsent
+                  /* change: every-member-plays. The only hold a team can clear
+                     themselves, so the copy says HOW rather than just that they are
+                     waiting. `offerHelp` stays true underneath it: a team whose sixth
+                     member went home must not be trapped. */
+                  : hold.kind === 'members_offline' ? t.play.heldMembersOffline
+                    : t.play.heldGeneric}
               </p>
               <p className="text-sm text-zinc-400">{t.play.heldAskHost}</p>
             </div>

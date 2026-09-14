@@ -248,6 +248,10 @@ const HE = {
     audioPickFile: '🎙️ הקליטו עם הטלפון',
     submitVideo: 'שלח סרטון',
     videoTooLarge: ({ mb }: { mb: number }) => `הסרטון גדול מדי (עד ${mb} מ"ב). צלמו סרטון קצר יותר.`,
+    // אותו מצב, אבל כשההקלטה מתוך האפליקציה זמינה (change: video-capture-profile).
+    // מצלמה של הטלפון ב־4K מייצרת בערך 400 מ"ב לדקה, אז גם קליפ של עשר שניות יכול
+    // לחרוג. "צלמו קצר יותר" פשוט לא יעזור שם, וההקלטה מתוך האפליקציה כן.
+    videoTooLargeUseRecorder: ({ mb }: { mb: number }) => `הסרטון גדול מדי (עד ${mb} מ"ב). הקליטו דרך האפליקציה במקום, ככה הסרטון יוצא קטן ומהיר.`,
     videoTooShort: ({ sec }: { sec: number }) => `הסרטון קצר מדי. צריך לפחות ${sec} שניות.`,
     videoCameraDenied: 'הגישה למצלמה נדחתה. אפשרו גישה כדי לצלם.',
     videoUnsupported: 'הדפדפן הזה לא תומך בצילום ישיר. צלמו עם אפליקציית המצלמה של הטלפון ובחרו את הקובץ.',
@@ -279,6 +283,9 @@ const HE = {
     navigateAria: 'פתיחת הניווט אל נקודת המשימה',
     kmAway: ({ km }: { km: string }) => `${km} ק"מ מכאן`,
     gpsWarning: 'GPS לא זמין. לא ניתן לרשום מיקום. הפעילו GPS ונסו שוב, או פנו למארגן.',
+    // הקליטה גרועה מכדי להוכיח שהגעתם (change: arrival-needs-a-usable-fix).
+    // בכוונה לא נוסח של כישלון: השחקן כנראה במקום הנכון, רק הטלפון עוד לא יודע.
+    fixTooCoarse: 'עוד לא רואים אתכם מספיק מדויק. עמדו רגע במקום ונסו שוב.',
     gpsUnavailable: 'GPS אינו זמין במכשיר זה או שהרשאה נדחתה.',
     gpsRetrying: 'ממשיכים לנסות לאתר אתכם. ברגע שיהיה איתות הכל יימשך מעצמו.',
     gpsContactHost: 'פנו למארגן אם אתם צריכים עזרה להשלים את המשימה.',
@@ -321,6 +328,11 @@ const HE = {
     chooseImage: 'בחרו קובץ תמונה.',
     imageTooLarge: ({ mb }: { mb: number }) => `התמונה גדולה מדי (עד ${mb} מ"ב).`,
     checkinFailed: 'הצ׳ק אין נכשל',
+    // כל אחד עושה את החלק שלו (change: every-member-plays). הכפתור מוצג גם למי
+    // שלא שולט במכשיר, כי זו הפעולה היחידה שהוא רשאי לעשות.
+    contributeCta: 'עשיתי את החלק שלי',
+    contributorsProgress: ({ done, need }: { done: number; need: number }) =>
+      `${done} מתוך ${need} עשו את החלק שלהם במשימה הזאת`,
   },
   badges: {
     title: 'התגים שלך',
@@ -548,6 +560,9 @@ const HE = {
     // only person who can release them.
     heldTitle: 'עוד לא יצאתם לדרך',
     heldConsent: 'המשחק הזה מחכה לאישור של הורה או אפוטרופוס עבורכם. לא עשיתם שום דבר לא בסדר.',
+    // ההמתנה היחידה שהקבוצה יכולה לפתור בעצמה (change: every-member-plays),
+    // ולכן הניסוח אומר איך ולא רק שמחכים.
+    heldMembersOffline: 'במשחק הזה כל אחד משחק מהטלפון שלו. שלחו את קוד הקבוצה למי שעוד לא מחובר, ותצאו לדרך יחד.',
     heldGeneric: 'המארגן צריך לסדר משהו לפניכם לפני שתוכלו להתחיל. לא עשיתם שום דבר לא בסדר.',
     heldAskHost: 'גשו למארגן המשחק ותגידו לו שאתם מחכים. רק הוא יכול לשחרר אתכם ולהתחיל.',
     shareProgress: '📸 שתפו את ההתקדמות',
@@ -608,6 +623,11 @@ const HE = {
     attachFailed: 'ההצטרפות נכשלה. בדקו את קוד המכשירים.',
     panelTitle: 'הטלפונים של הקבוצה',
     inviteHint: 'חברי הקבוצה מצטרפים עם הקוד:',
+    // כמה מאיתנו עוד לא על טלפון (change: every-member-plays). מוצג רק כשידוע:
+    // במשחק שלא אסף שמות חברי צוות אין מספר אמיתי, ולהמציא אחד זה שקר בטוח בעצמו.
+    membersMissing: ({ n }: { n: number }) => n === 1
+      ? 'עוד חבר אחד בקבוצה לא מחובר. שלחו לו את הקוד כדי שישחק גם הוא.'
+      : `עוד ${n} מהקבוצה לא מחוברים. שלחו להם את הקוד כדי שישחקו גם הם.`,
     copy: 'העתקה',
     copied: 'הועתק!',
     controllerBadge: 'שולט',
@@ -984,6 +1004,10 @@ const EN: typeof HE = {
     audioPickFile: '🎙️ Record with your phone',
     submitVideo: 'Submit video',
     videoTooLarge: ({ mb }: { mb: number }) => `That video is too large (max ${mb} MB). Film a shorter clip.`,
+    // Same situation, but with the in-app recorder available (change:
+    // video-capture-profile). A phone camera at 4K makes about 400MB a minute, so
+    // even a ten second clip can exceed the cap and filming shorter will not help.
+    videoTooLargeUseRecorder: ({ mb }: { mb: number }) => `That video is too large (max ${mb} MB). Record it in the app instead, which keeps the clip small and quick.`,
     videoTooShort: ({ sec }: { sec: number }) => `That clip is too short. It needs at least ${sec} seconds.`,
     videoCameraDenied: 'Camera access was denied. Allow it to film.',
     videoUnsupported: 'This browser cannot film directly. Record with your phone camera, then pick the file.',
@@ -1011,6 +1035,10 @@ const EN: typeof HE = {
     navigateAria: 'Open navigation to the mission location',
     kmAway: ({ km }: { km: string }) => `${km} km away`,
     gpsWarning: 'GPS unavailable. Location cannot be recorded. Enable GPS and try again, or contact your host.',
+    // The fix is too coarse to prove arrival (change: arrival-needs-a-usable-fix).
+    // Deliberately not phrased as a failure: the player is probably in the right
+    // place and the phone simply does not know it yet.
+    fixTooCoarse: 'We cannot see you precisely enough yet. Stand still for a moment and try again.',
     gpsUnavailable: 'GPS is not available on this device or was denied.',
     gpsRetrying: "We're still trying to find you. The moment there's a signal it resumes on its own.",
     gpsContactHost: 'Contact your host if you need help completing this mission.',
@@ -1051,6 +1079,11 @@ const EN: typeof HE = {
     chooseImage: 'Please choose an image file.',
     imageTooLarge: ({ mb }: { mb: number }) => `That image is too large (max ${mb} MB).`,
     checkinFailed: 'Check in failed',
+    // Everyone does their part (change: every-member-plays). The button is shown to a
+    // non controller too, because it is the only action their device may take.
+    contributeCta: 'I did my part',
+    contributorsProgress: ({ done, need }: { done: number; need: number }) =>
+      `${done} of ${need} have done their part of this mission`,
   },
   badges: {
     title: 'Your badges',
@@ -1267,6 +1300,9 @@ const EN: typeof HE = {
     // Held-team notice (change: held-team-visibility). See the Hebrew block above.
     heldTitle: 'You have not been started yet',
     heldConsent: 'This game is waiting on a parent or guardian approval for you. You did nothing wrong.',
+    // The only hold a team can clear themselves (change: every-member-plays), so the
+    // copy says HOW rather than just that they are waiting.
+    heldMembersOffline: 'In this game everyone plays from their own phone. Send the team code to whoever is not connected yet, and you will start together.',
     heldGeneric: 'The host has something to sort out for you before you can start. You did nothing wrong.',
     heldAskHost: 'Find the host and tell them you are waiting. Only they can release you and start you off.',
     shareProgress: '📸 Share our progress',
@@ -1323,6 +1359,12 @@ const EN: typeof HE = {
     attachFailed: 'Could not join. Check the device code.',
     panelTitle: "Your team's phones",
     inviteHint: 'Teammates join with the code:',
+    // How many of us are not on a phone yet (change: every-member-plays). Shown only
+    // when it is knowable: a game that never collected member names has no real
+    // number here, and inventing one would be a confident lie.
+    membersMissing: ({ n }: { n: number }) => n === 1
+      ? 'One teammate is not connected yet. Send them the code so they can play too.'
+      : `${n} teammates are not connected yet. Send them the code so they can play too.`,
     copy: 'Copy',
     copied: 'Copied!',
     controllerBadge: 'In control',

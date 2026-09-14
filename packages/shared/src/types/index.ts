@@ -310,6 +310,19 @@ export interface Task {
   difficulty: number;            // 1–10
   estimatedMinutes: number;
   expectedDurationMinutes?: number;  // for Dynamic Time Bonus calculation
+  // How many DISTINCT devices must each do their part before this mission can be
+  // completed (change: every-member-plays). Absent or 0 means none, which is every
+  // existing mission.
+  //
+  // A contribution is ADDITIVE: the controller still submits. This exists because the
+  // device model makes every other teammate a spectator by construction
+  // (`assertController`), which is how one person doing the mission advanced the whole
+  // team while the rest stood around.
+  //
+  // Reduced to what the team can actually achieve at completion time - see
+  // `effectiveContributorRequirement` - so a mission authored for four contributors and
+  // played by a team of two is never unwinnable.
+  requiredContributors?: number;
   pointValue: number;
   maxConcurrentTeams: number;   // real station contention — 1 for a single physical
                                  // resource, high ("no queue here") for an open space;
@@ -613,6 +626,33 @@ export interface Game {
   // every existing game keeps the feed on. Enforced write-side in the functions
   // (rules cannot conditionally gate feedItems reads on this flag).
   photoFeedEnabled?: boolean;
+  // A team that joins AFTER the organizer pressed start (change:
+  // late-joiner-autostart). When true, `joinRun` launches it immediately instead of
+  // leaving it registered forever. OFF by default and read as a LITERAL `true`,
+  // because taking the start button away removes the organizer's "everyone ready?"
+  // moment, and this flag starts a team playing on its own.
+  //
+  // Guardian consent is strictly upstream: a consent gated game never auto starts a
+  // late joiner, whatever this says. See shared/lateJoiner.
+  //
+  // The console's stranded team strip does NOT consult this. The organizer who never
+  // turned it on is exactly the organizer whose team sat 27 minutes.
+  autoStartLateJoiners?: boolean;
+  // Run every media submission through automatic approval (change:
+  // late-joiner-autostart). Copied onto the RUN at launch and read from there, never
+  // from the template mid run: an operational choice on the template is replayed by
+  // every later run, copied by duplicate/export/publish, and rewritten wholesale by
+  // the Builder. Equivalent to setting `smart.autoApprove` on every media mission,
+  // without touching a single task.
+  autoApproveAllMedia?: boolean;
+  // Every declared member must be on their own phone before the team plays
+  // (change: every-member-plays). OFF by default and read as a LITERAL `true`: this
+  // holds a team out of a game they turned up to play.
+  //
+  // FAILS OPEN on an unknown headcount. `memberCount` is only meaningful when the game
+  // collects member names, so holding on it would block a team for a question they were
+  // never asked. See shared/teamParticipation.
+  requireAllMembersOnline?: boolean;
   // Power-ups (change: power-ups): when true, each completed task has a
   // seeded-deterministic ~25% chance to award a power-up (×2 next task or +15
   // flat). Default false — existing games are untouched. Never rolls on the
@@ -875,6 +915,20 @@ export interface Run {
   // Routing resolves it via effectiveTaskStatus(); the completion path never reads
   // it, so a team already holding a paused task still finishes and scores it.
   taskStatusOverrides?: Record<string, StationStatus>;
+  // When the organizer first started a cohort (change: late-joiner-autostart).
+  // `startTeams` is point in time and used to leave NO trace on the run, so nothing
+  // downstream could tell "joined before the start" from "joined after it and was
+  // stranded". That is how a team sat 27 minutes unnoticed in run
+  // ijI9JMITSf8C9heN1Cwp. Stamped ONCE, on the first start; a second press does not
+  // move it, because the question it answers is "has play begun", not "when was the
+  // last batch launched".
+  teamsStartedAt?: string;
+  // This run approves every media submission automatically (change:
+  // late-joiner-autostart). Copied from the game at launch so an operational choice
+  // is never written into the template later runs replay. Read by
+  // submitStationPhoto alongside the per task `smart.autoApprove`, which still wins
+  // on its own.
+  autoApproveAllMedia?: boolean;
   // Retention tombstones, written by the maintenance sweeps (server only). Both
   // make their sweep idempotent — a stamped run is never re-scanned.
   //   piiPrunedAt       raw participant PII destroyed (90 days)
@@ -1024,6 +1078,13 @@ export interface RunTaskRecord {
   // so a reload / GPS loss / offline spell can never re-seal a task the player has
   // already reached. Until it is set, the sanitizer ships only the sealed stub.
   arrivedAt?: string;
+  // Was the team let through WITHOUT the fix proving it (change:
+  // arrival-needs-a-usable-fix)? Set only when the grace window opened on a fix too
+  // coarse to place them inside the radius. Purely an organizer-facing record: it
+  // changes no score, gates nothing, and is never shown to the participant - telling
+  // a player 'you got in on a technicality' would document the way through the gate
+  // this flag exists to detect.
+  arrivalUnverified?: boolean;
   // Test mode (change: test-mode-hidden-scoring): what the participant actually
   // submitted, and whether it was right. Written ONLY on a run whose game seals
   // scoring, inside the SAME transaction that scores the answer, so a submission can
@@ -1136,8 +1197,27 @@ export interface RunTeam {
   discoveryState?: import('./../discoveryPoi').TeamDiscoveryState;
   activeTaskId?: string | null;  // mirror for getStationTeams query
   launched: boolean;
+  // When this team joined the run. Written by joinRun since long before it was
+  // typed here; declared now because the console needs it to tell a team waiting
+  // BEFORE the organizer pressed start from one stranded AFTER it
+  // (change: late-joiner-autostart). Optional: legacy documents may lack it.
+  joinedAt?: string;
   startedAt?: string;
   finishedAt?: string;
+  // When this team was FIRST refused a check-in for a coarse fix, per task
+  // (change: arrival-needs-a-usable-fix). ISO instants, keyed by taskId.
+  //
+  // A FLAT MAP ON THE TEAM, DELIBERATELY NOT A FIELD ON THE TASK RECORD. The task
+  // records live inside the `stages` array, and CLAUDE.md is explicit that an array
+  // element can never be dotted-path-updated - it coerces the array to a map. Writing
+  // one stamp would therefore need a read-modify-write of the whole stages array,
+  // inside a transaction, on a REFUSAL path that runs before any transaction exists.
+  // A plain nested object merges in one write.
+  //
+  // Not cleaned up: one short string per task a team struggled at, on a document
+  // that is pruned with the run. Clearing it on success would also throw away the
+  // only evidence that the team was ever held.
+  coarseFixSince?: Record<string, string>;
   // Smart station streak
   smartStreak?: number;
   streakMultiplier?: number;
@@ -1173,6 +1253,14 @@ export interface RunTeam {
   }>;
   // Per-sequence-task progress: taskId → number of steps completed so far.
   taskStepProgress?: Record<string, number>;
+  // Who has done their part of a mission (change: every-member-plays):
+  // taskId -> the DISTINCT device uids that contributed.
+  //
+  // A contribution is additive and never a second route to completing a mission: the
+  // controller still submits. It exists because the device model makes every other
+  // teammate a spectator by construction, which is how "one person does the mission and
+  // the team advances" happened.
+  taskContributions?: Record<string, string[]>;
   // Shared team devices (change: shared-team-devices). Absent on legacy docs —
   // the founding uid (id) is then the sole attached device and the controller.
   deviceUids?: string[];
@@ -1527,6 +1615,11 @@ export interface TeamSummary {
   activeStageOrder: number | null;
   finished: boolean;
   launched: boolean;
+  /** When the team joined (change: late-joiner-autostart). Null on a legacy row. */
+  joinedAt?: string | null;
+  /** Declared people with no phone attached; null when unknowable
+   *  (change: every-member-plays). */
+  membersNotConnected?: number | null;
   startedAt: string | null;
   finishedAt: string | null;
 }
@@ -1587,6 +1680,13 @@ export interface UpdateGamePayload {
   photoFeedEnabled?: boolean;
   // Power-ups toggle (change: power-ups). Default false when absent.
   powerUpsEnabled?: boolean;
+  // Late joiner auto start + run wide media approval (change: late-joiner-autostart).
+  // Both default false when absent, so every existing game is untouched.
+  autoStartLateJoiners?: boolean;
+  autoApproveAllMedia?: boolean;
+  // Every declared member on their own phone (change: every-member-plays). Default
+  // false when absent.
+  requireAllMembersOnline?: boolean;
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Default false
   // when absent ⇒ finalizeRun auto-publishes the final board, today's behaviour.
   manualLeaderboardReveal?: boolean;

@@ -114,7 +114,13 @@ export const launchRun     = callable<{ gameId: string; testDrive?: boolean }, {
 // `heldForConsent` counts teams the server refused to start because the game
 // requires guardian consent and none is recorded (change: expose-enforced-settings).
 // Optional so an older backend simply reports nothing rather than breaking.
-export const startTeams    = callable<{ gameId: string; runId: string; teamIds?: string[] }, { launched: number; heldForConsent?: number }>('startTeams');
+// `heldForMembers` counts teams held because not every declared member is on their own
+// phone (change: every-member-plays). Optional, like heldForConsent, so an older backend
+// reports nothing rather than breaking.
+export const startTeams    = callable<
+  { gameId: string; runId: string; teamIds?: string[] },
+  { launched: number; heldForConsent?: number; heldForMembers?: number }
+>('startTeams');
 export const skipStage     = callable<{ gameId: string; runId: string; teamId: string }, { ok: boolean }>('skipStage');
 // Skip ONE mission for ONE team, keeping them inside the same stage
 // (change: skip-single-task). `taskId` omitted means "the mission this team is on
@@ -125,6 +131,10 @@ export const skipTaskForTeam = callable<
   {
     ok: boolean; taskId: string; stageCompleted: boolean;
     requiredTaskCount: number; requirementLowered: boolean;
+    // What the skip PAID (change: live-ops-feedback-loop). A single mission skip now
+    // pays the same consolation skipStage pays, so the console can say so instead of
+    // the organizer computing it by hand and paying it as a manual bonus.
+    consolation?: number;
     nextTaskId: string | null; nextReason: string | null;
   }
 >('skipTaskForTeam');
@@ -232,6 +242,20 @@ export interface RunTeamRow {
   activeStageOrder: number | null;
   finished: boolean;
   launched: boolean;
+  /** When the team joined (change: late-joiner-autostart). Null on a legacy row. */
+  joinedAt?: string | null;
+  /**
+   * How many of this team's declared people have no phone attached
+   * (change: every-member-plays).
+   *
+   * A COUNT, never a person. Null means the headcount is unknowable, which is the
+   * common case - `memberCount` is only meaningful when the game collects member
+   * names - so a console must render null as "cannot tell", never as zero.
+   */
+  membersNotConnected?: number | null;
+  // Check-ins this team was let into on a fix that could not prove it
+  // (change: arrival-needs-a-usable-fix). A count, never the places.
+  unverifiedArrivals?: number;
   startedAt: string | null;
   finishedAt: string | null;
   /** Safe-zone latch: the team is soft-paused until it is verifiably back inside. */
@@ -332,7 +356,14 @@ export const acknowledgeAlert      = callable<{ ownerUid: string; gameId: string
 // Out-of-bounds recovery: release a team the safe-zone latch is holding. The server
 // keeps a short grace window so a broken phone's next bad fix can't re-latch them.
 export const clearTeamOutOfBounds  = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; reason?: string }, { ok: boolean; overrideUntil: string }>('clearTeamOutOfBounds');
-export const reviewStationSubmission = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; taskId: string; approved: boolean; note?: string }, { ok: boolean; approved: boolean }>('reviewStationSubmission');
+// `reversal` and `scoreDelta` are present only when an APPROVED submission was undone
+// (change: approval-can-be-undone) - the server removes exactly what the approval
+// awarded, and reports it so the console can say what it cost rather than leaving the
+// organizer to infer that a status flip moved points.
+export const reviewStationSubmission = callable<
+  { ownerUid: string; gameId: string; runId: string; teamId: string; taskId: string; approved: boolean; note?: string },
+  { ok: boolean; approved: boolean; reversal?: 'reversed' | 'alreadyRejected' | 'notApproved' | 'unknownAward'; scoreDelta?: number }
+>('reviewStationSubmission');
 export const adjustTeamScore       = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; delta: number; reason?: string }, { ok: boolean; newBonusPenalty: number }>('adjustTeamScore');
 // Live photo feed moderation (change: live-photo-feed): hide an item from the run's feed.
 export const hideFeedItem          = callable<{ ownerUid: string; gameId: string; runId: string; itemId: string }, { ok: boolean }>('hideFeedItem');

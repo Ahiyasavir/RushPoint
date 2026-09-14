@@ -1043,7 +1043,15 @@ const HE = {
     photoReviewRecent: 'נבדקו לאחרונה',
     photoReviewTagApproved: 'אושר',
     photoReviewTagRejected: 'נדחה',
-    photoReviewRejectDisabled: 'כבר אושר. לביטול השתמשו בעדכון ניקוד ידני.',
+    photoReviewRejectDisabled: 'כבר אושר.',
+    // ביטול אישור (change: approval-can-be-undone). מזיז ניקוד, ולכן שואל קודם
+    // ואומר מה זה עולה.
+    reverseApprovalCta: 'ביטול האישור',
+    reverseApprovalTitle: 'ביטול אישור של הגשה',
+    reverseApprovalConfirm: ({ team }: { team: string }) =>
+      `לבטל את האישור של ${team}? הנקודות שההגשה הזאת נתנה יירדו מהקבוצה, וההגשה תסומן כנדחתה.`,
+    reverseApprovalDone: ({ team, points }: { team: string; points: number }) =>
+      `האישור בוטל. ${points} נקודות ירדו מ${team}.`,
     photoReviewAlreadyRejected: 'כבר נדחה',
     photoReviewLoadError: 'טעינת ההגשות נכשלה, מנסים שוב',
     photoReviewSubmittedAt: ({ time }: { time: string }) => `הוגש בשעה ${time}`,
@@ -1300,6 +1308,24 @@ const HE = {
     // Confirmations for actions that used to succeed or fail in total silence
     // (change: creator-no-silent-failures).
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `הניקוד של ${team} עודכן. השינוי שנרשם: ${delta} נקודות.`,
+    // Why a manual adjustment was made (change: live-ops-feedback-loop). The IDS
+    // come from packages/shared/scoreReasons and are language neutral, because the
+    // audit row they are written into may be read back in the other language; only
+    // the wording below is local. scripts/test-score-reasons-shared.ts pins that
+    // every id shared exports has a label here, in both languages.
+    reasonLabel: 'סיבה',
+    adjustScoreReasonPrompt: ({ team, delta }: { team: string; delta: string }) =>
+      `למה ${team} מקבלים ${delta} נקודות? אפשר גם לדלג.`,
+    adjustScoreReasonSkip: 'בלי לציין סיבה',
+    reasonOther: 'סיבה אחרת',
+    reasonOtherPlaceholder: 'כתבו סיבה קצרה',
+    reasonCreativity: 'בונוס יצירתיות',
+    reasonTeamwork: 'עבודת צוות',
+    reasonSpeed: 'בונוס מהירות',
+    reasonHelpfulness: 'עזרה לקבוצה אחרת',
+    reasonLate: 'קנס איחור',
+    reasonRuleBreak: 'הפרת כללים',
+    reasonStaffCall: 'החלטת צוות',
     skipStageAria: ({ team }: { team: string }) => `דילוג על השלב הנוכחי של ${team}`,
     skipTaskAria: ({ team }: { team: string }) => `דילוג על המשימה הנוכחית של ${team}`,
     // ── שחרור קבוצה שנתקעה מחוץ לאזור המשחק ──
@@ -1343,6 +1369,20 @@ const HE = {
       tasksPaused: ({ n }: { n: number }) => `${n} משימות מושהות`,
       nobodyJoined: () => 'עדיין אף אחד לא הצטרף',
       notStarted: ({ n }: { n: number }) => `${n} קבוצות עוד לא יצאו לדרך`,
+      // קבוצה שהצטרפה אחרי שהמשחק כבר התחיל, ועדיין לא משחקת (change: late-joiner-autostart)
+      lateJoinerStranded: ({ n }: { n: number }) => n === 1
+        ? 'קבוצה הצטרפה אחרי שהתחלתם ועדיין מחכה. הפעילו אותה'
+        : `${n} קבוצות הצטרפו אחרי שהתחלתם ועדיין מחכות. הפעילו אותן`,
+      // חברי צוות בלי טלפון משלהם (change: every-member-plays). מידע, לא אזהרה:
+      // לשתף טלפון זו דרך משחק לגיטימית, ולצעוק על זה ילמד את המנחה להתעלם מהרצועה.
+      membersOffline: ({ n }: { n: number }) => n === 1
+        ? 'בקבוצה אחת יש משתתפים בלי טלפון משלהם'
+        : `${n} קבוצות עם משתתפים בלי טלפון משלהם`,
+      // הגעות שהשרת קיבל בלי שהקליטה הוכיחה אותן (change: arrival-needs-a-usable-fix).
+      // מידע, לא אשמה: ברוב המקרים זו חצר בלי שמיים, לא רמאות.
+      arrivalsUnverified: ({ n }: { n: number }) => n === 1
+        ? 'הגעה אחת התקבלה בלי אימות מיקום מדויק'
+        : `${n} הגעות התקבלו בלי אימות מיקום מדויק`,
     },
 
     // ── מה כתוב על כפתור במדור שלא פתוח (change: run-console-clarity) ──
@@ -1669,6 +1709,12 @@ const HE = {
     backToGames: 'המשחקים',
     saved: 'נשמר',
     saving: 'שומר…',
+    // שמירה שלא נוחתת (change: save-tells-the-truth). ה־SDK מחכה 70 שניות לפני
+    // שהוא נכשל, אז "שומר…" סימן גם "בתהליך" וגם "תקוע דקה". אלה המילים
+    // שמבדילות ביניהם, והן מופיעות תוך שניות במקום אחרי דקה.
+    saveSlow:    'עדיין שומר…',
+    saveStalled: 'השמירה נתקעה. בדקו את החיבור',
+    saveOffline: 'אין חיבור. השמירה תמשיך לנסות',
     unsaved: 'לא נשמר',
     undo: 'בטל',
     redo: 'בצע מחדש',
@@ -1733,6 +1779,10 @@ const HE = {
     // תפריט הפעולות של כרטיס המשימה בקנבס (change: mission-card-actions).
     taskActionsMenu: 'פעולות על המשימה',
     duplicateTask: 'שכפול המשימה',
+    // החלפת המשימה במשימה אחרת מבנק המשימות, הכי דומה לזו שיש (change: mission-regenerate).
+    // לחיצה חוזרת מתרחקת בכוונה, ולכן הכיתוב הוא פעולה חוזרת ולא פעולה חד פעמית.
+    regenerateTask: 'החלפה במשימה דומה',
+    regenerateNothingLeft: 'אין כרגע משימה נוספת שמתאימה למשחק הזה. אפשר לערוך את המשימה ידנית.',
     duplicatedTaskTitle: (title: string) => `${title} (עותק)`,
     hideTask: 'הוצאה מהמשחק',
     hideTaskHelp: 'המשימה נשמרת כאן, ולא תופיע באף ריצה עד שתחזירו אותה.',
@@ -1879,6 +1929,8 @@ const HE = {
     locAdvancedShort: 'אפשרויות מתקדמות',
     locRadiusLabel: 'מרחק ההפעלה',
     locRadiusHelp: 'מאיזה מרחק מהנקודה המשימה נפתחת. ברירת המחדל (40מ׳) מתאימה כמעט תמיד.',
+    // מה ייאכף בפועל כשהרדיוס קטן ממה שהטלפון יכול להוכיח (change: arrival-needs-a-usable-fix).
+    locRadiusFloorNote: ({ m }: { m: number }) => `טלפון לא יכול לדעת איפה הוא בדיוק כזה, ולכן במשחק המשימה תיפתח ברדיוס ${m} מטר. אחרת אף אחד לא היה מצליח לפתוח אותה.`,
     locRadiusPresetTight: 'מדויק (4מ׳)',
     locRadiusPresetDefault: 'רגיל (40מ׳)',
     locSkipGps: 'ללא בדיקת GPS',
@@ -2093,6 +2145,17 @@ const HE = {
     photoFeedResponsibility: 'כמארגני האירוע אתם אחראים לתוכן שהמשתתפים שלכם מעלים. כל משתתף יכול לדווח על תמונה, תמונה שדווחה מוסרת עד לבדיקה, ואתם והצוות שלכם יכולים להסתיר או להחזיר כל תמונה מלוח הבקרה של ההרצה. פירוט מלא בתנאי השימוש.',
     powerUpsLabel: 'כוחות מיוחדים',
     powerUpsHint: 'סיכוי של בערך 25% בכל משימה שהושלמה לזכות בכוח מיוחד: פי 2 נקודות במשימה הבאה או 15 נקודות בונוס.',
+    // קבוצה שמצטרפת אחרי שהמשחק כבר התחיל (change: late-joiner-autostart)
+    autoStartLateJoinersLabel: 'התחלה אוטומטית לקבוצה שמצטרפת באיחור',
+    autoStartLateJoinersHint: 'קבוצה שנכנסת אחרי שלחצתם להתחיל תקבל משימה מיד, בלי לחכות לכם. כבוי כברירת מחדל. גם כשזה כבוי, הקונסולה תמיד תציג קבוצה שנתקעה. במשחק שדורש אישור הורה, האישור נדרש קודם.',
+    autoApproveAllMediaLabel: 'אישור אוטומטי לכל התמונות והסרטונים',
+    autoApproveAllMediaHint: 'כל הגשת מדיה בריצה תאושר מיד, בלי שתצטרכו לאשר אחת אחת. ההגדרה נתפסת ברגע ההשקה, ולכן היא תחול על הריצה הבאה ולא על ריצה שכבר רצה.',
+    // כולם מהטלפון שלהם (change: every-member-plays)
+    requireAllMembersOnlineLabel: 'כל חברי הקבוצה מהטלפון שלהם',
+    requireAllMembersOnlineHint: 'קבוצה תתחיל לשחק רק כשכל מי שנרשם בה מחובר מהטלפון שלו. עובד רק אם המשחק אוסף את שמות חברי הקבוצה בהרשמה, אחרת אין לנו מספר להשוות אליו ואף קבוצה לא תיעצר.',
+    // כמה חברי צוות חייבים לעשות חלק במשימה (change: every-member-plays)
+    requiredContributorsLabel: 'כמה חייבים לעשות חלק',
+    requiredContributorsHelp: 'המשימה תיסגר רק אחרי שכל כך הרבה מכשירים שונים לחצו "עשיתי את החלק שלי". השרת מקטין את המספר למספר המכשירים שבאמת מחוברים לקבוצה, אז משימה שדורשת ארבעה לא תיתקע קבוצה של שניים. ריק או 0 הוא ללא דרישה.',
     manualRevealLabel: 'חשיפה ידנית של טבלת הדירוג',
     manualRevealHint: 'בסיום המשחק הדירוג יישאר מוסתר מהמשתתפים עד שתחשפו אותו מלוח הבקרה של ההרצה.',
     testModeLabel: 'מצב מבחן',
@@ -3620,7 +3683,15 @@ const EN: typeof HE = {
     photoReviewRecent: 'Recently reviewed',
     photoReviewTagApproved: 'Approved',
     photoReviewTagRejected: 'Rejected',
-    photoReviewRejectDisabled: 'Already approved. To undo, use a manual score adjustment.',
+    photoReviewRejectDisabled: 'Already approved.',
+    // Undoing an approval (change: approval-can-be-undone). It moves a score, so it
+    // asks first and says what it cost.
+    reverseApprovalCta: 'Undo approval',
+    reverseApprovalTitle: 'Undo an approved submission',
+    reverseApprovalConfirm: ({ team }: { team: string }) =>
+      `Undo the approval for ${team}? The points this submission awarded come off the team, and it is marked rejected.`,
+    reverseApprovalDone: ({ team, points }: { team: string; points: number }) =>
+      `Approval undone. ${points} points came off ${team}.`,
     photoReviewAlreadyRejected: 'Already rejected',
     photoReviewLoadError: 'Could not load submissions, retrying',
     photoReviewSubmittedAt: ({ time }: { time: string }) => `submitted at ${time}`,
@@ -3879,6 +3950,20 @@ const EN: typeof HE = {
     adjustScoreConfirmWithScore: ({ team, delta, current, result }: { team: string; delta: string; current: number; result: number }) =>
       `Current score of ${team}: ${current}. Applying ${delta} points makes ${result}. Apply?`,
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `Score of ${team} updated by ${delta} points.`,
+    // See the Hebrew map for why the ids are shared and the wording is not.
+    reasonLabel: 'Reason',
+    adjustScoreReasonPrompt: ({ team, delta }: { team: string; delta: string }) =>
+      `Why is ${team} getting ${delta} points? You can skip this.`,
+    adjustScoreReasonSkip: 'Without a reason',
+    reasonOther: 'Other reason',
+    reasonOtherPlaceholder: 'Write a short reason',
+    reasonCreativity: 'Creativity bonus',
+    reasonTeamwork: 'Teamwork',
+    reasonSpeed: 'Speed bonus',
+    reasonHelpfulness: 'Helped another team',
+    reasonLate: 'Late penalty',
+    reasonRuleBreak: 'Rule violation',
+    reasonStaffCall: 'Staff decision',
     skipStageAria: ({ team }: { team: string }) => `Skip the current stage of ${team}`,
     skipTaskAria: ({ team }: { team: string }) => `Skip the current mission of ${team}`,
     // ── Releasing a team stuck outside the play area ──
@@ -3923,6 +4008,21 @@ const EN: typeof HE = {
       tasksPaused: ({ n }: { n: number }) => `${n} missions are paused`,
       nobodyJoined: () => 'Nobody has joined yet',
       notStarted: ({ n }: { n: number }) => `${n} teams have not started`,
+      // A team that joined after play began and is still waiting (change: late-joiner-autostart)
+      lateJoinerStranded: ({ n }: { n: number }) => n === 1
+        ? 'A team joined after you started and is still waiting. Start them'
+        : `${n} teams joined after you started and are still waiting. Start them`,
+      // Members without their own phone (change: every-member-plays). Information, not
+      // a warning: sharing a phone is a legitimate way to play.
+      membersOffline: ({ n }: { n: number }) => n === 1
+        ? 'One team has members without their own phone'
+        : `${n} teams have members without their own phone`,
+      // Arrivals the server accepted without the fix proving them (change:
+      // arrival-needs-a-usable-fix). Information, not an accusation: the usual cause
+      // is a courtyard with no sky, not a player at home.
+      arrivalsUnverified: ({ n }: { n: number }) => n === 1
+        ? 'One arrival was accepted without a precise location'
+        : `${n} arrivals were accepted without a precise location`,
     },
 
     // ── What a closed section says about itself (change: run-console-clarity) ──
@@ -4249,6 +4349,13 @@ const EN: typeof HE = {
     backToGames: 'Games',
     saved: 'Saved',
     saving: 'Saving…',
+    // A save that is not landing (change: save-tells-the-truth). The SDK waits 70
+    // seconds before rejecting, so "Saving" used to mean both "in progress" and
+    // "stuck for a minute". These are the words that tell them apart, and they
+    // appear within seconds instead of after a minute.
+    saveSlow:    'Still saving…',
+    saveStalled: 'Save is stuck. Check your connection',
+    saveOffline: 'No connection. The save will keep trying',
     unsaved: 'Unsaved',
     undo: 'Undo',
     redo: 'Redo',
@@ -4313,6 +4420,10 @@ const EN: typeof HE = {
     // The mission card's action menu on the canvas (change: mission-card-actions).
     taskActionsMenu: 'Mission actions',
     duplicateTask: 'Duplicate mission',
+    // Swap the mission for the closest one in the mission bank
+    // (change: mission-regenerate). Pressing again drifts further on purpose.
+    regenerateTask: 'Swap for a similar mission',
+    regenerateNothingLeft: 'There is no other mission that fits this game right now. You can edit this one by hand.',
     duplicatedTaskTitle: (title: string) => `${title} (copy)`,
     hideTask: 'Take out of the game',
     hideTaskHelp: 'The mission is kept here and joins no run until you bring it back.',
@@ -4460,6 +4571,9 @@ const EN: typeof HE = {
     locAdvancedShort: 'Advanced options',
     locRadiusLabel: 'How close players must get',
     locRadiusHelp: 'How near the spot a player has to be for the mission to open. The default (40m) is right almost every time.',
+    // What actually gets enforced when the radius is below what GPS can prove
+    // (change: arrival-needs-a-usable-fix).
+    locRadiusFloorNote: ({ m }: { m: number }) => `A phone cannot place itself that precisely, so the mission opens from ${m}m. Otherwise nobody could ever open it.`,
     locRadiusPresetTight: 'Precise (4m)',
     locRadiusPresetDefault: 'Normal (40m)',
     locSkipGps: 'Skip the GPS check',
@@ -4678,6 +4792,17 @@ const EN: typeof HE = {
     photoFeedResponsibility: 'As the organizer you are responsible for the content your participants upload. Any participant can report a photo, a reported photo is removed pending review, and you and your staff can hide or restore any photo from the run console. See the Terms of Service for the full policy.',
     powerUpsLabel: 'Power ups',
     powerUpsHint: 'About a 25% chance on each completed mission to win a power up: 2x points on the next mission, or 15 bonus points.',
+    // A team that joins after the game already started (change: late-joiner-autostart)
+    autoStartLateJoinersLabel: 'Start a late joining team automatically',
+    autoStartLateJoinersHint: 'A team that joins after you pressed start gets a mission right away instead of waiting for you. Off by default. Even when off, the console always shows a team that is stranded. In a game that needs guardian consent, the consent still comes first.',
+    autoApproveAllMediaLabel: 'Approve every photo and video automatically',
+    autoApproveAllMediaHint: 'Every media submission in the run is approved on arrival, so you never review one by one. The setting is captured at launch, so it applies to the next run rather than one already under way.',
+    // Everyone on their own phone (change: every-member-plays)
+    requireAllMembersOnlineLabel: 'Every team member on their own phone',
+    requireAllMembersOnlineHint: 'A team starts playing only once everyone registered in it is connected from their own phone. This works only if the game collects team member names at registration, otherwise there is no number to compare against and no team is held.',
+    // How many teammates must each do part of the mission (change: every-member-plays)
+    requiredContributorsLabel: 'How many must take part',
+    requiredContributorsHelp: 'The mission closes only once that many different devices have tapped "I did my part". The server reduces the number to the devices a team actually has, so a mission needing four never strands a team of two. Empty or 0 means no requirement.',
     manualRevealLabel: 'Manual leaderboard reveal',
     manualRevealHint: 'When the game ends the standings stay hidden from players until you reveal them from the run console.',
     testModeLabel: 'Test mode',

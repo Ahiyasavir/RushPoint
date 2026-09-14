@@ -210,6 +210,11 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   deleteZone: { max: 20, windowMs: MIN },
   captureZone: { max: 30, windowMs: MIN }, // in-play action, contested by design
   joinTeamAsDevice: { max: 10, windowMs: MIN }, // matches joinRun — same "get onto a team" weight
+  // change: every-member-plays. Generous: a teammate tapping "I did my part" is a
+  // normal, repeated act, and it is idempotent by construction (a set of distinct
+  // uids), so a double tap costs nothing. The budget exists to bound abuse, not to
+  // ration participation.
+  contributeToTask: { max: 60, windowMs: MIN },
   transferController: { max: 20, windowMs: MIN },
   claimController: { max: 20, windowMs: MIN },
 };

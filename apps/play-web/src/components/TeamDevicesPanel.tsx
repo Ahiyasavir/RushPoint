@@ -1,5 +1,9 @@
 import { useState } from 'react';
 import type { RunTeam } from '@rushpoint/shared';
+// How many of us are not on a phone yet (change: every-member-plays). Returns null
+// rather than a number when the headcount is unknowable, so this renders nothing at
+// all for a game that never asked how many people are in a team.
+import { teamAttendance } from '@rushpoint/shared';
 import { transferController, claimController } from '../services/calls';
 import { useT } from '../i18nContext';
 import { dialog } from './dialog';
@@ -22,6 +26,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
   const [err, setErr] = useState('');
 
   const controllerUid = team.controllerUid ?? team.id;
+  const attendance = teamAttendance(team);
   const isController = controllerUid === myUid;
   const devices = team.devices ?? [{ uid: team.id, name: team.displayName, joinedAt: team.updatedAt }];
 
@@ -68,6 +73,19 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
 
       {open && (
         <div className="px-4 pb-4 space-y-3">
+          {/* WHO IS STILL MISSING (change: every-member-plays).
+              The team already sees the join code; what it could never see was whether
+              anyone still needs it. A team of six sharing one phone looked exactly like
+              a solo player on every screen, because memberCount and deviceUids were
+              never compared. Rendered only when the shortfall is KNOWN - `missing` is
+              null for a game that never collected member names, and inventing a number
+              there would be a confident lie. */}
+          {attendance.short && attendance.missing !== null && (
+            <p className="text-[13px] text-ink-warm rounded-lg bg-app-raised px-3 py-2">
+              {t.devices.membersMissing({ n: attendance.missing })}
+            </p>
+          )}
+
           {team.deviceJoinCode && (
             <div className="flex items-center justify-between gap-2 rounded-lg bg-app-raised px-3 py-2">
               <div>

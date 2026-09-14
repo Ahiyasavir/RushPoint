@@ -56,6 +56,8 @@ export interface SharedTaskView {
   difficulty?: number;
   estimatedMinutes?: number;
   expectedDurationMinutes?: number;
+  /** How many teammates must each do their part (change: every-member-plays). */
+  requiredContributors?: number;
   pointValue?: number;
   maxConcurrentTeams?: number;
   triggerMode?: TriggerMode;
@@ -175,6 +177,11 @@ export function sanitizeTaskForShare(task: Task, revealAnswers = false): SharedT
   put(t, 'difficulty', task.difficulty);
   put(t, 'estimatedMinutes', task.estimatedMinutes);
   put(t, 'expectedDurationMinutes', task.expectedDurationMinutes);
+  // change: every-member-plays. PROJECTED, not withheld: it is authoring metadata a
+  // creator evaluating this game needs to see - a mission that needs three teammates
+  // is a different mission from one that needs one - and it reveals no answer, no
+  // location and no secret.
+  put(t, 'requiredContributors', task.requiredContributors);
   put(t, 'pointValue', task.pointValue);
   put(t, 'maxConcurrentTeams', task.maxConcurrentTeams);
   put(t, 'triggerMode', task.triggerMode);

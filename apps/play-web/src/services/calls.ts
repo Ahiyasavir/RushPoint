@@ -343,6 +343,24 @@ export const joinTeamAsDevice = callable<
   { ownerUid: string; gameId: string; runId: string; teamId: string; role: 'controller' | 'viewer' | null; alreadyAttached: boolean }
 >('joinTeamAsDevice');
 
+// ── Everyone does their part (change: every-member-plays) ──
+// The ONLY mutation a non-controller device may make. It records that THIS phone did
+// its part of a mission; it does not complete it, score it or route anybody. The
+// controller still submits - this only decides whether they are allowed to yet.
+export const contributeToTask = callable<
+  { ownerUid?: string; gameId?: string; runId?: string; code?: string; taskId: string },
+  {
+    ok: boolean; taskId: string; teamId: string;
+    /** This device had already contributed; the call was a no op. */
+    already: boolean;
+    /** Distinct devices that have contributed so far. */
+    contributors: number;
+    /** How many are needed, already reduced to the devices this team actually has. */
+    required: number;
+    satisfied: boolean;
+  }
+>('contributeToTask');
+
 export const transferController = callable<
   Ctx & { toUid: string },
   { ok: boolean; controllerUid: string }
