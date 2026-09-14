@@ -742,6 +742,10 @@ const HE = {
     likeFailed: 'לא הצלחנו לשמור. נסו שוב.',
     // תגיות (change: game-task-tags)
     moreTags:   (n: number) => `+${n} תגיות`,
+    // משימות מבנק המשימות (change: mission-bank-in-library)
+    bankRowBadge:     'משימת רשפוינט',
+    bankRowBadgeHelp: 'משימה שרשפוינט כתבה מראש. היא לא הגיעה ממשחק שפורסם, ולכן אין לה מספר העתקים או יוצר. אפשר להוסיף אותה כמו כל משימה אחרת.',
+    bankRowSource:    'משימה מוכנה של רשפוינט',
     // תצוגת פרטי משימה (change: gallery-mission-detail)
     detailTitle:         'פרטי המשימה',
     detailAboutTitle:    'איך המשימה עובדת',
@@ -3322,6 +3326,10 @@ const EN: typeof HE = {
     likeFailed: 'Could not save that. Try again.',
     // Tags (change: game-task-tags)
     moreTags:   (n: number) => `+${n} tags`,
+    // Mission-bank rows (change: mission-bank-in-library)
+    bankRowBadge:     'RushPoint mission',
+    bankRowBadgeHelp: 'A mission RushPoint wrote for you. It did not come from a published game, so it has no copy count and no author. Add it like any other mission.',
+    bankRowSource:    'A mission RushPoint made for you',
     // Mission detail view (change: gallery-mission-detail)
     detailTitle:         'Mission details',
     detailAboutTitle:    'How this mission plays',
