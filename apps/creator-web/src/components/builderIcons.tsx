@@ -8,7 +8,8 @@ import type { TaskType, TriggerMode } from '@rushpoint/shared';
 
 export type BuilderIconName =
   | 'radius' | 'exact' | 'instant' | 'anywhere'
-  | 'station' | 'photo' | 'quiz' | 'numeric' | 'field' | 'selfReport' | 'geofence' | 'sequence' | 'survey';
+  | 'station' | 'photo' | 'quiz' | 'numeric' | 'field' | 'selfReport' | 'geofence' | 'sequence' | 'survey'
+  | 'tune';
 
 const PATHS: Record<BuilderIconName, ReactNode> = {
   // ── Trigger modes ──
@@ -100,6 +101,20 @@ const PATHS: Record<BuilderIconName, ReactNode> = {
       <path d="M4 9.5 12 6l8 3.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9.5Z" />
       <path d="M9 9.2h6" />
       <path d="M11 13h2" />
+    </>
+  ),
+  // Fine-tune: sliders. Deliberately NOT a gear, and deliberately sharing no
+  // vocabulary with the location answers (pin / ring / globe) - the control this
+  // marks sits near them, and the whole point is that it must not read as one of
+  // them (change: d4be1fd, revised).
+  tune: (
+    <>
+      <path d="M4 7h9M17 7h3" />
+      <path d="M4 12h3M11 12h9" />
+      <path d="M4 17h9M17 17h3" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="9" cy="12" r="2" />
+      <circle cx="15" cy="17" r="2" />
     </>
   ),
 };

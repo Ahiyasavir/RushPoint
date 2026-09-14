@@ -236,6 +236,9 @@ const HE = {
     photoNotCompressed: 'לא הצלחנו לכווץ את התמונה, ההעלאה עשויה להיות איטית.',
     approved: 'אושר!',
     pendingReview: 'הוגש. ממתין לאישור.',
+    // המנחה דחה את ההגשה (change: rejection-tells-the-player). קודם לא נאמר להם כלום.
+    rejectedTitle: 'ההגשה לא התקבלה',
+    rejectedNoReason: 'המנחה ביקש שתנסו שוב. שלחו משהו אחר.',
     submitPhoto: 'שלח תמונה',
     startRecording: 'התחילו הקלטה',
     stopRecording: 'עצרו הקלטה',
@@ -992,6 +995,9 @@ const EN: typeof HE = {
     photoNotCompressed: "We couldn't shrink the photo, the upload may be slow.",
     approved: 'Approved!',
     pendingReview: 'Submitted. Waiting for review.',
+    // The organizer rejected the submission (change: rejection-tells-the-player).
+    rejectedTitle: 'Your submission was not accepted',
+    rejectedNoReason: 'The host asked for another try. Send something else.',
     submitPhoto: 'Submit photo',
     startRecording: 'Start recording',
     stopRecording: 'Stop recording',

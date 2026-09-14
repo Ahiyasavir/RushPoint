@@ -30,6 +30,9 @@ import {
   getUploadRetrying, subscribeUploadRetrying,
 } from '../lib/uploadResiliency';
 import { withLocation } from '../utils/withLocation';
+// What the organizer decided about this team's own submission, and why
+// (change: rejection-tells-the-player). Total; silent on anything malformed.
+import { submissionVerdict } from '../lib/submissionVerdict';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
@@ -391,6 +394,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // way the server reduces it at submit time, so the two never disagree about what the
   // team is waiting for. A mission authored for four contributors and played by a team
   // of two shows "0 of 2", not an impossible "0 of 4".
+  // The organizer's verdict on THIS mission's submission (change:
+  // rejection-tells-the-player). `task` is undefined while routing hands back the
+  // next mission, and the helper is silent on that, so no notice can flash between
+  // missions.
+  const verdict = submissionVerdict(state.team, task?.id);
   const attachedDevices = Math.max(1, new Set(state.team.deviceUids ?? [state.team.id]).size);
   const contributorsNeeded = effectiveContributorRequirement(
     task?.requiredContributors, attachedDevices,
@@ -1105,6 +1113,36 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           exact failure for its own case. The rule simply never travelled to the
           other seven. It is a property of the BRANCH, not of any one component:
           a new task type added here needs the key too. */}
+      {/* ── The organizer rejected this, and the team used to be told NOTHING ──
+          (change: rejection-tells-the-player)
+
+          The verdict and the organizer's words have always reached this device:
+          the server writes them onto `taskSubmissions`, and the participant
+          sanitizer allow-lists that field. No screen had ever read it, so pressing
+          reject changed the team's display by nothing at all and the players stood
+          waiting for an approval that was not coming.
+
+          Placed directly ABOVE the entry controls, because the only useful response
+          to it is to submit again and that is what sits underneath. A rejection with
+          no reason still renders as a decision: an organizer mid-run must be able to
+          turn down a photo of somebody's hand without composing a sentence, so the
+          empty-note case is the common one, not the degenerate one. */}
+      {verdict.rejected && (
+        <div
+          role="status"
+          className="mt-5 rounded-lg border border-rp-alert/40 bg-rp-alert/10 px-3 py-2.5"
+          data-testid="submission-rejected"
+        >
+          <p className="text-sm font-semibold text-ink-alert">{t.task.rejectedTitle}</p>
+          {verdict.reason ? (
+            // The organizer's own words, so `dir="auto"`: the run may be Hebrew and
+            // the note English, or the other way round.
+            <p dir="auto" className="mt-1 text-sm text-zinc-200">{verdict.reason}</p>
+          ) : (
+            <p className="mt-1 text-sm text-zinc-200">{t.task.rejectedNoReason}</p>
+          )}
+        </div>
+      )}
       <div className={readOnly ? 'mt-5 pointer-events-none' : 'mt-5'} aria-disabled={readOnly}>
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
             {t.task.checkArrival}

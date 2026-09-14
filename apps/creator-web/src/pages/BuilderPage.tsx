@@ -387,6 +387,7 @@ export default function BuilderPage() {
     const id = setInterval(() => setSaveTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [status]);
+
   const saveHealthState = useMemo(
     () => saveHealth({ status, startedAtMs: saveStartedAt.current, nowMs: Date.now(), online }),
     // `saveTick` is the whole point of the dependency list: it is what makes an
@@ -505,6 +506,31 @@ export default function BuilderPage() {
     saveTimer.current = window.setTimeout(() => { void save(); }, AUTOSAVE_DELAY);
     return () => window.clearTimeout(saveTimer.current);
   }, [game, save]);
+
+  // ── AND IT HAS TO RECOVER BY ITSELF (change: save-tells-the-truth, revised) ──
+  //
+  // Telling the truth was only half the job. Reported from production: go offline,
+  // come back, and the header says the save FAILED "and does not stop saying it for a
+  // very long time" - a refresh was the only thing that fixed it.
+  //
+  // Nothing was retrying. The autosave effect below is keyed on `[game, save]`, so it
+  // only fires when the creator EDITS something; a creator who is simply waiting for
+  // their connection edits nothing, so the failed state was terminal. The `online`
+  // listener above existed purely to colour a message, while holding the one piece of
+  // information that should have driven the repair.
+  //
+  // Retry on the offline -> online EDGE, not on the value: `save()` sets status, which
+  // would re-enter this effect and spin if it depended on status. And unconditional
+  // rather than gated on 'failed': `save()` is already a no-op when the snapshot
+  // matches, so a clean Builder pays nothing, while a HUNG save (still inside the SDK's
+  // 70s timeout, never rejected, so never 'failed') is rescued too - its own
+  // `saveSeq` guard discards the stale resolution when it finally lands.
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    const prev = wasOnline.current;
+    wasOnline.current = online;
+    if (online && !prev) void save();
+  }, [online, save]);
 
   // Warn before leaving/closing the tab with unsaved edits.
   useEffect(() => {

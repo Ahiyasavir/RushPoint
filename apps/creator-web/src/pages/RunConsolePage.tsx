@@ -9,6 +9,7 @@ import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
+  updateGame,
   inviteStaff, skipStage, skipTaskForTeam, adjustTeamScore, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
@@ -509,6 +510,12 @@ export default function RunConsolePage() {
   // Which game is live, for the console header. Display only — the same
   // owner-scoped read that builds taskTitles already returns it.
   const [gameTitle, setGameTitle] = useState('');
+  // Whether late joiners already start themselves (change: late-joiner-autostart,
+  // revised). Held here so "start all teams" can OFFER it at the one moment it is
+  // obviously relevant - the setting lives in the Builder, which is not where anybody
+  // is standing when a team turns up late. `null` = not loaded yet, so the offer is
+  // never made on a guess.
+  const [autoStartLate, setAutoStartLate] = useState<boolean | null>(null);
   // Where this game actually happens, so the hot-zone and zone pickers open on
   // the neighbourhood instead of on central Israel (change:
   // location-picker-game-anchor). Collected in the read that already walks every
@@ -521,6 +528,7 @@ export default function RunConsolePage() {
       .then(({ game }) => {
         if (!alive) return;
         setGameTitle(game.title ?? '');
+        setAutoStartLate(game.autoStartLateJoiners === true);
         const map = new Map<string, string>();
         const anchors: LatLng[] = [];
         for (const stage of game.stages ?? []) {
@@ -639,6 +647,38 @@ export default function RunConsolePage() {
         toast.info(t.runConsole.heldForConsent({ launched: res?.launched ?? 0, held: heldForConsent }));
       } else {
         toast.success(t.runConsole.startedAllTeams);
+      }
+      // ── Offer the thing that stops this happening twice ────────────────────
+      //
+      // "Start all teams" is a point-in-time action: it launches the teams that exist
+      // when it runs, and a team joining a minute later waits forever unless somebody
+      // presses it again. That cost team GILAD 27 minutes and every mission of their
+      // run. The cure already shipped - `autoStartLateJoiners` - but it lives in the
+      // BUILDER, and nobody is in the Builder at the moment they press start, which is
+      // why Ahiya could not find it at all.
+      //
+      // So it is offered HERE, once, at the only moment it is obviously relevant, and
+      // only when it is actually off. The server re-reads this flag on every joinRun,
+      // so accepting takes effect immediately for the rest of THIS run - it is not a
+      // setting for next time.
+      if (autoStartLate === false) {
+        if (await dialog.confirm(
+          t.runConsole.offerAutoStartBody, t.runConsole.offerAutoStartCta,
+          false, { title: t.runConsole.offerAutoStartTitle },
+        )) {
+          try {
+            await updateGame({ gameId: gameId!, autoStartLateJoiners: true });
+            setAutoStartLate(true);
+            toast.success(t.runConsole.offerAutoStartDone);
+          } catch {
+            // Never fails the start that just succeeded: the teams ARE running, and
+            // the console's stranded-team strip still catches a late joiner by hand.
+            toast.error(t.runConsole.offerAutoStartFailed);
+          }
+        } else {
+          // Declining is a real answer - do not ask again this session.
+          setAutoStartLate(true);
+        }
       }
     }
     catch { await dialog.alert(t.runConsole.startFailed); }
@@ -2407,7 +2447,11 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
     ))) return;
     let note = '';
     if (!approved) {
-      const answer = await dialog.prompt(rc.photoReviewRejectPrompt);
+      // The reason is optional and the label says so, but the confirm button used to
+      // read a generic "submit", which leaves an organizer mid-run unsure whether an
+      // empty box will be taken. Naming the action makes the no-reason path obvious:
+      // press it empty and the team is told they were rejected, with no reason given.
+      const answer = await dialog.prompt(rc.photoReviewRejectPrompt, '', rc.photoReviewRejectCta);
       if (answer === null) return; // cancelled
       note = answer;
     }

@@ -49,7 +49,24 @@ export const DEFAULT_RADIUS_M = defaultRadiusFor('radius'); // 40
  * top-level buttons, demoted to presets on a single control: the information the
  * "Exact" button carried is preserved, just one level deeper.
  */
-export const RADIUS_PRESETS: readonly number[] = [TIGHT_RADIUS_M, DEFAULT_RADIUS_M];
+/**
+ * The TIGHTEST radius the one-tap preset is allowed to offer.
+ *
+ * It used to be TIGHT_RADIUS_M (4m), and that was a button handing creators a number
+ * the game does not honour: the arrival gate floors every radius at
+ * ARRIVAL_RADIUS_FLOOR_M, so pressing "precise" authored 4 and played 25. Ahiya found
+ * it immediately - the control offered a promise the product cannot keep.
+ *
+ * Offering the floor instead removes the contradiction at its source rather than
+ * explaining it afterwards. TIGHT_RADIUS_M itself is deliberately NOT changed: it is
+ * also the `triggerModeFromRadius` cutoff, and moving that would reclassify the mode of
+ * every stored task. So a preset press now yields 'radius' mode, exactly like the
+ * normal preset - which is honest, because the server treats 'exact' and 'radius'
+ * identically and always has.
+ */
+export const TIGHT_PRESET_M = ARRIVAL_RADIUS_FLOOR_M;
+
+export const RADIUS_PRESETS: readonly number[] = [TIGHT_PRESET_M, DEFAULT_RADIUS_M];
 
 /**
  * What the server will ACTUALLY enforce for an authored radius

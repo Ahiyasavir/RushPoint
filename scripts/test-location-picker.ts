@@ -18,7 +18,7 @@
 import type { Task, TriggerMode } from '@rushpoint/shared';
 import { normalizeTriggerMode, ARRIVAL_RADIUS_FLOOR_M } from '@rushpoint/shared';
 import {
-  TIGHT_RADIUS_M, DEFAULT_RADIUS_M, RADIUS_PRESETS,
+  TIGHT_RADIUS_M, TIGHT_PRESET_M, DEFAULT_RADIUS_M, RADIUS_PRESETS,
   enforcedRadiusM, radiusBelowFloor,
   type LocationChoice,
   locationChoiceOf, triggerModeFromRadius, skipsGpsCheck,
@@ -49,7 +49,7 @@ console.log('\n── 1. radius → triggerMode cutoff ────────�
 // default (40m) and today's 'exact' default (4m) must reproduce themselves exactly,
 // so nothing already saved changes meaning.
 eq('the default radius still derives radius mode', triggerModeFromRadius(DEFAULT_RADIUS_M), 'radius');
-eq('the tight preset still derives exact mode', triggerModeFromRadius(TIGHT_RADIUS_M), 'exact');
+eq('the mode cutoff still derives exact at 4m', triggerModeFromRadius(TIGHT_RADIUS_M), 'exact');
 eq('at the cutoff exactly ⇒ exact', triggerModeFromRadius(4), 'exact');
 eq('just above the cutoff ⇒ radius', triggerModeFromRadius(5), 'radius');
 eq('1m ⇒ exact', triggerModeFromRadius(1), 'exact');
@@ -59,7 +59,7 @@ eq('500m ⇒ radius', triggerModeFromRadius(500), 'radius');
 eq('NaN falls back to radius', triggerModeFromRadius(Number.NaN), 'radius');
 eq('a negative radius falls back to radius', triggerModeFromRadius(-10), 'radius');
 ok('both presets are offered, tight first-or-last but both present',
-  RADIUS_PRESETS.includes(TIGHT_RADIUS_M) && RADIUS_PRESETS.includes(DEFAULT_RADIUS_M));
+  RADIUS_PRESETS.includes(TIGHT_PRESET_M) && RADIUS_PRESETS.includes(DEFAULT_RADIUS_M));
 
 console.log('\n── 2. every stored triggerMode maps to one of TWO choices ───');
 const ALL_MODES: TriggerMode[] = ['radius', 'exact', 'instant', 'locationless'];
@@ -150,10 +150,20 @@ for (const m of ALL_MODES) {
 // The tight preset on this very control is 4m, and the arrival gate floors every
 // radius at ARRIVAL_RADIUS_FLOOR_M because a handset cannot resolve better. So the
 // Builder hands out a value the game will not honour literally, and has to say so.
-eq('the tight preset is BELOW the floor - which is exactly why the note exists',
-  radiusBelowFloor(TIGHT_RADIUS_M), true);
+// THE PRESET NO LONGER OFFERS A NUMBER THE GAME IGNORES. It used to hand out
+// TIGHT_RADIUS_M (4m) while the arrival gate floored everything at 25 - a button
+// promising precision the hardware cannot deliver. It now offers the floor itself.
+eq('the tight PRESET is never below the floor', radiusBelowFloor(TIGHT_PRESET_M), false);
+eq('and what it offers is exactly what gets enforced',
+  enforcedRadiusM(TIGHT_PRESET_M), TIGHT_PRESET_M);
+eq('every preset is honest', RADIUS_PRESETS.every((r) => !radiusBelowFloor(r)), true);
+// The mode cutoff is deliberately untouched: moving it would reclassify stored tasks.
+eq('the mode cutoff constant still stands where it always did', TIGHT_RADIUS_M, 4);
+// A hand-typed sub-floor value is still possible, so the explanatory note still has
+// a job - it is the fallback now, not the primary answer.
+eq('a hand-typed 4 still reports that it will be widened', radiusBelowFloor(4), true);
 eq('the default preset is not', radiusBelowFloor(DEFAULT_RADIUS_M), false);
-eq('a 4m radius is really enforced at the floor', enforcedRadiusM(TIGHT_RADIUS_M), ARRIVAL_RADIUS_FLOOR_M);
+eq('a hand-typed 4m radius is really enforced at the floor', enforcedRadiusM(4), ARRIVAL_RADIUS_FLOOR_M);
 eq('the floor never NARROWS a generous radius', enforcedRadiusM(DEFAULT_RADIUS_M), DEFAULT_RADIUS_M);
 eq('a radius exactly at the floor is not flagged', radiusBelowFloor(ARRIVAL_RADIUS_FLOOR_M), false);
 // Garbage in must not produce a note about a number the creator never typed.

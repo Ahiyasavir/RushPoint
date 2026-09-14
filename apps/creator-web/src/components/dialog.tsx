@@ -66,8 +66,12 @@ export const dialog = {
   // heading via `opts.title` instead of squeezing it in here.
   confirm: (message: string, confirmLabel?: string, danger?: boolean, opts?: { title?: string }) =>
     push('confirm', message, { confirmLabel, danger, ...opts }) as Promise<boolean>,
-  prompt: (message: string, defaultValue = '') =>
-    push('prompt', message, { defaultValue }) as Promise<string | null>,
+  // `confirmLabel` matters when the field is OPTIONAL: a generic "submit" leaves an
+  // operator unsure whether an empty box will be accepted, so the caller names the
+  // ACTION instead and pressing it empty is visibly the no-reason path
+  // (change: rejection-tells-the-player).
+  prompt: (message: string, defaultValue = '', confirmLabel?: string) =>
+    push('prompt', message, { defaultValue, ...(confirmLabel ? { confirmLabel } : {}) }) as Promise<string | null>,
   /**
    * Pick one of a short list. Resolves the chosen option's `id`, or `null` when the
    * operator cancels the whole action. An option carrying `id: ''` is the documented

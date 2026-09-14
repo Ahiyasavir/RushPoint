@@ -30,7 +30,7 @@ import {
 } from '@rushpoint/shared';
 import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
-import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET, TAP_TEXT } from '../lib/interaction';
+import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
 import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
@@ -61,7 +61,7 @@ import {
 } from '../lib/taskTemplates';
 // The 2-option location picker's pure decisions (change: task-location-mode-consolidation).
 import {
-  type LocationChoice, TIGHT_RADIUS_M, DEFAULT_RADIUS_M, CHOICE_ICON_MODE,
+  type LocationChoice, TIGHT_PRESET_M, DEFAULT_RADIUS_M, CHOICE_ICON_MODE,
   radiusBelowFloor, enforcedRadiusM,
   locationChoiceOf, skipsGpsCheck, locationChoicePatch, radiusPatch, skipGpsPatch,
 } from '../lib/locationPicker';
@@ -681,20 +681,64 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
             );
           })}
         </div>
-        <div className="flex items-start justify-between gap-3 mt-1.5">
-          <p className="text-[13px] text-[--ink-3] leading-snug">
-            {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
-          </p>
-          {choice === 'specific' && (
-            <button type="button" onClick={() => setAdvOpen((o) => !o)} aria-expanded={advOpen}
+        <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">
+          {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
+        </p>
+        {/* ── Advanced options: prominent again, but no longer an ANSWER ──────
+            Two revisions ago this was a card in the row above and read as a third
+            answer to "where can this be done?". The fix demoted it to a small
+            underlined link, which solved that and created the opposite problem:
+            the creator could not find it. Ahiya: "it cannot be this small and
+            unremarkable, it has to come back there - maybe put a divider between
+            them."
+
+            That is the right instrument, so this is the divider plus four cues
+            that all say "not an answer", while the control itself is full size:
+
+              1. It is BELOW a rule, in its own band. The question's answers are
+                 finished above the line.
+              2. It spans the FULL width. The answers are a 2-up grid; nothing in
+                 a grid of two can be a third member of it while being twice as
+                 wide as both.
+              3. It is HORIZONTAL - icon beside label. Both answers are
+                 icon-over-label, which is the composition d4be1fd identified as
+                 the thing people actually read shape from.
+              4. Its icon is sliders, sharing no vocabulary with the pin / globe.
+
+            And the answers keep the height that fix bought them: this sits below
+            the row, it does not re-enter it. */}
+        {choice === 'specific' && (
+          <>
+            <div className="border-t border-[--rp-border] mt-3" />
+            <button
+              type="button"
+              onClick={() => setAdvOpen((o) => !o)}
+              aria-expanded={advOpen}
               title={b.locAdvanced}
-              className={`${TAP_TEXT} -my-2 shrink-0 gap-1.5 rounded-lg px-1 text-[13px] font-medium transition-colors ${
-                advOpen ? 'text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
-              <span aria-hidden className="text-base leading-none">⚙</span>
-              <span className="underline underline-offset-2">{b.locAdvancedShort}</span>
+              className={`mt-3 w-full flex items-center gap-3 rounded-xl border px-3 py-3 text-start transition-colors ${
+                advOpen
+                  ? 'border-rp-fire bg-rp-fire/10 text-ink-fire'
+                  : 'border-[--rp-border] bg-[--surface-2] text-[--ink-2] hover:border-[--ink-3] hover:bg-[--surface-3]'}`}
+            >
+              <span className={`shrink-0 grid place-items-center w-9 h-9 rounded-lg ${
+                advOpen ? 'bg-rp-fire/15' : 'bg-[--surface-1]'}`}>
+                <BuilderIcon name="tune" className="w-5 h-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-semibold leading-tight">{b.locAdvancedShort}</span>
+                <span className="block text-[12px] leading-tight opacity-70">{b.locAdvancedHint}</span>
+              </span>
+              {/* Chevron, rotated when open: the one cue that says "this opens a
+                  drawer" rather than "this navigates somewhere". */}
+              <span aria-hidden className={`shrink-0 transition-transform ${advOpen ? 'rotate-180' : ''}`}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}
+                  strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </span>
             </button>
-          )}
-        </div>
+          </>
+        )}
       </div>
       )}
 
@@ -717,7 +761,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
                   {/* The two old top-level buttons, demoted to one-tap presets. */}
                   <div className="flex gap-1 ms-auto">
                     <Button variant="ghost" className="text-[13px] px-2 py-1"
-                      onClick={() => set(radiusPatch(task, TIGHT_RADIUS_M))}>{b.locRadiusPresetTight}</Button>
+                      onClick={() => set(radiusPatch(task, TIGHT_PRESET_M))}>{b.locRadiusPresetTight({ m: TIGHT_PRESET_M })}</Button>
                     <Button variant="ghost" className="text-[13px] px-2 py-1"
                       onClick={() => set(radiusPatch(task, DEFAULT_RADIUS_M))}>{b.locRadiusPresetDefault}</Button>
                   </div>
