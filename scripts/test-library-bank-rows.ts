@@ -45,6 +45,7 @@ import {
   mergeLibraryRows,
   filterBankRowsByFacets,
   BANK_ROW_ID_PREFIX,
+  BANK_PROVENANCE_TAG,
   type LibraryRow,
 } from '../apps/creator-web/src/lib/libraryBankRows';
 
@@ -189,11 +190,28 @@ if (loaded) {
 // Tags are localized through the bank's own vocabulary, not shown as raw ids:
 // `locationBased` in a Hebrew list is exactly the "English in the Hebrew Builder"
 // bug the i18n gate exists for, and a data-borne one no checker would catch.
+// Every row also carries a fixed PROVENANCE tag (change: mission-bank-search-tag)
+// — one more than the entry's own content tags.
 const heTags = bankEntryToLibraryRow(LOADED, 'he')?.tags ?? [];
 const enTags = bankEntryToLibraryRow(LOADED, 'en')?.tags ?? [];
-check('tags are localized per language', heTags.length === 2 && enTags.length === 2 && heTags.join() !== enTags.join(),
+check('tags are localized per language', heTags.length === 3 && enTags.length === 3 && heTags.join() !== enTags.join(),
   `${heTags.join('|')} vs ${enTags.join('|')}`);
 check('tags are not raw bank ids in Hebrew', !heTags.includes('thinking'));
+
+// ─── 2b. The search-by-tag provenance marker ──────────────────────────────────
+//
+// The whole point: a creator can search this one word and get ONLY bank
+// missions, with no facet UI to build or maintain (change: mission-bank-search-tag).
+check('a provenance tag is exported for both languages',
+  typeof BANK_PROVENANCE_TAG.he === 'string' && BANK_PROVENANCE_TAG.he.trim() !== ''
+  && typeof BANK_PROVENANCE_TAG.en === 'string' && BANK_PROVENANCE_TAG.en.trim() !== ''
+  && BANK_PROVENANCE_TAG.he !== BANK_PROVENANCE_TAG.en);
+check('every bank row carries the active-language provenance tag',
+  heTags.includes(BANK_PROVENANCE_TAG.he) && enTags.includes(BANK_PROVENANCE_TAG.en));
+check('the provenance tag is not the OTHER language’s', !heTags.includes(BANK_PROVENANCE_TAG.en));
+check('it is present across the whole real bank, in both languages',
+  bankRowsFor(TASK_BANK, 'he').every((r) => r.tags?.includes(BANK_PROVENANCE_TAG.he))
+  && bankRowsFor(TASK_BANK, 'en').every((r) => r.tags?.includes(BANK_PROVENANCE_TAG.en)));
 
 // ─── 3. Totality ──────────────────────────────────────────────────────────────
 
@@ -277,6 +295,23 @@ check('a published row matched on its source game title survives the client re-r
 const simpleTag = bankSimple.tags?.[0] ?? '';
 const byTag = mergeLibraryRows([], [bankSimple], simpleTag);
 check('a bank row matched on its own tag survives', simpleTag !== '' && byTag.length === 1, simpleTag);
+
+// Searching the provenance tag is the feature: it must isolate the bank from a
+// mixed pool, in whichever language the tag is being read in.
+const mixedPool = [
+  published({ title: 'Totally unrelated', description: 'says nothing about any of this', popularity: 50, copyCount: 50 }),
+  published({ id: 'pt-2', title: 'Another real mission', description: 'also unrelated' }),
+];
+const allBank = bankRowsFor(TASK_BANK, 'he');
+const searchHe = mergeLibraryRows(mixedPool, allBank, BANK_PROVENANCE_TAG.he);
+check('searching the (HE) provenance tag returns ONLY bank rows',
+  searchHe.length === allBank.length && searchHe.every((r) => r.bankKey !== undefined),
+  `${searchHe.length} row(s), ${allBank.length} expected`);
+
+const allBankEn = bankRowsFor(TASK_BANK, 'en');
+const searchEn = mergeLibraryRows(mixedPool, allBankEn, BANK_PROVENANCE_TAG.en);
+check('searching the (EN) provenance tag returns ONLY bank rows',
+  searchEn.length === allBankEn.length && searchEn.every((r) => r.bankKey !== undefined));
 
 // ─── 7. Facets ────────────────────────────────────────────────────────────────
 

@@ -62,6 +62,25 @@ import type { TaskBankEntry } from '../taskBank';
 export const BANK_ROW_ID_PREFIX = 'bank:';
 
 /**
+ * A fixed marker tag added to every bank row's own `tags`, in whichever
+ * language the row was projected in (change: mission-bank-search-tag).
+ *
+ * The library already ranks a text query against a row's tags (`rankFields`
+ * below), so this needs no new facet UI, no server change, and no filter
+ * logic of its own: a creator typing this one word into the existing search
+ * box gets ONLY bank missions, because no real `publicTasks` document is ever
+ * going to carry this exact string as a tag a creator typed themselves. It is
+ * content on the row (so it also renders as an ordinary chip, same as any
+ * other tag), never a `BankTagId` — it says WHERE the mission came from, not
+ * WHAT it is, so it must never be offered as a composer-scoring vocabulary
+ * entry.
+ */
+export const BANK_PROVENANCE_TAG: Record<'he' | 'en', string> = {
+  he: 'בנק משימות',
+  en: 'RushPoint mission bank',
+};
+
+/**
  * A row the task library renders. Structurally a `PublicTask` either way, so both
  * mounts, the detail modal and the shared ranking all keep working unchanged —
  * `bankKey` is the ONE discriminator, present iff the row came from the bank.
@@ -113,9 +132,14 @@ export function bankEntryToLibraryRow(entry: TaskBankEntry, lang: 'he' | 'en'): 
   const type = text(built.type);
   if (!title || !type) return null;
 
-  const tags = Array.isArray(entry.tags)
-    ? entry.tags.map((t) => bankTagLabel(t, lang)).filter((t): t is string => t !== '')
-    : [];
+  // The provenance marker goes FIRST, so it survives whatever `max` a TagChips
+  // caller passes rather than being pushed into a "+N more" overflow.
+  const tags = [
+    BANK_PROVENANCE_TAG[lang],
+    ...(Array.isArray(entry.tags)
+      ? entry.tags.map((t) => bankTagLabel(t, lang)).filter((t): t is string => t !== '')
+      : []),
+  ];
 
   // COPY OUT, field by field. Never `...built`. See the header.
   return {
