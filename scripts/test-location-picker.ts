@@ -16,9 +16,10 @@
 //
 // Runs via `npm test` (scripts/run-unit-tests.mjs auto-discovers scripts/test-*.ts).
 import type { Task, TriggerMode } from '@rushpoint/shared';
-import { normalizeTriggerMode } from '@rushpoint/shared';
+import { normalizeTriggerMode, ARRIVAL_RADIUS_FLOOR_M } from '@rushpoint/shared';
 import {
   TIGHT_RADIUS_M, DEFAULT_RADIUS_M, RADIUS_PRESETS,
+  enforcedRadiusM, radiusBelowFloor,
   type LocationChoice,
   locationChoiceOf, triggerModeFromRadius, skipsGpsCheck,
   locationChoicePatch, radiusPatch, skipGpsPatch,
@@ -142,6 +143,25 @@ for (const m of ALL_MODES) {
     normalizeTriggerMode(rewritten), normalizeTriggerMode(task));
   eq(`${m}: … and preserves coordinates`, rewritten.coordinates, task.coordinates);
 }
+
+
+// ── The radius floor (change: arrival-needs-a-usable-fix) ───────────────────
+//
+// The tight preset on this very control is 4m, and the arrival gate floors every
+// radius at ARRIVAL_RADIUS_FLOOR_M because a handset cannot resolve better. So the
+// Builder hands out a value the game will not honour literally, and has to say so.
+eq('the tight preset is BELOW the floor - which is exactly why the note exists',
+  radiusBelowFloor(TIGHT_RADIUS_M), true);
+eq('the default preset is not', radiusBelowFloor(DEFAULT_RADIUS_M), false);
+eq('a 4m radius is really enforced at the floor', enforcedRadiusM(TIGHT_RADIUS_M), ARRIVAL_RADIUS_FLOOR_M);
+eq('the floor never NARROWS a generous radius', enforcedRadiusM(DEFAULT_RADIUS_M), DEFAULT_RADIUS_M);
+eq('a radius exactly at the floor is not flagged', radiusBelowFloor(ARRIVAL_RADIUS_FLOOR_M), false);
+// Garbage in must not produce a note about a number the creator never typed.
+for (const bad of [undefined, null, 0, -5, Number.NaN]) {
+  eq(`radiusBelowFloor(${String(bad)}) is false`, radiusBelowFloor(bad as number), false);
+}
+eq('an absent radius reports the ordinary default, not the floor',
+  enforcedRadiusM(undefined), DEFAULT_RADIUS_M);
 
 if (failures > 0) {
   console.error(`\n✗ ${failures} assertion(s) failed\n`);

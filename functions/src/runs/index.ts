@@ -36,6 +36,9 @@ import {
   describeGameRequirements,
   normalizeTriggerMode,
   evaluateTrigger,
+  // Is the fix good enough to PROVE arrival (change: arrival-needs-a-usable-fix)?
+  evaluateArrivalFix,
+  defaultRadiusFor,
   evaluatePresence,
   proximitySatisfied,
   attemptLimitReached,
@@ -69,6 +72,21 @@ import {
   // (change: expose-enforced-settings). It delegates per team to
   // `isConsentSatisfied`.
   partitionTeamsByConsent,
+  // How many of a team's declared people are not on a phone (change:
+  // every-member-plays). Total, and returns null rather than a confident lie when the
+  // headcount is unknowable.
+  teamAttendance,
+  // Should this team wait for the rest of its people? Fails open twice over.
+  teamShouldWaitForMembers,
+  // Has everyone done their part (change: every-member-plays)? Distinct devices only,
+  // and the requirement is reduced to what the team can actually achieve.
+  effectiveContributorRequirement,
+  contributorsSatisfied,
+  MEMBERS_OFFLINE_HOLD,
+  // A team that joined after the organizer pressed start (change:
+  // late-joiner-autostart). Total, consent checked BEFORE the opt-in setting, and
+  // fails toward NOT starting.
+  lateJoinerVerdict,
   // The same predicate the partition delegates to, used by the two READ paths
   // that report a hold to the people it affects (change: held-team-visibility):
   // getMyTeamState's `holdReason` and listRunTeams' `heldForConsent`. Reusing it
@@ -340,6 +358,13 @@ export async function launchRunCore(
     billingType, maxParticipants, participantCount: 0,
     // Only test-drive runs carry the flag — normal runs stay free of the field.
     ...(testDrive ? { isTestDrive: true } : {}),
+    // Copied from the game at LAUNCH, never read from the template mid run
+    // (change: late-joiner-autostart). An operational choice written on the template
+    // is replayed by every later run, copied by duplicate/export/publish, and
+    // rewritten wholesale by the Builder -- the same trap Run.taskStatusOverrides
+    // exists to avoid. Only carried when actually on, so an existing run stays
+    // free of the field.
+    ...(game.autoApproveAllMedia === true ? { autoApproveAllMedia: true } : {}),
     launchedAt: now, createdAt: now, updatedAt: now,
   });
   const accessCode: AccessCode = { code, ownerUid: uid, gameId, runId: runRef.id, status: 'unused', createdAt: now };
@@ -617,7 +642,26 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   // to the normal registered/wait path, so the creator can still start from the
   // console after the consent flow — a rehearsal must not become the one door that
   // starts play without the check.
-  const selfStart = run.isTestDrive === true && !game.requiresGuardianConsent && (game.stages?.length ?? 0) > 0;
+  //
+  // A LATE JOINER is the second door into the same self-start (change:
+  // late-joiner-autostart), and it is opt-in per game and off by default. In run
+  // ijI9JMITSf8C9heN1Cwp a team joined a minute after the organizer pressed start,
+  // stayed `launched:false` for 27 minutes with nothing on screen, pressed SOS to be
+  // noticed, and finished zero missions — because startTeams is point in time and
+  // nothing ever asks the question again.
+  //
+  // `lateJoinerVerdict` is total, checks consent BEFORE the setting, and fails
+  // toward NOT starting. So the consent stop above holds for this door too: it is
+  // the same sentence, not a parallel one that could drift.
+  const lateJoin = lateJoinerVerdict({
+    teamsStartedAt: run.teamsStartedAt,
+    joinedAt: now,
+    hasStages: (game.stages?.length ?? 0) > 0,
+    autoStartLateJoiners: game.autoStartLateJoiners,
+    requiresGuardianConsent: game.requiresGuardianConsent,
+  });
+  const selfStart = (run.isTestDrive === true && !game.requiresGuardianConsent
+    && (game.stages?.length ?? 0) > 0) || lateJoin.autoStart;
   const team: RunTeam = {
     id: teamId,
     runId,
@@ -640,6 +684,14 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     // teammates attach their own phones via joinTeamAsDevice with this code.
     deviceUids: [teamId],
     controllerUid: teamId,
+    // WHEN this team joined (change: late-joiner-autostart). The team document carried
+    // NO top-level joinedAt - the only one was nested inside `devices[0]` - so
+    // `listRunTeams` projected null for every team and `pendingLateJoiners` could never
+    // measure a wait. The console's stranded-team strip was reading a field that did
+    // not exist. Found by EXECUTING the path in e2e; nothing else could have caught it,
+    // because the types are optional and the projection is faithfully copying an
+    // absent value.
+    joinedAt: now,
     deviceJoinCode: generateDeviceJoinCode(),
     devices: [{ uid: teamId, name: displayName.trim(), joinedAt: now }],
     updatedAt: now,
@@ -739,10 +791,20 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   // degrades to "joined, no task yet", which requestNextTask recovers from.
   if (selfStart && !joined.already) {
     await assignNextInActiveStage(ownerUid, gameId, runId, teamId, { lat: 31.7905, lng: 35.164 }, now, game)
-      .catch((e) => logBestEffort('joinRun.testDrive.assign', { ownerUid, gameId, runId, teamId }, e));
+      .catch((e) => logBestEffort('joinRun.selfStart.assign', { ownerUid, gameId, runId, teamId }, e));
   }
 
-  return { teamId, runId, gameId, ownerUid, alreadyJoined: joined.already, selfStarted: selfStart && !joined.already };
+  return {
+    teamId, runId, gameId, ownerUid,
+    alreadyJoined: joined.already,
+    selfStarted: selfStart && !joined.already,
+    // Additive, for the console and for diagnosing a stranded team after the fact
+    // (change: late-joiner-autostart). `lateJoined` is true even when nothing could
+    // start them — that is the whole point: the safety net must fire for the
+    // organizer who never turned auto start on.
+    lateJoined: lateJoin.isLate && !joined.already,
+    lateJoinBlockedBy: lateJoin.blockedBy,
+  };
 });
 
 
@@ -806,7 +868,17 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
   // cannot drift.
   const wrapped = selected.map((doc) => ({ doc, ...(doc.data() as RunTeam) }));
   const { ready, held } = partitionTeamsByConsent(wrapped, game);
-  const targets = ready.map((w) => w.doc);
+  // A SECOND hold, for teams whose people are not all on a phone yet (change:
+  // every-member-plays). Deliberately layered AFTER consent rather than folded into
+  // it: consent is a legal gate and this is a participation preference, and a team
+  // held for both must be reported as held for CONSENT - turning the setting off
+  // would not release them, and telling them it would is a dead end.
+  //
+  // `teamShouldWaitForMembers` fails open twice: it needs a literal `true` on the
+  // game, and it never holds a team whose headcount is unknowable.
+  const membersReady = ready.filter((w) => !teamShouldWaitForMembers(w, game));
+  const heldForMembers = ready.filter((w) => teamShouldWaitForMembers(w, game));
+  const targets = membersReady.map((w) => w.doc);
 
   const batch = db.batch();
   for (const doc of targets) {
@@ -817,6 +889,18 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
     batch.update(doc.ref, { launched: true, startedAt: now, status: 'active', stages, updatedAt: now });
   }
   await batch.commit();
+
+  // Stamp when play began, ONCE (change: late-joiner-autostart). startTeams used to
+  // leave no trace on the run at all, so nothing downstream could tell "joined
+  // before the start" from "joined after it and was stranded" — which is how one
+  // team sat 27 minutes unnoticed in run ijI9JMITSf8C9heN1Cwp. A second press must
+  // NOT move it: the question this answers is "has play begun", not "when was the
+  // last batch launched", and moving it would un-strand every team already waiting.
+  if (!runDoc.data!.teamsStartedAt) {
+    await db.doc(runPath(uid, gameId, runId))
+      .update({ teamsStartedAt: now, updatedAt: now })
+      .catch((e) => logBestEffort('startTeams.stamp', { uid, gameId, runId }, e));
+  }
 
   // Assign the first task of the active stage for each launched team. Delegated
   // to assignNextInActiveStage so single- vs multi-task routing — and the
@@ -834,7 +918,14 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
   // `heldForConsent` is ADDITIVE — `launched` keeps its exact prior meaning, so
   // every existing caller is unaffected. A caller that reads it can tell a cohort
   // that had nothing to start from a cohort that was blocked.
-  return { launched: targets.length, heldForConsent: held.length };
+  return {
+    launched: targets.length,
+    heldForConsent: held.length,
+    // Additive (change: every-member-plays). A caller that reads it can tell a cohort
+    // blocked by consent from one blocked by absent teammates - two different holds
+    // with two different fixes.
+    heldForMembers: heldForMembers.length,
+  };
 }, { timeoutSeconds: 180, memory: '512MB' });
 
 
@@ -943,6 +1034,9 @@ export async function completeTaskForTeam(
     submittedAnswer?: string;
     wasCorrect?: boolean;
     answerLog?: AnswerLogEntry | null;
+    // arrival-needs-a-usable-fix: the team was let through on a fix that could not
+    // prove it, because the grace window had passed. Organizer-facing only.
+    arrivalUnverified?: boolean;
   },
 ): Promise<{ completed: boolean; heldSlot: boolean }> {
   // Returns { completed, heldSlot }. `completed` is TRUE only when this call
@@ -1226,6 +1320,13 @@ export async function completeTaskForTeam(
     // preceded this completion were appended by the grading path on their way past.
     if (extras?.answerLog) {
       taskRec.answerLog = appendAnswerLog(taskRec.answerLog, extras.answerLog);
+    }
+    // arrival-needs-a-usable-fix: stamp the unverified arrival on the record itself,
+    // inside this transaction, so it is written atomically with the completion it
+    // describes and can never exist without it. Only ever set to TRUE - a later
+    // proven completion of a different task must not clear another one.
+    if (extras?.arrivalUnverified) {
+      taskRec.arrivalUnverified = true;
     }
 
     // Power-ups (change: power-ups) — ALL inside this existing transaction; no new
@@ -1514,9 +1615,17 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
 // stop that team still had left. This is the per-task version:
 //
 //   • only the named task (default: the one the team is holding) becomes `skipped`;
-//   • it earns EXACTLY 0 — `skipStage`'s `skipAward` consolation is deliberately not
-//     paid here, because a single mission is not a stage being taken away. An
-//     organiser who wants to compensate has `adjustTeamScore`, audited on its own;
+//   • it earns `skipAward` — the SAME consolation `skipStage` pays for a task it
+//     removes (change: live-ops-feedback-loop). This used to earn EXACTLY 0, argued
+//     on the grounds that a single mission is not a stage being taken away and that
+//     an organiser wanting to compensate has `adjustTeamScore`. Production run
+//     `ijI9JMITSf8C9heN1Cwp` tested that argument and it lost: the organiser
+//     computed the fair value (40) in his head, mid-run, and paid it out as a manual
+//     bonus — i.e. the compensation route turned a scored event into an untraceable
+//     one, in a run where manual awards already fully reversed the standings. The
+//     workaround WAS the bug. Finished runs cannot move: `earnedScore` is stamped
+//     onto the record here, and `buildRankings` sums stored records rather than
+//     re-deriving them, so this changes future skips only and needs no migration;
 //   • the team is routed to another task IN THE SAME STAGE through the ordinary
 //     assignment path, so station caps, exclusive groups, unlock gates, expiry,
 //     scheduled release and the run's live pause overrides all still apply;
@@ -1573,6 +1682,9 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
   // more than once). Released AFTER the commit, exactly like skipStage.
   let releaseIds: string[] = [];
   let skippedTaskId = '';
+  // What the skip paid this team (change: live-ops-feedback-loop). Declared out here
+  // because the transaction body stamps it and the response reports it.
+  let skipConsolation = 0;
   let stageCompleted = false;
   let requiredTaskCount = 0;
   let requirementLowered = false;
@@ -1632,13 +1744,24 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
     previousStatus = rec.status; // 'assigned' when the team was holding it, else 'unassigned'
     rec.status = 'skipped';
     rec.completedAt = now;
-    rec.earnedScore = 0; // no consolation award — see the header
     // fix-fixed-points-speed-template-drift: stamp the skipped task's expected
     // route-minutes from its template task so a finished team's terminal record is
     // immutable against later template edits.
     {
       const skipTemplate = gameStage?.tasks.find((gt) => gt.id === targetId);
       if (skipTemplate) rec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(skipTemplate);
+      // The SAME consolation `skipStage` pays (change: live-ops-feedback-loop). A
+      // task the template no longer describes earns 0 rather than failing the skip:
+      // the organiser is mid-event removing a stop, and refusing the removal because
+      // the template drifted would be the worse outcome.
+      rec.earnedScore = skipTemplate ? skipAward(game.scoringPreset, skipTemplate) : 0;
+      // Roll it up the SAME two places `skipStage` does. Stamping only the task
+      // record leaves `team.score` and the stage total behind it, and the e2e
+      // assertion caught exactly that: the record read 50 while the team read 0.
+      // The live leaderboard reads the team document, so a half-applied award is a
+      // team that was paid and cannot see it.
+      skipConsolation = rec.earnedScore;
+      stageRec.earnedScore = (stageRec.earnedScore ?? 0) + skipConsolation;
     }
     if (plan.heldSlot) releaseIds.push(targetId);
     // The team's OWN requirement for this stage, so the stage stays winnable. Never
@@ -1658,9 +1781,13 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
 
     const allDone = stages.every((s) => s.status === 'completed');
     // Whole-array rewrite (never a dotted update into an array — it would coerce
-    // the array to a map). Score is untouched: a skip pays nothing.
+    // the array to a map). The consolation moves the team's score by exactly what
+    // the task record was stamped with, the same way skipStage does
+    // (change: live-ops-feedback-loop) — the two numbers must never disagree,
+    // because the live board reads the team and the final ranking reads the records.
     tx.update(teamRef, {
       stages,
+      ...(skipConsolation > 0 ? { score: (team.score ?? 0) + skipConsolation } : {}),
       ...(allDone ? { status: 'finished', finishedAt: now } : {}),
       activeTaskId: null,
       updatedAt: now,
@@ -1712,6 +1839,7 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
     stageCompleted,
     requiredTaskCount,
     requirementLowered,
+    consolation: skipConsolation,
   });
 
   await maybeRefreshLeaderboardSnapshot(ownerUid, ids.gameId, ids.runId, { force: true });
@@ -1722,6 +1850,9 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
     stageCompleted,
     requiredTaskCount,
     requirementLowered,
+    // What the skip paid (change: live-ops-feedback-loop), so the console can say
+    // so instead of the organiser having to work it out and pay it by hand.
+    consolation: skipConsolation,
     nextTaskId,
     nextReason,
   };
@@ -3795,12 +3926,36 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       activeStageOrder,
       finished: t.status === 'finished',
       launched: t.launched,
+      // How many of this team's declared people are NOT on a phone (change:
+      // every-member-plays). A COUNT, never a person - the console needs to see that a
+      // team of six is one phone in a trench coat, and nothing in the product could say
+      // so because `memberCount` and `deviceUids` were never compared. Null when the
+      // headcount is unknowable, which is most games: `memberCount` is only meaningful
+      // when the game actually collects member names.
+      membersNotConnected: teamAttendance(t).missing,
+      // WHEN they joined (change: late-joiner-autostart). Without it the console
+      // cannot tell a team waiting BEFORE the organizer pressed start from one
+      // stranded AFTER it, which is the difference between a calm nudge and the
+      // 27 minutes team GILAD spent watching a blank screen in run
+      // ijI9JMITSf8C9heN1Cwp. Nullable: a team document written before this field
+      // existed degrades to "unknown wait", never to "not stranded".
+      joinedAt: t.joinedAt ?? null,
       startedAt: t.startedAt ?? null,
       finishedAt: t.finishedAt ?? null,
       // Out-of-bounds recovery: the run console could not SEE this condition, let
       // alone clear it — a team paused by the safe-zone latch looked identical to a
       // team that was simply slow. Projected so staff can spot it and release them.
       outOfBounds: t.outOfBounds === true,
+      // How many missions this team was let into WITHOUT the fix proving it
+      // (change: arrival-needs-a-usable-fix). A COUNT, never a list of places: the
+      // organizer needs to know that one team keeps arriving on evidence that could
+      // not support it, which is a very different thing from knowing where they were.
+      // Zero for every ordinary run, so the console strip stays silent unless there
+      // is genuinely something to look at.
+      unverifiedArrivals: t.stages.reduce(
+        (n, s) => n + (s.tasks ?? []).filter((r) => r.arrivalUnverified === true).length,
+        0,
+      ),
       // ── Attention signals (change: run-console-attention) ──
       // All three are read-only projections of state this handler already holds.
       // The console derives "is anyone stuck?" from them; nothing is written and
@@ -3914,6 +4069,76 @@ export async function resolveCallerTeam(
   if (opts.requireController) assertController(team, uid);
   return { ctx, teamId: team.id, team, teamRef };
 }
+
+// ─── contributeToTask (change: every-member-plays) ────────────────────────────
+//
+// THE ONLY MUTATION A NON-CONTROLLER DEVICE MAY MAKE.
+//
+// Every other participant callable passes `{ requireController: true }`, which is what
+// makes a teammate on their own phone a spectator by construction - and that is how one
+// person did the mission while the rest of the team stood around in run
+// ijI9JMITSf8C9heN1Cwp.
+//
+// This records that THIS device did its part of a mission, and nothing else:
+//   • it does not complete the task,
+//   • it does not score,
+//   • it does not release a station slot or route anybody.
+//
+// Keeping it additive is deliberate. A second completion path would need its own
+// idempotence, its own slot accounting and its own scoring edge cases, and the platform
+// would then have two functions that can finish a mission. The controller still submits;
+// this only decides whether they are ALLOWED to yet.
+//
+// Idempotent by construction: the contribution set is a set of DISTINCT device uids, so
+// one phone tapped five times is one contributor. That is the whole point - counting
+// taps rather than people would make the requirement decorative.
+export const contributeToTask = loggedCallable('contributeToTask', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'contributeToTask');
+  const { ownerUid, gameId, runId, code, taskId } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string; taskId?: string;
+  };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
+
+  // NO `requireController` - that is the entire reason this callable exists. The caller
+  // must still be an ATTACHED device of this team, which `resolveCallerTeam` enforces.
+  const { ctx, teamId, teamRef, team } = await resolveCallerTeam(
+    uid, { ownerUid, gameId, runId, code },
+  );
+  assertStageActiveForTask(team, taskId);
+
+  const contributed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    const fresh = snap.data() as RunTeam | undefined;
+    if (!fresh) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const existing = fresh.taskContributions?.[taskId] ?? [];
+    if (existing.includes(uid)) return { already: true, count: new Set(existing).size };
+    const next = Array.from(new Set([...existing, uid]));
+    // A nested object under a NON dotted key: `taskContributions` is a map, so this is
+    // the safe shape. Never a dotted path into an array (CLAUDE.md).
+    tx.update(teamRef, {
+      taskContributions: { ...(fresh.taskContributions ?? {}), [taskId]: next },
+      updatedAt: new Date().toISOString(),
+    });
+    return { already: false, count: next.length };
+  });
+
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
+  const gtask = gameSnap.exists ? findGameTask(gameSnap.data as Game, taskId) : undefined;
+  const required = effectiveContributorRequirement(
+    gtask?.requiredContributors, attachedDeviceUids(team).length,
+  );
+  return {
+    ok: true,
+    taskId,
+    teamId,
+    already: contributed.already,
+    contributors: contributed.count,
+    required,
+    satisfied: required === 0 || contributed.count >= required,
+  };
+});
+
 
 // ─── joinTeamAsDevice (attach another phone to an existing team) ───────────────
 
@@ -4430,9 +4655,12 @@ export async function assignNextInActiveStage(
 export const completeTask = loggedCallable('completeTask', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'completeTask');
-  const { taskId, lat, lng, ownerUid, gameId, runId, code } = data as {
+  const { taskId, lat, lng, accuracyMeters, ownerUid, gameId, runId, code } = data as {
     taskId: string;
     lat?: number; lng?: number;
+    // How good the fix was (change: arrival-needs-a-usable-fix). Optional: an app
+    // that has not updated sends nothing and gets exactly the old decision.
+    accuracyMeters?: number | null;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
@@ -4443,6 +4671,11 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   assertTeamNotHeld(team); // staff-console-field-ops — no check-in while held
   const now = new Date().toISOString();
+  const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
+  // Set by the proximity gate below when the grace window let a coarse fix through
+  // (change: arrival-needs-a-usable-fix). Declared out here because the gate decides
+  // it and the completion write is where the organizer record is actually made.
+  let arrivalUnverified = false;
 
   // Trigger-mode gate: radius/exact tasks validate GPS proximity server-side so
   // they can't be spoofed by calling completeTask directly; instant/locationless
@@ -4502,9 +4735,56 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
         }
       } else {
         const distM = haversineKm({ lat, lng }, c!) * 1000;
+        // IS THE FIX GOOD ENOUGH TO PROVE ANYTHING (change: arrival-needs-a-usable-fix)?
+        // safeZone already refuses to ACCUSE on an imprecise fix; this refuses to be
+        // PROVED by one. A 200m fix cannot place anybody within a 40m radius, and
+        // accepting it is how teams advanced "without precise verification of their
+        // physical location" in run ijI9JMITSf8C9heN1Cwp. Absent accuracy reproduces
+        // the old decision exactly, so an app that has not updated is unaffected.
+        //
+        // AND IT CAN NEVER BECOME A WALL. `coarseFixSince[taskId]` is the moment this
+        // team was FIRST refused here; once COARSE_FIX_GRACE_MS has passed the gate
+        // opens regardless and the arrival is recorded as unverified. A mission
+        // authored at 4m, or a courtyard with no sky, must not be unwinnable.
+        const nowMs = Date.now();
+        const coarseSince = team.coarseFixSince?.[taskId];
+        const fix = evaluateArrivalFix({
+          distanceM: distM,
+          radiusM: gtask.geofenceRadiusMeters ?? defaultRadiusFor(mode),
+          accuracyMeters,
+          coarseSinceMs: coarseSince ? Date.parse(coarseSince) : null,
+          nowMs,
+        });
+        if (fix.outcome === 'fixTooCoarse'
+          && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
+          // Start the clock on the FIRST refusal, so the ten seconds the player is
+          // about to be asked to wait are actually counted. Best-effort and awaited
+          // before the throw: if this write fails the player is merely asked to hold
+          // still again, which is the same answer they just got.
+          if (fix.startCoarseClock) {
+            await teamRef.set(
+              { coarseFixSince: { [taskId]: new Date(nowMs).toISOString() } },
+              { merge: true },
+            ).catch(() => undefined);
+          }
+          // `unavailable` and NOT `failed-precondition`: this is retriable by standing
+          // still, it is not the player being in the wrong place, and the client must
+          // be able to tell the two apart to give usable advice.
+          throw new functions.https.HttpsError(
+            'unavailable',
+            'We cannot see your location precisely enough yet. Hold still for a moment and try again.',
+          );
+        }
+        // Remember it for the completion write below, which is where the organizer's
+        // record is actually made.
+        arrivalUnverified = fix.unverified;
         // Hidden-location tasks gate identically but the rejection must not leak the
         // distance (otherwise the secret spot is triangulable by polling).
-        const verdict = evaluateTrigger(mode, distM, gtask.geofenceRadiusMeters, { hidden: !!gtask.hideLocation });
+        //
+        // Measured against `fix.effectiveRadiusM`, never the authored radius: the
+        // floor has to apply to the DISTANCE check too, or a 4m mission is still
+        // unwinnable — it would simply fail one line further down.
+        const verdict = evaluateTrigger(mode, distM, fix.effectiveRadiusM, { hidden: !!gtask.hideLocation });
         if (!verdict.ok && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
           const fallback = gtask.hideLocation
             ? 'Not here yet — keep following the clue'
@@ -4515,7 +4795,38 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     }
   }
 
-  const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  // HAS EVERYONE DONE THEIR PART (change: every-member-plays)?
+  //
+  // Gated HERE, on the participant's own completion, and deliberately NOT inside
+  // completeTaskForTeam: a staff approval, a skip and the auto-approve path all reach
+  // that function, and none of them should be blocked by a teammate who has not tapped
+  // yet. The organizer's tools must never be held hostage to the team's attendance.
+  //
+  // The requirement is REDUCED to the devices actually attached, so a mission authored
+  // for four contributors and played by a team of two is never unwinnable - the same
+  // rule planTaskSkip applies to a stage's requiredTaskCount, applied to people.
+  {
+    // `gtask` is already resolved above from the cached game doc - no extra read on
+    // this hot participant path.
+    const need = effectiveContributorRequirement(
+      gtask?.requiredContributors,
+      attachedDeviceUids(team).length,
+    );
+    if (need > 0 && !contributorsSatisfied(team.taskContributions?.[taskId], need)) {
+      const have = new Set(team.taskContributions?.[taskId] ?? []).size;
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `waiting-for-teammates: ${have} of ${need} have done their part`,
+      );
+    }
+  }
+
+  const { completed } = await completeTaskForTeam(
+    ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now,
+    // arrival-needs-a-usable-fix: absent on every ordinary check-in, so a record
+    // gains the field only when the grace window actually opened for it.
+    arrivalUnverified ? { arrivalUnverified: true } : undefined,
+  );
   // A duplicate/idempotent completion must NOT release or re-assign: a concurrent
   // real completion already did, and doubling the assignment leaks a station slot.
   // Idempotent replay (WO-3): a duplicate completion of an already-graded task is
@@ -4669,8 +4980,10 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
 export const reportArrival = loggedCallable('reportArrival', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'reportArrival');
-  const { taskId, lat, lng, ownerUid, gameId, runId, code } = data as {
+  const { taskId, lat, lng, accuracyMeters, ownerUid, gameId, runId, code } = data as {
     taskId?: string; lat?: number; lng?: number;
+    // See completeTask (change: arrival-needs-a-usable-fix).
+    accuracyMeters?: number | null;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
@@ -4690,6 +5003,10 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
   // have not reached (that would be a location oracle on a future chapter).
   assertStageActiveForTask(team, taskId);
 
+  // arrival-needs-a-usable-fix: did the grace window let a coarse fix unseal this?
+  // Recorded on the latch below, organizer-facing only.
+  let unsealUnverified = false;
+
   // Nothing to unseal on a visible task — a no-op success keeps the client simple.
   if (!task.hideLocation) return { arrived: true };
 
@@ -4707,7 +5024,43 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
       }
     } else {
       const distM = haversineKm({ lat, lng }, c!) * 1000;
-      const verdict = evaluateTrigger(mode, distM, task.geofenceRadiusMeters, { hidden: true });
+      // A coarse fix must not UNSEAL a hidden mission either (change:
+      // arrival-needs-a-usable-fix) - revealing the spot to someone who is not there
+      // is the same defect wearing the treasure-hunt costume. Retriable, and the
+      // reason stays digit-free so the secret point is not triangulable by polling.
+      //
+      // Same grace window as the check-in path, and for the same reason: a hunt whose
+      // final clue can never be opened because the courtyard has no sky is not a
+      // harder hunt, it is a broken one.
+      const nowMs = Date.now();
+      const coarseSince = team.coarseFixSince?.[taskId];
+      const fix = evaluateArrivalFix({
+        distanceM: distM,
+        radiusM: task.geofenceRadiusMeters ?? defaultRadiusFor(mode),
+        accuracyMeters,
+        coarseSinceMs: coarseSince ? Date.parse(coarseSince) : null,
+        nowMs,
+      });
+      if (fix.outcome === 'fixTooCoarse'
+        && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
+        // Start the clock on the FIRST refusal only, so repeated presses cannot push
+        // the window away from the player. Shared with completeTask by construction:
+        // both key the same per-task stamp on the same team document, so ten seconds
+        // of holding still counts however the player asked.
+        if (fix.startCoarseClock) {
+          await teamRef.set(
+            { coarseFixSince: { [taskId]: new Date(nowMs).toISOString() } },
+            { merge: true },
+          ).catch(() => undefined);
+        }
+        return { arrived: false, retriable: true, reason: 'Hold still for a moment so we can see where you are' };
+      }
+      unsealUnverified = fix.unverified;
+      // Measured against the FLOORED radius, never the authored one - otherwise a
+      // tightly-authored hidden mission would clear the accuracy gate and then fail
+      // the distance gate one line later, which is the same dead end wearing a
+      // different message.
+      const verdict = evaluateTrigger(mode, distM, fix.effectiveRadiusM, { hidden: true });
       if (!verdict.ok && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
         // Reason strings for hidden tasks are digit-free by contract; never fall
         // back to a message that carries the distance.
@@ -4729,7 +5082,11 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
       tasks: s.tasks.map((r) => {
         if (r.taskId !== taskId || r.arrivedAt != null) return r; // idempotent
         changed = true;
-        return { ...r, arrivedAt };
+        // Only ever ADDS the flag: an arrival proven by a good fix leaves the
+        // record clean, which is what makes the console strip meaningful.
+        return unsealUnverified
+          ? { ...r, arrivedAt, arrivalUnverified: true }
+          : { ...r, arrivedAt };
       }),
     }));
     if (!changed) return;
@@ -5665,8 +6022,17 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   // predicate startTeams partitions on, so the explanation cannot disagree with
   // the behaviour. Response-level (not a task payload), so the participant
   // sanitizer contract is untouched. Read-only: nothing here releases anybody.
-  const holdReason: 'guardian_consent' | null =
-    !team.launched && !isConsentSatisfied(team, game) ? 'guardian_consent' : null;
+  //
+  // TWO reasons now (change: every-member-plays), and the ORDER is load-bearing:
+  // consent outranks the attendance hold, because turning the attendance setting off
+  // would not release a team held for consent, and telling them it would is a dead end.
+  // Same ordering startTeams partitions on, so the explanation cannot disagree with the
+  // behaviour.
+  const holdReason: 'guardian_consent' | typeof MEMBERS_OFFLINE_HOLD | null =
+    team.launched ? null
+      : !isConsentSatisfied(team, game) ? 'guardian_consent'
+        : teamShouldWaitForMembers(team, game) ? MEMBERS_OFFLINE_HOLD
+          : null;
 
   // ── Test mode (change: test-mode-hidden-scoring) ────────────────────────────
   // THE seal. This function returns the team document WHOLE, so every field on

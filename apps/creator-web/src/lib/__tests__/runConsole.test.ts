@@ -753,6 +753,9 @@ function quietSignals(status: RunStatus = 'live'): RunSignalInput {
     pausedTaskCount: 0,
     teamCount: 4,
     unstartedTeamCount: 0,
+    strandedLateJoinerCount: 0,
+    teamsWithMembersOffline: 0,
+    unverifiedArrivalCount: 0,
   };
 }
 
@@ -808,6 +811,7 @@ describe('buildRunSignals — the catalogue', () => {
       [{ pausedTaskCount: 2 }, 'tasksPaused'],
       [{ teamCount: 0 }, 'nobodyJoined'],
       [{ unstartedTeamCount: 2 }, 'notStarted'],
+      [{ strandedLateJoinerCount: 1, unstartedTeamCount: 1 }, 'lateJoinerStranded'],
     ];
     for (const [patch, id] of cases) {
       const ids = buildRunSignals({ ...quietSignals('live'), ...patch }).map((s) => s.id);
@@ -819,6 +823,77 @@ describe('buildRunSignals — the catalogue', () => {
     const [signal] = buildRunSignals({ ...quietSignals('live'), stuckTeamCount: 3 });
     expect(signal.id).toBe('teamsStuck');
     expect(signal.count).toBe(3);
+  });
+
+  // change: late-joiner-autostart. In run ijI9JMITSf8C9heN1Cwp a team joined after
+  // the start, sat 27 minutes with nothing on screen and had to press SOS to be
+  // noticed. `notStarted` already existed but is INFO and means "you have not
+  // pressed start yet" - a different, unalarming situation. A team stranded AFTER
+  // play began is the urgent one, and it must not be told as the calm one.
+  it('tells a stranded late joiner apart from a run that has not started', () => {
+    const signals = buildRunSignals({
+      ...quietSignals('live'), unstartedTeamCount: 1, strandedLateJoinerCount: 1,
+    });
+    const ids = signals.map((s) => s.id);
+    expect(ids).toContain('lateJoinerStranded');
+    // Same team, told twice, would be noise on the screen that matters most.
+    expect(ids).not.toContain('notStarted');
+    expect(signals.find((s) => s.id === 'lateJoinerStranded')?.severity).toBe('warn');
+    expect(signals.find((s) => s.id === 'lateJoinerStranded')?.count).toBe(1);
+  });
+
+  // change: every-member-plays. A team of six sharing one phone was indistinguishable
+  // from a solo player on every screen, because memberCount and deviceUids were never
+  // compared. INFO, not a warning: sharing a phone is a legitimate way to play, and
+  // crying wolf would teach an organizer to ignore the strip.
+  it('surfaces teams whose members have no phone, as information rather than alarm', () => {
+    const signals = buildRunSignals({ ...quietSignals('live'), teamsWithMembersOffline: 3 });
+    const chip = signals.find((s) => s.id === 'membersOffline');
+    expect(chip).toBeDefined();
+    expect(chip?.severity).toBe('info');
+    expect(chip?.count).toBe(3);
+  });
+
+  it('says nothing when every team is fully connected or unknowable', () => {
+    const ids = buildRunSignals({ ...quietSignals('live'), teamsWithMembersOffline: 0 }).map((s) => s.id);
+    expect(ids).not.toContain('membersOffline');
+  });
+
+  // change: arrival-needs-a-usable-fix. The server now lets a team through a check-in
+  // its GPS could not prove, once the grace window has passed — because refusing
+  // forever made a 4m mission, and any courtyard with no sky, permanently unwinnable.
+  // The count exists so an organizer can SEE that, and for nothing else.
+  it('surfaces arrivals accepted without a precise fix', () => {
+    const signals = buildRunSignals({ ...quietSignals('live'), unverifiedArrivalCount: 4 });
+    const chip = signals.find((s) => s.id === 'arrivalsUnverified');
+    expect(chip).toBeDefined();
+    expect(chip?.count).toBe(4);
+  });
+
+  // INFO, deliberately. The overwhelmingly common cause is bad reception, not a player
+  // at home — the server let them through precisely BECAUSE refusing was the worse
+  // bug. Ranking this as a warning would accuse the ordinary case.
+  it('reports unverified arrivals as information, never as an accusation', () => {
+    const chip = buildRunSignals({ ...quietSignals('live'), unverifiedArrivalCount: 1 })
+      .find((s) => s.id === 'arrivalsUnverified');
+    expect(chip?.severity).toBe('info');
+  });
+
+  it('stays silent when every arrival was proven', () => {
+    const ids = buildRunSignals({ ...quietSignals('live'), unverifiedArrivalCount: 0 }).map((s) => s.id);
+    expect(ids).not.toContain('arrivalsUnverified');
+  });
+
+  // A quiet run must stay quiet: the strip is only worth reading if it is empty when
+  // nothing is wrong.
+  it('does not add the chip to an otherwise silent run', () => {
+    expect(buildRunSignals(quietSignals('live'))).toEqual([]);
+  });
+
+  it('still says "not started" for teams waiting BEFORE the organizer pressed start', () => {
+    const ids = buildRunSignals({ ...quietSignals('live'), unstartedTeamCount: 3 }).map((s) => s.id);
+    expect(ids).toContain('notStarted');
+    expect(ids).not.toContain('lateJoinerStranded');
   });
 
   it('lets one queue occupy one chip: overdue photos suppress the pending chip', () => {
@@ -848,6 +923,9 @@ describe('buildRunSignals — ordering', () => {
     pausedTaskCount: 1,
     teamCount: 5,
     unstartedTeamCount: 1,
+    strandedLateJoinerCount: 1,
+    teamsWithMembersOffline: 1,
+    unverifiedArrivalCount: 0,
   };
 
   it('puts every critical signal before every warning and every warning before every note', () => {
@@ -874,7 +952,9 @@ describe('buildRunSignals — every signal leads somewhere', () => {
         status: 'live',
         alertCount: 1, outOfBoundsCount: 1, overduePhotoCount: 1, pendingPhotoCount: 4,
         stuckTeamCount: 1, heldForConsentCount: 1, unreadChatThreads: 1, pausedTaskCount: 1,
-        teamCount: 0, unstartedTeamCount: 1,
+        teamCount: 0, unstartedTeamCount: 1, strandedLateJoinerCount: 1,
+        teamsWithMembersOffline: 1,
+    unverifiedArrivalCount: 0,
       });
       void id;
       for (const s of signals) expect(ALL_PANEL_IDS, s.id).toContain(s.panel);
@@ -898,7 +978,9 @@ describe('buildRunSignals — every signal leads somewhere', () => {
       alertCount: state.alertCount, outOfBoundsCount: 2, overduePhotoCount: 1,
       pendingPhotoCount: state.pendingPhotoCount, stuckTeamCount: 2, heldForConsentCount: 1,
       unreadChatThreads: state.unreadChatThreads, pausedTaskCount: state.pausedTaskCount,
-      teamCount: 0, unstartedTeamCount: 0,
+      teamCount: 0, unstartedTeamCount: 0, strandedLateJoinerCount: 0,
+      teamsWithMembersOffline: 0,
+    unverifiedArrivalCount: 0,
     });
     expect(signals.length).toBeGreaterThan(0);
     for (const s of signals) expect([...reachable], s.id).toContain(s.panel);

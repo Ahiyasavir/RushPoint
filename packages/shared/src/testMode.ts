@@ -88,6 +88,13 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
       // The hidden-task arrival latch: dropping it would re-seal a task the
       // player has already walked to.
       copy(out, r, 'arrivedAt');
+      // NOT `arrivalUnverified` (change: arrival-needs-a-usable-fix), and this is a
+      // decision rather than an oversight: it is the organizer's record that a team
+      // was let through on a fix which could not prove it. Telling the PLAYER would
+      // publish the way through the gate the flag exists to detect - 'press, wait ten
+      // seconds, press again' becomes a documented move. Withheld by construction
+      // here, like `submittedAnswer` above: never allow-listed, not conditionally
+      // stripped.
       copy(out, r, 'verificationOutcome');
       copy(out, r, 'photoUrl');
       // Their own survey answer — not secret to its own team.

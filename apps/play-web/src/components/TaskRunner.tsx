@@ -1,8 +1,20 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSeconds, resolveVideoDuration } from '@rushpoint/shared';
+import {
+  haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSeconds, resolveVideoDuration,
+  // How long the server holds a coarse fix before letting it through anyway, so the
+  // app can press again for the player at the right moment rather than guessing
+  // (change: arrival-needs-a-usable-fix).
+  COARSE_FIX_GRACE_MS,
+} from '@rushpoint/shared';
+// Reduced to the devices this team actually has, the same way the server reduces it at
+// submit time, so the two never disagree about what the team is waiting for
+// (change: every-member-plays).
+import { effectiveContributorRequirement } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
+  // The ONLY mutation a non-controller device may make (change: every-member-plays).
+  contributeToTask,
   submitTaskAnswer, submitSequenceStep, triggerSOS, revealTaskAnswer,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
@@ -11,7 +23,7 @@ import {
 // which secondary actions belong behind the overflow.
 import { selectMissionNotice, type MissionNotice } from '../lib/missionNotice';
 import MissionExtras from './MissionExtras';
-import { uploadTaskPhoto, uploadTaskAudio, uploadTaskVideo } from '../services/firebase';
+import { uploadTaskPhoto, uploadTaskAudio, uploadTaskVideo, uid } from '../services/firebase';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
   getUploadProgress, subscribeUploadProgress,
@@ -35,7 +47,8 @@ import {
   canCompleteWithoutLocation,
 } from '../lib/stuckGuards';
 import {
-  VIDEO_BITS_PER_SECOND, AUDIO_BITS_PER_SECOND, videoTypeFromName, pickedClipVerdict,
+  VIDEO_BITS_PER_SECOND, AUDIO_BITS_PER_SECOND, CAPTURE_VIDEO_CONSTRAINTS,
+  videoTypeFromName, pickedClipVerdict,
   recordedClipVerdict,
 } from '../lib/videoCapture';
 
@@ -255,6 +268,30 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     ? state.activeStageTasks.find((t) => t.id === assignedRec.taskId)
     : undefined;
 
+  // ── The automatic second press (change: arrival-needs-a-usable-fix) ─────────
+  //
+  // The server refuses a fix too coarse to prove arrival and asks the player to hold
+  // still; COARSE_FIX_GRACE_MS later it accepts regardless. Without this, the player
+  // has to work that out and press again themselves — and the message does not say
+  // "press again in ten seconds", because putting a number on it would document the
+  // way through the gate.
+  //
+  // So the app presses for them, exactly ONCE per mission. One press, a short "hold
+  // still", and it resolves itself. A second refusal is left alone: by then the
+  // window has passed and anything still refusing is a real problem the player needs
+  // to see, not something more waiting will fix.
+  const coarseRetryRef = useRef<number | null>(null);
+  const coarseRetriedFor = useRef<string | null>(null);
+  // TaskRunner does NOT remount between missions (see the keying note on the entry
+  // components), so a pending retry from the previous mission would fire against the
+  // next one. Cancel on every task change, and on unmount.
+  useEffect(() => () => {
+    if (coarseRetryRef.current !== null) {
+      window.clearTimeout(coarseRetryRef.current);
+      coarseRetryRef.current = null;
+    }
+  }, [assignedRec?.taskId]);
+
   // Clear a revealed hint / message when the assigned task changes.
   useEffect(() => { setHint(null); setMsg(null); setFieldGpsFailed(false); }, [assignedRec?.taskId]);
 
@@ -347,6 +384,35 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // Every interactive element freezes for viewers; a submission that loses a
   // race with a mid-flight control transfer maps to a friendly localized message.
   const frozen = busy || readOnly;
+
+  // ── Everyone does their part (change: every-member-plays) ──────────────────
+  //
+  // `requiredContributors` is reduced HERE to the devices actually attached, the same
+  // way the server reduces it at submit time, so the two never disagree about what the
+  // team is waiting for. A mission authored for four contributors and played by a team
+  // of two shows "0 of 2", not an impossible "0 of 4".
+  const attachedDevices = Math.max(1, new Set(state.team.deviceUids ?? [state.team.id]).size);
+  const contributorsNeeded = effectiveContributorRequirement(
+    task?.requiredContributors, attachedDevices,
+  );
+  const contributedUids = (task && state.team.taskContributions?.[task.id]) || [];
+  const contributorsDone = new Set(contributedUids).size;
+  const myUid = uid();
+  const iContributed = !!myUid && contributedUids.includes(myUid);
+  const [contributing, setContributing] = useState(false);
+  async function contribute() {
+    if (!task || contributing) return;
+    setContributing(true);
+    try {
+      await contributeToTask({ ...ctx, taskId: task.id });
+      onChanged();
+    } catch (e) {
+      // A contribution is additive and idempotent, so a failure costs nothing and the
+      // player can simply tap again - but it must still SAY so. CLAUDE.md records a
+      // safety callable whose silent catch left a stuck player with no feedback.
+      setMsg(submitError(e, t.task.failed));
+    } finally { setContributing(false); }
+  }
   // The GRADED answer controls additionally freeze during a wrong-answer retry
   // lockout. Deliberately narrower than `frozen`: a cooling-down team can still
   // reveal a hint, call for help, or trigger SOS.
@@ -554,9 +620,47 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // it). Sends REAL coords when the argument is present, OMITS them when not — never
   // synthetic at-the-spot coords (that would leak a hidden task's secret location and
   // pollute the movement heatmap). Callers decide when omission is allowed.
-  async function submitCheckIn(coords?: { lat: number; lng: number }) {
+  async function submitCheckIn(coords?: { lat: number; lng: number; accuracyMeters?: number }) {
     try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); feedback('task'); advanceWithCardExit(); }
-    catch (e) { setMsg(submitError(e, t.task.failed)); }
+    catch (e) {
+      // A fix too coarse to prove arrival comes back as `unavailable`, NOT as
+      // `failed-precondition` (change: arrival-needs-a-usable-fix). The two need
+      // different advice: "you are not there" means walk, "we cannot see you well
+      // enough" means stand still for a moment. Telling a player at the right spot to
+      // walk somewhere is how a check-in becomes a dead end.
+      const code = (e && typeof e === 'object' && 'code' in e
+        ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
+      // 'progress' and not 'error': the player is probably standing in the right
+      // place and the phone simply does not know it yet, so this reads as "nearly
+      // there" rather than as a rejection.
+      if (code === 'unavailable') {
+        setMsg({ text: t.task.fixTooCoarse, tone: 'progress' });
+        // Press again for them once the server's grace window has opened — see the
+        // note on `coarseRetryRef`. `+1500` clears the window with room for clock
+        // skew between this phone and the server, which is the only reason to be
+        // generous here: arriving early just gets the same "hold still" back.
+        const forTask = task?.id ?? null;
+        if (forTask && coarseRetriedFor.current !== forTask && coords) {
+          coarseRetriedFor.current = forTask;
+          coarseRetryRef.current = window.setTimeout(() => {
+            coarseRetryRef.current = null;
+            // The mission may have changed while we waited (a staff skip, a
+            // force-assign). Re-read it rather than trusting the closure.
+            if (!task || task.id !== forTask) return;
+            // A FRESH fix, not the stale one that was just refused: ten seconds is
+            // usually exactly what a cold GPS needed, so re-sending the old reading
+            // would throw away the whole point of waiting.
+            withLocation(
+              (lat, lng, accuracyMeters) => { void submitCheckIn({ lat, lng, accuracyMeters }); },
+              // No fix at all on the retry: leave the "hold still" message standing.
+              // The player can still press the button themselves.
+              () => undefined,
+            );
+          }, COARSE_FIX_GRACE_MS + 1500);
+        }
+      }
+      else { setMsg(submitError(e, t.task.failed)); }
+    }
     finally { end(); }
   }
 
@@ -565,7 +669,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (!begin()) return;
     clearMsg();
     withLocation(
-      (lat, lng) => { void submitCheckIn({ lat, lng }); },
+      // The accuracy rides along so the server can judge whether this fix is good
+      // enough to PROVE arrival (change: arrival-needs-a-usable-fix).
+      (lat, lng, accuracyMeters) => { void submitCheckIn({ lat, lng, accuracyMeters }); },
       () => {
         // Test run (server-authoritative run.isTestDrive, tied to the TEST RUN banner):
         // accept the check-in from anywhere so the creator can rehearse from their desk.
@@ -594,7 +700,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (!begin()) return;
     clearMsg();
     withLocation(
-      (lat, lng) => { void submitCheckIn({ lat, lng }); },
+      // The accuracy rides along so the server can judge whether this fix is good
+      // enough to PROVE arrival (change: arrival-needs-a-usable-fix).
+      (lat, lng, accuracyMeters) => { void submitCheckIn({ lat, lng, accuracyMeters }); },
       () => { void submitCheckIn(); },
     );
   }
@@ -1078,6 +1186,33 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           cooldownLeft,
         })}
       />
+
+      {/* EVERYONE DOES THEIR PART (change: every-member-plays).
+          Rendered OUTSIDE the action wrapper below, which is `pointer-events-none` for a
+          non-controller - and a non-controller is exactly who this control is for.
+          Contributing is the only mutation their device may make, so putting it inside a
+          container that swallows pointer events would have shipped a button nobody could
+          press.
+
+          The controller sees the progress line too: they are the one who will be refused
+          at submit time, so they need to know who they are waiting for. */}
+      {contributorsNeeded > 0 && (
+        <div className="mt-4 rounded-xl border border-glass-border bg-app-raised px-3 py-2.5">
+          <p className="text-[13px] text-ink-warm">
+            {t.task.contributorsProgress({ done: contributorsDone, need: contributorsNeeded })}
+          </p>
+          {!iContributed && (
+            <Button
+              className="mt-2"
+              loading={contributing}
+              onClick={() => { void contribute(); }}
+              data-testid="task-contribute"
+            >
+              {t.task.contributeCta}
+            </Button>
+          )}
+        </div>
+      )}
 
       <div className={readOnly ? 'mt-5 pointer-events-none' : 'mt-5'} aria-disabled={readOnly}>
         {task.type === 'field' || task.type === 'self_report' ? (
@@ -2322,10 +2457,15 @@ function VideoEntry({ smart, busy, onSubmit }: {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        // The rear camera is what a field mission is filmed with; `ideal` so a
-        // laptop or a front-only device still gets a working camera instead of an
-        // OverconstrainedError.
-        video: { facingMode: { ideal: 'environment' } },
+        // The whole capture profile, not just the camera (change:
+        // video-capture-profile). This used to ask ONLY for `facingMode`, so the
+        // browser captured at the camera's own default - 1080p on essentially every
+        // modern phone - and the pinned 2 Mbps was then spread over four times the
+        // pixels of 720p. Blocky clip, hot phone, large file, all at once.
+        //
+        // Every constraint is `ideal`, so a laptop or a front-only device still gets
+        // a working camera instead of an OverconstrainedError.
+        video: CAPTURE_VIDEO_CONSTRAINTS,
         audio: true,
       });
     } catch {
@@ -2415,7 +2555,16 @@ function VideoEntry({ smart, busy, onSubmit }: {
     // is strictly kinder than letting a 100MB camera clip upload and be rejected.
     // (Unlike the duration read below, there is nothing uncertain to fail open on.)
     if (file.size > MAX_VIDEO_BYTES) {
-      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+      // "Film a shorter clip" is advice that cannot work here (change:
+      // video-capture-profile). A native camera at 4K60 makes roughly 400MB a minute,
+      // so a TEN SECOND clip can exceed the cap - and the player has no idea their
+      // camera is the reason. Point them at the in-app recorder, which pins its own
+      // bitrate and therefore cannot produce a file this size. Only when that
+      // recorder is unavailable on this device does the length advice stand, because
+      // then it is the only lever they have.
+      setErr(unsupported
+        ? t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) })
+        : t.task.videoTooLargeUseRecorder({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
       return;
     }
     const url = URL.createObjectURL(file);
