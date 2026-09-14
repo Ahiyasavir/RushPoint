@@ -73,6 +73,20 @@ export const AUDIT_SYSTEM_OPERATOR = 'system:purge-sweep';
 // after the event — the same rule as adjustTeamScore.
 export const AUDIT_TASK_SKIPPED = 'task_skipped';
 
+// ── Media review (change: approval-can-be-undone) ────────────────────────────
+// `reviewStationSubmission` wrote NO audit record at all, and it decides whether a
+// team keeps points: an approval scores the mission, and a reversal takes that score
+// back. Both are a human's privileged judgement on a specific team, which is exactly
+// what this collection exists for.
+//
+// The reversal is the one that matters most. Photo missions from the bank default to
+// autoApprove, so "approved" is the state a weak submission lands in by default, and
+// undoing it REMOVES points a team already saw on the board. Without a record, the
+// organizer's own console could not answer "who took those points off, and why".
+export const AUDIT_SUBMISSION_APPROVED = 'submission_approved';
+export const AUDIT_SUBMISSION_REJECTED = 'submission_rejected';
+export const AUDIT_SUBMISSION_APPROVAL_REVERSED = 'submission_approval_reversed';
+
 // ── Staff field-ops overrides (change: staff-console-field-ops) ───────────────
 // All three change one identified team's run from the field console, so "who did
 // this, to whom, and why" must outlive the event — same rule as adjustTeamScore.

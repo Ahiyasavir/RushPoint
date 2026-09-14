@@ -187,14 +187,20 @@ export interface ReviewDecision {
  * Idempotence falls out of it: applying the same action twice equals applying it
  * once, from every starting status, and the second application never sends.
  *
- * Reject-after-approve is refused rather than sent because the server has no
- * score clawback path (see `canReject` in shared/photoQueue): it would flip a
- * status string while the points silently stayed. The manual score adjustment is
- * the honest tool for that.
+ * Reject-after-approve is now SENT (change: approval-can-be-undone). It used to be
+ * refused because the server had no score clawback path, so it would have flipped a
+ * status string while the points silently stayed. The server now removes exactly what
+ * the approval awarded, so the status and the scoreboard cannot disagree - and an
+ * organizer looking at an auto-approved photo of somebody's hand finally has a button
+ * to press.
+ *
+ * APPROVE-after-approve is still refused: it is a genuine no op (the server returns
+ * completed:false, so no second score and no duplicate feed item) and sending it would
+ * be a round trip that changes nothing.
  */
 export function decideReview(status: string | null | undefined, action: ReviewAction): ReviewDecision {
   const current = normalizeStatus(status ?? undefined);
-  if (current === 'approved') {
+  if (current === 'approved' && action === 'approve') {
     return { send: false, nextStatus: 'approved', reason: 'alreadyApproved' };
   }
   if (action === 'approve') {

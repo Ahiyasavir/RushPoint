@@ -157,8 +157,12 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
   ok(nextStatus('rejected', 'approve') === 'approved', 'rejected + approve = approved (it was never scored)');
   ok(nextStatus('rejected', 'reject') === 'rejected', 'rejected + reject is a no op');
   ok(nextStatus('approved', 'approve') === 'approved', 'approved + approve is a no op (server returns completed:false)');
-  ok(nextStatus('approved', 'reject') === 'approved',
-    'approved + reject does NOT flip: there is no score clawback path on the server');
+  // change: approval-can-be-undone. This asserted the OPPOSITE until the server gained
+  // a clawback. The refusal existed because flipping a status while the points stayed
+  // would have made the submission and the scoreboard disagree; planApprovalReversal
+  // now removes exactly what the approval awarded, so the edge is honest.
+  ok(nextStatus('approved', 'reject') === 'rejected',
+    'approved + reject DOES flip now: the server takes the award back with it');
 }
 {
   // Idempotence as an algebraic property over the whole table.
@@ -174,7 +178,10 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
 }
 {
   ok(canReject('pending') && canReject('rejected'), 'reject stays available while unscored');
-  ok(!canReject('approved'), 'reject is refused on an approved row (disable it and say why)');
+  // change: approval-can-be-undone. Bank photo missions default to autoApprove and the
+  // alternative BLOCKS the team, so disabling this button meant an organizer looking at
+  // an auto-approved photo of somebody's hand had nothing to press.
+  ok(canReject('approved'), 'reject is available on an approved row: an approval can be undone');
   ok(canApprove('pending') && canApprove('rejected'), 'approve is available while unscored');
   ok(!canApprove('approved'), 'approve is pointless on an already approved row');
 }

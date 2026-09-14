@@ -68,10 +68,6 @@ export const PUBLIC_CALLABLES = {
  * Deliberately ABSENT, with reasons:
  *   • deleteMyAccount        — a durable, admin-readable record of a user
  *                              exercising erasure works against the request.
- *   • reviewStationSubmission— already persists reviewedBy/reviewedAt/reviewNote
- *                              on the submission itself, so the question is
- *                              already answerable; a second record is cost with
- *                              no new fact.
  *   • updateLocation & co.   — high-frequency participant pings; one audit row per
  *                              call would be a cost bug, not accountability.
  */
@@ -85,6 +81,8 @@ export const PRIVILEGED_CALLABLES = {
     + 'run, and can lower that team\'s stage requirement. "Who skipped this, for whom, and why" '
     + 'must stay answerable after the event, exactly like adjustTeamScore.',
   clearTeamOutOfBounds: 'Staff override that releases a team from a safety-zone block.',
+  reviewStationSubmission:
+    'Staff verdict on a participant submission, and the only one of these that can move a score in BOTH directions: approving awards the points of the mission, and undoing an approval takes them back off the team and its stage. The participant is not present when it happens and sees only the number change, so "who judged this, which way, and whether it was later reversed" has to stay answerable after the event, exactly like adjustTeamScore.',
   setTeamHold:
     'Staff override that stops ONE identified team from advancing at all and pauses its race '
     + 'clock. Both directions change that team\'s standing (held time is excluded from scoring), '

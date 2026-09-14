@@ -19,6 +19,10 @@ import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
 // added to sanitizeTeamForParticipant's allow-list.
 import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/shared';
+// Undoing an approval and taking the points back with it (change:
+// approval-can-be-undone). Total, and refuses to act on an unreadable award rather
+// than guessing at an amount to subtract from a live scoreboard.
+import { planApprovalReversal } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
 import { storageOriginOpts } from './storageOriginOpts';
@@ -114,6 +118,7 @@ export {
   startInstantPlay,
   createZone, deleteZone, getRunZones, captureZone,
   joinTeamAsDevice, transferController, claimController,
+  contributeToTask,
   submitRunFeedback, getRunFeedbackSummary,
   getRunSurveyResults,
   requestGuardianConsent, grantGuardianConsent,
@@ -146,7 +151,12 @@ import { requireAuth, assertStaffOrOwner, assertAdmin } from './auth';
 // ─── Audit trail ──────────────────────────────────────────────────────────────
 // The writer now lives in obs/audit.ts so the games domain can record destructive
 // actions too (change: recoverable-game-deletion). Behaviour is unchanged.
-import { writeAuditLog, auditBestEffort } from './obs/audit';
+// Media review is a score-moving human judgement and now leaves a durable record
+// too (change: approval-can-be-undone) - hence the three SUBMISSION action types.
+import {
+  writeAuditLog, auditBestEffort,
+  AUDIT_SUBMISSION_APPROVED, AUDIT_SUBMISSION_REJECTED, AUDIT_SUBMISSION_APPROVAL_REVERSED,
+} from './obs/audit';
 
 
 // ─── Chat integrations (change: chat-integrations) ─────────────────────────────
@@ -1444,6 +1454,10 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // live photo feed (live-photo-feed) — no extra read on this hot path.
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   let autoApprove = false;
+  // Kept separate so the log and the return value can say WHICH rule approved this:
+  // an organizer who turned the run-wide switch on mid-event needs to be able to tell
+  // that from a mission the game itself declared staffless.
+  let perTaskAutoApprove = false;
   let taskTitle = '';
   let feedEnabled = true;
   // wave-f S1: the resolved task's hidden-location flag decides whether its
@@ -1465,6 +1479,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
       const task = stage.tasks.find((t) => t.id === taskId);
       if (task) {
         autoApprove = task.smart?.autoApprove === true;
+        perTaskAutoApprove = autoApprove;
         taskTitle = task.title ?? '';
         feedTask = { hideLocation: task.hideLocation };
         kind = task.smart?.captureKind === 'audio' || task.smart?.captureKind === 'video'
@@ -1475,6 +1490,28 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
       }
     }
   }
+
+  // The RUN-wide approval switch (change: late-joiner-autostart). In production run
+  // ijI9JMITSf8C9heN1Cwp every media submission had to be approved by hand, so the
+  // organizer became a full time review queue for a creative-content game and the
+  // players' own feedback was "let the host approve the missions faster".
+  // `smart.autoApprove` already existed and the server already honoured it, but it
+  // is PER TASK — there was no way to say "this run, approve everything".
+  //
+  // Read from the RUN, never from the game, and only when the task did not already
+  // decide: an operational choice written on the template is replayed by every later
+  // run. `cachedGetDoc` because the flag is stamped at launch and cannot change
+  // during the run, so re-reading it on every submission would be pure waste on a
+  // path CLAUDE.md calls out as read-cost sensitive.
+  if (!autoApprove) {
+    const runCached = await cachedGetDoc<{ autoApproveAllMedia?: boolean }>(
+      db, docCachePolicy, FIRESTORE_PATHS.run(ownerUid, gameId, runId),
+    );
+    autoApprove = runCached.data?.autoApproveAllMedia === true;
+  }
+  /** Which rule approved this, for the caller and the structured log. */
+  const approvalSource = (): 'task' | 'run' | 'none' =>
+    (perTaskAutoApprove ? 'task' : autoApprove ? 'run' : 'none');
 
   // audio-tasks: the declared content-type must match the task's captureKind. An
   // audio task requires a declared audio type; a photo task rejects an audio type
@@ -1518,7 +1555,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     s.tasks.some((t) => t.taskId === taskId && t.status === 'completed'),
   );
   if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
-    return { submitted: true, autoApproved: autoApprove, already: true };
+    return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), already: true };
   }
 
   const now = new Date().toISOString();
@@ -1573,9 +1610,30 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     }
   }
 
-  return { submitted: true, autoApproved: autoApprove, ...(alreadyCompleted ? { already: true } : {}) };
+  return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), ...(alreadyCompleted ? { already: true } : {}) };
 });
 
+
+/**
+ * What a team's task record was stamped with for this task (change:
+ * approval-can-be-undone).
+ *
+ * Returns `undefined` when it cannot be found, which `planApprovalReversal` reads as
+ * "unknown award" and refuses to act on. That is deliberate: guessing at an amount and
+ * subtracting it from a live scoreboard is worse than declining, because nobody would
+ * be able to tell it happened.
+ */
+function findTaskRecordScore(
+  stages: { tasks?: { taskId: string; earnedScore?: number }[] }[] | undefined,
+  taskId: string,
+): number | undefined {
+  for (const stage of stages ?? []) {
+    for (const rec of stage.tasks ?? []) {
+      if (rec.taskId === taskId) return rec.earnedScore;
+    }
+  }
+  return undefined;
+}
 
 export const reviewStationSubmission = loggedCallable('reviewStationSubmission', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
@@ -1601,6 +1659,47 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   if (!teamSnap.exists) {
     throw new functions.https.HttpsError('not-found', 'Team not found');
   }
+  // ── Reversing an approval (change: approval-can-be-undone) ────────────────
+  //
+  // `approved + reject` used to be refused outright, because there was no way to take
+  // the score back and flipping the status alone would have left the submission and
+  // the scoreboard disagreeing. Bank photo missions default to autoApprove and the
+  // alternative BLOCKS the team, so "approved" was effectively "unreviewable" - which
+  // is how a photo of somebody's hand scored full points in run ijI9JMITSf8C9heN1Cwp
+  // with nothing an organizer could do about it.
+  //
+  // The clawback is a TRANSACTION over the team document so a concurrent completion
+  // cannot interleave with it, and `planApprovalReversal` is total and biased hard
+  // toward doing nothing: an unreadable award removes NOTHING rather than guessing at
+  // an amount and silently moving a live scoreboard.
+  let reversal: { outcome: string; scoreDelta: number } | null = null;
+  if (!approved) {
+    reversal = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(teamRef);
+      const team = snap.data() as {
+        score?: number;
+        stages?: { tasks?: { taskId: string; earnedScore?: number; status?: string }[] }[];
+        taskSubmissions?: Record<string, { status?: string }>;
+      } | undefined;
+      const plan = planApprovalReversal({
+        submissionStatus: team?.taskSubmissions?.[taskId]?.status,
+        earnedScore: findTaskRecordScore(team?.stages, taskId),
+        teamScore: team?.score,
+      });
+      if (plan.outcome !== 'reversed') return { outcome: plan.outcome, scoreDelta: 0 };
+      // The award is removed from the team's total AND zeroed on the task record, so
+      // the live board (which reads `score`) and the final ranking (which sums the
+      // stored records) can never disagree - the live/final parity rule in CLAUDE.md.
+      const stages = (team?.stages ?? []).map((s) => ({
+        ...s,
+        tasks: (s.tasks ?? []).map((t) => (t.taskId === taskId ? { ...t, earnedScore: 0 } : t)),
+      }));
+      // Whole-array rewrite, never a dotted update into an array.
+      tx.update(teamRef, { score: plan.nextTeamScore, stages, updatedAt: now });
+      return { outcome: plan.outcome, scoreDelta: plan.scoreDelta };
+    });
+  }
+
   // merge:true deep-merges this into the existing submission, preserving
   // photoUrl/submittedAt while updating the review subfields.
   await teamRef.set(
@@ -1673,7 +1772,49 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
     }
   }
 
-  return { ok: true, approved };
+  // ── The durable record (change: approval-can-be-undone) ───────────────────
+  //
+  // `reviewStationSubmission` wrote NO audit record at all, and it decides whether a
+  // team keeps points: an approval scores the mission, a reversal takes that score
+  // back. Both are a human's privileged judgement on a specific team.
+  //
+  // The REVERSAL is the one that made this mandatory. Bank photo missions default to
+  // autoApprove, so "approved" is where a weak submission lands by default, and
+  // undoing it removes points the team already saw on the board. Without this, the
+  // organizer's own console could not answer "who took those points off, and why" -
+  // which is the same accountability hole that made every manual adjustment read as
+  // the literal 'manual' before live-ops-feedback-loop.
+  //
+  // `auditBestEffort`, never `writeAuditLog`: a failed audit write must not abort the
+  // review the organizer just made, or the accountability fix becomes a new outage.
+  // The score movement is already committed by this point, so the record is written
+  // AFTER it and can only ever be missing, never wrong.
+  const reversed = reversal?.outcome === 'reversed';
+  await auditBestEffort({
+    ownerUid, gameId, runId, teamId,
+    operatorId: context.auth!.uid,
+    actionType: reversed ? AUDIT_SUBMISSION_APPROVAL_REVERSED
+      : approved ? AUDIT_SUBMISSION_APPROVED
+        : AUDIT_SUBMISSION_REJECTED,
+    // The score the team LOST, as a positive number, so a reader does not have to
+    // reason about the sign of a delta. Absent on every path that moved no score.
+    ...(reversed ? { pointsRemoved: Math.abs(reversal?.scoreDelta ?? 0) } : {}),
+    previousValue: reversed ? 'approved' : null,
+    newValue: approved ? 'approved' : 'rejected',
+    reason: validate(() => optionalString(note, 'note', MAX_MESSAGE_LEN)) ?? '',
+    taskId,
+  });
+
+  // A reversal is a privileged act that MOVES A SCORE, so it is reported like one
+  // (change: approval-can-be-undone). `reversal` is null on the approve path and on a
+  // no-op, so an ordinary review returns exactly what it always did.
+  return {
+    ok: true,
+    approved,
+    ...(reversal && reversal.outcome !== 'notApproved'
+      ? { reversal: reversal.outcome, scoreDelta: reversal.scoreDelta }
+      : {}),
+  };
 });
 
 
