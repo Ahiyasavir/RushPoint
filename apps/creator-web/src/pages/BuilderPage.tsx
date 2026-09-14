@@ -1,6 +1,11 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { isPlacedCoord } from '../lib/mapAnchor';
+// Keeping a popover inside the viewport (change: popover-stays-on-screen) — the
+// measured fix for a readiness panel that rendered 180px off a 375px phone screen.
+import { popoverPlacement, type PopoverPlacement } from '../lib/popoverPlacement';
+// What to tell a creator about a save still in flight (change: save-tells-the-truth).
+import { saveHealth } from '../lib/saveHealth';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import type {
@@ -77,6 +82,15 @@ import type { StageSettingsState } from '../lib/stageSettings';
 import { parseTagsInput } from '../lib/tags';
 import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
 import { buildSavePayload } from '../lib/savePayload';
+// Regenerate one mission from the bank (change: mission-regenerate). The pure
+// decision lives in lib/regenerateMission; the memory of what has already been
+// offered for a mission lives in lib/regenerateHistory.
+import { loadMissionBank, missionBankNow } from '../lib/missionBank';
+import {
+  missionTagProfile, missionRoleAt, regenerateContext, chooseRegeneratedMission,
+  applyRegeneratedMission, seedFor,
+} from '../lib/regenerateMission';
+import { readOfferedKeys, recordOfferedKey } from '../lib/regenerateHistory';
 import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib/gamePresentation';
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 // Builder header stage/mission breadcrumb (change: builder-clarity-mission-hierarchy).
@@ -350,6 +364,37 @@ export default function BuilderPage() {
   // Why the last save failed. Persistent (never a toast): the whole failure mode
   // of this bug class is a creator who looks up ten minutes later.
   const [saveError, setSaveError] = useState<CallFailure | null>(null);
+
+  // ── Telling the truth about a save that has not landed (change: save-tells-the-truth)
+  //
+  // The callable SDK waits 70s before rejecting, so `status === 'saving'` used to mean
+  // BOTH "in progress" and "stuck for over a minute", and the creator was told nothing
+  // until the timeout. `saveHealth` escalates on elapsed time instead - but it needs a
+  // clock that MOVES, or the status would be decided once at save time and never
+  // re-render. The interval runs ONLY while a save is in flight and stops the moment
+  // it lands, so an idle Builder ticks nothing.
+  const saveStartedAt = useRef<number | null>(null);
+  const [saveTick, setSaveTick] = useState(0);
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const sync = (): void => setOnline(navigator.onLine);
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => { window.removeEventListener('online', sync); window.removeEventListener('offline', sync); };
+  }, []);
+  useEffect(() => {
+    if (status !== 'saving') return;
+    const id = setInterval(() => setSaveTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+  const saveHealthState = useMemo(
+    () => saveHealth({ status, startedAtMs: saveStartedAt.current, nowMs: Date.now(), online }),
+    // `saveTick` is the whole point of the dependency list: it is what makes an
+    // in-flight save re-evaluate every second instead of freezing on its first verdict.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [status, online, saveTick],
+  );
+  const saveLevel = saveHealthState.level;
   const [error, setError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
   // Share this game by link, published or not (change: game-share-link).
@@ -410,6 +455,7 @@ export default function BuilderPage() {
     const snap = serializeGame(g);
     if (snap === savedSnapshot.current) return true;
     const seq = ++saveSeq.current;
+    saveStartedAt.current = Date.now();
     setStatus('saving');
     try {
       await updateGame(buildSavePayload(g));
@@ -1108,10 +1154,10 @@ export default function BuilderPage() {
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
         {/* A FAILED save gets its own colour and its own word — it can never be
             read as an ordinary pending save (change: creator-no-silent-failures). */}
-        <span className={`text-xs flex items-center gap-1.5 shrink-0 ${status === 'failed' ? 'text-ink-alert font-semibold' : 'text-[--ink-3]'}`}>
+        <span className={`text-xs flex items-center gap-1.5 shrink-0 ${saveLevel === 'failed' || saveLevel === 'offline' || saveLevel === 'stalled' ? 'text-ink-alert font-semibold' : 'text-[--ink-3]'}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${
-            status === 'failed' ? 'bg-rp-alert'
-              : status === 'saving' ? 'bg-rp-amber animate-pulse'
+            saveLevel === 'failed' || saveLevel === 'offline' || saveLevel === 'stalled' ? 'bg-rp-alert'
+              : saveLevel === 'saving' || saveLevel === 'slow' ? 'bg-rp-amber animate-pulse'
               : status === 'unsaved' ? 'bg-rp-amber'
               : 'bg-rp-go'}`} />
           {/* Below `xl` the WORD is dropped and the coloured dot carries the state —
@@ -1119,9 +1165,17 @@ export default function BuilderPage() {
               explicit save button sits right beside it. A FAILED save is the one
               state that must never be reduced to a dot, so it keeps its word at
               every width. The accessible name is unaffected either way. */}
-          <span className={status === 'failed' ? undefined : 'hidden xl:inline'}>
-            {status === 'failed' ? b.saveFailedShort
-              : status === 'saving' ? b.saving
+          {/* A save that has not landed must never keep saying the word for a save
+              that is landing (change: save-tells-the-truth). The SDK waits 70s before
+              rejecting, so "saving" used to mean both "in progress" and "stuck for a
+              minute". These states keep their word at EVERY width for the same reason
+              a failure does: a coloured dot cannot say "check your connection". */}
+          <span className={saveHealthState.needsAttention ? undefined : 'hidden xl:inline'}>
+            {saveLevel === 'failed' ? b.saveFailedShort
+              : saveLevel === 'offline' ? b.saveOffline
+              : saveLevel === 'stalled' ? b.saveStalled
+              : saveLevel === 'slow' ? b.saveSlow
+              : saveLevel === 'saving' ? b.saving
               : status === 'unsaved' ? b.unsaved
               : b.saved}
           </span>
@@ -1138,7 +1192,15 @@ export default function BuilderPage() {
         {!isMobile && (
         <button
           onClick={() => { void save(); }}
-          disabled={status === 'saving'}
+          // NOT disabled while a save is in flight (change: save-tells-the-truth).
+          // This button's own comment above says it exists "purely so a creator who is
+          // unsure whether autosave caught up has one button that unconditionally
+          // tries again right now" - and `disabled={status === 'saving'}` took it away
+          // for the entire 70 second hang, which is exactly when a creator reaches for
+          // it. `save()` is already a safe no-op when nothing changed and carries its
+          // own out-of-order guard (`saveSeq`), so pressing it during a flight cannot
+          // persist a stale snapshot. Same lesson CLAUDE.md records for the join
+          // screen: a disabled button cannot tell you what it wants.
           title={b.saveNowHint}
           className="shrink-0 min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-medium border border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-50 disabled:pointer-events-none transition-colors"
         >
@@ -1640,6 +1702,11 @@ function BuilderTabBar({ tabs, active, label, onSelect }: {
 // this change exists to shorten. The wrapper still renders, zero-width, because the
 // popover positions against it — hiding the whole component would take the list
 // with it, and the list is the part that matters.
+/** What the readiness popover asks for. 22rem, the width it has always rendered at
+ *  on a roomy screen — `popoverPlacement` narrows it only when a viewport cannot
+ *  hold it (change: popover-stays-on-screen). */
+const READINESS_PANEL_WIDTH_PX = 352;
+
 function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true }: {
   issues: ReadinessIssue[]; open: boolean; onToggle: () => void; onActivate: (issue: ReadinessIssue) => void;
   showTrigger?: boolean;
@@ -1656,8 +1723,55 @@ function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true
     const stage = issue.stageTitle || b.untitledStage;
     return issue.taskId ? `${stage} · ${issue.taskTitle || b.untitledTask}` : stage;
   };
+
+  // Keep the popover on screen (change: popover-stays-on-screen).
+  //
+  // MEASURED, not guessed: on a phone `showTrigger` is false, so the wrapper below is
+  // a ZERO-WIDTH slot and the old `end-0 w-[22rem] max-w-[calc(100vw-1.5rem)]` put the
+  // box at left 204 -> right 555 on a 375px viewport. 180px off screen, 49% visible,
+  // and `scrollWidth` stayed 375 so the overflow was CLIPPED rather than scrollable.
+  // The max-width cap computed to exactly 351px and changed nothing, because a maximum
+  // width bounds how WIDE a box is and never WHERE it sits. In RTL the lost half is
+  // the half every Hebrew line begins on, and on a phone this popover IS the launch
+  // button's action — so the one control that starts a game opened an unreadable
+  // explanation of why it would not.
+  //
+  // Tailwind cannot express a runtime pixel value (a computed class compiles to no
+  // CSS at all), so the clamp is applied as an inline style and the defeated classes
+  // are removed rather than left to look protective.
+  const slotRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
+  useLayoutEffect(() => {
+    if (!open) { setPlacement(null); return; }
+    const measure = (): void => {
+      const slot = slotRef.current;
+      if (!slot) return;
+      const rect = slot.getBoundingClientRect();
+      const viewport = popoverPlacement({
+        anchorLeft: rect.left,
+        anchorWidth: rect.width,
+        preferredWidth: READINESS_PANEL_WIDTH_PX,
+        viewportWidth: document.documentElement.clientWidth,
+        rtl: getComputedStyle(document.documentElement).direction !== 'ltr',
+      });
+      // `popoverPlacement` answers in VIEWPORT pixels, which is the only frame the
+      // clamp can be expressed in. But the popover is absolutely positioned, so its
+      // `left` is measured from its CONTAINING BLOCK — this zero-width slot — not
+      // from the viewport. Setting the viewport number directly moved the box to
+      // slot.left + left and it was still 192px off screen; the browser said so, the
+      // types did not. Convert once, here, at the boundary between the two frames.
+      setPlacement({ ...viewport, left: viewport.left - rect.left });
+    };
+    measure();
+    // An orientation change while the popover is open would otherwise leave a stale
+    // placement, which is the same defect in a different costume.
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open]);
+
   return (
-    <div className="relative shrink-0">
+    <div ref={slotRef} className="relative shrink-0">
       {showTrigger && (
       <button
         type="button"
@@ -1676,7 +1790,15 @@ function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true
       )}
 
       {open && (
-        <div className="absolute z-50 end-0 top-full mt-1 w-[22rem] max-w-[calc(100vw-1.5rem)] rounded-xl border border-[--rp-border] bg-[--surface-1] shadow-soft">
+        <div
+          ref={panelRef}
+          // `end-0`, `w-[22rem]` and `max-w-[calc(100vw-1.5rem)]` are GONE on purpose:
+          // all three were defeated by the zero-width anchor, and leaving them would
+          // tell the next reader the cap is still protecting them. Geometry has one
+          // owner now. `left: 0` until measured so the first paint cannot flash off
+          // screen; `popoverPlacement` is total, so this is never NaN.
+          style={{ left: placement?.left ?? 0, width: placement?.width ?? READINESS_PANEL_WIDTH_PX }}
+          className="absolute z-50 top-full mt-1 rounded-xl border border-[--rp-border] bg-[--surface-1] shadow-soft">
           <Advanced dense title={b.readinessTitle} open onToggle={onToggle}>
             {issues.length === 0 ? (
               <EmptyState icon="🚀" title={b.readinessReadyTitle} body={b.readinessReadyBody} />
@@ -1797,6 +1919,35 @@ function StepDetails({ game, patch, qsAnchor }: {
         </label>
         {/* UGC disclosure (change: feed-ugc-safety, D7): run-wide visibility + organizer responsibility. */}
         <p className="text-xs text-[--ink-3] -mt-2">{b.photoFeedResponsibility}</p>
+
+        {/* A team that joins after the start (change: late-joiner-autostart):
+            default OFF. The console flags a stranded late joiner either way; this
+            only decides whether the platform starts them without being asked. */}
+        <label title={b.autoStartLateJoinersHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.autoStartLateJoiners}
+            onChange={(e) => patch({ autoStartLateJoiners: e.target.checked })} />
+          {b.autoStartLateJoinersLabel}
+        </label>
+
+        {/* Approve every media submission automatically (change: late-joiner-autostart):
+            default OFF. Copied onto the run at launch, so changing it here affects the
+            NEXT run, never one already in flight. */}
+        <label title={b.autoApproveAllMediaHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.autoApproveAllMedia}
+            onChange={(e) => patch({ autoApproveAllMedia: e.target.checked })} />
+          {b.autoApproveAllMediaLabel}
+        </label>
+
+        {/* Everyone on their own phone (change: every-member-plays): default OFF.
+            Fails open on an unknown headcount - a game that never collects member
+            names cannot hold anyone, because it does not know how many people a team
+            is. The hint says so rather than letting a creator switch it on and wonder
+            why nothing happened. */}
+        <label title={b.requireAllMembersOnlineHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.requireAllMembersOnline}
+            onChange={(e) => patch({ requireAllMembersOnline: e.target.checked })} />
+          {b.requireAllMembersOnlineLabel}
+        </label>
 
         {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
         <label title={b.powerUpsHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
@@ -2353,6 +2504,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   quickSetupGuided?: { taskId: string | null; anchor: string | null; onExit: () => void } | null;
 }) {
   const b = useT().builder;
+  // The signed-in creator, for the per-creator regenerate memory
+  // (change: mission-regenerate). A browser holds several accounts, and one
+  // creator's "already seen" must not narrow another's pool.
+  const { user } = useAuth();
   // Where this game is ALREADY placed (change: location-picker-game-anchor). The
   // map picker for a mission with no pin opens on these instead of on a zoom-8
   // view of the whole country, so the neighbourhood is found once per GAME rather
@@ -2713,6 +2868,93 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     updateStage(stage.id, { tasks });
     setSettingsOpen(false);
     setEditing({ taskId: copy.id });
+  }
+
+  /**
+   * Swap this mission for the closest bank mission, and drift on repeat
+   * (change: mission-regenerate).
+   *
+   * The ask this answers is the one the Builder had no word for: *this slot is
+   * right, this mission is not, give me another one like it.* Writing a
+   * replacement by hand or hunting the library both cost more than the whole
+   * generation did.
+   *
+   * Everything that DECIDES lives in `lib/regenerateMission.ts` and is pure — the
+   * profile derived from the outgoing mission, the similarity score, the drift and
+   * the merge. This function only gathers the inputs and commits the result, which
+   * is what keeps the algorithm assertable without a DOM
+   * (scripts/test-mission-regenerate.ts).
+   *
+   * Three things worth not re-deriving later:
+   *
+   *   - DRIFT IS THE PRESS COUNT. The offered history for this mission IS how many
+   *     times it has been regenerated, so the two can never disagree; a separate
+   *     counter would be a second source of truth for one fact.
+   *   - ONE HISTORY ENTRY. The swap commits through `updateStage`, the same path
+   *     every other edit takes, so the Builder's existing undo reverses it in one
+   *     press. That is what buys the right to ask no confirmation: the action is
+   *     destructive to the mission's text, and the answer to that is a cheap undo,
+   *     not a dialog in front of a button meant to be pressed repeatedly.
+   *   - SYNCHRONOUS BANK. `missionBankNow()` is the last successful load or the
+   *     authored bank compiled into the bundle, never empty, so the button answers
+   *     a press immediately. `loadMissionBank()` is fired and NOT awaited, so an
+   *     admin's edit is picked up by the next press.
+   */
+  function regeneratedTaskFor(source: Task | undefined): Task | null {
+    if (!source) return null;
+
+    // The SLOT's role, not the task's: whatever mission ends up first has to be
+    // one a group can walk up to and begin with, and the bank tags its openers
+    // and finales for exactly that reason. Found in the browser — the first real
+    // press replaced this game's opening mission with a mid-game one.
+    const si = game.stages.findIndex((st) => st.tasks.some((t) => t.id === source.id));
+    const ti = si < 0 ? -1 : game.stages[si].tasks.findIndex((t) => t.id === source.id);
+    const role = missionRoleAt(si, ti, game.stages.length, si < 0 ? 0 : game.stages[si].tasks.length);
+
+    void loadMissionBank();
+    const offeredKeys = readOfferedKeys(user?.uid, game.id, source.id);
+    const picked = chooseRegeneratedMission({
+      bank: missionBankNow(),
+      profile: missionTagProfile(source, role),
+      context: regenerateContext(game, source),
+      drift: offeredKeys.length,
+      offeredKeys,
+      seed: seedFor(source.id, offeredKeys.length),
+    });
+    if (!picked) { void dialog.alert(b.regenerateNothingLeft); return null; }
+
+    let built: Task;
+    try {
+      built = picked.build();
+    } catch {
+      // A bank entry that cannot build is a content defect, not a reason to take
+      // the Builder down with it.
+      void dialog.alert(b.regenerateNothingLeft);
+      return null;
+    }
+
+    recordOfferedKey(user?.uid, game.id, source.id, picked.key);
+    return applyRegeneratedMission(source, built);
+  }
+
+  /**
+   * The CARD's regenerate: compute the replacement and commit it to the stage.
+   *
+   * The editor has its own path (`onRegenerate` on ContextPanel) and deliberately
+   * does NOT reuse this one. The editor holds a local draft of the open mission
+   * and `applyRegeneratedMission` preserves the task id, so the panel's `key`
+   * does not change and it never remounts — committing behind its back would
+   * leave the draft holding the OLD mission, and its own autosave would write
+   * that back over the replacement a moment later. So the editor commits through
+   * its own change handler, and this function serves the card only.
+   */
+  function regenerateTask(stageId: string, taskId: string): void {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const at = stage?.tasks.findIndex((t) => t.id === taskId) ?? -1;
+    if (!stage || at < 0) return;
+    const next = regeneratedTaskFor(stage.tasks[at]);
+    if (!next) return;
+    updateStage(stage.id, { tasks: stage.tasks.map((t, i) => (i === at ? next : t)) });
   }
 
   /**
@@ -3096,6 +3338,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                   .filter((s) => s.id !== activeStage.id)}
                 onMoveToStage={(taskId, toStageId) => moveTaskToStage(activeStage.id, taskId, toStageId)}
                 onDuplicate={(taskId) => duplicateTask(activeStage.id, taskId)}
+                onRegenerate={(taskId) => regenerateTask(activeStage.id, taskId)}
                 onToggleHidden={(taskId) => toggleTaskHidden(activeStage.id, taskId)}
                 /* Withheld for the last mission of a stage: a stage with none is a
                    readiness blocker, so the only outcome would be a new error. */
@@ -3226,6 +3469,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             && (quickSetupGuided.taskId === editingTask.id || quickSetupFocus?.taskId === editingTask.id)
             ? quickSetupGuided : null}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
+          /* Returns the replacement rather than committing it — the panel owns the
+             open mission's draft and commits through its own change handler. See
+             `regenerateTask` for why the two paths are separate. */
+          onRegenerate={() => regeneratedTaskFor(editingTask)}
           /* The SAME delete the mission card's ⋯ menu runs (change:
              mission-card-actions) — see `removeTask`, which owns the confirm and
              the three stage-level cleanups a delete drags behind it. */
@@ -3269,7 +3516,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, quickSetupStep, gameAnchors, guided }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, quickSetupStep, gameAnchors, guided, onRegenerate }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
   siblings?: Task[];
   // Every PLACED mission of the whole game (change: location-picker-game-anchor):
@@ -3287,6 +3534,15 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
   focus?: { tab: TaskEditorTab | null; group: TaskOptInGroup | null; nonce: number } | null;
   // Guided editing (change: quick-setup-guided-editor) — see lib/guidedEditor.
   guided?: { anchor: string | null; onExit: () => void } | null;
+  /**
+   * Produce a replacement for the open mission, or `null` when the bank has
+   * nothing further to offer (change: mission-regenerate). It RETURNS the task
+   * instead of committing it, so this panel puts it through its own change
+   * handler and keeps its draft and global state in step: the task id survives a
+   * regenerate, so this panel is never remounted, and a commit made behind it
+   * would be overwritten by its own autosave a moment later.
+   */
+  onRegenerate?: () => Task | null;
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
@@ -3339,6 +3595,12 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
 
   function close() { onClose(); }
 
+  // One handler for both render branches below, so the guided and unguided
+  // editors cannot drift about what the action does.
+  const regenerate = onRegenerate
+    ? () => { const next = onRegenerate(); if (next) handleChange(next); }
+    : undefined;
+
   // Esc closes the panel (flush-on-unmount preserves the draft).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
@@ -3389,7 +3651,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
               a container that can scroll is not the same as a card that does. */}
           <div className="shrink-0 lg:w-[20rem] lg:overflow-y-auto flex flex-col">{quickSetupStep}</div>
           <div className="flex-1 min-h-0 p-2.5">
-            <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
               focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
               guided={!!guided} guidedAnchor={guided?.anchor ?? null} onExitGuided={guided?.onExit} />
           </div>
@@ -3398,7 +3660,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
         <>
           {quickSetupStep}
           <div className="flex-1 min-h-0 p-2.5">
-            <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
               focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
               /* This branch is the NOT-guided one, so these are constants — the
                  optional chains that used to be here narrowed to `never`. */
