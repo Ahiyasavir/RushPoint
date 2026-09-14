@@ -35,7 +35,11 @@
       "Bash(curl -sS -o /dev/null -w \"player: %{http_code} -> %{redirect_url}\\\\n\" https://player.rush-point.com/?code=S3L6BF)",
       "Bash(curl -sS -o /dev/null -w \"apex: %{http_code} -> %{redirect_url}\\\\n\" https://rush-point.com/)",
       "Bash(curl -sS -o /dev/null -w \"api: %{http_code}\\\\n\" https://api.rush-point.com/)",
-      "WebSearch"
+      "WebSearch",
+      "Monitor",
+      "CronCreate",
+      "Bash(openspec instructions *)",
+      "Bash(ssh -o StrictHostKeyChecking=accept-new root@31.70.107.184 \"docker ps --format '{{.Names}}\\\\t{{.Image}}\\\\t{{.Status}}'\")"
     ]
   }
 }
