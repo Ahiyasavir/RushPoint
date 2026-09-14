@@ -19,6 +19,8 @@ import {
 // play-web StaffConsole so the two review surfaces can never disagree.
 import {
   buildSubmissionQueues, submissionKey, isRenderableMedia,
+  newPendingKeys, pendingLateJoiners,
+  OTHER_REASON, reasonsForDelta, resolveReason, type ScoreReasonId,
   type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
 } from '@rushpoint/shared';
 // Review triage (change: photo-review-throughput): wait time, "who is actually
@@ -387,6 +389,25 @@ export default function RunConsolePage() {
     });
   }, [gameId, runId, ownerUid, runLive]);
   const photoQueues = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
+
+  // A submission arriving is the ONE event an organizer is blocked on and cannot
+  // see (change: live-ops-feedback-loop). The SOS listener above has cued since it
+  // was written; this queue never did, so in run ijI9JMITSf8C9heN1Cwp the organizer
+  // learned a team was waiting by happening to look, and players asked for faster
+  // approvals. Same shape as `seenAlertIds`: a ref baselined to null so the first
+  // snapshot is silent however many items are already pending, and a refresh with
+  // it. `newPendingKeys` owns the "what is actually new" decision and is total —
+  // its failure mode is silence, never an exception inside a render path.
+  const seenPendingKeys = useRef<Set<string> | null>(null);
+  // Reset the baseline when the LISTENER re-subscribes, not merely when the data
+  // changes: switching runs must not replay the new run's backlog as arrivals.
+  useEffect(() => { seenPendingKeys.current = null; }, [gameId, runId, ownerUid, runLive]);
+  useEffect(() => {
+    const keys = photoQueues.pending.map(submissionKey);
+    const verdict = newPendingKeys(seenPendingKeys.current, keys);
+    seenPendingKeys.current = new Set(keys);
+    if (verdict.shouldCue) playAlert();
+  }, [photoQueues]);
   // Everything the review queue's pending/reviewed split does NOT show on its
   // own: an autoApproved item, an already-rejected one — same source snapshot,
   // no extra listener.
@@ -840,6 +861,25 @@ export default function RunConsolePage() {
     pausedTaskCount,
     teamCount: teams.length,
     unstartedTeamCount: teams.filter((tm) => !tm.launched && !tm.finished).length,
+    // The safety net for the defect that cost one team its whole run (change:
+    // late-joiner-autostart). Deliberately NOT gated on the auto start setting:
+    // the organizer who never turned it on is exactly the one whose team sat
+    // 27 minutes. `run.teamsStartedAt` absent ⇒ play has not begun ⇒ nobody is
+    // stranded, and the calmer `notStarted` signal covers that case instead.
+    // Teams with a KNOWN shortfall between declared people and attached phones
+    // (change: every-member-plays). `membersNotConnected` is null when the headcount is
+    // unknowable, and a null must never be counted as a shortfall - that is the whole
+    // reason it is null rather than zero.
+    teamsWithMembersOffline: teams.filter(
+      (tm) => !tm.finished && typeof tm.membersNotConnected === 'number' && tm.membersNotConnected > 0,
+    ).length,
+    strandedLateJoinerCount: pendingLateJoiners(
+      teams.filter((tm) => !tm.finished), run?.teamsStartedAt,
+    ).length,
+    // Check-ins the server accepted without the fix proving it (change:
+    // arrival-needs-a-usable-fix). Summed across teams, because one team arriving
+    // this way at every stop is the only pattern worth walking over for.
+    unverifiedArrivalCount: teams.reduce((n, tm) => n + (tm.unverifiedArrivals ?? 0), 0),
   });
   const signalLabel = (s: RunSignal): string => rc.signal[s.id]({ n: s.count });
   // The single most urgent signal, for the polite live region (item 6). `signals`
@@ -897,9 +937,19 @@ export default function RunConsolePage() {
 
   async function adjustScore(team: RunTeamRow) {
     const raw = await dialog.prompt(rc.scoreAdjustmentPrompt);
-    const delta = parseScoreDelta(raw);
     // `parseInt(v) || 0` used to send a zero delta for any garbage input,
     // writing a permanent audit entry for a change that never happened.
+    //
+    // DELIBERATELY still `parseScoreDelta` and NOT the staff console's
+    // `parseAdjustAmount` (change: live-ops-feedback-loop). Unifying them looked like
+    // tidy-up and is a REGRESSION: this one normalises the four dashes a Hebrew or
+    // typographic keyboard produces (a Unicode minus is what an organizer's phone
+    // actually types), accepts a leading '+', and rounds a decimal instead of
+    // refusing it. `parseAdjustAmount` rejects all three and caps at 10 000 rather
+    // than 100 000. Two parsers is a real inconsistency, but the fix is to decide
+    // which behaviour is right for BOTH consoles on merit — not to silently make the
+    // creator's console reject input it accepts today. See the change's design doc.
+    const delta = parseScoreDelta(raw);
     if (delta === null) { if (raw != null && raw.trim() !== '') await dialog.alert(rc.scoreAdjustmentInvalid); return; }
     const signed = delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`;
     // Show the arithmetic (item 8): this is irreversible, audit logged and can
@@ -907,6 +957,37 @@ export default function RunConsolePage() {
     // number is the SAME ranked score the row renders, so the anchor can never
     // disagree with what the operator is looking at.
     const current = rankedScoreById.get(team.id) ?? team.score;
+
+    // WHY this adjustment was made (change: live-ops-feedback-loop). Every manual
+    // award in run ijI9JMITSf8C9heN1Cwp was recorded as the literal 'manual', and
+    // those awards fully reversed the standings — the trail for the decisions that
+    // chose the winner said nothing. The vocabulary is shared with the staff
+    // console so the two write ids an organizer can group afterwards.
+    //
+    // OPTIONAL by design, and the "" option is what makes that true without a
+    // disabled control: picking it carries on with no reason, while Cancel (null)
+    // abandons the adjustment. A host correcting a score mid-event must never be
+    // blocked by a question they do not want to answer.
+    const presets = reasonsForDelta(delta);
+    const picked = await dialog.choose(
+      rc.adjustScoreReasonPrompt({ team: team.displayName, delta: signed }),
+      [
+        ...presets.map((id) => ({ id, label: rc[id] })),
+        { id: OTHER_REASON, label: rc[OTHER_REASON] },
+        { id: '', label: rc.adjustScoreReasonSkip },
+      ],
+      { title: rc.reasonLabel },
+    );
+    if (picked === null) return; // cancelled the whole adjustment
+    let reason = '';
+    if (picked === OTHER_REASON) {
+      const typed = await dialog.prompt(rc.reasonOtherPlaceholder);
+      if (typed === null) return;
+      reason = resolveReason(OTHER_REASON, typed);
+    } else if (picked !== '') {
+      reason = resolveReason(picked as ScoreReasonId, '');
+    }
+
     if (!(await dialog.confirm(
       rc.adjustScoreConfirmWithScore({ team: team.displayName, delta: signed, current, result: current + delta }),
       rc.adjustScoreConfirmTitle, true,
@@ -916,7 +997,7 @@ export default function RunConsolePage() {
     // table kept the old number — and the creator believed the correction landed.
     // At a live event that is a wrong winner.
     try {
-      await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'manual' });
+      await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason });
       await loadTeams();
       toast.success(rc.adjustScoreApplied({ team: team.displayName, delta: signed }));
     } catch (e) {
@@ -2307,13 +2388,23 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
 
   async function review(row: SubmissionRow, approved: boolean) {
     const key = submissionKey(row);
-    // Legality first: an approved row has no server-side score clawback, so a
-    // "reject" would flip a status string while the points silently stayed.
+    // Legality first. Reject-after-approve is now LEGAL (change:
+    // approval-can-be-undone) - the server removes exactly what the approval awarded,
+    // so the old objection ("it would flip a status string while the points silently
+    // stayed") no longer holds. Approve-after-approve is still a refused no op.
     const decision = decideReview(row.status, approved ? 'approve' : 'reject');
     if (!decision.send) {
       toast.error(decision.reason === 'alreadyApproved' ? rc.photoReviewRejectDisabled : rc.photoReviewAlreadyRejected);
       return;
     }
+    // Undoing an approval MOVES A SCORE, so unlike an ordinary reject it asks first
+    // and names the consequence. An ordinary pending reject costs nothing yet and
+    // keeps its single note prompt.
+    const isReversal = !approved && row.status === 'approved';
+    if (isReversal && !(await dialog.confirm(
+      rc.reverseApprovalConfirm({ team: row.displayName }),
+      rc.reverseApprovalCta, true, { title: rc.reverseApprovalTitle },
+    ))) return;
     let note = '';
     if (!approved) {
       const answer = await dialog.prompt(rc.photoReviewRejectPrompt);
@@ -2321,11 +2412,17 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
       note = answer;
     }
     try {
-      await reviewStationSubmission({
+      const res = await reviewStationSubmission({
         ...ctx, teamId: row.teamId, taskId: row.taskId, approved, ...(note ? { note } : {}),
       });
       setFailures((prev) => clearFailure(prev, key));
-      toast.success(approved ? rc.photoReviewApproved : rc.photoReviewRejected);
+      // Say what it COST. An organizer who reverses an approval needs to see the
+      // points come off, or they cannot tell a reversal from a status flip - which is
+      // precisely the failure the server change exists to prevent.
+      const delta = typeof res?.scoreDelta === 'number' ? res.scoreDelta : 0;
+      toast.success(approved ? rc.photoReviewApproved
+        : isReversal ? rc.reverseApprovalDone({ team: row.displayName, points: Math.abs(delta) })
+          : rc.photoReviewRejected);
     } catch {
       toast.error(rc.photoReviewFailed);
       setFailures((prev) => recordFailure(prev, key, rc.photoReviewRowFailed({ team: row.displayName })));
@@ -2497,14 +2594,17 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
           <div className="space-y-1">
             {reviewed.map((row) => {
               const key = submissionKey(row);
-              // Reviewed rows are terminal, so a further reject is never useful:
-              // an APPROVED row has no server-side score clawback, and RE-rejecting
-              // an already-REJECTED row is a no-op that only re-opens the note
-              // prompt and fires a pointless callable. Either way the affordance is
-              // DISABLED with a status-specific reason rather than inviting the act.
-              const rejectReason = row.status === 'approved'
-                ? rc.photoReviewRejectDisabled
-                : rc.photoReviewAlreadyRejected;
+              // An APPROVED row can now be UNDONE (change: approval-can-be-undone).
+              // This button used to be hardcoded `disabled`, and its reason said the
+              // server had no score clawback - which was true when it was written and
+              // is not any more. Leaving it disabled would have shipped a server
+              // feature nobody could reach: bank photo missions default to
+              // autoApprove, so "approved" was the state a photo of somebody's hand
+              // ended up in, with the only button greyed out.
+              //
+              // An already-REJECTED row stays disabled: re-rejecting really is a no op
+              // that would only re-open the note prompt and fire a pointless callable.
+              const canUndo = row.status === 'approved';
               return (
                 <div key={key} className="flex items-center gap-2 text-[13px]">
                   <span className={row.status === 'approved' ? 'text-ink-fire' : 'text-ink-alert'}>
@@ -2513,11 +2613,19 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
                   <span dir="auto" className="text-[--ink-2] truncate flex-1">{row.displayName}</span>
                   <span dir="auto" className="text-[--ink-3] truncate">{taskLabel(row.taskId)}</span>
                   <button
-                    className="text-[--ink-3] disabled:text-[--ink-4] disabled:cursor-not-allowed"
-                    disabled
-                    title={rejectReason}
+                    // A real hit area WITHOUT a forced width: the house TAP_INLINE is
+                    // a fixed 44x44 square, correct for a glyph and wrong for a text
+                    // label, which it would clip. `min-h` plus padding and a negative
+                    // margin gives the same 44px target while the row keeps its
+                    // density - the same shape play-web uses for its text controls.
+                    className={canUndo
+                      ? 'inline-flex items-center min-h-[44px] px-2 -my-2 shrink-0 text-ink-alert font-medium hover:underline disabled:opacity-50'
+                      : 'text-[--ink-3] disabled:text-[--ink-4] disabled:cursor-not-allowed'}
+                    disabled={!canUndo || reviewAction.busy}
+                    onClick={canUndo ? () => { void reviewAction.run(row, false); } : undefined}
+                    title={canUndo ? rc.reverseApprovalTitle : rc.photoReviewAlreadyRejected}
                   >
-                    {rejectReason}
+                    {canUndo ? rc.reverseApprovalCta : rc.photoReviewAlreadyRejected}
                   </button>
                 </div>
               );

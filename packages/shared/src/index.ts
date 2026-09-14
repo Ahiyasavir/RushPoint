@@ -99,6 +99,25 @@ export * from './hiddenTask';
 // Skipping ONE mission for ONE team (change: skip-single-task) — the decision that
 // keeps the skip inside the stage and keeps the stage winnable afterwards.
 export * from './taskSkip';
+// Live-ops feedback (change: live-ops-feedback-loop) — "is a team waiting on me
+// right now?" for the review queue, and the one vocabulary a manual score
+// adjustment records itself with.
+export * from './reviewQueueCue';
+// A team that joins a run already in progress (change: late-joiner-autostart).
+export * from './lateJoiner';
+// Is a location fix good enough to PROVE arrival (change: arrival-needs-a-usable-fix)?
+// The mirror of safeZone: there an imprecise fix must not accuse, here it must not prove.
+export * from './arrivalFix';
+// Undoing an approval, and taking the points back with it (change:
+// approval-can-be-undone). The clawback that lets auto-approve mean UNBLOCKING
+// rather than UNREVIEWABLE.
+export * from './approvalReversal';
+// How many of a team's people are actually here, and acting (change:
+// every-member-plays). UNKNOWN is a first-class answer: memberCount is only
+// meaningful when the game collects member names, so a shortfall is null rather
+// than a confident lie.
+export * from './teamParticipation';
+export * from './scoreReasons';
 export * from './templateWizard';
 export * from './videoDuration';
 export * from './playStore';

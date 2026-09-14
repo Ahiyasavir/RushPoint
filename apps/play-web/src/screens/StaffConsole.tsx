@@ -25,7 +25,8 @@ import {
 } from '@rushpoint/shared';
 import {
   OTHER_REASON, reasonsForDelta, resolveReason, parseAdjustAmount, type ScoreReasonId,
-} from '../lib/scoreReasons';
+  newPendingKeys, submissionKey,
+} from '@rushpoint/shared';
 import { filterTeamsByName } from '../lib/staffTeamFilter';
 import type { StaffCtx } from '../lib/playRoute';
 import {
@@ -208,6 +209,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const ctx = useMemo(() => ({ ownerUid, gameId, runId }), [ownerUid, gameId, runId]);
 
   const [pending, setPending] = useState<PendingSubmission[]>([]);
+  // Baselined to null so the FIRST snapshot never cues, however many items are
+  // already waiting (change: live-ops-feedback-loop). Same shape as seenAlertIds.
+  const seenPendingKeys = useRef<Set<string> | null>(null);
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   // Volunteers read this, so it is a CLASSIFICATION, never the server's English
@@ -284,6 +288,18 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         }
       });
       rows.sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+      // A submission arriving is the one event a marshal is blocked on and cannot
+      // see (change: live-ops-feedback-loop). The SOS listener below has cued since
+      // it was written; this one never did. Same baseline discipline: `null` until
+      // the first snapshot, so opening the console over a queue is silent and so is
+      // a reconnect. `newPendingKeys` is total — its failure mode is silence, never
+      // an exception inside the listener that also renders the queue.
+      {
+        const keys = rows.map(submissionKey);
+        const verdict = newPendingKeys(seenPendingKeys.current, keys);
+        seenPendingKeys.current = new Set(keys);
+        if (verdict.shouldCue) feedback('alert');
+      }
       // Stable order: score desc, then id — so tied teams don't flicker rows between
       // snapshots (which could make a busy +/- button appear on the wrong team).
       teamRows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
@@ -629,7 +645,7 @@ function TeamOpsCard({
     closeAmount();
   }
 
-  // The preset ids ARE i18n keys (see lib/scoreReasons — an id is language-neutral
+  // The preset ids ARE i18n keys (see shared/scoreReasons — an id is language-neutral
   // for the audit log, the label is localized for the marshal). Resolved through an
   // unknown cast because t.staff also holds function-valued entries.
   const label = (id: ScoreReasonId) =>

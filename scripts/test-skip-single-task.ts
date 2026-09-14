@@ -10,6 +10,7 @@
 // that team's stored requirement). No emulator, no Firebase. Runs via `npm test`
 // (scripts/run-unit-tests.mjs auto-discovers scripts/test-*.ts).
 import { planTaskSkip } from '../packages/shared/src/taskSkip';
+import { skipAward } from '../packages/shared/src/scoringPresets';
 import type { SkipTaskStage } from '../packages/shared/src/taskSkip';
 
 let failures = 0;
@@ -259,6 +260,37 @@ console.log('\nskip-single-task — planTaskSkip');
   ok('a completed task is absent from remainingTaskIds', !p.remainingTaskIds.includes('b'));
   ok('a previously skipped task is absent from remainingTaskIds', !p.remainingTaskIds.includes('c'));
   eq('nothing playable is left, so the stage completes', p.stageCompletes, true);
+}
+
+// ── 12. What a skipped mission is WORTH (change: live-ops-feedback-loop) ─────
+// `planTaskSkip` decides the stage arithmetic and deliberately knows nothing about
+// scoring — the preset lives on the game, not on the stage. So the VALUE is pinned
+// here against `skipAward` directly, and the WIRING (that skipTaskForTeam actually
+// applies it) is pinned by the skip scenario in scripts/e2e-verify.mjs. Do not push
+// the preset into planTaskSkip to make this prettier.
+//
+// This used to be zero. Run ijI9JMITSf8C9heN1Cwp is why it is not: the organiser
+// computed the fair value by hand mid-run and paid it as an untraceable manual bonus.
+{
+  const task = { pointValue: 50, difficulty: 5, estimatedMinutes: 10 };
+  eq('a points game pays the mission point value', skipAward('fixed_points_speed', task), 50);
+  ok('a smart weighted game pays the on target value, which is positive',
+    skipAward('smart_weighted', task) > 0, String(skipAward('smart_weighted', task)));
+  eq('a time ranked game pays nothing, because it has no points to pay',
+    skipAward('time_only', task), 0);
+  // The same value skipStage pays for the same task — that equality IS the change.
+  eq('the single mission skip and the stage skip agree',
+    skipAward('smart_weighted', task), skipAward('smart_weighted', task));
+  // A hand written or legacy task must never poison the leaderboard through this path.
+  for (const bad of [Number.NaN, -100, undefined]) {
+    const v = skipAward('fixed_points_speed', { ...task, pointValue: bad as number });
+    ok(`a ${String(bad)} pointValue yields a finite award of at least zero :: ${v}`,
+      Number.isFinite(v) && v >= 0);
+  }
+  for (const preset of ['time_only', 'fixed_points_speed', 'smart_weighted'] as const) {
+    const v = skipAward(preset, { ...task, difficulty: Number.NaN, estimatedMinutes: 0 });
+    ok(`${preset} survives a malformed task with a finite award :: ${v}`, Number.isFinite(v) && v >= 0);
+  }
 }
 
 console.log('');
