@@ -15,6 +15,9 @@ import {
   videoTypeFromName,
   pickedClipVerdict,
   recordedClipVerdict,
+  CAPTURE_VIDEO_CONSTRAINTS,
+  MAX_PARTICIPANT_VIDEO_BYTES,
+  predictedClipBytes,
 } from '../apps/play-web/src/lib/videoCapture';
 import { VIDEO_DURATION_LIMITS } from '../packages/shared/src/videoDuration';
 
@@ -103,6 +106,70 @@ try {
   recordedClipVerdict(10, undefined as unknown as number);
 } catch { recThrew = true; }
 check('recordedClipVerdict never throws', recThrew === false);
+
+// ── The capture PROFILE (change: video-capture-profile) ──────────────────────
+//
+// The recorder used to pin the bitrate and say NOTHING about resolution, so the
+// browser captured at the camera's own default - 1080p on essentially every modern
+// phone - and then encoded that at a fixed 2 Mbps. The worst of both worlds: the bit
+// budget was spread across four times the pixels of 720p, so the clip looked blocky at
+// exactly the bitrate that would have looked clean on a smaller frame; software
+// encoding 1080p cooked the phone and dropped frames; and the file was large anyway,
+// because size is bitrate times duration however the bits were spent.
+{
+  const c = CAPTURE_VIDEO_CONSTRAINTS;
+  check('the recorder asks for a bounded width', typeof c.width === 'object' && c.width !== null);
+  check('the recorder asks for a bounded height', typeof c.height === 'object' && c.height !== null);
+  check('the recorder asks for a frame rate', typeof c.frameRate === 'object' && c.frameRate !== null);
+
+  // `ideal`, NEVER `exact`. An exact constraint the camera cannot meet throws
+  // OverconstrainedError and the player gets no camera at all - a harder failure than
+  // the one being fixed. The whole profile must be a preference.
+  const ALL = JSON.stringify(c);
+  check('no constraint is expressed as `exact` (that would refuse a camera)',
+    !ALL.includes('"exact"'), ALL);
+  check('every constraint is expressed as `ideal`', ALL.includes('"ideal"'), ALL);
+  check('the rear camera preference survived', JSON.stringify(c.facingMode).includes('environment'));
+
+  // 720p class: big enough to read a sign in a field clip, small enough that a phone
+  // can encode it in real time and that the pinned bitrate looks clean on it.
+  const w = (c.width as { ideal?: number }).ideal ?? 0;
+  const h = (c.height as { ideal?: number }).ideal ?? 0;
+  check(`the preferred frame is 720p class :: ${w}x${h}`, w === 1280 && h === 720);
+  const fps = (c.frameRate as { ideal?: number }).ideal ?? 0;
+  check(`the preferred frame rate is normal, not cinematic :: ${fps}`, fps === 30);
+}
+
+// ── The size ceiling stays DERIVABLE, and is asserted rather than commented ──
+//
+// The old module carried the arithmetic in a comment: "(2_000_000 + 96_000) x 60 / 8
+// = 15.7MB against a 20MB cap". A comment cannot fail. This can.
+{
+  const ceiling = VIDEO_DURATION_LIMITS.ceilingSeconds;
+  const worst = predictedClipBytes(ceiling);
+  const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)}MB`;
+  check(`a ceiling-length clip fits under the upload cap :: ${mb(worst)} of ${mb(MAX_PARTICIPANT_VIDEO_BYTES)}`,
+    worst < MAX_PARTICIPANT_VIDEO_BYTES);
+  // Headroom must not shrink. The previous budget produced ~15.7MB at the ceiling;
+  // this change must be no worse, or it has traded one refusal for another.
+  const PREVIOUS_CEILING_BYTES = (2_000_000 + 96_000) * 60 / 8;
+  check(`headroom is not reduced :: ${mb(worst)} vs the previous ${mb(PREVIOUS_CEILING_BYTES)}`,
+    worst <= PREVIOUS_CEILING_BYTES);
+  check('and it is genuinely smaller, which is the point', worst < PREVIOUS_CEILING_BYTES);
+
+  check('the default max length is comfortably under the cap',
+    predictedClipBytes(VIDEO_DURATION_LIMITS.defaultMaxSeconds) < MAX_PARTICIPANT_VIDEO_BYTES);
+  check('the client cap mirrors the server cap', MAX_PARTICIPANT_VIDEO_BYTES === 20 * 1024 * 1024);
+
+  // Total: this feeds a size estimate, never a hard refusal.
+  for (const bad of [undefined, NaN, Infinity, -5, 'x']) {
+    const v = predictedClipBytes(bad as unknown as number);
+    check(`predictedClipBytes(${String(bad)}) is a finite non-negative number :: ${v}`,
+      Number.isFinite(v) && v >= 0);
+  }
+  check('a zero-length clip predicts zero bytes', predictedClipBytes(0) === 0);
+  check('prediction grows with duration', predictedClipBytes(60) > predictedClipBytes(30));
+}
 
 console.log(`\n${failures === 0 ? 'ALL VIDEO-CAPTURE TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -3,13 +3,67 @@
 // without a component test runner. The clip-length RANGE itself lives in
 // @rushpoint/shared's videoDuration.ts — this is only what the widget adds on top.
 
+// ─── The capture profile (change: video-capture-profile) ─────────────────────
+//
+// WHAT WAS WRONG. The bitrate below was pinned and the RESOLUTION was not constrained
+// at all — `getUserMedia` asked only for `facingMode`. So the browser captured at the
+// camera's own default (1080p on essentially every modern phone, higher on many) and
+// encoded that at a flat 2 Mbps. The worst of both worlds:
+//
+//   • 2 Mbps is UNDER-provisioned for 1080p. The bit budget was spread over four times
+//     the pixels of 720p, so a clip came back blocky at exactly the bitrate that looks
+//     clean on a smaller frame. The player filmed something and got mush.
+//   • Encoding 1080p is expensive, and browser MediaRecorder on Android commonly
+//     encodes VP8/VP9 in SOFTWARE. That is the hot phone, the dropped frames, and the
+//     pause between "stop" and "here is your clip" — the part that reads as "not
+//     smooth".
+//   • And the file was large regardless, because size is bitrate x duration however
+//     the bits were spent. Every one of those megabytes crosses a field connection
+//     twice: once up, and once down to whoever reviews it.
+//
+// Asking for a 720p frame fixes all three at once: fewer pixels to encode (cooler,
+// faster), the same bits spread over a quarter of the area (sharper), and a lower
+// bitrate is then enough (smaller).
+//
+// `ideal`, NEVER `exact`. An `exact` constraint a camera cannot meet throws
+// OverconstrainedError and the player gets NO camera — a harder failure than the one
+// being fixed. Every line here is a preference; a device that ignores it still records.
+export const CAPTURE_VIDEO_CONSTRAINTS = {
+  // The rear camera is what a field mission is filmed with.
+  facingMode: { ideal: 'environment' as const },
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+  // 30fps, not 60: a field clip gains nothing from cinematic motion, and 60fps doubles
+  // the encoder's work for bits that are then taken out of image quality.
+  frameRate: { ideal: 30 },
+};
+
 // MediaRecorder's default video bitrate is browser-chosen and can be several times
 // this. Left unpinned, a ceiling-length clip could land well past the server's
 // MAX_PARTICIPANT_VIDEO_BYTES — the player records for a full minute and is refused
-// only at upload. Pinning it here is what makes that cap derivable arithmetic:
-// (2_000_000 + 96_000) bits/s x 60s / 8 ≈ 15.7MB against a 20MB cap.
-export const VIDEO_BITS_PER_SECOND = 2_000_000;
+// only at upload. Pinning it is what makes that cap derivable arithmetic.
+//
+// 1.5 Mbps at 720p30 is a visibly BETTER picture than 2 Mbps at 1080p while being 25%
+// smaller. The arithmetic is no longer a comment that cannot fail — see
+// `predictedClipBytes`, asserted against the real cap by scripts/test-video-capture.ts.
+export const VIDEO_BITS_PER_SECOND = 1_500_000;
 export const AUDIO_BITS_PER_SECOND = 96_000;
+
+/** Mirrors MAX_PARTICIPANT_VIDEO_BYTES in functions/uploadRoute.js. */
+export const MAX_PARTICIPANT_VIDEO_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Roughly how many bytes a clip of this length will weigh.
+ *
+ * Exists so "does a ceiling-length clip still fit under the upload cap?" is a question
+ * a TEST can ask, rather than arithmetic in a comment that no longer matches the
+ * constants beside it. Total: a garbage duration yields 0 rather than NaN, because
+ * this feeds an estimate and never a refusal.
+ */
+export function predictedClipBytes(seconds: number): number {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return 0;
+  return (VIDEO_BITS_PER_SECOND + AUDIO_BITS_PER_SECOND) * seconds / 8;
+}
 
 // Extension → content type, used ONLY when a picked File carries an empty `type`
 // (some Android pickers). Every value must be one the server accepts, or the
