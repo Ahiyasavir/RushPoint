@@ -19,6 +19,9 @@ import {
   locationLeakWarnings,
   // task-duration-defaults: the per-interaction derived estimate the editor suggests.
   defaultExpectedDurationMinutes, TASK_DURATION_MAX_MINUTES,
+  // The most devices one team may ever hold, so a contributor requirement cannot be
+  // authored above what any team could satisfy (change: every-member-plays).
+  TEAM_DEVICE_HARD_CAP,
   // visible-time-estimates: the WALK INCLUSIVE estimate the scoring sigmoid reads.
   defaultEstimatedMinutes, TASK_ESTIMATE_MAX_MINUTES,
   normalizeTags,
@@ -59,6 +62,7 @@ import {
 // The 2-option location picker's pure decisions (change: task-location-mode-consolidation).
 import {
   type LocationChoice, TIGHT_RADIUS_M, DEFAULT_RADIUS_M, CHOICE_ICON_MODE,
+  radiusBelowFloor, enforcedRadiusM,
   locationChoiceOf, skipsGpsCheck, locationChoicePatch, radiusPatch, skipGpsPatch,
 } from '../lib/locationPicker';
 // הקמה מהירה, guided mode (change: quick-setup-guided-editor): what this editor
@@ -93,9 +97,15 @@ const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[]
 
 export default function TaskWizard({
   task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings, revealAll,
-  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors,
+  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors, onRegenerate,
 }: {
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
+  /**
+   * Swap this mission for the closest one in the bank (change: mission-regenerate).
+   * Offered here as well as on the card, because the editor is where a creator is
+   * looking when they decide they do not want this mission.
+   */
+  onRegenerate?: () => void;
   onClose: () => void; closeLabel: string; gameId?: string;
   // The other tasks of the SAME stage (change: unlockable-tasks) — the
   // prerequisite multi-select offers exactly these, so cross-stage/unknown ids
@@ -319,20 +329,35 @@ export default function TaskWizard({
             ✕ made into its settings pane. Rendered only when the task can be
             deleted at all (the stage's last mission cannot), so a menu never
             opens onto nothing. */}
-        {onRemove && view.showTaskMenu && (
+        {(onRemove || onRegenerate) && view.showTaskMenu && (
           <div className="shrink-0">
             <OverflowMenu
               label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
               ariaLabel={b.taskMoreMenuAria}
               triggerClassName="w-11 h-11 justify-center rounded-lg text-lg leading-none text-[--ink-3]"
             >
-              <button
-                role="menuitem"
-                onClick={onRemove}
-                className="w-full text-start px-3 py-2.5 text-[13px] text-ink-alert rounded-lg hover:bg-rp-alert/10 transition-colors"
-              >
-                {b.deleteTask}
-              </button>
+              {/* Regenerate sits ABOVE delete and outside its danger styling: it is
+                  the repeatable action, delete is the terminal one, and a menu that
+                  puts them side by side in the same colour invites the wrong press
+                  (change: mission-regenerate). */}
+              {onRegenerate && (
+                <button
+                  role="menuitem"
+                  onClick={onRegenerate}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-[--ink-1] rounded-lg hover:bg-[--surface-2] transition-colors"
+                >
+                  {b.regenerateTask}
+                </button>
+              )}
+              {onRemove && (
+                <button
+                  role="menuitem"
+                  onClick={onRemove}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-ink-alert rounded-lg hover:bg-rp-alert/10 transition-colors"
+                >
+                  {b.deleteTask}
+                </button>
+              )}
             </OverflowMenu>
           </div>
         )}
@@ -698,6 +723,16 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
                   </div>
                 </div>
                 <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.locRadiusHelp}</p>
+                {/* A radius under the floor is not a stricter mission, it is one the
+                    server cannot honour literally - and the tight preset on this very
+                    control is 4m, so the Builder itself hands out such a value. Say what
+                    will actually happen, rather than letting a creator discover it by
+                    failing to check in at their own mission. */}
+                {radiusBelowFloor(radius) && (
+                  <p className="text-[13px] text-[--ink-3] leading-snug mt-1">
+                    {b.locRadiusFloorNote({ m: enforcedRadiusM(radius) })}
+                  </p>
+                )}
               </div>
 
               <label className="flex items-start gap-2 cursor-pointer">
@@ -1829,6 +1864,29 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           (change: task-media-durability) — it is no longer an opt-in group here. */}
       {shown('rules') && (
         <OptInGroup title={GROUP_TITLE.rules} hideLabel={b.hideSection} onHide={() => groups.hideGroup('rules')}>
+          {/* How many teammates must each do their part (change: every-member-plays).
+              Lives HERE and not under time-and-scoring: it is a LIMIT on when the
+              mission may be completed, not a duration or a point value. Absent or 0
+              means none, which is every mission that exists today. The server reduces
+              it to the devices a team actually has, so authoring 4 for a team of two is
+              never unwinnable, and the help text says so rather than letting a creator
+              believe they have locked something they have not. */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
+            <InlineLabel>{b.requiredContributorsLabel}</InlineLabel>
+            <Input dense type="number" min={0} max={TEAM_DEVICE_HARD_CAP} className="w-20"
+              data-qs-field="requiredContributors"
+              value={task.requiredContributors ?? ''}
+              placeholder="0" aria-label={b.requiredContributorsLabel}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10);
+                set({
+                  requiredContributors: Number.isFinite(n) && n > 1
+                    ? Math.min(TEAM_DEVICE_HARD_CAP, n)
+                    : undefined,
+                });
+              }} />
+          </div>
+          <p className="text-[13px] text-[--ink-3] mb-2" dir="auto">{b.requiredContributorsHelp}</p>
           {/* Prerequisites need siblings to point at, so a one-task stage is
               offered the rest of the group without them. */}
           {siblingCount > 1 && (
@@ -1980,6 +2038,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                   }} />
               </div>
               <p className="text-[13px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
+
             </div>
           );
         })()}

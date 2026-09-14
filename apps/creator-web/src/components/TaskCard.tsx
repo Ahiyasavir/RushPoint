@@ -40,7 +40,7 @@ export interface MoveTarget { id: string; label: string }
 
 export default function TaskCard({
   task, active, onClick, dragging, moveTargets, onMoveToStage,
-  onDuplicate, onToggleHidden, onDelete, group, handleProps,
+  onDuplicate, onRegenerate, onToggleHidden, onDelete, group, handleProps,
 }: {
   task: Task;
   active?: boolean;
@@ -58,6 +58,12 @@ export default function TaskCard({
    * `moveTargets` is empty in a one-stage game.
    */
   onDuplicate?: () => void;
+  /**
+   * Swap this mission for the closest one in the bank (change: mission-regenerate).
+   * Repeat presses drift further away, so it sits with the other repeatable card
+   * actions rather than with the destructive ones.
+   */
+  onRegenerate?: () => void;
   /** Bench this mission, or bring it back. See shared/hiddenTask. */
   onToggleHidden?: () => void;
   onDelete?: () => void;
@@ -177,7 +183,7 @@ export default function TaskCard({
             button — a `<span onClick>` wrapper here would be a clickable
             non-interactive element, which the creator a11y scan counts and is right
             to. */}
-        {(onDuplicate || onToggleHidden || onDelete || (onMoveToStage && moveTargets && moveTargets.length > 0)) && (
+        {(onDuplicate || onRegenerate || onToggleHidden || onDelete || (onMoveToStage && moveTargets && moveTargets.length > 0)) && (
           <span className="shrink-0 opacity-60 transition-opacity group-hover/card:opacity-100 focus-within:opacity-100">
             <OverflowMenu
               label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
@@ -188,6 +194,12 @@ export default function TaskCard({
                 <button role="menuitem" onClick={onDuplicate}
                   className="w-full text-start px-3 py-2.5 text-[13px] text-[--ink-1] rounded-lg hover:bg-[--surface-2] transition-colors">
                   {b.duplicateTask}
+                </button>
+              )}
+              {onRegenerate && (
+                <button role="menuitem" onClick={onRegenerate}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-[--ink-1] rounded-lg hover:bg-[--surface-2] transition-colors">
+                  {b.regenerateTask}
                 </button>
               )}
               {onToggleHidden && (
