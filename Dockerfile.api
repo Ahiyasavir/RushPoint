@@ -56,6 +56,7 @@ COPY --from=build /repo/functions/server.js ./server.js
 COPY --from=build /repo/functions/uploadRoute.js ./uploadRoute.js
 COPY --from=build /repo/functions/oauthRoute.js ./oauthRoute.js
 COPY --from=build /repo/functions/ingestUrlRoute.js ./ingestUrlRoute.js
+COPY --from=build /repo/functions/mediaServing.js ./mediaServing.js
 # TRANSITIVE, and therefore NOT covered by scripts/test-api-image-contents.ts:
 # that guard scans server.js's own require list, and server.js never mentions
 # this file — ingestUrlRoute.js does. It is just as fatal to omit (the container

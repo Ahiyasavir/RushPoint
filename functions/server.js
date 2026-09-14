@@ -47,6 +47,9 @@ const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 // lives in uploadRoute.js so it can be tested without this file's built-bundle
 // and Admin-SDK dependencies.
 const { createUploadHandler, sweepStaleTempUploads } = require('./uploadRoute.js');
+// Pure decisions for GET /uploads/* — content type, byte range, download
+// disposition (change: media-serving-correctness). See functions/mediaServing.js.
+const mediaServing = require('./mediaServing.js');
 // Server-side fetch of a picture dragged from another tab (change:
 // server-side-url-ingest). See urlIngestGuard.js for the SSRF rules — this
 // endpoint makes THIS box an HTTP client for an address a caller chose.
@@ -202,45 +205,16 @@ app.post('/ingest-url', createIngestUrlHandler({
   onResponse: reflectCors,
 }));
 
-// Serve uploaded files. Content-Type is derived from the extension.
-// These URLs are the "download URLs" — equivalent to Firebase's getDownloadURL().
-const EXTENSION_TYPES = {
-  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-  '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heif',
-  '.gif': 'image/gif', '.webm': 'audio/webm', '.m4a': 'audio/mp4',
-  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.mp4': 'video/mp4',
-  '.aac': 'audio/aac', '.3gp': 'audio/3gpp', '.3gpp': 'audio/3gpp', '.amr': 'audio/amr',
-  '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
-};
-
-app.get(/^\/uploads\/(.+)$/, (req, res) => {
-  const relativePath = req.params[0];
-  if (!relativePath || relativePath.includes('..')) {
-    return res.status(400).json({ error: 'Invalid path' });
-  }
-  const fullPath = fsPath.join(UPLOAD_DIR, relativePath);
-  // Ensure we don't escape UPLOAD_DIR
-  if (!fullPath.startsWith(fsPath.resolve(UPLOAD_DIR))) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  if (!fs.existsSync(fullPath)) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-  const ext = fsPath.extname(fullPath).toLowerCase();
-  const ct = EXTENSION_TYPES[ext] || 'application/octet-stream';
-  res.set('Content-Type', ct);
-  // nosniff is load-bearing here, not boilerplate. Content-Type is derived from
-  // the FILENAME, while the upload validated the declared Content-Type HEADER —
-  // two different things, so the two can disagree. Without nosniff a browser may
-  // ignore our declared type, sniff the bytes and render an uploaded file as
-  // HTML on this origin. An unknown extension is served as octet-stream, and
-  // nosniff is what makes that verdict stick.
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('Cache-Control', 'public, max-age=31536000, immutable');
-  // Allow cross-origin (play-web on rush-point.com fetches from api.rush-point.com).
-  res.set('Access-Control-Allow-Origin', '*');
-  fs.createReadStream(fullPath).pipe(res);
-});
+// Serve uploaded files. These URLs are the "download URLs" — equivalent to
+// Firebase's getDownloadURL().
+//
+// The handler itself lives in ./mediaServing.js and takes its upload directory by
+// injection, the same way ./uploadRoute.js already does — so a scripts/test-*.ts
+// can mount it on a bare express app and drive REAL HTTP without the built
+// callables bundle or a real Admin SDK. That matters here: the emulator does not
+// serve /uploads at all, so scripts/e2e-verify.mjs cannot reach this route and
+// the round trip has to be proven somewhere else (change: media-serving-correctness).
+app.get(/^\/uploads\/(.+)$/, mediaServing.createUploadsGetHandler({ uploadDir: UPLOAD_DIR }));
 
 // Internal: delete an upload prefix (local ops only — not for browser use).
 app.delete(/^\/uploads\/(.+)$/, async (req, res) => {
