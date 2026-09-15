@@ -1432,6 +1432,7 @@ export default function RunConsolePage() {
             loadError={photoLoadError}
             taskTitles={taskTitles}
             finishedTeamIds={finishedTeamIds}
+            onReviewed={() => { void loadTeams(); }}
           />
         );
       case 'feed': return <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} items={feedItems} />;
@@ -2435,7 +2436,9 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
 // The queue itself is now computed by the page (the disclosure plan needs the
 // pending count for a FOLDED group's badge, and a collapsed group renders no
 // children), so this panel is presentational.
-function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, taskTitles, finishedTeamIds }: {
+function PhotoReviewConsole({
+  ctx, pending, reviewed, pendingCount, loadError, taskTitles, finishedTeamIds, onReviewed,
+}: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   pending: SubmissionRow[];
   reviewed: SubmissionRow[];
@@ -2444,6 +2447,8 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
   taskTitles: ReadonlyMap<string, string>;
   /** Teams past the finish line: their submissions still score, but block nobody. */
   finishedTeamIds: string[];
+  /** Re-read the teams NOW, so a judged row leaves the queue at once. */
+  onReviewed: () => void;
 }) {
   const rc = useT().runConsole;
 
@@ -2514,6 +2519,15 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
     }
     // No optimistic removal: the row disappears because the snapshot says the
     // status left 'pending'. Optimism here would hide a failed review.
+    //
+    // But it must not wait for the next poll either. Measured in the running console:
+    // the callable returned ok in 797ms and the row sat there for SECONDS afterwards,
+    // while the only other signal - a toast - had already auto-dismissed at ~3.4s. An
+    // organizer who pressed Reject, looked at the photo rather than the corner, and
+    // then saw the row unchanged concluded nothing had happened. Ahiya reported exactly
+    // that. So: re-read the teams immediately. Still the server's answer, just now
+    // instead of later - which is why this is a refresh and not optimism.
+    onReviewed();
   }
 
   // Per-row in-flight guard — a double-tapped Approve must fire ONE callable.
