@@ -234,6 +234,9 @@ const HE = {
     uploadStarting: 'מתחיל להעלות…',
     uploadRetrying: 'הרשת איטית. מנסים שוב…',
     photoNotCompressed: 'לא הצלחנו לכווץ את התמונה, ההעלאה עשויה להיות איטית.',
+    photoCaptureFailed: 'לא הצלחנו לקרוא את התמונה. צלמו אותה שוב.',
+    photoTakeFirst: 'קודם צלמו תמונה, ואז שלחו אותה.',
+    photoStillWorking: 'עדיין שולחים את הקודמת. רגע אחד.',
     approved: 'אושר!',
     pendingReview: 'הוגש. ממתין לאישור.',
     // המנחה דחה את ההגשה (change: rejection-tells-the-player). קודם לא נאמר להם כלום.
@@ -256,6 +259,10 @@ const HE = {
     // לחרוג. "צלמו קצר יותר" פשוט לא יעזור שם, וההקלטה מתוך האפליקציה כן.
     videoTooLargeUseRecorder: ({ mb }: { mb: number }) => `הסרטון גדול מדי (עד ${mb} מ"ב). הקליטו דרך האפליקציה במקום, ככה הסרטון יוצא קטן ומהיר.`,
     videoTooShort: ({ sec }: { sec: number }) => `הסרטון קצר מדי. צריך לפחות ${sec} שניות.`,
+    videoShortButOk: ({ sec }: { sec: number }) => `הסרטון קצר מהזמן שביקשנו (${sec} שניות), אבל אפשר לשלוח אותו.`,
+    videoSaveToPhone: 'שמרו את הסרטון לטלפון',
+    videoHold: 'עצרו לרגע',
+    videoKeepGoing: 'המשיכו להקליט',
     videoCameraDenied: 'הגישה למצלמה נדחתה. אפשרו גישה כדי לצלם.',
     videoUnsupported: 'הדפדפן הזה לא תומך בצילום ישיר. צלמו עם אפליקציית המצלמה של הטלפון ובחרו את הקובץ.',
     videoPickFile: '🎥 צלמו עם הטלפון',
@@ -993,6 +1000,9 @@ const EN: typeof HE = {
     uploadStarting: 'Starting upload…',
     uploadRetrying: 'Slow network. Retrying…',
     photoNotCompressed: "We couldn't shrink the photo, the upload may be slow.",
+    photoCaptureFailed: 'We could not read that photo. Please take it again.',
+    photoTakeFirst: 'Take a photo first, then send it.',
+    photoStillWorking: 'Still sending the last one. One moment.',
     approved: 'Approved!',
     pendingReview: 'Submitted. Waiting for review.',
     // The organizer rejected the submission (change: rejection-tells-the-player).
@@ -1015,6 +1025,10 @@ const EN: typeof HE = {
     // even a ten second clip can exceed the cap and filming shorter will not help.
     videoTooLargeUseRecorder: ({ mb }: { mb: number }) => `That video is too large (max ${mb} MB). Record it in the app instead, which keeps the clip small and quick.`,
     videoTooShort: ({ sec }: { sec: number }) => `That clip is too short. It needs at least ${sec} seconds.`,
+    videoShortButOk: ({ sec }: { sec: number }) => `Shorter than the ${sec} seconds asked for, but you can still send it.`,
+    videoSaveToPhone: 'Save the video to your phone',
+    videoHold: 'Hold',
+    videoKeepGoing: 'Keep recording',
     videoCameraDenied: 'Camera access was denied. Allow it to film.',
     videoUnsupported: 'This browser cannot film directly. Record with your phone camera, then pick the file.',
     videoPickFile: '🎥 Film with your phone',

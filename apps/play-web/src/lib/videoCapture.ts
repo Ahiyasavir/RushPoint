@@ -84,6 +84,41 @@ export function videoTypeFromName(name: string): string {
 }
 
 /**
+ * What a clip's length means for the submit button.
+ *
+ *   'ok'        - at or above the mission's minimum.
+ *   'short'     - under it, but close enough to send anyway (warn, do not block).
+ *   'too-short' - so far under that it cannot be what the mission asked for.
+ *
+ * WHY 'short' EXISTS. The minimum used to be a hard wall, so a clip a second or two
+ * under it could not be sent at all and the only route forward was to record the
+ * whole thing again from zero. Reported as exactly that: refusing a clip "even when
+ * it is short by just a little" is infuriating, and it punishes the player for the
+ * recorder's own rounding rather than for anything they did.
+ *
+ * A minimum is guidance about what makes a good answer, not a correctness rule the
+ * server checks - nothing downstream reads seconds at all. So it now warns down to
+ * half the asked length and blocks only below that, where the clip really cannot be
+ * the thing that was requested.
+ */
+export const CLIP_SHORT_FRACTION = 0.5;
+
+export type ClipVerdict = 'ok' | 'short' | 'too-short';
+
+/**
+ * Grade a TRUSTED duration against a valid minimum. Both callers have already
+ * rejected garbage input and decided to fail open on it, so this only ever sees
+ * finite positive numbers.
+ */
+function gradeClip(seconds: number, minSeconds: number): ClipVerdict {
+  // Half a second of slack: the tick counter and the container's own duration never
+  // agree to the millisecond, and rounding against the player would refuse a clip
+  // they were told was long enough.
+  if (seconds + 0.5 >= minSeconds) return 'ok';
+  return seconds + 0.5 >= minSeconds * CLIP_SHORT_FRACTION ? 'short' : 'too-short';
+}
+
+/**
  * Whether a clip picked from the device's own camera app is long enough.
  *
  * FAILS OPEN by construction: a `<video>` element reports `Infinity` or `NaN` for
@@ -95,10 +130,10 @@ export function videoTypeFromName(name: string): string {
 export function pickedClipVerdict(
   durationSeconds: number | undefined,
   minSeconds: number,
-): 'ok' | 'too-short' {
+): ClipVerdict {
   if (typeof minSeconds !== 'number' || !Number.isFinite(minSeconds) || minSeconds <= 0) return 'ok';
   if (typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return 'ok';
-  return durationSeconds + 0.5 < minSeconds ? 'too-short' : 'ok';
+  return gradeClip(durationSeconds, minSeconds);
 }
 
 /**
@@ -116,11 +151,8 @@ export function pickedClipVerdict(
 export function recordedClipVerdict(
   elapsedSeconds: number | undefined,
   minSeconds: number,
-): 'ok' | 'too-short' {
+): ClipVerdict {
   if (typeof minSeconds !== 'number' || !Number.isFinite(minSeconds) || minSeconds <= 0) return 'ok';
   if (typeof elapsedSeconds !== 'number' || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) return 'ok';
-  // Half a second of slack: the tick counter and the container's own duration
-  // never agree to the millisecond, and rounding against the player would refuse
-  // a clip they were told was long enough.
-  return elapsedSeconds + 0.5 < minSeconds ? 'too-short' : 'ok';
+  return gradeClip(elapsedSeconds, minSeconds);
 }

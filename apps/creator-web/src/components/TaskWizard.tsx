@@ -632,6 +632,14 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
     { choice: 'anywhere', label: b.locAnywhere, sub: b.locAnywhereSub, desc: b.locAnywhereDesc },
     { choice: 'specific', label: b.locSpecific, sub: b.locSpecificSub, desc: b.locSpecificDesc },
   ];
+  // Escape closes the advanced dialog. Bound while it is open only, so the wizard's
+  // own Escape handling is untouched the rest of the time.
+  useEffect(() => {
+    if (!advOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setAdvOpen(() => false); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [advOpen, setAdvOpen]);
   const showModeChooser = guided?.showModeChooser !== false;
   const showAdvanced = guided?.showAdvanced !== false;
   const radius = task.geofenceRadiusMeters ?? DEFAULT_RADIUS_M;
@@ -646,115 +654,111 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
       {showModeChooser && (
       <div className="shrink-0">
         <Label>{b.fireQuestion}</Label>
-        {/* THE TWO CHOICES ARE THE ROW; ADVANCED IS NOT ONE OF THEM
-            (change: advanced-options-is-not-a-third-answer).
- 
-            The previous revision here already said the goal — a control "beside
-            the primary choice, not a peer of it" — and the markup contradicted it.
-            Measured on a 375px phone: the gear rendered at the same y, the same
-            110px height (`items-stretch`), the same `border-2 rounded-xl`, and the
-            same icon-over-label composition as the two answers. Everything a
-            person reads shape from was identical; only the width differed. So the
-            question "where can this mission be done?" appeared to have three
-            answers, one of which was a settings drawer.
- 
-            It moves out of the row, onto the description line below, as a text
-            control rather than a card. Nothing can be mistaken for an answer if it
-            is not shaped like one and not standing among them. Two consequences,
-            both wanted: the real choices go from 129px to ~160px each on a phone,
-            and the gear keeps a full 44px target via TAP_TEXT rather than being
-            the "small gear pill squeezed onto the question row" this comment's
-            ancestor was right to move away from. */}
-        <div className="grid grid-cols-2 gap-2 mt-1.5">
-          {CHOICES.map((c) => {
-            const active = choice === c.choice;
-            return (
-              <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
-                className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-4 px-2 transition-colors ${
-                  active
-                    ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
-                    : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
-                <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-7 h-7" />
-                <span className="text-[14px] font-semibold leading-tight text-center">{c.label}</span>
-                <span className="text-[13px] leading-tight text-center opacity-70">{c.sub}</span>
+        {/* ── The answers, a partition, and the settings tile ───────────────────
+            Third revision, and the two failures before it are why this shape is
+            what it is. It began as a card INSIDE this row, which read as a third
+            answer to "where can this be done?" (d4be1fd measured it: same height,
+            same border, same icon-over-label). The fix demoted it to a small
+            underlined link, which cured that and made it invisible - Ahiya could
+            not find the settings at all.
+
+            So it is back in the row at full size, with a literal PARTITION between
+            it and the answers, which is what he asked for. The line is the whole
+            argument: the two choices live to one side of it and are a closed set,
+            and what is past it is plainly not a member of that set. The tile is
+            also a different SHAPE (a fixed square, not a flexing half) and carries
+            sliders rather than the pin/globe vocabulary.
+
+            And it no longer opens an accordion. An accordion pushed the map down
+            and put the settings in a 45%-tall scroll box, which is how the radius
+            note ended up wrapping to three lines. It opens its own dialog now:
+            nothing moves, and the settings get a full-width surface. */}
+        <div className="flex items-stretch gap-2 mt-1.5">
+          <div className="grid grid-cols-2 gap-2 flex-1 min-w-0">
+            {CHOICES.map((c) => {
+              const active = choice === c.choice;
+              return (
+                <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
+                  className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-4 px-2 transition-colors ${
+                    active
+                      ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
+                      : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
+                  <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-7 h-7" />
+                  <span className="text-[14px] font-semibold leading-tight text-center">{c.label}</span>
+                  <span className="text-[13px] leading-tight text-center opacity-70">{c.sub}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {showAdvanced && choice === 'specific' && (
+            <>
+              {/* THE PARTITION. Not decoration - it is the thing that stops the
+                  tile beside it being read as a third answer. */}
+              <div aria-hidden className="w-px self-stretch bg-[--rp-border]" />
+              <button
+                type="button"
+                onClick={() => setAdvOpen(() => true)}
+                title={b.locAdvanced}
+                aria-haspopup="dialog"
+                data-qs-field="locationAdvanced"
+                className="shrink-0 w-[84px] flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed
+                  border-[--rp-border] bg-[--surface-2] text-[--ink-2] py-4 px-1.5 transition-colors
+                  hover:border-[--ink-3] hover:bg-[--surface-3] hover:text-[--ink-1]"
+              >
+                <BuilderIcon name="tune" className="w-6 h-6" />
+                <span className="text-[12px] font-semibold leading-tight text-center">{b.locAdvancedShort}</span>
               </button>
-            );
-          })}
+            </>
+          )}
         </div>
         <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">
           {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
         </p>
-        {/* ── Advanced options: prominent again, but no longer an ANSWER ──────
-            Two revisions ago this was a card in the row above and read as a third
-            answer to "where can this be done?". The fix demoted it to a small
-            underlined link, which solved that and created the opposite problem:
-            the creator could not find it. Ahiya: "it cannot be this small and
-            unremarkable, it has to come back there - maybe put a divider between
-            them."
-
-            That is the right instrument, so this is the divider plus four cues
-            that all say "not an answer", while the control itself is full size:
-
-              1. It is BELOW a rule, in its own band. The question's answers are
-                 finished above the line.
-              2. It spans the FULL width. The answers are a 2-up grid; nothing in
-                 a grid of two can be a third member of it while being twice as
-                 wide as both.
-              3. It is HORIZONTAL - icon beside label. Both answers are
-                 icon-over-label, which is the composition d4be1fd identified as
-                 the thing people actually read shape from.
-              4. Its icon is sliders, sharing no vocabulary with the pin / globe.
-
-            And the answers keep the height that fix bought them: this sits below
-            the row, it does not re-enter it. */}
-        {choice === 'specific' && (
-          <>
-            <div className="border-t border-[--rp-border] mt-3" />
-            <button
-              type="button"
-              onClick={() => setAdvOpen((o) => !o)}
-              aria-expanded={advOpen}
-              title={b.locAdvanced}
-              className={`mt-3 w-full flex items-center gap-3 rounded-xl border px-3 py-3 text-start transition-colors ${
-                advOpen
-                  ? 'border-rp-fire bg-rp-fire/10 text-ink-fire'
-                  : 'border-[--rp-border] bg-[--surface-2] text-[--ink-2] hover:border-[--ink-3] hover:bg-[--surface-3]'}`}
-            >
-              <span className={`shrink-0 grid place-items-center w-9 h-9 rounded-lg ${
-                advOpen ? 'bg-rp-fire/15' : 'bg-[--surface-1]'}`}>
-                <BuilderIcon name="tune" className="w-5 h-5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[14px] font-semibold leading-tight">{b.locAdvancedShort}</span>
-                <span className="block text-[12px] leading-tight opacity-70">{b.locAdvancedHint}</span>
-              </span>
-              {/* Chevron, rotated when open: the one cue that says "this opens a
-                  drawer" rather than "this navigates somewhere". */}
-              <span aria-hidden className={`shrink-0 transition-transform ${advOpen ? 'rotate-180' : ''}`}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}
-                  strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </span>
-            </button>
-          </>
-        )}
       </div>
       )}
 
-      {/* Advanced settings: in flow, but ONLY while open (change:
-          builder-step1-full-height-map, revised). Collapsed it is not here at all —
-          its trigger is the gear on the question row above, so the old always-present
-          accordion header is gone. Opening it is a deliberate act, so briefly trading
-          map height for the settings the creator just asked for is the expected
-          behaviour; capped and scrollable so it can never eat the whole step. The
-          previous attempt floated this over the map and made the map unreadable. */}
-      {showAdvanced && choice === 'specific' && advOpen && (
-        <div className="shrink-0 max-h-[45%] overflow-y-auto overscroll-contain rounded-lg border border-[--rp-border] bg-[--surface-2] p-2.5">
-          <div className="space-y-3">
+      {/* ── Advanced settings, in their OWN window ─────────────────────────────
+          It used to be an accordion in the flow. Two costs, both reported: opening
+          it shoved the map down the screen, and it squeezed the settings into a
+          45%-tall scroll box - which is why the radius explanation wrapped onto
+          three lines. Ahiya: "I cannot stand this scrolling and accordion, it
+          complicates things too much ... I want a real window of its own."
+
+          A dialog answers both at once: nothing in the step moves, and the content
+          gets a full-width surface where the prose fits on one or two lines. It is
+          portalled to the body so `fixed inset-0` resolves against the VIEWPORT and
+          not against the wizard's own scroll container. */}
+      {showAdvanced && choice === 'specific' && advOpen && createPortal(
+        // The backdrop is deliberately NOT click-to-dismiss: that needs an onClick on a
+        // non-interactive div, and scripts/test-creator-a11y-scan.ts holds a baseline for
+        // those which "ratchets DOWN only - never raise it". Closing is covered three ways
+        // that are all real controls: the labelled ✕, the Done button, and Escape.
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={b.locAdvanced}
+            className="w-full max-w-lg max-h-[85vh] overflow-y-auto overscroll-contain rounded-xl
+              border border-[--rp-border] bg-[--surface-1] shadow-2xl"
+          >
+            <div className="flex items-start gap-3 px-4 pt-4 pb-2">
+              <div className="min-w-0 text-start">
+                <h2 className="text-sm font-semibold text-[--ink-1]">{b.locAdvanced}</h2>
+                <p className="mt-1 text-xs text-[--ink-3]">{b.locAdvancedHint}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdvOpen(() => false)}
+                aria-label={b.exclusiveClose}
+                title={b.exclusiveClose}
+                className={`${TAP_TARGET} ms-auto -me-2 shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]`}
+              >✕</button>
+            </div>
+            <div className="px-4 pb-4 space-y-4">
               <div>
                 <Label dense>{b.locRadiusLabel}</Label>
-                <div className="flex items-center gap-1.5" data-qs-field="geofenceRadiusMeters">
+                <div className="flex items-center gap-1.5 flex-wrap" data-qs-field="geofenceRadiusMeters">
                   <Input dense type="number" min={1} className="w-24" value={radius}
                     onChange={(e) => set(radiusPatch(task, Math.max(1, parseInt(e.target.value) || DEFAULT_RADIUS_M)))} />
                   <span className="text-[13px] text-[--ink-3]">{b.metersShort}</span>
@@ -768,10 +772,9 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
                 </div>
                 <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.locRadiusHelp}</p>
                 {/* A radius under the floor is not a stricter mission, it is one the
-                    server cannot honour literally - and the tight preset on this very
-                    control is 4m, so the Builder itself hands out such a value. Say what
-                    will actually happen, rather than letting a creator discover it by
-                    failing to check in at their own mission. */}
+                    server cannot honour literally. Say what will actually happen,
+                    rather than letting a creator discover it by failing to check in
+                    at their own mission. */}
                 {radiusBelowFloor(radius) && (
                   <p className="text-[13px] text-[--ink-3] leading-snug mt-1">
                     {b.locRadiusFloorNote({ m: enforcedRadiusM(radius) })}
@@ -788,11 +791,17 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
                 </span>
               </label>
 
-            {/* Hide location moved here from the old, disconnected `rules`
-                section: it only ever applied to a located task. */}
-            <HideLocationField task={task} set={set} b={b} />
+              {/* Hide location moved here from the old, disconnected `rules`
+                  section: it only ever applied to a located task. */}
+              <HideLocationField task={task} set={set} b={b} />
+
+              <div className="pt-1">
+                <Button onClick={() => setAdvOpen(() => false)}>{b.done}</Button>
+              </div>
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* "Not placed yet" (change: builder-first-task-flow). A located task that

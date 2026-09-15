@@ -18,6 +18,7 @@ import {
   CAPTURE_VIDEO_CONSTRAINTS,
   MAX_PARTICIPANT_VIDEO_BYTES,
   predictedClipBytes,
+  CLIP_SHORT_FRACTION,
 } from '../apps/play-web/src/lib/videoCapture';
 import { VIDEO_DURATION_LIMITS } from '../packages/shared/src/videoDuration';
 
@@ -169,6 +170,44 @@ check('recordedClipVerdict never throws', recThrew === false);
   }
   check('a zero-length clip predicts zero bytes', predictedClipBytes(0) === 0);
   check('prediction grows with duration', predictedClipBytes(60) > predictedClipBytes(30));
+}
+
+
+// ── A near-miss must not be a wall (change: clip-length-is-guidance) ──────────
+//
+// The minimum used to BLOCK, so a clip a second under it could not be sent and the
+// only way forward was to re-record the whole thing from zero. Reported from the
+// field in exactly those words. Nothing downstream reads seconds - the server bounds
+// bytes - so the minimum is guidance, and it now warns down to half and blocks only
+// below that.
+{
+  console.log('');
+  console.log('- a clip under the minimum warns, and only a FAR miss blocks -');
+  const MIN = 20;
+  const cases: [number, string][] = [
+    [25, 'ok'],          // over
+    [20, 'ok'],          // exactly at
+    [19.6, 'ok'],        // inside the half-second slack
+    [19, 'short'],       // a hair under - used to be BLOCKED
+    [15, 'short'],
+    [10, 'short'],       // exactly half
+    [9.5, 'short'],      // the true boundary: the half-second slack reaches 10.0
+    [9.4, 'too-short'],  // and just below it, the slack no longer reaches
+    [8, 'too-short'],    // genuinely not the thing that was asked for
+    [1, 'too-short'],
+  ];
+  for (const [sec, want] of cases) {
+    check(`${sec}s against a ${MIN}s minimum`, recordedClipVerdict(sec, MIN) === want, String(recordedClipVerdict(sec, MIN)));
+    check(`${sec}s picked against a ${MIN}s minimum`, pickedClipVerdict(sec, MIN) === want, String(pickedClipVerdict(sec, MIN)));
+  }
+  check('the documented fraction is a half', CLIP_SHORT_FRACTION === 0.5, String(CLIP_SHORT_FRACTION));
+
+  // The fail-open contract is unchanged: garbage is never evidence of a short clip.
+  for (const junk of [undefined, Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+    check(`a ${String(junk)} duration still reads ok`, pickedClipVerdict(junk as number, MIN) === 'ok', String(pickedClipVerdict(junk as number, MIN)));
+  }
+  // No minimum at all ⇒ every clip is fine.
+  check('no minimum accepts a one second clip', recordedClipVerdict(1, 0) === 'ok');
 }
 
 console.log(`\n${failures === 0 ? 'ALL VIDEO-CAPTURE TESTS PASSED' : failures + ' FAILED'}`);

@@ -33,6 +33,9 @@ import { withLocation } from '../utils/withLocation';
 // What the organizer decided about this team's own submission, and why
 // (change: rejection-tells-the-player). Total; silent on anything malformed.
 import { submissionVerdict } from '../lib/submissionVerdict';
+// A cancelled camera must never destroy the photo already in hand
+// (change: camera-capture-never-eats-a-photo).
+import { pickedFileVerdict } from '../lib/capturePick';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
@@ -1991,34 +1994,93 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
   // `capture="environment"` input opens the camera; there is no gallery picker and
   // no paste-a-URL field. The captured image is downscaled + JPEG-compressed in the
   // browser BEFORE upload so it doesn't burn mobile data.
+  //
+  // ── FOUR WAYS THIS USED TO EAT A PHOTO (change: camera-capture-never-eats-a-photo)
+  //
+  // Reported from the field: "it does not save it, and after I press OK it puts me
+  // back on 'take a photo' instead of 'send photo' ... it is as if it deletes it."
+  // There was no error on screen, so every one of these was silent:
+  //
+  //   1. A CANCELLED camera reports an empty `change`, and this cleared the photo
+  //      already in hand. That is the literal "it deletes it": back out of the camera
+  //      and the picture you just took is gone. `pickedFileVerdict` now answers
+  //      "nothing arrived ⇒ change nothing".
+  //   2. An EMPTY MIME type - which several Android pickers send - failed
+  //      `f.type.startsWith('image/')` and was refused as "not an image".
+  //   3. Nothing was wrapped in try/catch. `compressImageWithReport` is written not to
+  //      throw, but `URL.createObjectURL`, `new File([...])` and an out-of-memory
+  //      canvas all can, and any of them left the component silently empty.
+  //   4. `display: none` on a capture input is a known Android quirk where `change`
+  //      can fail to fire at all after the camera returns. It is now visually hidden
+  //      while still being laid out and focusable.
+  //
+  // And it says so out loud now: one `[rp:photo]` breadcrumb per change event, so the
+  // next report can distinguish "the event never fired" from "it fired and we lost it"
+  // instead of guessing between them.
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    setFileErr(''); setWarn('');
     const f = e.target.files?.[0] ?? null;
     e.target.value = ''; // allow re-selecting the same capture
-    if (!f) { setFile(null); setPreviewUrl(null); return; }
-    if (!f.type.startsWith('image/')) { setFileErr(t.task.chooseImage); setFile(null); setPreviewUrl(null); return; }
-    // Reject only genuinely absurd RAW inputs here — the real 12 MB cap is enforced
-    // on the COMPRESSED output below, so a valid high-MP capture (often >12 MB raw,
-    // ~400 KB compressed) is no longer wrongly rejected as "too large".
-    if (f.size > MAX_RAW_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
-    // compressImageWithReport reports WHY it fell back instead of silently
-    // handing back the full-size capture (Task 11).
-    const report = await compressImageWithReport(f);
-    // Enforce the 12 MB ceiling on the COMPRESSED result. Only fails when
-    // compression couldn't get under the cap (e.g. it fell back to a still-huge
-    // full-size blob), not on the raw capture size.
-    if (report.blob.size > MAX_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
-    if (!report.compressed) setWarn(t.task.photoNotCompressed);
-    const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
-    setFile(compressed);
-    setPreviewUrl(URL.createObjectURL(compressed));
+    console.info('[rp:photo] change', f ? { name: f.name, type: f.type, size: f.size } : 'no file');
+
+    const verdict = pickedFileVerdict(f, MAX_RAW_PHOTO_BYTES);
+    // NOTHING ARRIVED. Keep the photo, keep the preview, say nothing: the player
+    // backed out of the camera, which is not a request to throw their work away.
+    if (verdict.action === 'keep') return;
+
+    setFileErr(''); setWarn('');
+    if (verdict.action === 'reject') {
+      // Refused - but STILL keeps whatever was already captured, for the same reason.
+      setFileErr(verdict.reason === 'notAnImage'
+        ? t.task.chooseImage
+        : t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) }));
+      return;
+    }
+
+    try {
+      // compressImageWithReport reports WHY it fell back instead of silently
+      // handing back the full-size capture (Task 11).
+      const report = await compressImageWithReport(f!);
+      // Enforce the 12 MB ceiling on the COMPRESSED result. Only fails when
+      // compression couldn't get under the cap (e.g. it fell back to a still-huge
+      // full-size blob), not on the raw capture size.
+      if (report.blob.size > MAX_PHOTO_BYTES) {
+        setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) }));
+        return;
+      }
+      if (!report.compressed) setWarn(t.task.photoNotCompressed);
+      const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
+      setFile(compressed);
+      setPreviewUrl(URL.createObjectURL(compressed));
+      console.info('[rp:photo] ready', { bytes: compressed.size, compressed: report.compressed });
+    } catch (err) {
+      // A throw here used to leave the component looking untouched, which is
+      // indistinguishable from "the camera did nothing". Say it failed.
+      console.error('[rp:photo] capture failed', err);
+      setFileErr(t.task.photoCaptureFailed);
+    }
   }
 
-  const canSubmit = !busy && !fileErr && !!file;
+  // ── An ANSWERING button, not a dead one ────────────────────────────────────
+  //
+  // Reported: "on the second photo it does upload the picture but does not let me
+  // send it, something very strange there." A greyed-out submit cannot say which of
+  // its three preconditions is missing, so the player is left guessing and so is
+  // whoever reads the report - which is exactly the trap CLAUDE.md records for the
+  // join screen: "a disabled primary button explains nothing, cannot fire, and
+  // therefore cannot tell the user what it wants."
+  //
+  // It stays enabled and ANSWERS. The server re-validates everything anyway, so the
+  // worst a press can do is produce a sentence naming what is missing.
+  const submitBlocker: '' | 'busy' | 'fileErr' | 'noFile' =
+    busy ? 'busy' : fileErr ? 'fileErr' : !file ? 'noFile' : '';
   return (
     <div className="space-y-3">
+      {/* Visually hidden, NOT `display:none`: on Android a `display:none` capture
+          input can fail to fire `change` at all when the camera returns, which is
+          one of the four ways this screen used to lose a photo in silence. */}
       <input ref={inputRef} type="file" accept="image/*" capture="environment" onChange={pickFile}
-        data-testid="photo-file" className="hidden" />
+        data-testid="photo-file" tabIndex={-1} aria-hidden="true"
+        className="absolute w-px h-px opacity-0 pointer-events-none -z-10" />
       <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
         {file ? t.task.retakePhoto : t.task.takePhoto}
       </Button>
@@ -2027,7 +2089,17 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
       {/* A slow upload must never look like a frozen app. */}
       <UploadProgress busy={busy} />
-      <Button disabled={!canSubmit} onClick={() => file && onSubmit(file)} data-testid="photo-submit">
+      <Button
+        onClick={() => {
+          if (submitBlocker === '' && file) { onSubmit(file); return; }
+          // Name the obstacle instead of doing nothing. `fileErr` is already on
+          // screen above, so that case just re-points at it.
+          if (submitBlocker === 'noFile') setFileErr(t.task.photoTakeFirst);
+          else if (submitBlocker === 'busy') setWarn(t.task.photoStillWorking);
+          console.info('[rp:photo] submit blocked by', submitBlocker);
+        }}
+        data-testid="photo-submit"
+      >
         {busy ? t.task.working : t.task.submitPhoto}
       </Button>
     </div>
@@ -2345,6 +2417,13 @@ function VideoEntry({ smart, busy, onSubmit }: {
   // 'review' → the recorded clip, playable, with submit / record-again.
   const [mode, setMode] = useState<'idle' | 'camera' | 'review'>('idle');
   const [recording, setRecording] = useState(false);
+  // Held mid-take rather than finished (change: clip-length-is-guidance). Pressing
+  // the shutter while the clip is still under the minimum PAUSES the recorder
+  // instead of ending it, so "keep going" resumes the SAME capture. Appending a
+  // second recording's chunks instead would produce a container whose duration and
+  // seek table are wrong - the exact defect that made four clips unplayable in run
+  // ijI9JMITSf8C9heN1Cwp, and not one to re-introduce from the other end.
+  const [paused, setPaused] = useState(false);
   const [remaining, setRemaining] = useState(maxSeconds);
   const [elapsed, setElapsed] = useState(0);
   const [clipSeconds, setClipSeconds] = useState<number | undefined>(undefined);
@@ -2424,6 +2503,8 @@ function VideoEntry({ smart, busy, onSubmit }: {
       return;
     }
     setClipSeconds(seconds);
+    // 'short' is not an error - it is sendable, and saying so in the alert colour
+    // would read as a refusal. Only a far miss blocks.
     setErr(recordedClipVerdict(seconds, minSeconds) === 'too-short'
       ? t.task.videoTooShort({ sec: minSeconds })
       : '');
@@ -2459,8 +2540,40 @@ function VideoEntry({ smart, busy, onSubmit }: {
   // shutter with no disabled state, it never consults the mission's minimum, and
   // every failure path falls through to finalize() rather than leaving the player
   // inside a recording they cannot end.
+  // Hold the take without ending it. Only ever offered while the clip is under the
+  // minimum, which is the only situation where "start again from zero" was the
+  // alternative. Falls through to a real stop if the browser will not pause.
+  function holdTake() {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'recording' || typeof recorder.pause !== 'function') { stop(); return; }
+    try { recorder.pause(); } catch { stop(); return; }
+    clearTimers();
+    setPaused(true);
+    // `recording` deliberately STAYS true. It is what the shutter branches on, and
+    // the shutter must keep meaning "end this take" - scripts/test-video-recorder-guards.ts
+    // pins that shape because gating it once trapped a player inside a live take
+    // with a dead grey button. A paused recorder stops cleanly, so holding changes
+    // only whether frames are being captured, never whether the take can be ended.
+  }
+
+  function resumeTake() {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'paused') { setPaused(false); return; }
+    try { recorder.resume(); } catch { stop(); return; }
+    setPaused(false);
+    setRecording(true);
+    // The clock continues from where it was held - the clip really is that long.
+    timerRef.current = setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+      setRemaining((r) => (r > 0 ? r - 1 : 0));
+    }, 1000);
+    stopTimeoutRef.current = setTimeout(() => stop(), Math.max(1, maxSeconds - elapsedRef.current) * 1000);
+  }
+
   function stop() {
     clearTimers();
+    setPaused(false);
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === 'inactive') { finalize(); return; }
     try {
@@ -2629,7 +2742,13 @@ function VideoEntry({ smart, busy, onSubmit }: {
   }
 
   // The minimum gates the SUBMIT button only. It never gates stopping.
-  const clipTooShort = recordedClipVerdict(clipSeconds, minSeconds) === 'too-short';
+  //
+  // And it only BLOCKS on a far miss now (change: clip-length-is-guidance). A clip a
+  // little under the asked length is sendable with a warning: nothing downstream
+  // reads seconds, so the minimum is advice about what makes a good answer, and
+  // refusing a near miss only forced the player to record the whole thing again.
+  const clipGrade = recordedClipVerdict(clipSeconds, minSeconds);
+  const clipTooShort = clipGrade === 'too-short';
   const canSubmit = !!blob && !busy && !clipTooShort;
   const shortBy = Math.max(0, minSeconds - elapsed);
 
@@ -2706,6 +2825,20 @@ function VideoEntry({ smart, busy, onSubmit }: {
                 : 'h-14 w-14 rounded-full bg-red-600 transition-all'}
             />
           </button>
+          {/* Pause is a SEPARATE control, never the shutter (change:
+              clip-length-is-guidance). It exists so a clip that is still too short
+              can be continued instead of lost: "start again from zero" was the only
+              option before, and players said so. The shutter beside it still ends
+              the take on any press, in any state. */}
+          {recording && (
+            <button
+              type="button"
+              onClick={() => (paused ? resumeTake() : holdTake())}
+              className={`${TAP_TARGET} absolute end-4 bottom-8 rounded-2xl bg-white/90 px-4 text-sm font-semibold text-zinc-900`}
+            >
+              {paused ? t.task.videoKeepGoing : t.task.videoHold}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -2715,7 +2848,23 @@ function VideoEntry({ smart, busy, onSubmit }: {
     return (
       <div className="space-y-3">
         {err && <p className="text-ink-alert text-sm">{err}</p>}
+        {/* Short but sendable: a plain note, NOT the alert colour, because the
+            submit button beside it is enabled (change: clip-length-is-guidance). */}
+        {!err && clipGrade === 'short' && (
+          <p className="text-sm text-zinc-400">{t.task.videoShortButOk({ sec: minSeconds })}</p>
+        )}
         <video controls src={previewUrl} className="w-full rounded-xl bg-black" />
+        {/* Keep a copy. Players asked to be able to save what they filmed - it is
+            their own footage, and an approved clip otherwise only ever lives in the
+            organizer's console. `download` on a blob URL is the one path that needs
+            no permission and no share sheet. */}
+        <a
+          href={previewUrl}
+          download={`rushpoint-${Date.now()}.${mimeRef.current.includes('mp4') ? 'mp4' : 'webm'}`}
+          className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-ink-fire hover:bg-white transition-colors`}
+        >
+          {t.task.videoSaveToPhone}
+        </a>
         <div className="flex gap-2">
           {unsupported ? (
             <label className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-zinc-400 cursor-pointer hover:bg-white transition-colors`}>
