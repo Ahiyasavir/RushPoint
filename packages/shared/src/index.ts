@@ -167,3 +167,7 @@ export * from './runPlayerReport';
 export * from './quotaExhaustion';
 export * from './gameShareLink';
 export * from './sharedGameView';
+// Ask the media route to SAVE rather than display: `download` on an <a> is ignored
+// cross-origin, so only the server's Content-Disposition can do it
+// (change: download-actually-downloads).
+export * from './mediaDownloadUrl';

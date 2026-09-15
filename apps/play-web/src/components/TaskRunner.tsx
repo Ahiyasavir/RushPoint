@@ -1133,17 +1133,34 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       {verdict.rejected && (
         <div
           role="status"
-          className="mt-5 rounded-lg border border-rp-alert/40 bg-rp-alert/10 px-3 py-2.5"
+          className="rp-reject-card mt-5 flex items-start gap-3 rounded-xl border border-rp-alert/40 bg-rp-alert/10 px-3 py-3"
           data-testid="submission-rejected"
         >
-          <p className="text-sm font-semibold text-ink-alert">{t.task.rejectedTitle}</p>
-          {verdict.reason ? (
-            // The organizer's own words, so `dir="auto"`: the run may be Hebrew and
-            // the note English, or the other way round.
-            <p dir="auto" className="mt-1 text-sm text-zinc-200">{verdict.reason}</p>
-          ) : (
-            <p className="mt-1 text-sm text-zinc-200">{t.task.rejectedNoReason}</p>
-          )}
+          {/* The stamp. A verdict that simply appears reads as chrome; one that lands
+              reads as something that happened to you. It animates once. */}
+          <span
+            aria-hidden
+            className="rp-reject-stamp mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center
+              rounded-full border-2 border-rp-alert text-rp-alert"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}
+              strokeLinecap="round" className="h-5 w-5">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-ink-alert">{t.task.rejectedTitle}</p>
+            {verdict.reason ? (
+              // The organizer's own words, so `dir="auto"`: the run may be Hebrew and
+              // the note English, or the other way round.
+              <p dir="auto" className="mt-1 text-sm text-zinc-200">{verdict.reason}</p>
+            ) : (
+              <p className="mt-1 text-sm text-zinc-200">{t.task.rejectedNoReason}</p>
+            )}
+            {/* What to DO. The notice sits directly above the capture controls, so
+                this points at the thing immediately underneath it. */}
+            <p className="mt-1.5 text-[13px] font-medium text-ink-warm">{t.task.rejectedTryAgain}</p>
+          </div>
         </div>
       )}
       <div className={readOnly ? 'mt-5 pointer-events-none' : 'mt-5'} aria-disabled={readOnly}>
@@ -2087,6 +2104,21 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
       {fileErr && <p className="text-ink-alert text-sm">{fileErr}</p>}
       {!fileErr && warn && <p className="text-sm text-zinc-400" data-testid="photo-warn">{warn}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
+      {/* Keep a copy of your own photo, the same affordance the video review has.
+          `download` works here without the server flag because a blob: url is local
+          to this page - see mediaDownloadUrl for why the cross-origin case cannot. */}
+      {preview && (
+        <div className="flex justify-end">
+          <a
+            href={preview}
+            download={`rushpoint-${Date.now()}.jpg`}
+            className="inline-flex items-center gap-1.5 min-h-[44px] px-2 -my-1 text-[13px] font-medium text-zinc-400 hover:text-ink-fire transition-colors"
+          >
+            <span aria-hidden>⤓</span>
+            {t.task.photoSaveToPhone}
+          </a>
+        </div>
+      )}
       {/* A slow upload must never look like a frozen app. */}
       <UploadProgress busy={busy} />
       <Button
@@ -2834,9 +2866,22 @@ function VideoEntry({ smart, busy, onSubmit }: {
             <button
               type="button"
               onClick={() => (paused ? resumeTake() : holdTake())}
-              className={`${TAP_TARGET} absolute end-4 bottom-8 rounded-2xl bg-white/90 px-4 text-sm font-semibold text-zinc-900`}
+              aria-label={paused ? t.task.videoKeepGoing : t.task.videoHold}
+              title={paused ? t.task.videoKeepGoing : t.task.videoHold}
+              className="absolute end-6 bottom-[34px] flex h-12 w-12 items-center justify-center rounded-full
+                border-2 border-white/80 bg-black/45 backdrop-blur-sm text-white transition-transform active:scale-95"
             >
-              {paused ? t.task.videoKeepGoing : t.task.videoHold}
+              {/* The phone-camera vocabulary: two bars to hold, a triangle to go on.
+                  The previous version was a white pill with white text on a white
+                  viewfinder - unreadable, and it did not look like a camera control. */}
+              {paused ? (
+                <span className="ms-0.5 h-0 w-0 border-y-[9px] border-y-transparent border-s-[15px] border-s-white" />
+              ) : (
+                <span className="flex gap-[5px]">
+                  <span className="block h-[18px] w-[5px] rounded-sm bg-white" />
+                  <span className="block h-[18px] w-[5px] rounded-sm bg-white" />
+                </span>
+              )}
             </button>
           )}
         </div>
@@ -2858,13 +2903,16 @@ function VideoEntry({ smart, busy, onSubmit }: {
             their own footage, and an approved clip otherwise only ever lives in the
             organizer's console. `download` on a blob URL is the one path that needs
             no permission and no share sheet. */}
-        <a
-          href={previewUrl}
-          download={`rushpoint-${Date.now()}.${mimeRef.current.includes('mp4') ? 'mp4' : 'webm'}`}
-          className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-ink-fire hover:bg-white transition-colors`}
-        >
-          {t.task.videoSaveToPhone}
-        </a>
+        <div className="flex justify-end">
+          <a
+            href={previewUrl}
+            download={`rushpoint-${Date.now()}.${mimeRef.current.includes('mp4') ? 'mp4' : 'webm'}`}
+            className="inline-flex items-center gap-1.5 min-h-[44px] px-2 -my-1 text-[13px] font-medium text-zinc-400 hover:text-ink-fire transition-colors"
+          >
+            <span aria-hidden>⤓</span>
+            {t.task.videoSaveToPhone}
+          </a>
+        </div>
         <div className="flex gap-2">
           {unsupported ? (
             <label className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-zinc-400 cursor-pointer hover:bg-white transition-colors`}>

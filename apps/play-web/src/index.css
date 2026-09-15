@@ -215,3 +215,25 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .rp-indeterminate { animation: none; width: 100%; opacity: 0.5; }
 }
+
+/* The rejection stamp (change: rejection-tells-the-player).
+   A verdict that simply appears reads as chrome that was always there; one that
+   lands is read as something that just happened to YOU. Short, once, no loop -
+   a repeating animation on a refusal would nag rather than inform. */
+@keyframes rp-reject-stamp {
+  0%   { transform: scale(2.1) rotate(-18deg); opacity: 0; }
+  60%  { transform: scale(0.92) rotate(3deg);  opacity: 1; }
+  100% { transform: scale(1) rotate(0deg);     opacity: 1; }
+}
+.rp-reject-stamp { animation: rp-reject-stamp 420ms cubic-bezier(.2,.8,.3,1) both; }
+
+@keyframes rp-reject-card {
+  0%   { transform: translateY(-6px); opacity: 0; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+.rp-reject-card { animation: rp-reject-card 260ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The information is the point; the movement is not. */
+  .rp-reject-stamp, .rp-reject-card { animation: none; }
+}

@@ -1194,6 +1194,9 @@ const HE = {
     offerAutoStartCta: 'כן, שיתחילו לבד',
     offerAutoStartDone: 'מעכשיו קבוצה שמצטרפת באיחור מתחילה לבד',
     offerAutoStartFailed: 'לא הצלחנו לשנות את ההגדרה. הקבוצות שהתחלתן רצות כרגיל',
+    autoStartToggleLabel: 'קבוצה שמצטרפת באיחור מתחילה לבד',
+    autoStartToggleHelp: 'מי שנכנס אחרי שלחצתם להתחיל יקבל משימה מיד, בלי שתצטרכו ללחוץ שוב. חל על הריצה הזו.',
+    autoStartToggleOff: 'קבוצה שמצטרפת באיחור תמתין לכם',
     heldForConsent: ({ launched, held }: { launched: number; held: number }) =>
       `${launched} קבוצות התחילו. ${held} קבוצות ממתינות לאישור אפוטרופוס ולא יוכלו להתחיל בלעדיו.`,
     startFailed: 'התחלת הקבוצות נכשלה. בדקו את החיבור ונסו שוב.',
@@ -3843,6 +3846,9 @@ const EN: typeof HE = {
     offerAutoStartCta: 'Yes, start them on their own',
     offerAutoStartDone: 'A team joining late now starts on its own',
     offerAutoStartFailed: 'We could not change that setting. The teams you started are running normally',
+    autoStartToggleLabel: 'A team joining late starts on its own',
+    autoStartToggleHelp: 'Anyone who joins after you press start gets a mission right away, with no second press. Applies to this run.',
+    autoStartToggleOff: 'A team joining late will wait for you',
     heldForConsent: ({ launched, held }: { launched: number; held: number }) =>
       `${launched} teams started. ${held} teams are waiting for guardian approval and cannot start without it.`,
     startFailed: 'Could not start teams. Check your connection and try again.',

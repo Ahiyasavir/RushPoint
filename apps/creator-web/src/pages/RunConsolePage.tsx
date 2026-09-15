@@ -4,7 +4,7 @@ import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } fr
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -684,6 +684,22 @@ export default function RunConsolePage() {
     catch { await dialog.alert(t.runConsole.startFailed); }
     finally { setBusy(false); }
   }
+  // Flip `autoStartLateJoiners` from the console. Optimistic, then reconciled: the
+  // switch must move under the finger, but it must never keep a position the server
+  // did not accept - an organizer who believes late joiners are covered when they are
+  // not is worse off than one who sees the flip fail.
+  async function toggleAutoStartLate(next: boolean) {
+    const previous = autoStartLate;
+    setAutoStartLate(next);
+    try {
+      await updateGame({ gameId: gameId!, autoStartLateJoiners: next });
+      toast.success(next ? rc.offerAutoStartDone : rc.autoStartToggleOff);
+    } catch {
+      setAutoStartLate(previous);
+      toast.error(rc.offerAutoStartFailed);
+    }
+  }
+
   async function finalize() {
     // Ending the run is the one irreversible, everyone affecting action. Warn how
     // many teams are still racing (launched, not finished) so the host cannot end
@@ -1135,6 +1151,31 @@ export default function RunConsolePage() {
               <Button variant={runActionVariant('refreshStandings')} disabled={busy} onClick={() => refreshStandings()}>{rc.refreshStandings}</Button>
               <Button variant={runActionVariant('inviteStaff')} onClick={invite}>{rc.inviteStaffPin}</Button>
             </div>
+            {/* ── A standing switch, not only a one-time offer ────────────────
+                The offer that fires on "start all teams" is good for the moment it
+                fires and useless afterwards: an organizer who declined it, or who
+                only realises at minute twenty that stragglers keep arriving, had to
+                go back to the Builder to change it. This is the same flag, where
+                they already are. The server re-reads it on every joinRun, so a flip
+                applies to the rest of THIS run immediately.
+                `null` while the game doc is still loading: rendering an OFF switch
+                for a setting that is actually on would invite a flip that turns it
+                off. */}
+            {autoStartLate !== null && (
+              <label className="mt-3 flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-[--rp-fire]"
+                  checked={autoStartLate}
+                  disabled={busy}
+                  onChange={(e) => { void toggleAutoStartLate(e.target.checked); }}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-[--ink-1]">{rc.autoStartToggleLabel}</span>
+                  <span className="block text-[12px] leading-snug text-[--ink-3]">{rc.autoStartToggleHelp}</span>
+                </span>
+              </label>
+            )}
           </PanelShell>
         );
 
@@ -2786,7 +2827,11 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
       for (const row of rows) {
         // This was the ONE call site that already did it correctly (attach → click
         // → remove); it is now the shared helper, so the correctness travels.
-        downloadUrl(row.photoUrl, `${row.teamId}-${row.taskId}`);
+        // `?download=1` is what actually saves it: the `download` attribute inside
+        // downloadUrl is IGNORED cross-origin, so without the server's own
+        // Content-Disposition this opened each file in a tab instead
+        // (change: download-actually-downloads).
+        downloadUrl(mediaDownloadUrl(row.photoUrl), `${row.teamId}-${row.taskId}`);
         await new Promise((resolve) => setTimeout(resolve, MEDIA_DOWNLOAD_DELAY_MS));
       }
     } finally {

@@ -674,7 +674,14 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
             note ended up wrapping to three lines. It opens its own dialog now:
             nothing moves, and the settings get a full-width surface. */}
         <div className="flex items-stretch gap-2 mt-1.5">
-          <div className="grid grid-cols-2 gap-2 flex-1 min-w-0">
+          {/* `min-w-0` lets the two answers SHRINK. Without it a grid column refuses
+              to go below its content width, so on a narrow panel the pair stayed wide
+              and pushed the settings tile into the margin (reported: "they are too
+              wide and then advanced options goes into the edge"). The tile beside
+              them is `shrink-0`, so it keeps its size and the answers give up the
+              space instead - which is the right way round, because the tile is
+              already the smallest thing in the row. */}
+          <div className="grid grid-cols-2 gap-2 flex-1 min-w-0 [&>button]:min-w-0">
             {CHOICES.map((c) => {
               const active = choice === c.choice;
               return (
@@ -702,7 +709,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
                 title={b.locAdvanced}
                 aria-haspopup="dialog"
                 data-qs-field="locationAdvanced"
-                className="shrink-0 w-[84px] flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed
+                className="shrink-0 w-[76px] flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed
                   border-[--rp-border] bg-[--surface-2] text-[--ink-2] py-4 px-1.5 transition-colors
                   hover:border-[--ink-3] hover:bg-[--surface-3] hover:text-[--ink-1]"
               >
