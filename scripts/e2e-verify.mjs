@@ -10773,6 +10773,15 @@ async function main() {
       JSON.stringify({ before: scoreBefore, after: after.score, award }));
     check('newpaths: and the task RECORD was zeroed too, so live and final agree',
       (((after.stages ?? [])[0]?.tasks ?? []).find((t) => t.taskId === 'pa-a')?.earnedScore ?? -1) === 0);
+    // And the STAGE total with it. Nothing ranks on this field - every scorer reads the
+    // task-level earnedScore - but runs/helpers.ts recomputes it as the sum of its tasks
+    // on every completion, so a reversal that left it high made the stored document
+    // disagree with itself. Caught by reading the document after an undo in the console.
+    check('newpaths: and the STAGE total was recomputed, so the document agrees with itself',
+      ((after.stages ?? [])[0]?.earnedScore ?? -1)
+        === ((after.stages ?? [])[0]?.tasks ?? []).reduce((n, t) => n + (t.earnedScore ?? 0), 0),
+      JSON.stringify({ stage: (after.stages ?? [])[0]?.earnedScore,
+        tasks: ((after.stages ?? [])[0]?.tasks ?? []).map((t) => t.earnedScore) }));
     check('newpaths: the submission reads rejected',
       after.taskSubmissions?.['pa-a']?.status === 'rejected',
       String(after.taskSubmissions?.['pa-a']?.status));

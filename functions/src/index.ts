@@ -1690,10 +1690,17 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
       // The award is removed from the team's total AND zeroed on the task record, so
       // the live board (which reads `score`) and the final ranking (which sums the
       // stored records) can never disagree - the live/final parity rule in CLAUDE.md.
-      const stages = (team?.stages ?? []).map((s) => ({
-        ...s,
-        tasks: (s.tasks ?? []).map((t) => (t.taskId === taskId ? { ...t, earnedScore: 0 } : t)),
-      }));
+      const stages = (team?.stages ?? []).map((s) => {
+        const tasks = (s.tasks ?? []).map((t) => (t.taskId === taskId ? { ...t, earnedScore: 0 } : t));
+        // Keep the stage total consistent with the tasks under it. Nothing RANKS on
+        // this field - every scorer iterates `stageRec.tasks` and reads the task-level
+        // earnedScore, which is why the stale value never corrupted a leaderboard - but
+        // `runs/helpers.ts` recomputes it as exactly this sum on every completion, so
+        // leaving it high here would make the stored document disagree with itself and
+        // hand a wrong number to the first surface that ever reads it.
+        const earnedScore = tasks.reduce((sum, t) => sum + (t.earnedScore ?? 0), 0);
+        return { ...s, tasks, earnedScore };
+      });
       // Whole-array rewrite, never a dotted update into an array.
       tx.update(teamRef, { score: plan.nextTeamScore, stages, updatedAt: now });
       return { outcome: plan.outcome, scoreDelta: plan.scoreDelta };
