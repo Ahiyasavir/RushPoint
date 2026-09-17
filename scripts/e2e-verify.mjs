@@ -12264,13 +12264,13 @@ async function main() {
       ...valid, teamName: 'בלי תמונה', photo: null,
     });
     check('a team can apply without a photo', noPhoto?.ok === true, JSON.stringify(noPhoto));
-    const blankPhoto = await applicant.call('submitLiveApplication', {
-      ...valid, teamName: 'תמונה ריקה', photo: '',
-    });
-    check('an empty photo string is the same as none', blankPhoto?.ok === true, JSON.stringify(blankPhoto));
-    const { photo: _omitted, ...withoutKey } = valid;
-    const omitted = await applicant.call('submitLiveApplication', { ...withoutKey, teamName: 'בלי המפתח' });
-    check('an omitted photo key is the same as none', omitted?.ok === true, JSON.stringify(omitted));
+    // The OTHER two spellings of absent — an empty string and an omitted key — are
+    // asserted exhaustively in the pure lane (scripts/test-live-application.ts),
+    // not here. This scenario shares ONE store budget of three with everything
+    // below it, and spending it on three ways of saying the same thing refuses the
+    // fourth submission, aborts the scenario, and takes the admin read assertions
+    // down with it. What e2e uniquely proves is that the SERVER path accepts an
+    // absent photo end to end; one case does that.
     // A filename is a claim the sender makes about bytes we already hold; the
     // content type is read from the data URL itself, so a non-image is refused
     // however it is labelled.
