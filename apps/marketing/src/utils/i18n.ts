@@ -164,4 +164,4 @@ export const LIVE_EVENT_URL = `${SITE_ORIGIN}${LIVE_EVENT_PATH}`;
  * Configuration rather than copy: it is the same in both languages, and it must
  * not be something an editor can change in one language and not the other.
  */
-export const CONTACT_FALLBACK_EMAIL = 'spendora.tracker@gmail.com';
+export const CONTACT_FALLBACK_EMAIL = 'admin.rushpoint@gmail.com';

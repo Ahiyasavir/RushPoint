@@ -555,7 +555,7 @@ values are the same address today: a future change to who receives run-summary e
 should not silently redirect contact form notifications too.
 
 ```
-CONTACT_NOTIFY_TO=spendora.tracker@gmail.com
+CONTACT_NOTIFY_TO=admin.rushpoint@gmail.com
 ```
 
 This is also the fallback address published on the contact page itself
