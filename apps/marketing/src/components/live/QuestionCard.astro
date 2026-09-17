@@ -1,0 +1,113 @@
+---
+/**
+ * One question of the RushPoint Live audition (change: rushpoint-live-audition).
+ *
+ * ── Why this component exists ────────────────────────────────────────────────
+ *
+ * The questions used to be a label, a red asterisk, a grey hint and a grey box,
+ * nine times. That is the visual language of a government form, and it produces
+ * the exact feeling the page is trying to avoid: something to be endured rather
+ * than something to be won. Three specific things were wrong with it.
+ *
+ * THE ASTERISKS. Every question here is required, so nine red marks say nothing
+ * a single line at the top cannot say better — while adding nine small warnings
+ * to a page whose whole job is to feel like an invitation. Red is reserved for
+ * an actual problem now, which is what makes it mean anything when it appears.
+ *
+ * THE HIERARCHY. The label was the smallest text in its block, so the loudest
+ * thing on screen was an empty box. Here the QUESTION is the headline and the
+ * control is what follows it, which is the order a person reads an interview in.
+ *
+ * THE NUMBER. `01` through `09` is not decoration: a visitor who can see the
+ * questions are counted can see that they END, and a bounded ask is a much
+ * easier one to start. It doubles as the completion signal — the badge becomes a
+ * check the moment the question is answered, so the page acknowledges every
+ * answer instead of silently accepting it.
+ *
+ * ── The answered state ───────────────────────────────────────────────────────
+ *
+ * Driven by `data-answered` on the root, set by the page's own script from the
+ * same count that drives the progress bar — so a card and the bar can never
+ * disagree about whether something was answered. The styling is a static
+ * Tailwind variant, never an interpolated class: Tailwind only sees literal
+ * strings, and a computed one compiles to no CSS at all.
+ */
+export interface Props {
+  /** Position in the interview, already padded: `01`. */
+  n: string;
+  /** The question, in the voice of somebody asking it. */
+  title: string;
+  /** Why it is being asked, or what a good answer looks like. */
+  hint: string;
+  /** The `name` of the control inside, which is also its error slot's key. */
+  field: string;
+  /** True for a checkbox/radio group, which is labelled by its own legend. */
+  group?: boolean;
+}
+
+const { n, title, hint, field, group = false } = Astro.props;
+
+/** One string, so ten cards cannot drift apart. */
+const CARD =
+  'group relative rounded-2xl border-2 border-line bg-page p-5 transition-colors duration-300 ' +
+  'focus-within:border-primary/50 ' +
+  'data-[answered=true]:border-primary/50 data-[answered=true]:bg-primary/[0.04] sm:p-6';
+---
+
+<div class={CARD} data-question={field} data-answered="false">
+  <div class="flex items-start gap-3.5">
+    {/*
+      The badge. Both states are rendered and one is hidden, rather than the text
+      being rewritten: swapping between a number and an icon by rewriting content
+      would lose the icon's markup, and this way the box never changes size as it
+      flips — so answering a question cannot nudge the layout under a thumb.
+    */}
+    <span
+      class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-line font-heading text-sm font-black tabular-nums text-muted transition-colors duration-300 group-data-[answered=true]:border-primary group-data-[answered=true]:bg-primary group-data-[answered=true]:text-white"
+      aria-hidden="true"
+    >
+      <span class="group-data-[answered=true]:hidden">{n}</span>
+      <svg
+        class="hidden h-5 w-5 group-data-[answered=true]:block"
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M4 10.5l4 4 8-9" />
+      </svg>
+    </span>
+
+    <div class="min-w-0 flex-1">
+      {/*
+        A real <label> for a single control, a plain heading for a group — a
+        label pointing at a fieldset is not a thing, and the group carries its
+        own <legend> instead. Either way the question is the headline.
+      */}
+      {
+        group ? (
+          <h3 class="font-heading text-xl font-black leading-snug text-heading sm:text-[1.375rem]">{title}</h3>
+        ) : (
+          <label class="block font-heading text-xl font-black leading-snug text-heading sm:text-[1.375rem]" for={`f-${field}`}>
+            {title}
+          </label>
+        )
+      }
+      <p class="mt-1.5 text-sm leading-relaxed text-muted">{hint}</p>
+    </div>
+  </div>
+
+  <div class="mt-4">
+    <slot />
+  </div>
+
+  {/*
+    The error slot travels WITH the question rather than being repeated at each
+    call site, so a new question cannot ship without somewhere for its refusal to
+    land — which is the failure that leaves a person staring at a form that will
+    not submit and will not say why.
+  */}
+  <p class="mt-2 hidden text-sm font-semibold text-red-600 dark:text-red-400" data-error-for={field}></p>
+</div>

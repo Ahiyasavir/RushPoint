@@ -30,6 +30,7 @@ import PageLayout from '~/layouts/PageLayout.astro';
 import TopoBackdrop from '~/components/TopoBackdrop.astro';
 import { Icon } from 'astro-icon/components';
 import EventCountdown from '~/components/EventCountdown.astro';
+import QuestionCard from '~/components/live/QuestionCard.astro';
 
 import {
   API_ORIGIN,
@@ -208,12 +209,19 @@ const FIELD =
   {/* ── The form ────────────────────────────────────────────────────────── */}
   <section class="mx-auto max-w-2xl px-4 py-12 sm:px-6 sm:py-16">
     <h2 class="font-heading text-3xl font-black tracking-tight text-heading sm:text-4xl">
-      ספרו לנו על הקבוצה
+      עשר שאלות. זה הכול.
     </h2>
     <p class="mt-3 text-lg leading-relaxed text-muted">
-      תשע שאלות קצרות. אנחנו בוחרים עשר קבוצות, אז מה שתכתבו כאן הוא מה שיכריע. כתבו כמו
-      שאתם מדברים, לא כמו שממלאים טופס.
+      אין פה תשובות נכונות ואין מה להתכונן. אנחנו קוראים כל מועמדות, אז כתבו כמו שאתם
+      מדברים. ככל שתהיו יותר אתם, כך נדע טוב יותר אם אתם הקבוצה שאנחנו מחפשים.
     </p>
+    {/*
+      Said ONCE, here, instead of nine red asterisks down the page. Nine little
+      warnings on a page whose job is to feel like an invitation is nine reasons
+      to close the tab; red is now reserved for an actual problem, which is what
+      makes it mean something when it finally appears.
+    */}
+    <p class="mt-3 text-sm font-semibold text-heading">כל השאלות חובה, וכולן קצרות.</p>
 
     {/*
       The progress bar (change: rushpoint-live-urgency).
@@ -258,151 +266,89 @@ const FIELD =
       the copy are all in the static markup, so the page still says what it is for
       with scripting disabled.
     */}
-    <form
+<form
       id="live-form"
-      class="mt-10 flex flex-col gap-7"
+      class="mt-8 flex flex-col gap-4"
       novalidate
       data-language={language}
       data-api-origin={API_ORIGIN}
     >
-      {/* Who they are. Not one of the nine questions, but an application nobody can
+      {/* 01 — who they are. Not one of the nine, but an application nobody can
           refer to by name cannot be discussed, shortlisted or called back. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-teamName">
-          שם הקבוצה <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">איך נקרא לכם בשידור. אפשר שם רציני, ואפשר בדיחה פנימית שרק אתם מבינים.</p>
-        <input class={FIELD} id="f-teamName" name="teamName" type="text" maxlength="80" required />
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="teamName"></p>
-      </div>
+      <QuestionCard n="01" field="teamName" title="איך קוראים לקבוצה שלכם?" hint="השם שנכריז בו עליכם. אפשר רציני, ואפשר בדיחה פנימית שרק אתם מבינים.">
+        <input class={FIELD} id="f-teamName" name="teamName" type="text" maxlength="80" placeholder="הנשרים" required />
+      </QuestionCard>
 
-      {/* 1. Team size — the event's own rule, so the control cannot express a
-             number outside it in the first place. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-teamSize">
-          כמה אתם בקבוצה? <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">בין חמישה לשמונה. זה תנאי ולא המלצה, כי ככה המשימות בנויות.</p>
+      {/* 02 — the event's own rule, so the control cannot express a number outside it. */}
+      <QuestionCard n="02" field="teamSize" title="כמה אתם?" hint="בין חמישה לשמונה. זה תנאי ולא המלצה, כי ככה המשימות בנויות.">
         <select class={FIELD} id="f-teamSize" name="teamSize" required>
           <option value="">בחרו מספר</option>
-          <option value="5">5 חברים</option>
-          <option value="6">6 חברים</option>
-          <option value="7">7 חברים</option>
-          <option value="8">8 חברים</option>
+          <option value="5">חמישה</option>
+          <option value="6">שישה</option>
+          <option value="7">שבעה</option>
+          <option value="8">שמונה</option>
         </select>
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="teamSize"></p>
-      </div>
+      </QuestionCard>
 
-      {/* 2. Sectors — checkboxes, because a mixed team is the interesting case. */}
-      <fieldset>
-        <legend class="mb-1.5 font-semibold text-heading">
-          מאיזה מגזר אתם? <span class="text-primary" aria-hidden="true">*</span>
-        </legend>
-        <p class="mb-3 text-sm text-muted">אפשר לסמן יותר מאחד. אנחנו מרכיבים ערב שיש בו את כולם, אז זה עוזר לנו ולא פוסל אתכם.</p>
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4" data-group="sectors">
-          {
-            SECTORS.map((sector) => (
-              <label class="flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border border-line bg-page px-3 py-2.5 transition has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/40">
-                <input
-                  class="h-5 w-5 shrink-0 accent-[#ff5722]"
-                  type="checkbox"
-                  name="sectors"
-                  value={sector.value}
-                />
-                <span class="text-base font-medium text-default">{sector.label}</span>
-              </label>
-            ))
-          }
-        </div>
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="sectors"></p>
-      </fieldset>
+      {/* 03 — checkboxes, because a mixed team is the interesting case. */}
+      <QuestionCard n="03" field="sectors" group title="מאיפה אתם בעולם?" hint="אפשר לסמן יותר מאחד. אנחנו מרכיבים ערב שיש בו את כולם, אז זה עוזר לנו ולא פוסל אתכם.">
+        <fieldset>
+          <legend class="sr-only">מאיזה מגזר אתם</legend>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4" data-group="sectors">
+            {
+              SECTORS.map((sector) => (
+                <label class="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-line bg-page px-3 py-2.5 text-center transition has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/40">
+                  <input class="sr-only" type="checkbox" name="sectors" value={sector.value} />
+                  <span class="text-base font-semibold text-default">{sector.label}</span>
+                </label>
+              ))
+            }
+          </div>
+        </fieldset>
+      </QuestionCard>
 
-      {/* 3. Where they live. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-location">
-          מאיפה אתם? <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">עיר או אזור. אם אתם מפוזרים, כתבו את כולם.</p>
-        <input
-          class={FIELD}
-          id="f-location"
-          name="location"
-          type="text"
-          maxlength="200"
-          placeholder="למשל: ירושלים, ומשניים מבית שמש"
-          required
-        />
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="location"></p>
-      </div>
+      {/* 04 */}
+      <QuestionCard n="04" field="location" title="מאיפה אתם מגיעים?" hint="עיר או אזור. אם אתם מפוזרים, כתבו את כולם.">
+        <input class={FIELD} id="f-location" name="location" type="text" maxlength="200" placeholder="ירושלים, ושניים מבית שמש" required />
+      </QuestionCard>
 
-      {/* 4. How they know each other. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-howTheyMet">
-          איך אתם מכירים? <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">צבא, תנועה, שכונה, עבודה, משפחה. הסיפור שמחבר ביניכם הוא חצי מהעניין.</p>
-        <textarea class={FIELD} id="f-howTheyMet" name="howTheyMet" rows="3" maxlength="1500" required></textarea>
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="howTheyMet"></p>
-      </div>
+      {/* 05 */}
+      <QuestionCard n="05" field="howTheyMet" title="איך אתם מכירים?" hint="צבא, תנועה, שכונה, עבודה, משפחה. הסיפור שמחבר ביניכם הוא חצי מהעניין.">
+        <textarea class={FIELD} id="f-howTheyMet" name="howTheyMet" rows="3" maxlength="1500" placeholder="נפגשנו בתנועה לפני חמש שנים ומאז לא הצלחנו להיפרד" required></textarea>
+      </QuestionCard>
 
-      {/* 5. Ages. Free text on purpose: "16-18" and "רובנו בני 30, אחד בן 52" are
-             both real answers and a range picker refuses the second one. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-ageRange">
-          בני כמה אתם? <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">טווח הגילאים בקבוצה.</p>
-        <input
-          class={FIELD}
-          id="f-ageRange"
-          name="ageRange"
-          type="text"
-          maxlength="120"
-          placeholder="למשל: 16 עד 18"
-          required
-        />
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="ageRange"></p>
-      </div>
+      {/* 06 — free text on purpose: "16 עד 18" and "רובנו בני 30, אחד בן 52" are
+          both real answers, and a range picker refuses the second one. */}
+      <QuestionCard n="06" field="ageRange" title="בני כמה אתם?" hint="טווח הגילאים בקבוצה. אין גיל נכון.">
+        <input class={FIELD} id="f-ageRange" name="ageRange" type="text" maxlength="120" placeholder="16 עד 18" required />
+      </QuestionCard>
 
-      {/* 6. The pitch. The field that actually decides it, so it gets the room. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-motivation">
-          למה שנבחר דווקא בכם? <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">
-          זו השאלה שמכריעה, וזו גם היחידה שאין בה תשובה נכונה. אל תכתבו מה שנשמע טוב. כתבו מה שנכון עליכם.
-        </p>
-        <textarea class={FIELD} id="f-motivation" name="motivation" rows="5" maxlength="2000" required></textarea>
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="motivation"></p>
-      </div>
+      {/* 07 — the field that actually decides it, so it gets the room. */}
+      <QuestionCard n="07" field="motivation" title="למה שנבחר דווקא בכם?" hint="זו השאלה שמכריעה, וזו גם היחידה שאין בה תשובה נכונה. אל תכתבו מה שנשמע טוב. כתבו מה שנכון עליכם.">
+        <textarea class={FIELD} id="f-motivation" name="motivation" rows="5" maxlength="2000" placeholder="כתבו כאן כמו שהייתם מספרים לחבר" required></textarea>
+      </QuestionCard>
 
-      {/* 7. On camera. Radios rather than a slider: a slider on a phone has a
-             default value that reads as an answer nobody gave. */}
-      <fieldset>
-        <legend class="mb-1.5 font-semibold text-heading">
-          כמה נוח לכם מול מצלמה? <span class="text-primary" aria-hidden="true">*</span>
-        </legend>
-        <p class="mb-3 text-sm text-muted">הערב מצולם. לא מחפשים שחקנים, אז תענו בכנות. גם ארבע וגם אחת זו תשובה טובה.</p>
-        <div class="grid grid-cols-5 gap-1.5 sm:gap-2" data-group="cameraComfort">
-          {
-            CAMERA.map((step) => (
-              <label class="flex min-h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-line bg-page px-1 py-2 text-center transition has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/40">
-                <input class="sr-only" type="radio" name="cameraComfort" value={step.value} />
-                <span class="font-heading text-xl font-black text-default">{step.value}</span>
-                <span class="text-[11px] leading-tight text-muted">{step.label}</span>
-              </label>
-            ))
-          }
-        </div>
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="cameraComfort"></p>
-      </fieldset>
+      {/* 08 — radios, not a slider: a slider on a phone has a default value that
+          reads as an answer nobody gave. */}
+      <QuestionCard n="08" field="cameraComfort" group title="כמה נוח לכם מול מצלמה?" hint="הערב מצולם. לא מחפשים שחקנים, אז תענו בכנות. גם ארבע וגם אחת זו תשובה טובה.">
+        <fieldset>
+          <legend class="sr-only">רמת הנוחות מול מצלמה</legend>
+          <div class="grid grid-cols-5 gap-1.5 sm:gap-2" data-group="cameraComfort">
+            {
+              CAMERA.map((step) => (
+                <label class="flex min-h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-line bg-page px-1 py-2 text-center transition has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/40">
+                  <input class="sr-only" type="radio" name="cameraComfort" value={step.value} />
+                  <span class="font-heading text-xl font-black text-default">{step.value}</span>
+                  <span class="text-[11px] leading-tight text-muted">{step.label}</span>
+                </label>
+              ))
+            }
+          </div>
+        </fieldset>
+      </QuestionCard>
 
-      {/* 8. The one phone number we will actually call. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-phone">
-          טלפון של נציג הקבוצה <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">מספר אחד שעונים בו. נתקשר רק אם נתקדם איתכם.</p>
+      {/* 09 */}
+      <QuestionCard n="09" field="phone" title="למי מתקשרים?" hint="מספר אחד שעונים בו. נתקשר רק אם נתקדם איתכם.">
         {/*
           `type="tel"` for the numeric keypad, `dir="ltr"` because a phone number
           reads left to right inside a right-to-left page, and `text-start` so it
@@ -420,18 +366,10 @@ const FIELD =
           placeholder="050 000 0000"
           required
         />
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="phone"></p>
-      </div>
+      </QuestionCard>
 
-      {/* 9. The group photo. */}
-      <div>
-        <label class="mb-1.5 block font-semibold text-heading" for="f-photo">
-          תמונה קבוצתית <span class="text-primary" aria-hidden="true">*</span>
-        </label>
-        <p class="mb-2 text-sm text-muted">
-          לא חייבת להיות מקצועית, ולא חייבים להיות בה כולם. סלפי מהטלפון מספיק לגמרי. רק שנראה מי אתם.
-        </p>
-
+      {/* 10 */}
+      <QuestionCard n="10" field="photo" group title="תנו לנו לראות אתכם" hint="לא חייבת להיות מקצועית, ולא חייבים להיות בה כולם. סלפי מהטלפון מספיק לגמרי.">
         {/*
           The real input is hidden and the label is the control, so the button can
           be a real 56px target instead of the browser's own ~24px file chooser.
@@ -453,36 +391,49 @@ const FIELD =
           <img class="max-h-56 w-full rounded-xl object-cover" alt="התמונה שנבחרה" data-photo-image />
           <p class="mt-1.5 text-sm text-muted" data-photo-meta></p>
         </div>
-
-        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="photo"></p>
-      </div>
+      </QuestionCard>
 
       {/*
-        NEVER DISABLED. A disabled primary button explains nothing, cannot fire, and
-        is out of the tab order — so a team with one blank field taps the big orange
-        button and nothing happens at all. It answers instead: the first press marks
-        every missing field and moves focus to the first of them. This is the same
-        conclusion the participant app's join form reached; see the note about
-        `joinReadiness` in CLAUDE.md.
+        The close. A form that ends at a button ends on an administrative note;
+        this ends on the thing they are actually reaching for, immediately above
+        the press. It is not a new claim — everything in it is already true
+        elsewhere on the page — it is the reason restated at the moment of decision.
       */}
-      <button
-        class="mt-2 inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-primary px-8 text-lg font-black text-white shadow-lg shadow-primary/25 transition hover:bg-secondary focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/50 disabled:opacity-70"
-        id="live-submit"
-        type="submit"
-        data-label="שליחת המועמדות"
-        data-sending="שולחים..."
-      >
-        שליחת המועמדות
-      </button>
+      <div class="mt-4 rounded-2xl border-2 border-primary/30 bg-primary/[0.06] p-5 text-center sm:p-6">
+        <p class="font-heading text-xl font-black leading-snug text-heading sm:text-2xl">
+          עשר קבוצות ייצאו לדרך ב־22 באוקטובר
+        </p>
+        <p class="mx-auto mt-2 max-w-md text-base leading-relaxed text-muted">
+          אנחנו קוראים כל מועמדות. אם נתקדם איתכם, נתקשר למספר שהשארתם.
+        </p>
 
-      {/* One status region for every outcome, announced to assistive technology. It
-          starts EMPTY rather than hidden, so the live region already exists when the
-          first message lands in it. */}
-      <p class="min-h-6 text-base font-medium" id="live-status" role="status" aria-live="polite"></p>
+        {/*
+          NEVER DISABLED. A disabled primary button explains nothing, cannot fire,
+          and is out of the tab order — so a team with one blank field taps the big
+          orange button and nothing happens at all. It answers instead: the first
+          press marks every missing field and moves focus to the first of them.
+          This is the same conclusion the participant app's join form reached; see
+          the note about `joinReadiness` in CLAUDE.md.
+        */}
+        <button
+          class="mt-5 inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-primary px-8 text-lg font-black text-white shadow-lg shadow-primary/25 transition hover:bg-secondary focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/50 disabled:opacity-70"
+          id="live-submit"
+          type="submit"
+          data-label="שלחו אותנו למירוץ"
+          data-sending="שולחים..."
+        >
+          שלחו אותנו למירוץ
+        </button>
+
+        {/* One status region for every outcome, announced to assistive technology.
+            It starts EMPTY rather than hidden, so the live region already exists
+            when the first message lands in it. */}
+        <p class="mt-3 min-h-6 text-base font-medium" id="live-status" role="status" aria-live="polite"></p>
+      </div>
 
       <p class="text-sm leading-relaxed text-muted">
         הפרטים נשמרים אצלנו בלבד, משמשים רק לבחירת הקבוצות למירוץ הזה, ולא מועברים לאף גורם
-        אחר. אם משהו לא עובד, כתבו לנו אל 
+        אחר. אם משהו לא עובד, כתבו לנו אל
         <a class="text-secondary underline hover:text-primary" dir="ltr" href={`mailto:${CONTACT_FALLBACK_EMAIL}`}>
           {CONTACT_FALLBACK_EMAIL}
         </a>
@@ -638,23 +589,32 @@ const FIELD =
     return 'ממשיכים';
   }
 
-  function answeredCount(): number {
-    const data = new FormData(form);
-    let done = 0;
-    for (const field of PROGRESS_FIELDS) {
-      if (field === 'sectors') { if (data.getAll('sectors').length > 0) done += 1; continue; }
-      // The photo lives in a variable, not in the form: the input holds a file
-      // the browser has not finished downscaling yet, so `files.length` would
-      // count it as answered before there is anything to send.
-      if (field === 'photo') { if (photoDataUrl) done += 1; continue; }
-      if (String(data.get(field) ?? '').trim() !== '') done += 1;
-    }
-    return done;
+  /** Is this one question answered? The single definition of "answered". */
+  function isAnswered(field: string, data: FormData): boolean {
+    if (field === 'sectors') return data.getAll('sectors').length > 0;
+    // The photo lives in a variable, not in the form: the input holds a file the
+    // browser has not finished downscaling yet, so `files.length` would count it
+    // as answered before there is anything to send.
+    if (field === 'photo') return Boolean(photoDataUrl);
+    return String(data.get(field) ?? '').trim() !== '';
   }
 
   function refreshProgress(): void {
     const total = PROGRESS_FIELDS.length;
-    const done = answeredCount();
+    const data = new FormData(form);
+
+    // Each card's badge flips to a check the moment its question is answered, so
+    // the page acknowledges every answer instead of silently accepting it. Driven
+    // from the SAME predicate as the count below, so a card and the bar can never
+    // disagree about whether something was answered.
+    let done = 0;
+    for (const field of PROGRESS_FIELDS) {
+      const answered = isAnswered(field, data);
+      if (answered) done += 1;
+      const card = document.querySelector(`[data-question="${field}"]`);
+      if (card) card.setAttribute('data-answered', String(answered));
+    }
+
     const percent = applicationProgress(done, total);
 
     if (progressFill) progressFill.style.width = `${percent}%`;
