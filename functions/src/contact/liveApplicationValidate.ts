@@ -170,16 +170,26 @@ function optionalLanguage(value: unknown): 'he' | 'en' | null {
 /**
  * The group photo, read out of a `data:` URL.
  *
+ * OPTIONAL. An absent photo returns null rather than throwing: a team that cannot
+ * get everyone into one picture tonight should still be able to apply tonight, and
+ * a photograph is the single most awkward thing on this form to produce on demand.
+ * It is still WANTED — the page asks for it plainly — but wanting a thing and
+ * refusing an application without it are different decisions, and refusing loses
+ * teams over logistics rather than over fit.
+ *
+ * A photo that IS supplied is validated exactly as strictly as before. Optional
+ * means "may be absent", never "may be anything".
+ *
  * The content type is taken from the URL's own prefix and checked against the
  * allowlist; a filename is never consulted, because a filename is a claim the sender
  * makes about bytes we already hold. The base64 body is checked for shape too, so a
  * decode failure surfaces HERE, naming the field, rather than months later for
  * whoever opens the application.
  */
-export function parsePhotoDataUrl(value: unknown): LiveApplicationPhoto {
-  if (value === null || value === undefined || value === '') {
-    throw new ApplicationRejected('photo', 'photo is required');
-  }
+export function parsePhotoDataUrl(value: unknown): LiveApplicationPhoto | null {
+  // Absent, explicitly null, or an empty string. The callable transport collapses
+  // undefined to null, so all three have to mean the same thing.
+  if (value === null || value === undefined || value === '') return null;
   if (typeof value !== 'string') throw new ApplicationRejected('photo', 'photo must be a data URL');
 
   const match = /^data:([a-z0-9.+/-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(value);
@@ -211,7 +221,8 @@ export function parsePhotoDataUrl(value: unknown): LiveApplicationPhoto {
  */
 export function validateLiveApplication(payload: Record<string, unknown>): {
   fields: LiveApplicationFields;
-  photo: LiveApplicationPhoto;
+  /** Null when the team applied without one. See parsePhotoDataUrl. */
+  photo: LiveApplicationPhoto | null;
 } {
   const teamName = requiredText(payload.teamName, 'teamName', LIVE_APPLICATION_LIMITS.teamName);
   const teamSize = requiredInteger(payload.teamSize, 'teamSize', TEAM_SIZE_MIN, TEAM_SIZE_MAX);

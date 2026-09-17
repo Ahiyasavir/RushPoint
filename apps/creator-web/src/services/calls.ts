@@ -588,6 +588,8 @@ export interface LiveApplication {
   phone: string;
   /** Digits only, `972…`. Two spellings of one number are one number. */
   phoneNormalized: string;
+  /** False when the team applied without one. The photo is optional. */
+  hasPhoto: boolean;
   photoContentType: string;
   photoBytes: number;
   language: string | null;

@@ -180,7 +180,20 @@ for (const file of copyFiles) {
 
     // Single or double quoted string literals, minus the ones that are clearly
     // not prose: css classes, icon names, urls, html fragments.
-    for (const [, literal] of block.matchAll(/'((?:[^'\\]|\\.){4,})'/g)) {
+    // Match EVERY literal and filter by length afterwards, rather than asking the
+    // pattern for 4-or-more directly.
+    //
+    // The length used to be in the pattern, and that quietly desynchronised the
+    // whole scan: a literal too short to match — `value: '10'`, `n: '01'` — cannot
+    // be consumed, so the engine resumes at that literal's CLOSING quote, treats it
+    // as an OPENING one, and pairs it with the next literal's opening quote. Every
+    // literal after the short one is then read off by one, and the checker reports
+    // the punctuation BETWEEN two strings (`, label: `) as English prose inside the
+    // Hebrew block. It does not fail silently, which is the one mercy, but it fails
+    // with fifty findings that all describe nothing, which is nearly as bad: the
+    // real answer is buried and the file looks broken when it is fine.
+    for (const [, literal] of block.matchAll(/'((?:[^'\\]|\\.)*)'/g)) {
+      if (literal.length < 4) continue;
       if (/^(tabler:|https?:|\/|#|[a-z-]+(\s[a-z0-9:-]+)*$)/.test(literal)) continue;
       if (!/[A-Za-z֐-׿]/.test(literal)) continue;
       assertLanguage(`${file} ${language} "${literal.slice(0, 28)}"`, language, literal);

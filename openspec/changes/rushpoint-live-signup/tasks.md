@@ -85,3 +85,41 @@ below is the order it was done in, and the RED step really did come first.
 - [ ] 7.3 `npm run deploy:hosting` for the marketing site and the creator console.
 - [ ] 7.4 Confirm `CONTACT_NOTIFY_TO` is set on the VPS, or the notification mail is a
       logged no-op and applications are only visible in the admin screen.
+
+## 8. Later passes (same change, later decisions)
+
+- [x] 8.1 **Urgency** — a countdown anchored to an absolute instant (Thursday 22 October
+      2026, 19:00 IDT), bounded on read so a wrong device clock hides it rather than
+      printing an absurd number. The prize AMOUNT came out: it is not fixed, and a number
+      we might not keep is the one claim a team could catch us out on.
+- [x] 8.2 **The questions read as an interview** — numbered cards, the question as the
+      headline, no red asterisks, a badge that becomes a check when answered.
+- [x] 8.3 **English** — the page is bilingual and `live` is a STANDING_SUBJECT, so the
+      hreflang cluster is symmetric and the language switch lands on the counterpart. It
+      was Hebrew only on the reasoning that an English page advertises to people who
+      cannot attend; that was half right, because a large part of Israel reads English
+      first. WHERE a reader is now decides whether the home page BAND shows
+      (`utils/israelAudience.ts`), and the PAGE is never gated — links get shared.
+- [x] 8.4 **Follow, without forcing it** — Instagram, TikTok and Facebook. Not a gate and
+      not a checkbox: a self-declared box would be true by construction for every
+      application, so it would collect nothing and cost a step. The ask carries a REASON
+      that serves the applicant (the ten teams are announced there) and the primary
+      placement is the success screen, at peak commitment.
+- [x] 8.5 **The group photo is OPTIONAL.** A team that cannot get everyone into one
+      picture tonight can still apply tonight. Nine required answers, so the progress bar
+      counts nine — counting ten would strand a team that skipped it at "9 of 10" while
+      the form submitted happily. A photo that IS sent is validated exactly as strictly
+      as before: optional means "may be absent", never "may be anything".
+      `hasPhoto` is stored explicitly so the admin list can tell "no photo" from "a photo
+      I have not fetched", which would otherwise look identical.
+
+## 9. Gate repairs found along the way
+
+- [x] 9.1 `test-marketing-content.ts` asked its regex for literals of 4+ characters, which
+      made any SHORTER literal (`'10'`, `'01'`) desynchronise the whole scan: the engine
+      resumed at that literal's closing quote, paired it with the next opening one, and
+      reported the punctuation BETWEEN two strings as English prose. Fifty findings that
+      all described nothing. It matches every literal and filters by length now — and the
+      corrected gate immediately found a REAL leak the broken one had buried.
+- [x] 9.2 Latin whitelist: `RushPoint Live` (before the bare `RushPoint`, or its first
+      word is eaten), the file-format acronyms `JPG/JPEG/PNG/WebP`, and the social handles.

@@ -43,9 +43,15 @@ export interface Props {
   field: string;
   /** True for a checkbox/radio group, which is labelled by its own legend. */
   group?: boolean;
+  /**
+   * Said ON the question rather than left to the intro. A person scrolling
+   * straight to a field does not read the preamble, and "did I have to do this?"
+   * is the question that makes somebody abandon a form rather than skip a field.
+   */
+  optionalTag?: string;
 }
 
-const { n, title, hint, field, group = false } = Astro.props;
+const { n, title, hint, field, group = false, optionalTag } = Astro.props;
 
 /** One string, so ten cards cannot drift apart. */
 const CARD =
@@ -93,6 +99,13 @@ const CARD =
           <label class="block font-heading text-xl font-black leading-snug text-heading sm:text-[1.375rem]" for={`f-${field}`}>
             {title}
           </label>
+        )
+      }
+      {
+        optionalTag && (
+          <span class="mt-1.5 inline-block rounded-full border border-line bg-surface-tint px-2.5 py-0.5 text-xs font-bold text-muted">
+            {optionalTag}
+          </span>
         )
       }
       <p class="mt-1.5 text-sm leading-relaxed text-muted">{hint}</p>

@@ -206,7 +206,11 @@ export default function AdminLiveApplicationsPage() {
                       button rather than after the fact: an operator should know it is
                       recorded BEFORE they decide, not learn it afterwards. */}
                   <div className="space-y-2 border-t border-black/10 dark:border-white/10 pt-3">
-                    {!photo && (
+                    {/* "No photo" is a fact about the application, not a failure to
+                        load one. A button that can only ever return not-found would
+                        make an ordinary choice look like a broken record. */}
+                    {!app.hasPhoto && <p className="text-sm opacity-60">{tl.noPhoto}</p>}
+                    {app.hasPhoto && !photo && (
                       <>
                         <p className="text-xs opacity-60">{tl.photoNotice}</p>
                         <Button variant="subtle" onClick={() => void loadPhoto(app.id)}>

@@ -101,10 +101,15 @@ export const submitLiveApplication = loggedCallable('submitLiveApplication', asy
     // A copy of `sectors` as a plain array — `fields.sectors` is readonly for the
     // type system's benefit, which Firestore neither knows nor cares about.
     sectors: [...fields.sectors],
-    photoContentType: photo.contentType,
+    // The photo is OPTIONAL (change: rushpoint-live-optional-photo). `hasPhoto` is
+    // stored explicitly rather than left to be inferred from a missing subdocument:
+    // the admin list reads THIS document only, and "no photo" and "a photo I have
+    // not fetched yet" are different things that would otherwise look identical.
+    hasPhoto: photo !== null,
+    photoContentType: photo?.contentType ?? null,
     // Cheap to store, and it is what tells an operator whether a photo is worth
     // opening before they open it.
-    photoBytes: Math.floor((photo.base64.length * 3) / 4),
+    photoBytes: photo ? Math.floor((photo.base64.length * 3) / 4) : 0,
     // Server assigned. Ordering and any later retention sweep must not depend on a
     // value the sender supplied, and a sender can supply anything.
     receivedAt: Date.now(),
@@ -114,11 +119,15 @@ export const submitLiveApplication = loggedCallable('submitLiveApplication', asy
     uid: context.auth?.uid ?? null,
   });
 
-  await ref.collection(PHOTO_SUBCOLLECTION).doc(PHOTO_DOC_ID).set({
-    contentType: photo.contentType,
-    base64: photo.base64,
-    receivedAt: Date.now(),
-  });
+  // Only when there is one. An empty subdocument would make `getLiveApplicationPhoto`
+  // answer with a zero-length image instead of an honest not-found.
+  if (photo) {
+    await ref.collection(PHOTO_SUBCOLLECTION).doc(PHOTO_DOC_ID).set({
+      contentType: photo.contentType,
+      base64: photo.base64,
+      receivedAt: Date.now(),
+    });
+  }
 
   // Best effort, and never allowed to fail the call: the application is already
   // stored, so telling the team it failed would invite a duplicate.
@@ -169,6 +178,9 @@ export const listLiveApplications = loggedCallable('listLiveApplications', async
         cameraComfort: Number(a.cameraComfort ?? 0),
         phone: String(a.phone ?? ''),
         phoneNormalized: String(a.phoneNormalized ?? ''),
+        // `hasPhoto` is read with a FALLBACK for rows written before the photo became
+        // optional: those all carry one, and no stored field says so.
+        hasPhoto: typeof a.hasPhoto === 'boolean' ? a.hasPhoto : Boolean(a.photoContentType),
         photoContentType: String(a.photoContentType ?? ''),
         photoBytes: Number(a.photoBytes ?? 0),
         language: (a.language as string | null) ?? null,

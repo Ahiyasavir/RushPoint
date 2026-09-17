@@ -74,7 +74,7 @@ function base(): Record<string, unknown> {
   check('A2 sectors survive in order', fields.sectors.join(',') === 'religious,secular');
   check('A3 phone is normalized to 972', fields.phoneNormalized === '972541234567');
   check('A4 the phone as WRITTEN is kept too', fields.phone === '054-123-4567');
-  check('A5 photo content type is read from the data URL', photo.contentType === 'image/jpeg');
+  check('A5 photo content type is read from the data URL', photo?.contentType === 'image/jpeg');
   check('A6 language survives', fields.language === 'he');
 }
 
@@ -172,11 +172,31 @@ refuses('E3 a bad phone names the phone field', { ...base(), phone: '02-1234567'
 // ── F. The photo ─────────────────────────────────────────────────────────────
 
 for (const type of ['image/jpeg', 'image/png', 'image/webp']) {
-  check(`F1 ${type} is accepted`, parsePhotoDataUrl(photoOf(16, type)).contentType === type);
+  check(`F1 ${type} is accepted`, parsePhotoDataUrl(photoOf(16, type))?.contentType === type);
 }
-check('F2 the content type is matched case-insensitively', parsePhotoDataUrl(photoOf(16, 'IMAGE/JPEG')).contentType === 'image/jpeg');
-refuses('F3 a missing photo is refused', { ...base(), photo: null }, 'photo');
-refuses('F4 a blank photo is refused', { ...base(), photo: '' }, 'photo');
+check('F2 the content type is matched case-insensitively', parsePhotoDataUrl(photoOf(16, 'IMAGE/JPEG'))?.contentType === 'image/jpeg');
+// ── The photo is OPTIONAL ────────────────────────────────────────────────────
+//
+// A team that cannot get everyone into one picture tonight must still be able to
+// apply tonight. The transport collapses undefined to null, so all three spellings
+// of "absent" have to behave identically.
+
+for (const absent of [null, undefined, ''] as const) {
+  const { fields, photo } = validateLiveApplication({ ...base(), photo: absent });
+  check(`F3 photo ${JSON.stringify(absent)} is accepted as absent`, photo === null, String(photo));
+  check(`F3b the rest of the application still parses without a photo`, fields.teamName === 'הנשרים');
+}
+{
+  const { photo } = validateLiveApplication(
+    Object.fromEntries(Object.entries(base()).filter(([k]) => k !== 'photo')),
+  );
+  check('F4 an omitted photo key is accepted as absent', photo === null, String(photo));
+}
+check('F4b parsePhotoDataUrl returns null rather than throwing', parsePhotoDataUrl(null) === null);
+
+// Optional means "may be ABSENT", never "may be anything": a photo that IS sent is
+// held to exactly the same standard as before.
+
 refuses('F5 a plain URL is not a photo', { ...base(), photo: 'https://example.com/a.jpg' }, 'photo');
 refuses('F6 a PDF disguised as a data URL is refused', { ...base(), photo: photoOf(16, 'application/pdf') }, 'photo');
 refuses('F7 an SVG is refused', { ...base(), photo: photoOf(16, 'image/svg+xml') }, 'photo');

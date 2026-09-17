@@ -35,56 +35,85 @@ import QuestionCard from '~/components/live/QuestionCard.astro';
 import {
   API_ORIGIN,
   CONTACT_FALLBACK_EMAIL,
-  HREFLANG,
-  LIVE_EVENT_LANGUAGE,
-  LIVE_EVENT_URL,
+  FACEBOOK_URL,
+  INSTAGRAM_HANDLE,
+  INSTAGRAM_URL,
+  TIKTOK_HANDLE,
+  TIKTOK_URL,
+  LANGUAGES,
   OG_LOCALE,
+  alternatesFor,
+  pageUrl,
+  type Language,
 } from '~/utils/i18n';
+import { liveCopy } from '~/copy/live';
 
 export function getStaticPaths() {
-  // ONE language. Returning both would publish an English URL serving Hebrew.
-  return [{ params: { lang: LIVE_EVENT_LANGUAGE } }];
+  // BOTH languages now (change: rushpoint-live-english). It used to emit Hebrew
+  // only, on the reasoning that an English page would advertise a Jerusalem race
+  // to people who cannot attend. That was half right: it is a race for people IN
+  // Israel, which is not the same as people who read Hebrew — a large part of the
+  // country reads English first, and they were the ones being shut out.
+  //
+  // WHERE somebody is decides whether the home page BAND appears, not which
+  // language they read (utils/israelAudience.ts). This page itself is always
+  // reachable in both, because links get shared and refusing to render a page
+  // somebody was deliberately sent is the worse failure by far.
+  return LANGUAGES.map((lang) => ({ params: { lang } }));
 }
 
-const language = LIVE_EVENT_LANGUAGE;
+const language = Astro.params.lang as Language;
+const t = liveCopy[language];
 
 const metadata = {
-  title: 'RushPoint Live · המירוץ הגדול על ירושלים',
+  title: t.title,
   // This is what WhatsApp and Google show when the link is SHARED, which is how
   // most of these applications will actually arrive — so it carries the same
   // promise the page does, and names no prize the page does not name either.
-  description:
-    'עשר קבוצות בלבד, מכל המגזרים בישראל, מתמודדות בערב אחד של מירוץ בשטח על פני ירושלים. ' +
-    'יום חמישי, 22 באוקטובר. ההרשמה פתוחה לקבוצות של 5 עד 8 חברים.',
-  canonical: LIVE_EVENT_URL,
-  openGraph: { url: LIVE_EVENT_URL, locale: OG_LOCALE[language], type: 'website' },
+  description: t.description,
+  canonical: pageUrl(language, 'live'),
+  openGraph: { url: pageUrl(language, 'live'), locale: OG_LOCALE[language], type: 'website' },
 };
 
-/**
- * A page with no counterpart names only ITSELF. An x-default pointing at a page
- * that does not exist would be a broken promise to a crawler, and an entry for a
- * language this page is not published in would make the cluster asymmetric.
- */
-const alternates = [{ hreflang: HREFLANG[language], href: LIVE_EVENT_URL }];
-
-/** The sectors, as the server's own allowlist spells them. */
+/** The sectors, in the order they are offered, keyed as the server spells them. */
 const SECTORS = [
-  { value: 'religious', label: 'דתי' },
-  { value: 'secular', label: 'חילוני' },
-  { value: 'mixed', label: 'מעורב' },
-  { value: 'other', label: 'אחר' },
+  { value: 'religious', label: t.sectors.religious },
+  { value: 'secular', label: t.sectors.secular },
+  { value: 'mixed', label: t.sectors.mixed },
+  { value: 'other', label: t.sectors.other },
 ];
 
-/** The camera scale, 1 = מעדיפים לא, 5 = תנו לנו את המצלמה. */
-const CAMERA = [
-  { value: 1, label: 'מעדיפים בלי' },
-  { value: 2, label: 'קצת ביישנים' },
-  { value: 3, label: 'זורמים' },
-  { value: 4, label: 'נהנים' },
-  { value: 5, label: 'תנו לנו מצלמה' },
+/** The camera scale, 1 = rather not, 5 = give us the camera. */
+const CAMERA = t.camera.map((label, i) => ({ value: i + 1, label }));
+
+/**
+ * Where we announce the ten teams.
+ *
+ * Declared as ONE list so adding a fourth network is one entry rather than three
+ * edits in two files. `handle` is optional on purpose: the Facebook profile is a
+ * numeric url with no vanity name, so it is labelled by the network instead of by
+ * an @ that does not exist.
+ */
+const NETWORKS = [
+  { href: INSTAGRAM_URL, handle: INSTAGRAM_HANDLE, label: t.followCta, icon: 'tabler:brand-instagram' },
+  { href: TIKTOK_URL, handle: TIKTOK_HANDLE, label: t.followCtaTikTok, icon: 'tabler:brand-tiktok' },
+  { href: FACEBOOK_URL, handle: null, label: t.followCtaFacebook, icon: 'tabler:brand-facebook' },
 ];
 
-/** Shared input styling. One string so nine fields cannot drift from one another. */
+/**
+ * How many answers the progress bar counts.
+ *
+ * NINE, not ten: the photo is optional (change: rushpoint-live-optional-photo) and
+ * counting it would leave a team that chose to skip it stuck at "9 of 10" forever,
+ * staring at a bar that says they are not finished while the form submits happily.
+ * A progress bar has to measure the thing it is a bar FOR.
+ */
+const REQUIRED_COUNT = 9;
+
+/** Each question by position, so the markup below reads them by name. */
+const Q = t.questions;
+
+/** Shared input styling. One string so ten fields cannot drift from one another. */
 const FIELD =
   'w-full rounded-xl border border-line bg-page px-4 py-3 text-base text-default ' +
   'placeholder:text-muted/70 transition focus:border-primary focus:outline-none ' +
@@ -92,7 +121,7 @@ const FIELD =
   'aria-[invalid=true]:border-red-500 aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-red-500/25';
 ---
 
-<PageLayout metadata={metadata} language={language} alternates={alternates}>
+<PageLayout metadata={metadata} language={language} alternates={alternatesFor('live')}>
   {/* ── The pitch ───────────────────────────────────────────────────────── */}
   <section class="relative overflow-hidden bg-[#14110d] text-[#faf7f2]">
     <TopoBackdrop class="opacity-[0.07]" />
@@ -107,51 +136,42 @@ const FIELD =
         class="mx-auto flex w-fit items-center gap-2 rounded-full border border-primary/40 bg-primary/15 px-4 py-1.5 text-sm font-bold text-[#ffb59a]"
       >
         <Icon name="tabler:flame" class="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span>האודישן פתוח · RushPoint Live</span>
+        <span>{t.badge}</span>
       </p>
 
       <h1 class="mt-5 font-heading text-4xl font-black leading-tight tracking-tight sm:text-6xl">
-        המירוץ הגדול
-        <span class="block text-primary">על ירושלים</span>
+        {t.headlineTop}
+        <span class="block text-primary">{t.headlineBottom}</span>
       </h1>
 
       <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-[#d8d0c5] sm:text-xl">
-        ערב אחד. עיר שלמה. <strong class="font-bold text-[#faf7f2]">עשר קבוצות בלבד</strong>, נבחרות
-        מכל המגזרים בישראל, רצות אחרי משימות אמיתיות בשטח עד שנשארת אחת.
+        {t.blurb}
       </p>
 
       {/* The deadline. Real, anchored, and printed beside the date it counts to. */}
-      <EventCountdown class="mt-9" tone="dark" />
+      <EventCountdown class="mt-9" tone="dark" language={language} />
 
       <ul class="mx-auto mt-9 grid max-w-xl grid-cols-3 gap-3 text-center">
-        <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
-          <div class="font-heading text-2xl font-black sm:text-3xl">10</div>
-          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">קבוצות ייבחרו</div>
-        </li>
-        <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
-          <div class="font-heading text-2xl font-black sm:text-3xl">5 עד 8</div>
-          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">חברים בקבוצה</div>
-        </li>
-        <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
-          <div class="font-heading text-2xl font-black sm:text-3xl">ערב אחד</div>
-          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">מהתחלה ועד הסוף</div>
-        </li>
+        {
+          t.facts.map((fact) => (
+            <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
+              <div class="font-heading text-2xl font-black sm:text-3xl">{fact.value}</div>
+              <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">{fact.label}</div>
+            </li>
+          ))
+        }
       </ul>
 
       {/*
         The prize, honestly.
 
-        It is not fixed yet: it may be bigger, it may be smaller, and it may not
-        be money at all. Naming a number we might not keep would be the one claim
-        on this page a team could later catch us out on, and the scarcity above it
-        is only worth something while everything beside it holds. So the reveal
-        is the promise, and what is CERTAIN does the persuading instead.
+        It is not fixed yet: it may be bigger, it may be smaller, and it may not be
+        money at all. Naming a number we might not keep would be the one claim on
+        this page a team could later catch us out on, and the scarcity above it is
+        only worth something while everything beside it holds. So the reveal is the
+        promise, and what is CERTAIN does the persuading instead.
       */}
-      <p class="mx-auto mt-7 max-w-xl text-base leading-relaxed text-[#b6ada1]">
-        לקבוצה המנצחת מחכה פרס. מה הוא בדיוק נחשוף לקראת המירוץ, יחד עם ההטבות
-        משיתופי הפעולה עם המותגים. מה שכבר סגור: הערב הזה מצולם מהתחלה ועד הסוף,
-        וכל קבוצה יוצאת איתו בידיים.
-      </p>
+      <p class="mx-auto mt-7 max-w-xl text-base leading-relaxed text-[#b6ada1]">{t.prize}</p>
     </div>
   </section>
 
@@ -171,36 +191,28 @@ const FIELD =
   <section class="bg-surface-tint">
     <div class="mx-auto max-w-2xl px-4 py-12 sm:px-6 sm:py-14">
       <h2 class="font-heading text-2xl font-black tracking-tight text-heading sm:text-3xl">
-        מה אנחנו מחפשים, ומה לא
+        {t.lookingTitle}
       </h2>
       <div class="mt-6 grid gap-3 sm:grid-cols-2">
         <ul class="space-y-3 rounded-2xl border border-line bg-page p-5">
-          <li class="flex gap-2.5">
-            <Icon name="tabler:check" class="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-            <span class="text-base leading-relaxed text-default">קבוצה שכיף לה ביחד, וזה נראה</span>
-          </li>
-          <li class="flex gap-2.5">
-            <Icon name="tabler:check" class="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-            <span class="text-base leading-relaxed text-default">סיפור אמיתי שמחבר ביניכם</span>
-          </li>
-          <li class="flex gap-2.5">
-            <Icon name="tabler:check" class="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-            <span class="text-base leading-relaxed text-default">ראש פתוח ואנרגיה לערב שלם</span>
-          </li>
+          {
+            t.lookingYes.map((line) => (
+              <li class="flex gap-2.5">
+                <Icon name="tabler:check" class="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+                <span class="text-base leading-relaxed text-default">{line}</span>
+              </li>
+            ))
+          }
         </ul>
         <ul class="space-y-3 rounded-2xl border border-line bg-page p-5">
-          <li class="flex gap-2.5">
-            <Icon name="tabler:x" class="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
-            <span class="text-base leading-relaxed text-muted">לא צריך להיות ספורטאים</span>
-          </li>
-          <li class="flex gap-2.5">
-            <Icon name="tabler:x" class="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
-            <span class="text-base leading-relaxed text-muted">לא צריך ניסיון מול מצלמה</span>
-          </li>
-          <li class="flex gap-2.5">
-            <Icon name="tabler:x" class="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
-            <span class="text-base leading-relaxed text-muted">לא צריך להכיר את ירושלים</span>
-          </li>
+          {
+            t.lookingNo.map((line) => (
+              <li class="flex gap-2.5">
+                <Icon name="tabler:x" class="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+                <span class="text-base leading-relaxed text-muted">{line}</span>
+              </li>
+            ))
+          }
         </ul>
       </div>
     </div>
@@ -209,19 +221,16 @@ const FIELD =
   {/* ── The form ────────────────────────────────────────────────────────── */}
   <section class="mx-auto max-w-2xl px-4 py-12 sm:px-6 sm:py-16">
     <h2 class="font-heading text-3xl font-black tracking-tight text-heading sm:text-4xl">
-      עשר שאלות. זה הכול.
+      {t.formTitle}
     </h2>
-    <p class="mt-3 text-lg leading-relaxed text-muted">
-      אין פה תשובות נכונות ואין מה להתכונן. אנחנו קוראים כל מועמדות, אז כתבו כמו שאתם
-      מדברים. ככל שתהיו יותר אתם, כך נדע טוב יותר אם אתם הקבוצה שאנחנו מחפשים.
-    </p>
+    <p class="mt-3 text-lg leading-relaxed text-muted">{t.formIntro}</p>
     {/*
-      Said ONCE, here, instead of nine red asterisks down the page. Nine little
-      warnings on a page whose job is to feel like an invitation is nine reasons
-      to close the tab; red is now reserved for an actual problem, which is what
-      makes it mean something when it finally appears.
+      Said ONCE, here, instead of ten red asterisks down the page. Ten little
+      warnings on a page whose job is to feel like an invitation is ten reasons to
+      close the tab; red is now reserved for an actual problem, which is what makes
+      it mean something when it finally appears.
     */}
-    <p class="mt-3 text-sm font-semibold text-heading">כל השאלות חובה, וכולן קצרות.</p>
+    <p class="mt-3 text-sm font-semibold text-heading">{t.allRequired}</p>
 
     {/*
       The progress bar (change: rushpoint-live-urgency).
@@ -239,8 +248,8 @@ const FIELD =
     */}
     <div class="sticky top-0 z-20 -mx-4 mt-8 border-b border-line bg-page/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
       <div class="flex items-center justify-between gap-3">
-        <span class="text-sm font-semibold text-heading" data-progress-label>בואו נתחיל</span>
-        <span class="text-sm font-bold tabular-nums text-primary" data-progress-count>0 מתוך 10</span>
+        <span class="text-sm font-semibold text-heading" data-progress-label>{t.progressStart}</span>
+        <span class="text-sm font-bold tabular-nums text-primary" data-progress-count>{t.progressCount(0, REQUIRED_COUNT)}</span>
       </div>
       {/*
         A real progressbar role with real values, so this is a status to assistive
@@ -253,7 +262,7 @@ const FIELD =
         aria-valuemin="0"
         aria-valuemax="100"
         aria-valuenow="8"
-        aria-label="התקדמות במילוי המועמדות"
+        aria-label={t.formTitle}
         data-progress-track
       >
         <div class="h-full rounded-full bg-primary transition-[width] duration-300 ease-out" style="width:8%" data-progress-fill></div>
@@ -275,25 +284,25 @@ const FIELD =
     >
       {/* 01 — who they are. Not one of the nine, but an application nobody can
           refer to by name cannot be discussed, shortlisted or called back. */}
-      <QuestionCard n="01" field="teamName" title="איך קוראים לקבוצה שלכם?" hint="השם שנכריז בו עליכם. אפשר רציני, ואפשר בדיחה פנימית שרק אתם מבינים.">
-        <input class={FIELD} id="f-teamName" name="teamName" type="text" maxlength="80" placeholder="הנשרים" required />
+      <QuestionCard n={Q[0].n} field="teamName" title={Q[0].title} hint={Q[0].hint}>
+        <input class={FIELD} id="f-teamName" name="teamName" type="text" maxlength="80" placeholder={Q[0].placeholder} required />
       </QuestionCard>
 
       {/* 02 — the event's own rule, so the control cannot express a number outside it. */}
-      <QuestionCard n="02" field="teamSize" title="כמה אתם?" hint="בין חמישה לשמונה. זה תנאי ולא המלצה, כי ככה המשימות בנויות.">
+      <QuestionCard n={Q[1].n} field="teamSize" title={Q[1].title} hint={Q[1].hint}>
         <select class={FIELD} id="f-teamSize" name="teamSize" required>
-          <option value="">בחרו מספר</option>
-          <option value="5">חמישה</option>
-          <option value="6">שישה</option>
-          <option value="7">שבעה</option>
-          <option value="8">שמונה</option>
+          <option value="">{t.choosePrompt}</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
         </select>
       </QuestionCard>
 
       {/* 03 — checkboxes, because a mixed team is the interesting case. */}
-      <QuestionCard n="03" field="sectors" group title="מאיפה אתם בעולם?" hint="אפשר לסמן יותר מאחד. אנחנו מרכיבים ערב שיש בו את כולם, אז זה עוזר לנו ולא פוסל אתכם.">
+      <QuestionCard n={Q[2].n} field="sectors" group title={Q[2].title} hint={Q[2].hint}>
         <fieldset>
-          <legend class="sr-only">מאיזה מגזר אתם</legend>
+          <legend class="sr-only">{Q[2].title}</legend>
           <div class="grid grid-cols-2 gap-2 sm:grid-cols-4" data-group="sectors">
             {
               SECTORS.map((sector) => (
@@ -308,31 +317,31 @@ const FIELD =
       </QuestionCard>
 
       {/* 04 */}
-      <QuestionCard n="04" field="location" title="מאיפה אתם מגיעים?" hint="עיר או אזור. אם אתם מפוזרים, כתבו את כולם.">
-        <input class={FIELD} id="f-location" name="location" type="text" maxlength="200" placeholder="ירושלים, ושניים מבית שמש" required />
+      <QuestionCard n={Q[3].n} field="location" title={Q[3].title} hint={Q[3].hint}>
+        <input class={FIELD} id="f-location" name="location" type="text" maxlength="200" placeholder={Q[3].placeholder} required />
       </QuestionCard>
 
       {/* 05 */}
-      <QuestionCard n="05" field="howTheyMet" title="איך אתם מכירים?" hint="צבא, תנועה, שכונה, עבודה, משפחה. הסיפור שמחבר ביניכם הוא חצי מהעניין.">
-        <textarea class={FIELD} id="f-howTheyMet" name="howTheyMet" rows="3" maxlength="1500" placeholder="נפגשנו בתנועה לפני חמש שנים ומאז לא הצלחנו להיפרד" required></textarea>
+      <QuestionCard n={Q[4].n} field="howTheyMet" title={Q[4].title} hint={Q[4].hint}>
+        <textarea class={FIELD} id="f-howTheyMet" name="howTheyMet" rows="3" maxlength="1500" placeholder={Q[4].placeholder} required></textarea>
       </QuestionCard>
 
       {/* 06 — free text on purpose: "16 עד 18" and "רובנו בני 30, אחד בן 52" are
           both real answers, and a range picker refuses the second one. */}
-      <QuestionCard n="06" field="ageRange" title="בני כמה אתם?" hint="טווח הגילאים בקבוצה. אין גיל נכון.">
-        <input class={FIELD} id="f-ageRange" name="ageRange" type="text" maxlength="120" placeholder="16 עד 18" required />
+      <QuestionCard n={Q[5].n} field="ageRange" title={Q[5].title} hint={Q[5].hint}>
+        <input class={FIELD} id="f-ageRange" name="ageRange" type="text" maxlength="120" placeholder={Q[5].placeholder} required />
       </QuestionCard>
 
       {/* 07 — the field that actually decides it, so it gets the room. */}
-      <QuestionCard n="07" field="motivation" title="למה שנבחר דווקא בכם?" hint="זו השאלה שמכריעה, וזו גם היחידה שאין בה תשובה נכונה. אל תכתבו מה שנשמע טוב. כתבו מה שנכון עליכם.">
-        <textarea class={FIELD} id="f-motivation" name="motivation" rows="5" maxlength="2000" placeholder="כתבו כאן כמו שהייתם מספרים לחבר" required></textarea>
+      <QuestionCard n={Q[6].n} field="motivation" title={Q[6].title} hint={Q[6].hint}>
+        <textarea class={FIELD} id="f-motivation" name="motivation" rows="5" maxlength="2000" placeholder={Q[6].placeholder} required></textarea>
       </QuestionCard>
 
       {/* 08 — radios, not a slider: a slider on a phone has a default value that
           reads as an answer nobody gave. */}
-      <QuestionCard n="08" field="cameraComfort" group title="כמה נוח לכם מול מצלמה?" hint="הערב מצולם. לא מחפשים שחקנים, אז תענו בכנות. גם ארבע וגם אחת זו תשובה טובה.">
+      <QuestionCard n={Q[7].n} field="cameraComfort" group title={Q[7].title} hint={Q[7].hint}>
         <fieldset>
-          <legend class="sr-only">רמת הנוחות מול מצלמה</legend>
+          <legend class="sr-only">{Q[7].title}</legend>
           <div class="grid grid-cols-5 gap-1.5 sm:gap-2" data-group="cameraComfort">
             {
               CAMERA.map((step) => (
@@ -348,7 +357,7 @@ const FIELD =
       </QuestionCard>
 
       {/* 09 */}
-      <QuestionCard n="09" field="phone" title="למי מתקשרים?" hint="מספר אחד שעונים בו. נתקשר רק אם נתקדם איתכם.">
+      <QuestionCard n={Q[8].n} field="phone" title={Q[8].title} hint={Q[8].hint}>
         {/*
           `type="tel"` for the numeric keypad, `dir="ltr"` because a phone number
           reads left to right inside a right-to-left page, and `text-start` so it
@@ -363,35 +372,91 @@ const FIELD =
           dir="ltr"
           maxlength="40"
           autocomplete="tel"
-          placeholder="050 000 0000"
+          placeholder={Q[8].placeholder}
           required
         />
       </QuestionCard>
 
       {/* 10 */}
-      <QuestionCard n="10" field="photo" group title="תנו לנו לראות אתכם" hint="לא חייבת להיות מקצועית, ולא חייבים להיות בה כולם. סלפי מהטלפון מספיק לגמרי.">
+      <QuestionCard n={Q[9].n} field="photo" group title={Q[9].title} hint={Q[9].hint} optionalTag={t.optionalTag}>
         {/*
           The real input is hidden and the label is the control, so the button can
           be a real 56px target instead of the browser's own ~24px file chooser.
           It stays a <label for>, not a scripted click, so it works from the
           keyboard and with assistive technology exactly as a file input should.
         */}
-        <input class="sr-only" id="f-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" required />
+        {/* No `required`: the photo is optional. The form carries `novalidate` so the
+            attribute would not block a submission today, but it is still announced to
+            assistive technology as required — and it would start blocking the moment
+            anybody removed `novalidate`. */}
+        <input class="sr-only" id="f-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" />
         <label
           class="flex min-h-14 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line bg-page px-4 py-4 text-base font-semibold text-default transition hover:border-primary hover:bg-primary/5 focus-within:border-primary"
           for="f-photo"
         >
           <Icon name="tabler:camera-plus" class="h-6 w-6 shrink-0 text-primary" aria-hidden="true" />
-          <span data-photo-label>בחרו תמונה מהטלפון</span>
+          <span data-photo-label>{t.photoPick}</span>
         </label>
 
         {/* The preview is the receipt. A file input that says only "photo.jpg" gives
             no way to notice you picked the wrong picture. */}
         <div class="mt-3 hidden" data-photo-preview>
-          <img class="max-h-56 w-full rounded-xl object-cover" alt="התמונה שנבחרה" data-photo-image />
+          <img class="max-h-56 w-full rounded-xl object-cover" alt={t.photoAlt} data-photo-image />
           <p class="mt-1.5 text-sm text-muted" data-photo-meta></p>
         </div>
       </QuestionCard>
+
+      {/*
+        Following on Instagram (change: rushpoint-live-instagram).
+
+        NOT A GATE, deliberately. A required checkbox here would be theatre: we
+        cannot verify a follow, so all it would collect is a box that is true by
+        construction for every single application — no information, and one more
+        obstacle between a real team and the form.
+
+        What actually makes people follow is a REASON that serves them plus the
+        right moment. The reason is true and is stated plainly: the ten teams are
+        announced there. The moment is after they submit, not before — the success
+        screen carries the primary ask, when they are committed and waiting on an
+        answer. This block is the earlier, softer half, placed where somebody who
+        is already sold can act on it without leaving the form behind.
+
+        Opens in a new tab on purpose: a half filled application must survive the
+        detour. `noopener` because a `_blank` link without it hands the opened page
+        a handle on this one.
+      */}
+      <div class="mt-2 rounded-2xl border-2 border-line bg-surface-tint p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <Icon name="tabler:brand-instagram" class="mt-0.5 h-9 w-9 shrink-0 text-primary" aria-hidden="true" />
+          <div class="min-w-0 flex-1">
+            <h3 class="font-heading text-xl font-black leading-snug text-heading">{t.followTitle}</h3>
+            <p class="mt-1.5 text-sm leading-relaxed text-muted">{t.followBody}</p>
+            <div class="mt-4 flex flex-wrap gap-2">
+              {
+                NETWORKS.map((net) => (
+                  <a
+                    class="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full border-2 border-primary bg-page px-4 text-base font-black text-primary transition hover:bg-primary hover:text-white focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/40"
+                    href={net.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-follow-link
+                  >
+                    <Icon name={net.icon} class="h-5 w-5 shrink-0" aria-hidden="true" />
+                    {/* The handle where there is one: it differs between the
+                        networks, and a reader who searches by hand needs the right
+                        one. Where there is none, the network's own name. */}
+                    <span>{net.handle ? `@${net.handle}` : net.label}</span>
+                  </a>
+                ))
+              }
+            </div>
+            {/* Acknowledged once they have actually gone. It is not proof — nothing
+                here could be — it is the page noticing, which is what makes the ask
+                feel like an exchange rather than an instruction. */}
+            <p class="mt-2 hidden text-sm font-semibold text-primary" data-follow-done>{t.followDone}</p>
+          </div>
+        </div>
+      </div>
 
       {/*
         The close. A form that ends at a button ends on an administrative note;
@@ -401,28 +466,18 @@ const FIELD =
       */}
       <div class="mt-4 rounded-2xl border-2 border-primary/30 bg-primary/[0.06] p-5 text-center sm:p-6">
         <p class="font-heading text-xl font-black leading-snug text-heading sm:text-2xl">
-          עשר קבוצות ייצאו לדרך ב־22 באוקטובר
+          {t.closeTitle}
         </p>
-        <p class="mx-auto mt-2 max-w-md text-base leading-relaxed text-muted">
-          אנחנו קוראים כל מועמדות. אם נתקדם איתכם, נתקשר למספר שהשארתם.
-        </p>
+        <p class="mx-auto mt-2 max-w-md text-base leading-relaxed text-muted">{t.closeBody}</p>
 
-        {/*
-          NEVER DISABLED. A disabled primary button explains nothing, cannot fire,
-          and is out of the tab order — so a team with one blank field taps the big
-          orange button and nothing happens at all. It answers instead: the first
-          press marks every missing field and moves focus to the first of them.
-          This is the same conclusion the participant app's join form reached; see
-          the note about `joinReadiness` in CLAUDE.md.
-        */}
         <button
           class="mt-5 inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-primary px-8 text-lg font-black text-white shadow-lg shadow-primary/25 transition hover:bg-secondary focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/50 disabled:opacity-70"
           id="live-submit"
           type="submit"
-          data-label="שלחו אותנו למירוץ"
-          data-sending="שולחים..."
+          data-label={t.submit}
+          data-sending={t.sending}
         >
-          שלחו אותנו למירוץ
+          {t.submit}
         </button>
 
         {/* One status region for every outcome, announced to assistive technology.
@@ -432,8 +487,7 @@ const FIELD =
       </div>
 
       <p class="text-sm leading-relaxed text-muted">
-        הפרטים נשמרים אצלנו בלבד, משמשים רק לבחירת הקבוצות למירוץ הזה, ולא מועברים לאף גורם
-        אחר. אם משהו לא עובד, כתבו לנו אל
+        {t.privacy} {t.contactLead}{' '}
         <a class="text-secondary underline hover:text-primary" dir="ltr" href={`mailto:${CONTACT_FALLBACK_EMAIL}`}>
           {CONTACT_FALLBACK_EMAIL}
         </a>
@@ -452,6 +506,8 @@ const FIELD =
   // could silently drift from the version the gate actually tests. The two values
   // ride on the form's own data attributes instead.
   import { applicationProgress } from '~/utils/liveEvent';
+  import { liveCopy } from '~/copy/live';
+  import { FACEBOOK_URL, INSTAGRAM_URL, TIKTOK_URL } from '~/utils/i18n';
 
   // Typed once, here. The non-null assertions are honest: every one of these ids
   // is in the markup directly above, so a missing element is a mistake made at
@@ -459,6 +515,13 @@ const FIELD =
   const form = document.getElementById('live-form') as HTMLFormElement;
   const language = form.dataset.language ?? '';
   const apiOrigin = form.dataset.apiOrigin ?? '';
+
+  // Every word this script can put on screen comes from the copy module, which
+  // scripts/test-marketing-content.ts checks for language purity. A literal
+  // typed here would be checked by nothing — and a Hebrew sentence surfacing in
+  // the English page is precisely the failure that gate exists to catch.
+  // The fallback is Hebrew because a broken `lang` means the Hebrew route.
+  const t = liveCopy[language === 'en' ? 'en' : 'he'];
   const status = document.getElementById('live-status') as HTMLParagraphElement;
   const submit = document.getElementById('live-submit') as HTMLButtonElement;
 
@@ -474,24 +537,9 @@ const FIELD =
   // Every refusal names the field and says what to do about it. "שדה חובה" on nine
   // fields at once is a form that scolds; naming the thing is a form that helps.
 
-  const FIELD_ERRORS: Record<string, string> = {
-    teamName: 'צריך שם לקבוצה',
-    teamSize: 'בחרו כמה אתם, בין חמישה לשמונה',
-    sectors: 'סמנו לפחות מגזר אחד',
-    location: 'כתבו מאיפה אתם',
-    howTheyMet: 'ספרו איך אתם מכירים',
-    ageRange: 'כתבו את טווח הגילאים',
-    motivation: 'זו השאלה שמכריעה, אל תדלגו עליה',
-    cameraComfort: 'בחרו כמה נוח לכם מול מצלמה',
-    phone: 'צריך מספר טלפון נייד ישראלי תקין',
-    photo: 'צרפו תמונה קבוצתית',
-  };
+  const FIELD_ERRORS: Record<string, string> = t.fieldErrors;
 
-  const PHOTO_ERRORS: Record<string, string> = {
-    type: 'התמונה צריכה להיות JPG, PNG או WebP',
-    unreadable: 'לא הצלחנו לקרוא את התמונה. נסו תמונה אחרת',
-    huge: 'התמונה גדולה מדי גם אחרי הקטנה. נסו תמונה אחרת',
-  };
+  const PHOTO_ERRORS: Record<string, string> = t.photoErrors;
 
   /**
    * Both `document.querySelector` lookups and the caps below live next to each
@@ -532,7 +580,7 @@ const FIELD =
   function markError(field: string, message?: string): HTMLElement | null {
     const slot = errorSlot(field);
     if (slot) {
-      slot.textContent = message ?? FIELD_ERRORS[field] ?? 'משהו כאן חסר';
+      slot.textContent = message ?? FIELD_ERRORS[field] ?? t.errInvalid;
       slot.classList.remove('hidden');
     }
     // A checkbox/radio group gets the flag on its first control, which is what a
@@ -568,7 +616,13 @@ const FIELD =
   // The arithmetic itself is imported rather than written here, so the number on
   // screen is the one scripts/test-live-event-countdown.ts actually checks.
 
+  // The nine answers that are required, and therefore the nine the bar counts.
+  // `photo` is deliberately absent: it is optional, so it can neither block a
+  // submission nor hold the bar below 100%.
   const PROGRESS_FIELDS = Object.keys(FIELD_ERRORS);
+  // Every card that can show an answered state, which DOES include the photo: a
+  // team that adds one should see it acknowledged like everything else.
+  const CARD_FIELDS = [...PROGRESS_FIELDS, 'photo'];
 
   // Queried from the DOCUMENT, not from the form. The bar is a sibling of the
   // <form>, not a child of it — it is sticky and has to sit outside the element
@@ -582,11 +636,11 @@ const FIELD =
 
   /** Said at the top of the bar. Warmth, and a reason to keep going. */
   function progressWord(done: number, total: number): string {
-    if (done === 0) return 'בואו נתחיל';
-    if (done === total) return 'הכול מלא. אפשר לשלוח';
-    if (done >= total - 2) return 'כמעט שם';
-    if (done >= total / 2) return 'עברתם את החצי';
-    return 'ממשיכים';
+    if (done === 0) return t.progressStart;
+    if (done === total) return t.progressDone;
+    if (done >= total - 2) return t.progressNearly;
+    if (done >= total / 2) return t.progressHalf;
+    return t.progressGoing;
   }
 
   /** Is this one question answered? The single definition of "answered". */
@@ -608,9 +662,10 @@ const FIELD =
     // from the SAME predicate as the count below, so a card and the bar can never
     // disagree about whether something was answered.
     let done = 0;
-    for (const field of PROGRESS_FIELDS) {
+    for (const field of CARD_FIELDS) {
       const answered = isAnswered(field, data);
-      if (answered) done += 1;
+      // Counted only if it is one of the required nine.
+      if (answered && PROGRESS_FIELDS.includes(field)) done += 1;
       const card = document.querySelector(`[data-question="${field}"]`);
       if (card) card.setAttribute('data-answered', String(answered));
     }
@@ -619,7 +674,7 @@ const FIELD =
 
     if (progressFill) progressFill.style.width = `${percent}%`;
     if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(percent));
-    if (progressCount) progressCount.textContent = `${done} מתוך ${total}`;
+    if (progressCount) progressCount.textContent = t.progressCount(done, total);
     if (progressLabel) progressLabel.textContent = progressWord(done, total);
   }
 
@@ -698,7 +753,7 @@ const FIELD =
   if (hadDraft) {
     // Said plainly, and only when something really came back. Silently refilling
     // a form is unsettling; claiming to have refilled an empty one is worse.
-    show('המשכנו מאיפה שהפסקתם. אפשר לערוך הכול.', true);
+    show(t.draftRestored, true);
   }
 
   // ── The photo ──────────────────────────────────────────────────────────────
@@ -765,7 +820,7 @@ const FIELD =
 
     const file = photoInput.files?.[0];
     if (!file) {
-      photoLabel.textContent = 'בחרו תמונה מהטלפון';
+      photoLabel.textContent = t.photoPick;
       refreshProgress();
       return;
     }
@@ -773,23 +828,23 @@ const FIELD =
     // The type is read from the FILE, never from its name: an extension is a claim
     // the sender makes about bytes we already hold. The server checks again.
     if (!ALLOWED_TYPES.includes(file.type)) {
-      photoLabel.textContent = 'בחרו תמונה מהטלפון';
+      photoLabel.textContent = t.photoPick;
       photoInput.value = '';
       markError('photo', PHOTO_ERRORS.type);
       return;
     }
 
-    photoLabel.textContent = 'מקטינים את התמונה...';
+    photoLabel.textContent = t.photoWorking;
     try {
       const { dataUrl, bytes } = await downscale(file);
       photoDataUrl = dataUrl;
-      photoLabel.textContent = 'החלפת התמונה';
+      photoLabel.textContent = t.photoReplace;
       photoImage.src = dataUrl;
-      photoMeta.textContent = `התמונה מוכנה · ${Math.round(bytes / 1024)} KB`;
+      photoMeta.textContent = t.photoReady(Math.round(bytes / 1024));
       photoPreview.classList.remove('hidden');
       refreshProgress();
     } catch (e) {
-      photoLabel.textContent = 'בחרו תמונה מהטלפון';
+      photoLabel.textContent = t.photoPick;
       photoInput.value = '';
       const reason = e instanceof Error ? e.message : '';
       markError('photo', reason === 'huge' ? PHOTO_ERRORS.huge : PHOTO_ERRORS.unreadable);
@@ -823,7 +878,8 @@ const FIELD =
     if (!text('motivation')) missing.push('motivation');
     if (!text('cameraComfort')) missing.push('cameraComfort');
     if (!text('phone') || !phoneIsDialable(text('phone'))) missing.push('phone');
-    if (!photoDataUrl) missing.push('photo');
+    // No photo check: it is optional, and a form that refuses to send over an
+    // optional field is a form that lies about what it requires.
 
     return missing;
   }
@@ -855,7 +911,7 @@ const FIELD =
         const control = markError(field);
         if (!firstControl) firstControl = control;
       }
-      show(missing.length === 1 ? 'חסרה תשובה אחת' : `חסרות ${missing.length} תשובות`, false);
+      show(missing.length === 1 ? t.missingOne : t.missingMany(missing.length), false);
       firstControl?.focus?.({ preventScroll: true });
       firstControl?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
       return;
@@ -892,12 +948,58 @@ const FIELD =
         // Replace the form with the confirmation rather than clearing it. A blank
         // form under a success line is indistinguishable from one that failed and
         // wiped what they wrote.
-        form.innerHTML =
-          '<div class="rounded-2xl border border-line bg-surface-tint p-8 text-center">' +
-          '<p class="font-heading text-2xl font-black text-heading">המועמדות נשלחה</p>' +
-          '<p class="mt-3 text-lg leading-relaxed text-muted">קיבלנו אתכם. אנחנו עוברים על כל ' +
-          'הקבוצות ומודיעים לנבחרות בטלפון שהשארתם. בהצלחה.</p>' +
-          '</div>';
+        // The confirmation, and the one moment where asking for a follow costs
+        // nothing and converts: they have just committed, they are waiting on an
+        // answer, and this is genuinely where that answer gets published. The ask
+        // is a consequence of what they already want, not a toll on the way in.
+        //
+        // Built with createElement rather than innerHTML because the copy is
+        // interpolated: assigning a string here would make every sentence in the
+        // copy module a potential injection point the day one of them carries an
+        // angle bracket.
+        form.replaceChildren();
+        const done = document.createElement('div');
+        done.className = 'rounded-2xl border-2 border-primary/30 bg-primary/[0.06] p-8 text-center';
+
+        const h = document.createElement('p');
+        h.className = 'font-heading text-2xl font-black text-heading';
+        h.textContent = t.successTitle;
+
+        const body = document.createElement('p');
+        body.className = 'mt-3 text-lg leading-relaxed text-muted';
+        body.textContent = t.successBody;
+
+        const followH = document.createElement('p');
+        followH.className = 'mt-8 font-heading text-xl font-black text-heading';
+        followH.textContent = t.successFollowTitle;
+
+        const followBody = document.createElement('p');
+        followBody.className = 'mx-auto mt-2 max-w-md text-base leading-relaxed text-muted';
+        followBody.textContent = t.successFollowBody;
+
+        const row = document.createElement('div');
+        row.className = 'mt-5 flex flex-wrap justify-center gap-2';
+        for (const net of [
+          { href: INSTAGRAM_URL, label: t.followCta },
+          { href: TIKTOK_URL, label: t.followCtaTikTok },
+          { href: FACEBOOK_URL, label: t.followCtaFacebook },
+        ]) {
+          const a = document.createElement('a');
+          a.className =
+            'inline-flex min-h-14 flex-1 items-center justify-center gap-2 rounded-full ' +
+            'bg-primary px-5 text-base font-black text-white shadow-lg shadow-primary/25 ' +
+            'transition hover:bg-secondary focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/50';
+          a.href = net.href;
+          a.target = '_blank';
+          // `noopener` is not optional on a target=_blank link: without it the page
+          // we open can reach back through window.opener and navigate this tab.
+          a.rel = 'noopener noreferrer';
+          a.textContent = net.label;
+          row.append(a);
+        }
+
+        done.append(h, body, followH, followBody, row);
+        form.append(done);
         form.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
@@ -920,24 +1022,47 @@ const FIELD =
         const field = message.split(':')[0]?.trim();
         if (FIELD_ERRORS[field]) {
           const control = markError(field);
-          show('משהו אחד עוד לא תקין', false);
+          show(t.oneStillWrong, false);
           control?.focus?.({ preventScroll: true });
           control?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
         } else {
-          show('חלק מהפרטים לא התקבלו. עברו על הטופס ונסו שוב', false);
+          show(t.errInvalid, false);
         }
       } else if (code === 'RESOURCE_EXHAUSTED') {
-        show('נשלחו יותר מדי בקשות מהחיבור הזה. נסו שוב בעוד כמה דקות', false);
+        show(t.errRateLimited, false);
       } else {
-        show('משהו השתבש בשליחה. נסו שוב, ואם זה חוזר כתבו לנו במייל', false);
+        show(t.errUnknown, false);
       }
     } catch {
       // fetch throws on a network failure, which is the one case where the server
       // never saw the application at all.
-      show('אין חיבור לרשת. הפרטים נשמרו בטופס, נסו שוב כשיחזור', false);
+      show(t.errOffline, false);
     } finally {
       submit.disabled = false;
       submit.textContent = submit.dataset.label ?? '';
     }
+  });
+
+  // ── The Instagram ask ──────────────────────────────────────────────────────
+  //
+  // Nothing here verifies a follow, and nothing pretends to. Tapping through is
+  // the only signal available, it is remembered so the acknowledgement survives a
+  // reload of a half filled form, and it gates NOTHING: the application submits
+  // exactly the same whether they went or not.
+  const FOLLOW_KEY = 'rp-live-followed';
+  const followLink = document.querySelector('[data-follow-link]');
+  const followDone = document.querySelector('[data-follow-done]');
+
+  function markFollowed(): void {
+    followDone?.classList.remove('hidden');
+  }
+
+  try {
+    if (localStorage.getItem(FOLLOW_KEY) === '1') markFollowed();
+  } catch { /* storage blocked — the acknowledgement is a nicety, not the ask */ }
+
+  followLink?.addEventListener('click', () => {
+    try { localStorage.setItem(FOLLOW_KEY, '1'); } catch { /* nothing to remember, no matter */ }
+    markFollowed();
   });
 </script>

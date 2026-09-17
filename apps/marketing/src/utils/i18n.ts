@@ -87,7 +87,13 @@ export function otherLanguage(language: Language): Language {
  * until a translation exists or produce the machine translated Hebrew this site
  * refuses to ship.
  */
-export const STANDING_SUBJECTS = ['', 'story', 'contact', 'blog'] as const;
+// `live` joined this list when the page became bilingual (change:
+// rushpoint-live-english). It belongs here now BY DEFINITION: a standing page
+// is one that exists in both languages, and both exist. Being here is what
+// gives it a symmetric hreflang cluster and makes the language switch land on
+// the counterpart page instead of the other language's home. It does NOT put
+// it in the menu — the header's links are an explicit list in navigation.ts.
+export const STANDING_SUBJECTS = ['', 'story', 'contact', 'blog', 'live'] as const;
 export type StandingSubject = (typeof STANDING_SUBJECTS)[number];
 
 /** The URL path for a page. `subject` identifies it across languages. */
@@ -141,22 +147,49 @@ export function standingPages(): Array<{ language: Language; subject: string; pa
 }
 
 /**
- * The RushPoint Live application form (change: rushpoint-live-signup).
+ * The RushPoint Live application page.
  *
- * Deliberately NOT a member of STANDING_SUBJECTS. A standing page is one that
- * exists in both languages by definition, and this one does not: the event is a
- * single race across Jerusalem for teams living in Israel, so an English version
- * would be advertising to people who cannot attend. Adding it to that list would
- * make the hreflang cluster, the language switch and the paired content check all
- * demand a counterpart that should not exist.
+ * It WAS Hebrew only and deliberately absent from STANDING_SUBJECTS, on the
+ * reasoning that an English page would advertise a Jerusalem race to people who
+ * cannot attend. That was half right: it is a race for people IN Israel, which is
+ * not the same as people who read Hebrew, and a large part of the country reads
+ * English first (change: rushpoint-live-english).
  *
- * Declared here with the other addresses rather than inline at each link, for the
- * reason the origins above give: a path spelled inline is a path nobody finds when
- * it moves.
+ * So both languages exist, it is a standing subject like any other, and WHERE a
+ * visitor is — not which language they read — decides whether the home page band
+ * appears. See utils/israelAudience.ts, and note the page itself is never gated.
  */
-export const LIVE_EVENT_LANGUAGE: Language = 'he';
-export const LIVE_EVENT_PATH = `/${LIVE_EVENT_LANGUAGE}/live/`;
-export const LIVE_EVENT_URL = `${SITE_ORIGIN}${LIVE_EVENT_PATH}`;
+export const liveEventPath = (language: Language): string => pagePath(language, 'live');
+export const liveEventUrl = (language: Language): string => pageUrl(language, 'live');
+
+/**
+ * The Instagram account (change: rushpoint-live-instagram).
+ *
+ * Following it is a CONDITION OF ENTRY to RushPoint Live, so the handle is
+ * declared here with the other addresses rather than spelled inline at each link:
+ * an account name typed into three files is an account name nobody finds when it
+ * changes, and one of those three silently sends applicants to a dead profile.
+ */
+export const INSTAGRAM_HANDLE = 'ahiyasavir';
+export const INSTAGRAM_URL = `https://instagram.com/${INSTAGRAM_HANDLE}`;
+
+/**
+ * TikTok. A DIFFERENT handle from the Instagram one above, which is exactly why
+ * both are declared here rather than being derived from a single brand name: a
+ * `@${INSTAGRAM_HANDLE}` typed into a TikTok link would point at a profile that
+ * is not ours and would look right in review.
+ */
+export const TIKTOK_HANDLE = 'ahiyasavir09';
+export const TIKTOK_URL = `https://tiktok.com/@${TIKTOK_HANDLE}`;
+
+/**
+ * Facebook. A NUMERIC profile url, not a vanity one, so there is no handle to
+ * display and the link is labelled by the network instead. Written out in full
+ * rather than assembled from an id, because `profile.php?id=` is the whole shape
+ * of the address and splitting it would invite someone to "tidy" it into a
+ * /username form that does not resolve.
+ */
+export const FACEBOOK_URL = 'https://www.facebook.com/profile.php?id=61593391145817';
 
 /**
  * A direct address to fall back to when the contact form cannot reach the API.

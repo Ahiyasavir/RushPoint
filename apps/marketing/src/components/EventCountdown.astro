@@ -20,41 +20,46 @@
  * total, and gated by scripts/test-live-event-countdown.ts.
  */
 import { Icon } from 'astro-icon/components';
-import {
-  LIVE_EVENT_AT,
-  LIVE_EVENT_CITY_HE,
-  LIVE_EVENT_DATE_HE,
-  LIVE_EVENT_DAY_HE,
-  MAX_PLAUSIBLE_LEAD_MS,
-} from '~/utils/liveEvent';
+import { LIVE_EVENT_AT, MAX_PLAUSIBLE_LEAD_MS } from '~/utils/liveEvent';
+import { liveCopy } from '~/copy/live';
+import type { Language } from '~/utils/i18n';
 
 export interface Props {
   /** `dark` sits on the near-black band; `light` on the page surface. */
   tone?: 'dark' | 'light';
+  /** Which language's labels to draw. */
+  language: Language;
   class?: string;
 }
 
-const { tone = 'dark', class: className = '' } = Astro.props;
+const { tone = 'dark', language, class: className = '' } = Astro.props;
+const t = liveCopy[language];
 
 const cell = tone === 'dark' ? 'border-white/10 bg-white/[0.06] text-[#faf7f2]' : 'border-line bg-page text-heading';
 const label = tone === 'dark' ? 'text-[#b6ada1]' : 'text-muted';
 
 /** Largest unit first in READING order; the container is RTL, so days sit right. */
 const UNITS = [
-  { key: 'days', label: 'ימים' },
-  { key: 'hours', label: 'שעות' },
-  { key: 'minutes', label: 'דקות' },
-  { key: 'seconds', label: 'שניות' },
+  { key: 'days', label: t.units.days },
+  { key: 'hours', label: t.units.hours },
+  { key: 'minutes', label: t.units.minutes },
+  { key: 'seconds', label: t.units.seconds },
 ];
 ---
 
-<div class={className} data-countdown data-event-at={LIVE_EVENT_AT} data-max-lead={MAX_PLAUSIBLE_LEAD_MS}>
+<div
+  class={className}
+  data-countdown
+  data-event-at={LIVE_EVENT_AT}
+  data-max-lead={MAX_PLAUSIBLE_LEAD_MS}
+  data-lang={language}
+>
   {/* The fact, always present, never dependent on a clock or on scripting. */}
   <p class={`flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-base font-bold ${tone === 'dark' ? 'text-[#faf7f2]' : 'text-heading'}`}>
     <Icon name="tabler:calendar-event" class="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-    <span>{LIVE_EVENT_DAY_HE}, {LIVE_EVENT_DATE_HE}, בערב</span>
+    <span>{t.eventWhen}</span>
     <span class={label}>·</span>
-    <span>{LIVE_EVENT_CITY_HE}</span>
+    <span>{t.eventCity}</span>
   </p>
 
   {/*
@@ -89,7 +94,7 @@ const UNITS = [
   </div>
 
   {/* Shown only once the evening has arrived. */}
-  <p class="mt-4 hidden text-lg font-black text-primary" data-countdown-started>המירוץ יצא לדרך</p>
+  <p class="mt-4 hidden text-lg font-black text-primary" data-countdown-started>{t.started}</p>
 </div>
 
 <script>
@@ -98,6 +103,7 @@ const UNITS = [
   // different numbers on the same screen, which is exactly the kind of small
   // wrongness that makes a visitor stop believing the rest of the page.
   import { countdownAt } from '~/utils/liveEvent';
+  import { liveCopy } from '~/copy/live';
 
   const roots = Array.from(document.querySelectorAll('[data-countdown]'));
 
@@ -130,7 +136,8 @@ const UNITS = [
 
       const announce = clock.querySelector('[data-countdown-announce]');
       if (announce) {
-        const text = `נותרו ${verdict.days} ימים ו${verdict.hours} שעות למירוץ`;
+        const lang = root.getAttribute('data-lang') === 'en' ? 'en' : 'he';
+        const text = liveCopy[lang].remaining(verdict.days, verdict.hours);
         // Only rewrite when the MINUTE-level text actually changed, so the live
         // region does not re-announce every second.
         if (announce.textContent !== text) announce.textContent = text;

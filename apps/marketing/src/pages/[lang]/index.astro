@@ -15,8 +15,7 @@ import LiveEventBanner from '~/components/widgets/LiveEventBanner.astro';
 
 import {
   LANGUAGES,
-  LIVE_EVENT_LANGUAGE,
-  LIVE_EVENT_PATH,
+  liveEventPath,
   alternatesFor,
   pageUrl,
   pagePath,
@@ -94,12 +93,15 @@ const metadata = {
       occasion doors because those are four evergreen ways in and this is a
       deadline.
 
-      Hebrew only: the race is one day in Jerusalem for teams living in Israel,
-      so the English home page renders exactly as it did before. The guard is the
-      language, not a flag, so there is nothing to forget to turn off.
+      BOTH languages now (change: rushpoint-live-english). It used to render on
+      the Hebrew page only, which shut out the large part of Israel that reads
+      English first. The English band carries `israelOnly`, so it reveals itself
+      only where there is no positive evidence the reader is somewhere else; the
+      Hebrew one is unconditional, because that page's readers are in Israel
+      essentially by definition.
     */
-    language === LIVE_EVENT_LANGUAGE && <LiveEventBanner href={LIVE_EVENT_PATH} />
   }
+  <LiveEventBanner href={liveEventPath(language)} language={language} israelOnly={language === 'en'} />
 
   {
     /*

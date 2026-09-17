@@ -12257,12 +12257,25 @@ async function main() {
     await expectError('an off-scale camera answer is refused',
       applicant.call('submitLiveApplication', { ...valid, cameraComfort: 9 }),
       { codeIn: ['functions/invalid-argument'] });
-    await expectError('an application with no photo is refused',
-      applicant.call('submitLiveApplication', { ...valid, photo: null }),
-      { codeIn: ['functions/invalid-argument'] });
+    // The photo is OPTIONAL (change: rushpoint-live-optional-photo). A team that
+    // cannot get everyone into one picture tonight must still be able to apply
+    // tonight, so all three spellings of "absent" have to be ACCEPTED.
+    const noPhoto = await applicant.call('submitLiveApplication', {
+      ...valid, teamName: 'בלי תמונה', photo: null,
+    });
+    check('a team can apply without a photo', noPhoto?.ok === true, JSON.stringify(noPhoto));
+    const blankPhoto = await applicant.call('submitLiveApplication', {
+      ...valid, teamName: 'תמונה ריקה', photo: '',
+    });
+    check('an empty photo string is the same as none', blankPhoto?.ok === true, JSON.stringify(blankPhoto));
+    const { photo: _omitted, ...withoutKey } = valid;
+    const omitted = await applicant.call('submitLiveApplication', { ...withoutKey, teamName: 'בלי המפתח' });
+    check('an omitted photo key is the same as none', omitted?.ok === true, JSON.stringify(omitted));
     // A filename is a claim the sender makes about bytes we already hold; the
     // content type is read from the data URL itself, so a non-image is refused
     // however it is labelled.
+    // Optional means "may be ABSENT", never "may be anything": a photo that IS sent
+    // is held to exactly the standard it always was.
     await expectError('a non-image data URL is refused',
       applicant.call('submitLiveApplication', { ...valid, photo: `data:application/pdf;base64,${'A'.repeat(64)}` }),
       { codeIn: ['functions/invalid-argument'] });
@@ -12319,6 +12332,15 @@ async function main() {
     check('the list carries no image bytes',
       !/[A-Za-z0-9+/]{200,}/.test(listedJson),
       `${listedJson.length} chars for ${(listed?.applications ?? []).length} application(s)`);
+
+    const withoutPhoto = (listed?.applications ?? []).find((a) => a.teamName === 'בלי תמונה');
+    check('an application with no photo says so', withoutPhoto?.hasPhoto === false,
+      JSON.stringify({ hasPhoto: withoutPhoto?.hasPhoto, bytes: withoutPhoto?.photoBytes }));
+    check('an application WITH a photo says so', mine?.hasPhoto === true, String(mine?.hasPhoto));
+    // A missing photo must be an honest not-found rather than a zero-length image.
+    await expectError('fetching the photo of an application that has none is refused',
+      platformAdmin.call('getLiveApplicationPhoto', { applicationId: withoutPhoto?.id }),
+      { codeIn: ['functions/not-found'] });
 
     const fetched = await platformAdmin.call('getLiveApplicationPhoto', { applicationId: mine?.id });
     check('an admin can fetch one group photo by id',
