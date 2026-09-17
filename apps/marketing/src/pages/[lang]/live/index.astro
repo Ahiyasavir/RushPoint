@@ -29,6 +29,7 @@
 import PageLayout from '~/layouts/PageLayout.astro';
 import TopoBackdrop from '~/components/TopoBackdrop.astro';
 import { Icon } from 'astro-icon/components';
+import EventCountdown from '~/components/EventCountdown.astro';
 
 import {
   API_ORIGIN,
@@ -102,7 +103,7 @@ const FIELD =
         class="mx-auto flex w-fit items-center gap-2 rounded-full border border-primary/40 bg-primary/15 px-4 py-1.5 text-sm font-bold text-[#ffb59a]"
       >
         <Icon name="tabler:flame" class="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span>RushPoint Live</span>
+        <span>האודישן פתוח · RushPoint Live</span>
       </p>
 
       <h1 class="mt-5 font-heading text-4xl font-black leading-tight tracking-tight sm:text-6xl">
@@ -111,29 +112,93 @@ const FIELD =
       </h1>
 
       <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-[#d8d0c5] sm:text-xl">
-        יום אחד. עיר שלמה. <strong class="font-bold text-[#faf7f2]">עשר קבוצות בלבד</strong>, נבחרות
+        ערב אחד. עיר שלמה. <strong class="font-bold text-[#faf7f2]">עשר קבוצות בלבד</strong>, נבחרות
         מכל המגזרים בישראל, רצות אחרי משימות אמיתיות בשטח עד שנשארת אחת.
       </p>
 
-      <ul class="mx-auto mt-8 grid max-w-xl grid-cols-3 gap-3 text-center">
+      {/* The deadline. Real, anchored, and printed beside the date it counts to. */}
+      <EventCountdown class="mt-9" tone="dark" />
+
+      <ul class="mx-auto mt-9 grid max-w-xl grid-cols-3 gap-3 text-center">
         <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
           <div class="font-heading text-2xl font-black sm:text-3xl">10</div>
-          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">קבוצות בלבד</div>
+          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">קבוצות ייבחרו</div>
         </li>
         <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
           <div class="font-heading text-2xl font-black sm:text-3xl">5 עד 8</div>
           <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">חברים בקבוצה</div>
         </li>
         <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
-          <div class="font-heading text-2xl font-black sm:text-3xl">₪1,000</div>
-          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">לקבוצה המנצחת</div>
+          <div class="font-heading text-2xl font-black sm:text-3xl">ערב אחד</div>
+          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">מהתחלה ועד הסוף</div>
         </li>
       </ul>
 
-      <p class="mx-auto mt-6 max-w-xl text-base text-[#b6ada1]">
-        ובנוסף: הטבות בלעדיות משיתופי פעולה עם מותגים, ותיעוד מלא של היום. הקבוצות מצולמות
-        לאורך כל המירוץ.
+      {/*
+        The prize, honestly.
+
+        It is not fixed yet: it may be bigger, it may be smaller, and it may not
+        be money at all. Naming a number we might not keep would be the one claim
+        on this page a team could later catch us out on, and the scarcity above it
+        is only worth something while everything beside it holds. So the reveal
+        is the promise, and what is CERTAIN does the persuading instead.
+      */}
+      <p class="mx-auto mt-7 max-w-xl text-base leading-relaxed text-[#b6ada1]">
+        לקבוצה המנצחת מחכה פרס. מה הוא בדיוק נחשוף לקראת המירוץ, יחד עם ההטבות
+        משיתופי הפעולה עם המותגים. מה שכבר סגור: הערב הזה מצולם מהתחלה ועד הסוף,
+        וכל קבוצה יוצאת איתו בידיים.
       </p>
+    </div>
+  </section>
+
+  {/* ── What we are looking for ─────────────────────────────────────────── */}
+  {/*
+    The single highest-value section on the page, and it is not about the event
+    at all. Casting teams for this genre say plainly that they choose for
+    chemistry, energy and an interesting relationship — not for looks, fitness or
+    experience in front of a camera. Teams disqualify THEMSELVES against an
+    imagined standard long before anyone reads their answers, so saying out loud
+    what is actually being judged converts better than another paragraph of
+    adjectives about the race would.
+
+    It sits directly ABOVE the form because it is what makes the nine questions
+    answerable: a team that knows what is being looked for knows what to write.
+  */}
+  <section class="bg-surface-tint">
+    <div class="mx-auto max-w-2xl px-4 py-12 sm:px-6 sm:py-14">
+      <h2 class="font-heading text-2xl font-black tracking-tight text-heading sm:text-3xl">
+        מה אנחנו מחפשים, ומה לא
+      </h2>
+      <div class="mt-6 grid gap-3 sm:grid-cols-2">
+        <ul class="space-y-3 rounded-2xl border border-line bg-page p-5">
+          <li class="flex gap-2.5">
+            <Icon name="tabler:check" class="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <span class="text-base leading-relaxed text-default">קבוצה שכיף לה ביחד, וזה נראה</span>
+          </li>
+          <li class="flex gap-2.5">
+            <Icon name="tabler:check" class="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <span class="text-base leading-relaxed text-default">סיפור אמיתי שמחבר ביניכם</span>
+          </li>
+          <li class="flex gap-2.5">
+            <Icon name="tabler:check" class="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <span class="text-base leading-relaxed text-default">ראש פתוח ואנרגיה לערב שלם</span>
+          </li>
+        </ul>
+        <ul class="space-y-3 rounded-2xl border border-line bg-page p-5">
+          <li class="flex gap-2.5">
+            <Icon name="tabler:x" class="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+            <span class="text-base leading-relaxed text-muted">לא צריך להיות ספורטאים</span>
+          </li>
+          <li class="flex gap-2.5">
+            <Icon name="tabler:x" class="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+            <span class="text-base leading-relaxed text-muted">לא צריך ניסיון מול מצלמה</span>
+          </li>
+          <li class="flex gap-2.5">
+            <Icon name="tabler:x" class="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+            <span class="text-base leading-relaxed text-muted">לא צריך להכיר את ירושלים</span>
+          </li>
+        </ul>
+      </div>
     </div>
   </section>
 
@@ -144,8 +209,45 @@ const FIELD =
     </h2>
     <p class="mt-3 text-lg leading-relaxed text-muted">
       תשע שאלות קצרות. אנחנו בוחרים עשר קבוצות, אז מה שתכתבו כאן הוא מה שיכריע. כתבו כמו
-      שאתם מדברים.
+      שאתם מדברים, לא כמו שממלאים טופס.
     </p>
+
+    {/*
+      The progress bar (change: rushpoint-live-urgency).
+
+      Showing progress through a multi-answer form measurably raises completion,
+      and starting it ABOVE zero raises it further — the endowed progress effect,
+      from the study where a loyalty card handed over with two stamps already on
+      it was finished at nearly twice the rate of a shorter empty one. Arriving
+      and reading this far IS a real step, so the bar says so.
+
+      It is sticky because its whole job is to be visible while scrolling past
+      nine questions; a progress bar you have scrolled away from is decoration.
+      `top-0` rather than a guessed offset, and `backdrop-blur` so text passing
+      underneath stays readable.
+    */}
+    <div class="sticky top-0 z-20 -mx-4 mt-8 border-b border-line bg-page/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-sm font-semibold text-heading" data-progress-label>בואו נתחיל</span>
+        <span class="text-sm font-bold tabular-nums text-primary" data-progress-count>0 מתוך 10</span>
+      </div>
+      {/*
+        A real progressbar role with real values, so this is a status to assistive
+        technology rather than a decorative stripe. `transition-[width]` only —
+        animating `all` here would also animate the colour on every keystroke.
+      */}
+      <div
+        class="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-tint"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="8"
+        aria-label="התקדמות במילוי המועמדות"
+        data-progress-track
+      >
+        <div class="h-full rounded-full bg-primary transition-[width] duration-300 ease-out" style="width:8%" data-progress-fill></div>
+      </div>
+    </div>
 
     {/*
       A real <form> with real labels, and `novalidate` so the page — not the
@@ -153,14 +255,20 @@ const FIELD =
       the copy are all in the static markup, so the page still says what it is for
       with scripting disabled.
     */}
-    <form id="live-form" class="mt-10 flex flex-col gap-7" novalidate>
+    <form
+      id="live-form"
+      class="mt-10 flex flex-col gap-7"
+      novalidate
+      data-language={language}
+      data-api-origin={API_ORIGIN}
+    >
       {/* Who they are. Not one of the nine questions, but an application nobody can
           refer to by name cannot be discussed, shortlisted or called back. */}
       <div>
         <label class="mb-1.5 block font-semibold text-heading" for="f-teamName">
           שם הקבוצה <span class="text-primary" aria-hidden="true">*</span>
         </label>
-        <p class="mb-2 text-sm text-muted">איך נקרא לכם. אפשר שם רציני ואפשר בדיחה פנימית.</p>
+        <p class="mb-2 text-sm text-muted">איך נקרא לכם בשידור. אפשר שם רציני, ואפשר בדיחה פנימית שרק אתם מבינים.</p>
         <input class={FIELD} id="f-teamName" name="teamName" type="text" maxlength="80" required />
         <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="teamName"></p>
       </div>
@@ -171,7 +279,7 @@ const FIELD =
         <label class="mb-1.5 block font-semibold text-heading" for="f-teamSize">
           כמה אתם בקבוצה? <span class="text-primary" aria-hidden="true">*</span>
         </label>
-        <p class="mb-2 text-sm text-muted">בין חמישה לשמונה חברים. זה תנאי, לא המלצה.</p>
+        <p class="mb-2 text-sm text-muted">בין חמישה לשמונה. זה תנאי ולא המלצה, כי ככה המשימות בנויות.</p>
         <select class={FIELD} id="f-teamSize" name="teamSize" required>
           <option value="">בחרו מספר</option>
           <option value="5">5 חברים</option>
@@ -187,7 +295,7 @@ const FIELD =
         <legend class="mb-1.5 font-semibold text-heading">
           מאיזה מגזר אתם? <span class="text-primary" aria-hidden="true">*</span>
         </legend>
-        <p class="mb-3 text-sm text-muted">אפשר לסמן יותר מאחד. אנחנו מרכיבים מירוץ מכל הארץ.</p>
+        <p class="mb-3 text-sm text-muted">אפשר לסמן יותר מאחד. אנחנו מרכיבים ערב שיש בו את כולם, אז זה עוזר לנו ולא פוסל אתכם.</p>
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-4" data-group="sectors">
           {
             SECTORS.map((sector) => (
@@ -229,7 +337,7 @@ const FIELD =
         <label class="mb-1.5 block font-semibold text-heading" for="f-howTheyMet">
           איך אתם מכירים? <span class="text-primary" aria-hidden="true">*</span>
         </label>
-        <p class="mb-2 text-sm text-muted">צבא, תנועה, שכונה, עבודה, משפחה. מה שזה לא יהיה.</p>
+        <p class="mb-2 text-sm text-muted">צבא, תנועה, שכונה, עבודה, משפחה. הסיפור שמחבר ביניכם הוא חצי מהעניין.</p>
         <textarea class={FIELD} id="f-howTheyMet" name="howTheyMet" rows="3" maxlength="1500" required></textarea>
         <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="howTheyMet"></p>
       </div>
@@ -259,7 +367,7 @@ const FIELD =
           למה שנבחר דווקא בכם? <span class="text-primary" aria-hidden="true">*</span>
         </label>
         <p class="mb-2 text-sm text-muted">
-          זו השאלה שמכריעה. אל תכתבו מה שנשמע טוב. כתבו מה שנכון עליכם.
+          זו השאלה שמכריעה, וזו גם היחידה שאין בה תשובה נכונה. אל תכתבו מה שנשמע טוב. כתבו מה שנכון עליכם.
         </p>
         <textarea class={FIELD} id="f-motivation" name="motivation" rows="5" maxlength="2000" required></textarea>
         <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="motivation"></p>
@@ -271,7 +379,7 @@ const FIELD =
         <legend class="mb-1.5 font-semibold text-heading">
           כמה נוח לכם מול מצלמה? <span class="text-primary" aria-hidden="true">*</span>
         </legend>
-        <p class="mb-3 text-sm text-muted">המירוץ מצולם. אין תשובה נכונה, רק תשובה כנה.</p>
+        <p class="mb-3 text-sm text-muted">הערב מצולם. לא מחפשים שחקנים, אז תענו בכנות. גם ארבע וגם אחת זו תשובה טובה.</p>
         <div class="grid grid-cols-5 gap-1.5 sm:gap-2" data-group="cameraComfort">
           {
             CAMERA.map((step) => (
@@ -318,7 +426,7 @@ const FIELD =
           תמונה קבוצתית <span class="text-primary" aria-hidden="true">*</span>
         </label>
         <p class="mb-2 text-sm text-muted">
-          לא חייבת להיות מקצועית. סלפי מהטלפון מספיק. רק שנראה מי אתם.
+          לא חייבת להיות מקצועית, ולא חייבים להיות בה כולם. סלפי מהטלפון מספיק לגמרי. רק שנראה מי אתם.
         </p>
 
         {/*
@@ -380,18 +488,25 @@ const FIELD =
   </section>
 </PageLayout>
 
-<script
-  define:vars={{
-    language,
-    apiOrigin: API_ORIGIN,
-  }}
->
+<script>
   // Page local. No framework, no hydration: the page is readable and says what it
   // is for without this, and this only exists to check the answers and send them.
+  //
+  // A BUNDLED script, not an inline one. It used to carry its two server values
+  // through `define:vars`, which forces `is:inline` and therefore forbids imports
+  // — and the progress arithmetic would then have had to be copied here, where it
+  // could silently drift from the version the gate actually tests. The two values
+  // ride on the form's own data attributes instead.
+  import { applicationProgress } from '~/utils/liveEvent';
 
-  const form = document.getElementById('live-form');
-  const status = document.getElementById('live-status');
-  const submit = document.getElementById('live-submit');
+  // Typed once, here. The non-null assertions are honest: every one of these ids
+  // is in the markup directly above, so a missing element is a mistake made at
+  // build time, not a case the page has to survive at runtime.
+  const form = document.getElementById('live-form') as HTMLFormElement;
+  const language = form.dataset.language ?? '';
+  const apiOrigin = form.dataset.apiOrigin ?? '';
+  const status = document.getElementById('live-status') as HTMLParagraphElement;
+  const submit = document.getElementById('live-submit') as HTMLButtonElement;
 
   /**
    * The photo, downscaled and ready to send. Held here rather than read off the
@@ -399,13 +514,13 @@ const FIELD =
    * resolves the input may hold a different file, and committing the file the
    * handler STARTED with is how you send the wrong picture.
    */
-  let photoDataUrl = null;
+  let photoDataUrl: string | null = null;
 
   // ── Messages ───────────────────────────────────────────────────────────────
   // Every refusal names the field and says what to do about it. "שדה חובה" on nine
   // fields at once is a form that scolds; naming the thing is a form that helps.
 
-  const FIELD_ERRORS = {
+  const FIELD_ERRORS: Record<string, string> = {
     teamName: 'צריך שם לקבוצה',
     teamSize: 'בחרו כמה אתם, בין חמישה לשמונה',
     sectors: 'סמנו לפחות מגזר אחד',
@@ -418,7 +533,7 @@ const FIELD =
     photo: 'צרפו תמונה קבוצתית',
   };
 
-  const PHOTO_ERRORS = {
+  const PHOTO_ERRORS: Record<string, string> = {
     type: 'התמונה צריכה להיות JPG, PNG או WebP',
     unreadable: 'לא הצלחנו לקרוא את התמונה. נסו תמונה אחרת',
     huge: 'התמונה גדולה מדי גם אחרי הקטנה. נסו תמונה אחרת',
@@ -442,16 +557,16 @@ const FIELD =
 
   // ── Field state ────────────────────────────────────────────────────────────
 
-  function errorSlot(field) {
+  function errorSlot(field: string): HTMLElement | null {
     return form.querySelector(`[data-error-for="${field}"]`);
   }
 
   /** Every control that carries this field's answer — one input, or a whole group. */
-  function controlsFor(field) {
-    return [...form.querySelectorAll(`[name="${field}"]`)];
+  function controlsFor(field: string): HTMLElement[] {
+    return [...form.querySelectorAll<HTMLElement>(`[name="${field}"]`)];
   }
 
-  function clearError(field) {
+  function clearError(field: string): void {
     const slot = errorSlot(field);
     if (slot) {
       slot.textContent = '';
@@ -460,7 +575,7 @@ const FIELD =
     for (const control of controlsFor(field)) control.removeAttribute('aria-invalid');
   }
 
-  function markError(field, message) {
+  function markError(field: string, message?: string): HTMLElement | null {
     const slot = errorSlot(field);
     if (slot) {
       slot.textContent = message ?? FIELD_ERRORS[field] ?? 'משהו כאן חסר';
@@ -480,25 +595,160 @@ const FIELD =
   // Clearing as they fix it. Waiting for the next submit to withdraw a complaint
   // the person has already answered makes the form look broken.
   form.addEventListener('input', (event) => {
-    const field = event.target?.name;
+    const field = (event.target as HTMLInputElement | null)?.name;
     if (field && FIELD_ERRORS[field]) clearError(field);
+    refreshProgress();
+    saveDraft();
   });
   form.addEventListener('change', (event) => {
-    const field = event.target?.name;
+    const field = (event.target as HTMLInputElement | null)?.name;
     if (field && FIELD_ERRORS[field]) clearError(field);
+    refreshProgress();
+    saveDraft();
   });
+
+  // ── Progress ───────────────────────────────────────────────────────────────
+  //
+  // Answered COUNT, not fields touched: a field typed into and then emptied has
+  // gone backwards, and a bar that only ever rises would be lying about that.
+  // The arithmetic itself is imported rather than written here, so the number on
+  // screen is the one scripts/test-live-event-countdown.ts actually checks.
+
+  const PROGRESS_FIELDS = Object.keys(FIELD_ERRORS);
+
+  // Queried from the DOCUMENT, not from the form. The bar is a sibling of the
+  // <form>, not a child of it — it is sticky and has to sit outside the element
+  // it reports on — so `form.querySelector` returns null for all four, and every
+  // guarded update below silently becomes a no-op. That is a progress bar that
+  // ships looking perfect and never moves, which is how this was first written.
+  const progressFill = document.querySelector<HTMLElement>('[data-progress-fill]');
+  const progressTrack = document.querySelector<HTMLElement>('[data-progress-track]');
+  const progressCount = document.querySelector<HTMLElement>('[data-progress-count]');
+  const progressLabel = document.querySelector<HTMLElement>('[data-progress-label]');
+
+  /** Said at the top of the bar. Warmth, and a reason to keep going. */
+  function progressWord(done: number, total: number): string {
+    if (done === 0) return 'בואו נתחיל';
+    if (done === total) return 'הכול מלא. אפשר לשלוח';
+    if (done >= total - 2) return 'כמעט שם';
+    if (done >= total / 2) return 'עברתם את החצי';
+    return 'ממשיכים';
+  }
+
+  function answeredCount(): number {
+    const data = new FormData(form);
+    let done = 0;
+    for (const field of PROGRESS_FIELDS) {
+      if (field === 'sectors') { if (data.getAll('sectors').length > 0) done += 1; continue; }
+      // The photo lives in a variable, not in the form: the input holds a file
+      // the browser has not finished downscaling yet, so `files.length` would
+      // count it as answered before there is anything to send.
+      if (field === 'photo') { if (photoDataUrl) done += 1; continue; }
+      if (String(data.get(field) ?? '').trim() !== '') done += 1;
+    }
+    return done;
+  }
+
+  function refreshProgress(): void {
+    const total = PROGRESS_FIELDS.length;
+    const done = answeredCount();
+    const percent = applicationProgress(done, total);
+
+    if (progressFill) progressFill.style.width = `${percent}%`;
+    if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(percent));
+    if (progressCount) progressCount.textContent = `${done} מתוך ${total}`;
+    if (progressLabel) progressLabel.textContent = progressWord(done, total);
+  }
+
+  // ── The draft ──────────────────────────────────────────────────────────────
+  //
+  // Nine answers and a photograph is something a team fills across a day, after
+  // asking four friends how old they are — so closing the tab must not cost them
+  // what they already wrote. Restored on load, cleared once it is safely sent.
+  //
+  // TEXT ONLY. The photo is deliberately never stored: it is hundreds of
+  // kilobytes, which browsers refuse in this storage anyway, and it is a picture
+  // of identifiable people that has no business sitting on a shared family phone
+  // after the form is submitted.
+  //
+  // Every read and write is wrapped: this storage throws outright in some private
+  // modes and returns empty in others, and a saved draft is a convenience — the
+  // form must work identically for somebody whose browser has it turned off.
+
+  const DRAFT_KEY = 'rp-live-draft';
+
+  function saveDraft(): void {
+    try {
+      const data = new FormData(form);
+      const draft: Record<string, string | string[]> = {};
+      for (const field of PROGRESS_FIELDS) {
+        if (field === 'photo') continue;
+        draft[field] = field === 'sectors' ? data.getAll('sectors').map(String) : String(data.get(field) ?? '');
+      }
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch { /* storage blocked or full — the draft is a convenience, not the form */ }
+  }
+
+  function clearDraft(): void {
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing was stored either */ }
+  }
+
+  function restoreDraft(): boolean {
+    // No initializer: both branches below assign it, so a starting value here is
+    // dead code (and eslint's no-useless-assignment says so).
+    let draft;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      draft = raw ? JSON.parse(raw) : null;
+    } catch { draft = null; }
+    // Anything but an object is not a draft. Stored data can be edited by hand,
+    // can be left over from an older shape of this form, or can be truncated.
+    if (!draft || typeof draft !== 'object') return false;
+
+    let restored = 0;
+    for (const field of PROGRESS_FIELDS) {
+      if (field === 'photo') continue;
+      const value = draft[field];
+
+      if (field === 'sectors') {
+        if (!Array.isArray(value)) continue;
+        for (const box of form.querySelectorAll<HTMLInputElement>('input[name="sectors"]')) {
+          if (value.includes(box.value)) { box.checked = true; restored += 1; }
+        }
+        continue;
+      }
+      if (typeof value !== 'string' || value === '') continue;
+
+      if (field === 'cameraComfort') {
+        const radio = form.querySelector<HTMLInputElement>(`input[name="cameraComfort"][value="${CSS.escape(value)}"]`);
+        if (radio) { radio.checked = true; restored += 1; }
+        continue;
+      }
+      const control = form.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[name="${field}"]`);
+      if (control) { control.value = value; restored += 1; }
+    }
+    return restored > 0;
+  }
+
+  const hadDraft = restoreDraft();
+  refreshProgress();
+  if (hadDraft) {
+    // Said plainly, and only when something really came back. Silently refilling
+    // a form is unsettling; claiming to have refilled an empty one is worse.
+    show('המשכנו מאיפה שהפסקתם. אפשר לערוך הכול.', true);
+  }
 
   // ── The photo ──────────────────────────────────────────────────────────────
 
-  const photoInput = document.getElementById('f-photo');
-  const photoLabel = form.querySelector('[data-photo-label]');
-  const photoPreview = form.querySelector('[data-photo-preview]');
-  const photoImage = form.querySelector('[data-photo-image]');
-  const photoMeta = form.querySelector('[data-photo-meta]');
+  const photoInput = document.getElementById('f-photo') as HTMLInputElement;
+  const photoLabel = form.querySelector<HTMLElement>('[data-photo-label]')!;
+  const photoPreview = form.querySelector<HTMLElement>('[data-photo-preview]')!;
+  const photoImage = form.querySelector<HTMLImageElement>('[data-photo-image]')!;
+  const photoMeta = form.querySelector<HTMLElement>('[data-photo-meta]')!;
 
   const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-  function readAsDataUrl(file) {
+  function readAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result ?? ''));
@@ -507,7 +757,7 @@ const FIELD =
     });
   }
 
-  function loadImage(dataUrl) {
+  function loadImage(dataUrl: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
@@ -524,7 +774,7 @@ const FIELD =
    * The quality ladder walks DOWN only as far as it has to, so a small picture
    * keeps its quality and only a large one pays.
    */
-  async function downscale(file) {
+  async function downscale(file: File): Promise<{ dataUrl: string; bytes: number }> {
     const original = await readAsDataUrl(file);
     const img = await loadImage(original);
 
@@ -553,6 +803,7 @@ const FIELD =
     const file = photoInput.files?.[0];
     if (!file) {
       photoLabel.textContent = 'בחרו תמונה מהטלפון';
+      refreshProgress();
       return;
     }
 
@@ -573,10 +824,13 @@ const FIELD =
       photoImage.src = dataUrl;
       photoMeta.textContent = `התמונה מוכנה · ${Math.round(bytes / 1024)} KB`;
       photoPreview.classList.remove('hidden');
+      refreshProgress();
     } catch (e) {
       photoLabel.textContent = 'בחרו תמונה מהטלפון';
       photoInput.value = '';
-      markError('photo', e?.message === 'huge' ? PHOTO_ERRORS.huge : PHOTO_ERRORS.unreadable);
+      const reason = e instanceof Error ? e.message : '';
+      markError('photo', reason === 'huge' ? PHOTO_ERRORS.huge : PHOTO_ERRORS.unreadable);
+      refreshProgress();
     }
   });
 
@@ -587,15 +841,15 @@ const FIELD =
    * here — where the person can still see the field. The server remains the
    * authority; this exists so they are not told at the END of nine answers.
    */
-  function phoneIsDialable(raw) {
+  function phoneIsDialable(raw: string): boolean {
     const digits = String(raw).replace(/[^0-9]/g, '');
     return /^05\d{8}$/.test(digits) || /^9725\d{8}$/.test(digits) || /^009725\d{8}$/.test(digits);
   }
 
   /** Every missing answer, in the order they appear on the page. */
-  function missingFields(data) {
-    const missing = [];
-    const text = (field) => String(data.get(field) ?? '').trim();
+  function missingFields(data: FormData): string[] {
+    const missing: string[] = [];
+    const text = (field: string) => String(data.get(field) ?? '').trim();
 
     if (!text('teamName')) missing.push('teamName');
     if (!text('teamSize')) missing.push('teamSize');
@@ -613,7 +867,7 @@ const FIELD =
 
   // ── Status ─────────────────────────────────────────────────────────────────
 
-  function show(text, ok) {
+  function show(text: string, ok: boolean): void {
     status.textContent = text;
     status.className = ok
       ? 'min-h-6 text-base font-medium text-green-700 dark:text-green-400'
@@ -645,7 +899,7 @@ const FIELD =
     }
 
     submit.disabled = true;
-    submit.textContent = submit.dataset.sending;
+    submit.textContent = submit.dataset.sending ?? '';
 
     try {
       const response = await fetch(`${apiOrigin}/submitLiveApplication`, {
@@ -669,6 +923,9 @@ const FIELD =
       });
 
       if (response.ok) {
+        // Only now, once the server has it. Clearing the draft on SEND would throw
+        // away everything they wrote the moment a request failed.
+        clearDraft();
         // Replace the form with the confirmation rather than clearing it. A blank
         // form under a success line is indistinguishable from one that failed and
         // wiped what they wrote.
@@ -717,7 +974,7 @@ const FIELD =
       show('אין חיבור לרשת. הפרטים נשמרו בטופס, נסו שוב כשיחזור', false);
     } finally {
       submit.disabled = false;
-      submit.textContent = submit.dataset.label;
+      submit.textContent = submit.dataset.label ?? '';
     }
   });
 </script>

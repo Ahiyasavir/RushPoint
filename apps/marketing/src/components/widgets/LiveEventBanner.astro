@@ -1,24 +1,33 @@
 ---
 /**
- * The RushPoint Live call to action on the home page (change: rushpoint-live-signup).
+ * The RushPoint Live call to action on the home page (change: rushpoint-live-signup,
+ * reworked by rushpoint-live-urgency).
  *
  * WHY IT SITS WHERE IT SITS. The home page's own argument is "play a mission and
  * see for yourself", and that argument is load-bearing — the section order comment
  * in [lang]/index.astro explains why the playable mission comes before the claims.
- * This band is a DIFFERENT offer: one dated event, ten teams, a prize. It goes
- * directly under the hero because it is time-bound and the rest of the page is not,
- * and it is a band rather than a section so it reads as an announcement rather than
- * as another feature the product has.
+ * This band is a DIFFERENT offer: one dated evening, ten teams, a place in a race.
+ * It goes directly under the hero because it is time-bound and the rest of the
+ * page is not, and it is a band rather than a section so it reads as an
+ * announcement rather than as another feature the product has.
+ *
+ * ── What this band is selling, and what it is NOT ───────────────────────────
+ *
+ * It sells SELECTION, not a prize. The prize is genuinely not fixed yet — it may
+ * be larger, smaller, or not money at all — so naming a number would be the one
+ * thing on this page a visitor could later catch us out on, and a scarcity claim
+ * is only worth anything while every other claim beside it holds. What is fixed
+ * is everything that actually does the persuading: ten teams, one evening, a real
+ * date, cameras on the whole thing. Those are checkable, so they are what is said.
  *
  * ADDITIVE, NEVER A GATE, for the same reason the occasion doors below it are:
  * ignoring it costs a visitor nothing and every section below still renders in
  * order. It is deliberately NOT a dialog. An interstitial over a page whose whole
  * point is "try it in thirty seconds" would be the one thing that stops them.
  *
- * HEBREW ONLY, on purpose. The event is one race across Jerusalem for teams living
- * in Israel; an English band would be advertising to people who cannot attend.
- * The page it links to is Hebrew only for the same reason, and the home page's
- * English build renders exactly as it did before this existed.
+ * HEBREW ONLY, on purpose. The event is one race across Jerusalem for teams
+ * living in Israel; an English band would be advertising to people who cannot
+ * attend. The home page's English build renders exactly as it did before.
  *
  * The copy lives here rather than in src/data/pages/*.json because those files are
  * scanned in matching pairs by scripts/test-marketing-content.ts — a page that
@@ -26,25 +35,29 @@
  */
 import { Icon } from 'astro-icon/components';
 import TopoBackdrop from '~/components/TopoBackdrop.astro';
+import EventCountdown from '~/components/EventCountdown.astro';
 
 export interface Props {
-  /** Where the application form lives. Passed in, never spelled inline. */
+  /** Where the application lives. Passed in, never spelled inline. */
   href: string;
 }
 
 const { href } = Astro.props;
 
 /**
- * The three facts that decide whether someone keeps reading, as numbers.
+ * The three facts that decide whether someone keeps reading.
  *
- * A number is the only part of an announcement a person retains from a scroll, and
- * each of these answers a different question: is there room for us (10), are we the
- * right shape (5-8), and is it worth the day (1,000).
+ * A number is the only part of an announcement a person retains from a scroll,
+ * and each of these answers a different question a team is actually asking: is
+ * there room for us (10), are we the right shape (5 to 8), and what is being
+ * asked of us (one evening, not a season).
+ *
+ * Every one of them is checkable. That is the whole selection rule for this list.
  */
 const FACTS = [
-  { value: '10', label: 'קבוצות בלבד', icon: 'tabler:users-group' },
+  { value: '10', label: 'קבוצות ייבחרו', icon: 'tabler:users-group' },
   { value: '5 עד 8', label: 'חברים בקבוצה', icon: 'tabler:user-check' },
-  { value: '₪1,000', label: 'לקבוצה המנצחת', icon: 'tabler:trophy' },
+  { value: 'ערב אחד', label: 'מהתחלה ועד הסוף', icon: 'tabler:moon-stars' },
 ];
 ---
 
@@ -74,7 +87,7 @@ const FACTS = [
           ></span>
           <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary"></span>
         </span>
-        <span>ההרשמה נפתחה · RushPoint Live</span>
+        <span>האודישן פתוח · RushPoint Live</span>
       </p>
 
       <h2 class="mt-5 font-heading text-4xl font-black leading-tight tracking-tight sm:text-5xl md:text-6xl">
@@ -83,9 +96,12 @@ const FACTS = [
       </h2>
 
       <p class="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-[#d8d0c5] sm:text-xl">
-        יום אחד. עיר שלמה. עשר קבוצות שנבחרות מכל המגזרים בישראל, רצות אחרי משימות בשטח
-        עד שנשארת אחת. מצלמות איתכן לאורך כל הדרך.
+        ערב אחד. עיר שלמה. עשר קבוצות שנבחרות מכל המגזרים בישראל, רצות אחרי משימות
+        בשטח עד שנשארת אחת. מצלמות איתכן לאורך כל הדרך.
       </p>
+
+      {/* The deadline, because it is real. See the reasoning in EventCountdown. */}
+      <EventCountdown class="mt-8" tone="dark" />
     </div>
 
     {/* The numbers. A row on a phone too — three short values fit, and splitting
@@ -117,12 +133,12 @@ const FACTS = [
         data-live-cta
       >
         <Icon name="tabler:flame" class="h-6 w-6 shrink-0" aria-hidden="true" />
-        <span>הרשמת הקבוצה שלי</span>
+        <span>אנחנו רוצים להתמודד</span>
       </a>
 
       {/* What it costs to press it, answered before it is pressed — the same
           friction reduction the playable mission below gets. */}
-      <p class="text-sm text-[#b6ada1]">מילוי הטופס לוקח כשלוש דקות · בלי תשלום · בלי התחייבות</p>
+      <p class="text-sm text-[#b6ada1]">כשלוש דקות · בלי תשלום · בלי התחייבות</p>
     </div>
   </div>
 </section>
