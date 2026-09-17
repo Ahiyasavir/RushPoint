@@ -299,7 +299,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   }, [assignedRec?.taskId]);
 
   // Clear a revealed hint / message when the assigned task changes.
-  useEffect(() => { setHint(null); setMsg(null); setFieldGpsFailed(false); }, [assignedRec?.taskId]);
+  useEffect(() => { setHint(null); setMsg(null); setFieldGpsFailed(false); setSentFor(null); }, [assignedRec?.taskId]);
 
   // Wrong-answer cost (change: wrong-answer-cost): what a wrong answer just cost,
   // and the retry lockout it started. The SERVER is the only authority (it
@@ -389,7 +389,23 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   // Every interactive element freezes for viewers; a submission that loses a
   // race with a mid-flight control transfer maps to a friendly localized message.
-  const frozen = busy || readOnly;
+  // ── One submission per press, not per press-until-routing (live run 2026-09-17) ──
+  //
+  // "After I pressed send on the video it DID submit, but it still let me submit it
+  // again, and that wastes memory." Exactly right: `end()` clears `busy` the moment the
+  // callable resolves, while the mission stays on screen until routing hands back the
+  // next one. In that window the control is live with the clip still loaded, so one
+  // more press re-uploads the whole file - 4.6MB in that run.
+  //
+  // Latched per task id, cleared when the mission changes, so the next mission starts
+  // ready to submit.
+  const [sentFor, setSentFor] = useState<string | null>(null);
+
+  // `sentFor` folds in here so ONE successful submit disables every control on the
+  // mission until routing moves on - the live-run report of a video that submitted and
+  // then offered to submit again. Gating at this single site covers photo, audio and
+  // video; gating each entry component separately is how they drift.
+  const frozen = busy || readOnly || (task ? sentFor === task.id : false);
 
   // ── Everyone does their part (change: every-member-plays) ──────────────────
   //
@@ -401,6 +417,26 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // rejection-tells-the-player). `task` is undefined while routing hands back the
   // next mission, and the helper is silent on that, so no notice can flash between
   // missions.
+  // ── A captured photo must outlive a remount (change: photo-survives-a-remount) ──
+  //
+  // Diagnosed from the live run of 2026-09-17, run A20PW01e22Uim8p7XEVK. The player
+  // submitted on סחר חליפין, the picture vanished and they were back on the capture
+  // screen; they shot it again and it went through. The server logs show exactly that:
+  // the upload SUCCEEDED (83KB written to disk at 08:29:41) and no submitStationPhoto
+  // ever followed it. Two independent faults compounded.
+  //
+  // 1. The capture lived only in PhotoEntry's own useState. `task` is null whenever
+  //    routing has not handed back a mission, and TaskRunner early-returns then - so a
+  //    routing round-trip, a reconnect or any refresh unmounted PhotoEntry and took the
+  //    photo with it.
+  // 2. A successful upload was thrown away when the submit that followed it failed, so
+  //    the retry re-uploaded the same picture. That is why the run left an orphan file
+  //    on disk with no submission attached.
+  //
+  // Keyed by task id, like PhotoEntry's own `key`, so a photo can never cross into the
+  // next mission - the failure that `key` was added to prevent. Cleared on success.
+  const capturedRef = useRef<Map<string, { file: File; url?: string }>>(new Map());
+
   const verdict = submissionVerdict(state.team, task?.id);
   const attachedDevices = Math.max(1, new Set(state.team.deviceUids ?? [state.team.id]).size);
   const contributorsNeeded = effectiveContributorRequirement(
@@ -809,8 +845,17 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     clearMsg();
     try {
       showProgress(t.task.uploadingPhoto);
-      const url = await uploadTaskPhoto(file, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
+      // Reuse an upload that already landed. If the SUBMIT failed last time, the bytes
+      // are still on the server; re-sending them would orphan another copy and cost the
+      // player another wait on a connection that has just proved unreliable.
+      const cached = capturedRef.current.get(task!.id);
+      const url = cached?.url
+        ?? await uploadTaskPhoto(file, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
+      if (!cached?.url) capturedRef.current.set(task!.id, { file, url });
       const res = await submitStationPhoto({ ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url });
+      // Landed. Only now is it safe to forget the picture.
+      capturedRef.current.delete(task!.id);
+      setSentFor(task!.id);
       showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
@@ -833,6 +878,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       const res = await submitStationPhoto({
         ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
       });
+      setSentFor(task!.id);
       showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
@@ -853,6 +899,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       const res = await submitStationPhoto({
         ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
       });
+      setSentFor(task!.id);
       showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
@@ -1326,7 +1373,18 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         ) : task.smart?.captureKind === 'video' ? (
           <VideoEntry key={task.id} smart={task.smart} busy={frozen} onSubmit={video} />
         ) : (
-          <PhotoEntry key={task.id} busy={frozen} onSubmit={photo} />
+          <PhotoEntry
+            key={task.id}
+            busy={frozen}
+            onSubmit={photo}
+            // Keyed by task id on BOTH sides, so mission B can never be handed
+            // mission A's picture - the failure the `key` above exists to prevent.
+            restored={capturedRef.current.get(task.id)?.file ?? null}
+            onCaptured={(f) => {
+              if (f) capturedRef.current.set(task.id, { file: f });
+              else capturedRef.current.delete(task.id);
+            }}
+          />
         )}
       </div>
 
@@ -1987,10 +2045,27 @@ function UploadProgress({ busy }: { busy: boolean }) {
   );
 }
 
-function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) => void }) {
+function PhotoEntry({ busy, onSubmit, restored, onCaptured }: {
+  busy: boolean;
+  onSubmit: (file: File) => void;
+  /**
+   * A photo already captured for THIS mission, handed back after a remount.
+   *
+   * Without it the picture died with the component. `task` is null whenever routing
+   * has not yet handed back a mission (see the note on the early returns above), and
+   * TaskRunner returns early then - so a routing round-trip, a reconnect or any state
+   * refresh unmounted PhotoEntry and took the capture with it. Observed in the live
+   * run of 2026-09-17: the file reached the server (83KB on disk, complete) and the
+   * player was looking at an empty capture screen, so they shot it again. The orphan
+   * is still there with no submission attached to it.
+   */
+  restored: File | null;
+  /** Report every capture up, so the copy that survives a remount stays current. */
+  onCaptured: (file: File | null) => void;
+}) {
   const { t } = useT();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(restored);
   const [preview, setPreview] = useState<string | null>(null);
   const [fileErr, setFileErr] = useState('');
   // A full-size fallback (compression failed) is the difference between a 400 KB
@@ -2006,6 +2081,12 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
     setPreview(next);
   }
   useEffect(() => () => { if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current); }, []);
+  // A blob: URL does not survive the unmount that revoked it, so a restored photo
+  // needs a fresh one. Runs once per mount, only when something was handed back.
+  useEffect(() => {
+    if (restored) setPreviewUrl(URL.createObjectURL(restored));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Camera-capture only (change: fix-photo-camera-capture): a hidden
   // `capture="environment"` input opens the camera; there is no gallery picker and
@@ -2067,6 +2148,10 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
       if (!report.compressed) setWarn(t.task.photoNotCompressed);
       const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
       setFile(compressed);
+      // Hand it up BEFORE anything else can unmount this component. A NEW capture also
+      // invalidates any upload already made for this mission, which is what stops a
+      // retry from submitting the picture the player just replaced.
+      onCaptured(compressed);
       setPreviewUrl(URL.createObjectURL(compressed));
       console.info('[rp:photo] ready', { bytes: compressed.size, compressed: report.compressed });
     } catch (err) {
