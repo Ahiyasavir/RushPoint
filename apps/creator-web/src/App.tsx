@@ -49,6 +49,11 @@ const AdminMissionBankPage = lazyWithRetry('adminMissionBank', () => import('./p
 // Contact form messages from the marketing site (change: marketing-site). Same
 // treatment again: admin only, direct URL, gated by the page and by the callable.
 const AdminContactPage = lazyWithRetry('adminContact', () => import('./pages/AdminContactPage'));
+// RushPoint Live team applications (change: rushpoint-live-signup). Same treatment
+// again. Routed at /admin/live-applications rather than /admin/live because this app
+// already has a creator-facing /live (live RUNS), and two neighbouring routes whose
+// names differ by a path segment is how an operator ends up on the wrong screen.
+const AdminLiveApplicationsPage = lazyWithRetry('adminLiveApplications', () => import('./pages/AdminLiveApplicationsPage'));
 // A game shared by link, read-only (change: game-share-link). Registered here for
 // a SIGNED-IN visitor; AuthGate serves the same page to a signed-out one, since
 // the whole point of a share link is that the recipient may not have an account.
@@ -247,6 +252,7 @@ export default function App() {
             <Route path="/admin/templates"     element={<AdminTemplatesPage />} />
             <Route path="/admin/mission-bank"  element={<AdminMissionBankPage />} />
             <Route path="/admin/contact"       element={<AdminContactPage />} />
+            <Route path="/admin/live-applications" element={<AdminLiveApplicationsPage />} />
             <Route path="/p/:token"            element={<SharedGamePage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />

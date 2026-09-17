@@ -1,0 +1,128 @@
+---
+/**
+ * The RushPoint Live call to action on the home page (change: rushpoint-live-signup).
+ *
+ * WHY IT SITS WHERE IT SITS. The home page's own argument is "play a mission and
+ * see for yourself", and that argument is load-bearing — the section order comment
+ * in [lang]/index.astro explains why the playable mission comes before the claims.
+ * This band is a DIFFERENT offer: one dated event, ten teams, a prize. It goes
+ * directly under the hero because it is time-bound and the rest of the page is not,
+ * and it is a band rather than a section so it reads as an announcement rather than
+ * as another feature the product has.
+ *
+ * ADDITIVE, NEVER A GATE, for the same reason the occasion doors below it are:
+ * ignoring it costs a visitor nothing and every section below still renders in
+ * order. It is deliberately NOT a dialog. An interstitial over a page whose whole
+ * point is "try it in thirty seconds" would be the one thing that stops them.
+ *
+ * HEBREW ONLY, on purpose. The event is one race across Jerusalem for teams living
+ * in Israel; an English band would be advertising to people who cannot attend.
+ * The page it links to is Hebrew only for the same reason, and the home page's
+ * English build renders exactly as it did before this existed.
+ *
+ * The copy lives here rather than in src/data/pages/*.json because those files are
+ * scanned in matching pairs by scripts/test-marketing-content.ts — a page that
+ * exists in ONE language by design does not have a counterpart to pair with.
+ */
+import { Icon } from 'astro-icon/components';
+import TopoBackdrop from '~/components/TopoBackdrop.astro';
+
+export interface Props {
+  /** Where the application form lives. Passed in, never spelled inline. */
+  href: string;
+}
+
+const { href } = Astro.props;
+
+/**
+ * The three facts that decide whether someone keeps reading, as numbers.
+ *
+ * A number is the only part of an announcement a person retains from a scroll, and
+ * each of these answers a different question: is there room for us (10), are we the
+ * right shape (5-8), and is it worth the day (1,000).
+ */
+const FACTS = [
+  { value: '10', label: 'קבוצות בלבד', icon: 'tabler:users-group' },
+  { value: '5 עד 8', label: 'חברים בקבוצה', icon: 'tabler:user-check' },
+  { value: '₪1,000', label: 'לקבוצה המנצחת', icon: 'tabler:trophy' },
+];
+---
+
+<section class="relative overflow-hidden bg-[#14110d] text-[#faf7f2]" dir="rtl" lang="he">
+  {/* Texture, not a picture. aria-hidden inside the component itself. */}
+  <TopoBackdrop class="opacity-[0.07]" />
+
+  {/* A warm glow behind the headline so the band has a centre of gravity and does
+      not read as a flat black rectangle dropped onto a warm page. */}
+  <div
+    aria-hidden="true"
+    class="pointer-events-none absolute -top-40 start-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-primary/25 blur-3xl rtl:translate-x-1/2"
+  >
+  </div>
+
+  <div class="relative mx-auto max-w-5xl px-4 py-14 sm:px-6 sm:py-16">
+    <div class="text-center">
+      {/* The dated, scarce thing first. It is the only reason this band interrupts. */}
+      <p
+        class="mx-auto flex w-fit items-center gap-2 rounded-full border border-primary/40 bg-primary/15 px-4 py-1.5 text-sm font-bold tracking-wide text-[#ffb59a]"
+      >
+        <span class="relative flex h-2.5 w-2.5 shrink-0">
+          {/* The pulse is the one piece of motion on the page. It says "happening",
+              which is the entire difference between this and every other section. */}
+          <span
+            class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75 motion-reduce:hidden"
+          ></span>
+          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary"></span>
+        </span>
+        <span>ההרשמה נפתחה · RushPoint Live</span>
+      </p>
+
+      <h2 class="mt-5 font-heading text-4xl font-black leading-tight tracking-tight sm:text-5xl md:text-6xl">
+        המירוץ הגדול
+        <span class="block text-primary">על ירושלים</span>
+      </h2>
+
+      <p class="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-[#d8d0c5] sm:text-xl">
+        יום אחד. עיר שלמה. עשר קבוצות שנבחרות מכל המגזרים בישראל, רצות אחרי משימות בשטח
+        עד שנשארת אחת. מצלמות איתכן לאורך כל הדרך.
+      </p>
+    </div>
+
+    {/* The numbers. A row on a phone too — three short values fit, and splitting
+        them onto three lines would turn the most scannable part into the longest. */}
+    <ul class="mx-auto mt-9 grid max-w-2xl grid-cols-3 gap-3 sm:gap-6">
+      {
+        FACTS.map((fact) => (
+          <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4 text-center sm:px-4">
+            <Icon name={fact.icon} class="mx-auto mb-2 h-6 w-6 text-primary" aria-hidden="true" />
+            <div class="font-heading text-2xl font-black leading-none sm:text-3xl">{fact.value}</div>
+            <div class="mt-1.5 text-xs leading-snug text-[#b6ada1] sm:text-sm">{fact.label}</div>
+          </li>
+        ))
+      }
+    </ul>
+
+    <div class="mt-9 flex flex-col items-center gap-3">
+      {/*
+        A real link, not a button that opens a dialog. Nine answers and a photograph
+        is a form somebody will start on the bus and finish at home, so it needs an
+        address they can send to the rest of the team — which a modal does not have.
+
+        Sized well past the 44px floor on purpose: this is the single thing the band
+        exists to be pressed, usually one-handed, on a phone.
+      */}
+      <a
+        class="inline-flex min-h-14 w-full max-w-sm items-center justify-center gap-2 rounded-full bg-primary px-8 text-lg font-black text-white shadow-lg shadow-primary/25 transition hover:bg-secondary focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/50 sm:w-auto"
+        href={href}
+        data-live-cta
+      >
+        <Icon name="tabler:flame" class="h-6 w-6 shrink-0" aria-hidden="true" />
+        <span>הרשמת הקבוצה שלי</span>
+      </a>
+
+      {/* What it costs to press it, answered before it is pressed — the same
+          friction reduction the playable mission below gets. */}
+      <p class="text-sm text-[#b6ada1]">מילוי הטופס לוקח כשלוש דקות · בלי תשלום · בלי התחייבות</p>
+    </div>
+  </div>
+</section>

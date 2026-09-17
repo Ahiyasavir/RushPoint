@@ -568,3 +568,44 @@ export const listContactMessages = callable<
   { limit?: number },
   { messages: ContactMessage[] }
 >('listContactMessages');
+
+// RushPoint Live team applications (change: rushpoint-live-signup). Admin only and
+// audit logged server-side, for the same reason the contact list is — and more so:
+// every record holds a phone number, a home town, an age range and a photograph of
+// identifiable people, none of whom have an account or any way to see, correct or
+// delete what is stored about them.
+export interface LiveApplication {
+  id: string;
+  teamName: string;
+  teamSize: number;
+  sectors: string[];
+  location: string;
+  howTheyMet: string;
+  ageRange: string;
+  motivation: string;
+  cameraComfort: number;
+  /** As the applicant wrote it — that is the form a person recognises. */
+  phone: string;
+  /** Digits only, `972…`. Two spellings of one number are one number. */
+  phoneNormalized: string;
+  photoContentType: string;
+  photoBytes: number;
+  language: string | null;
+  receivedAt: number;
+  status: string;
+  uid: string | null;
+}
+
+export const listLiveApplications = callable<
+  { limit?: number },
+  { applications: LiveApplication[] }
+>('listLiveApplications');
+
+// The photo is a SEPARATE call on purpose. Half a megabyte per row would make the
+// list unusable, and a photograph of identifiable people — quite possibly minors —
+// should be a deliberate act by a named operator that leaves an audit row behind,
+// not a side effect of opening a page.
+export const getLiveApplicationPhoto = callable<
+  { applicationId: string },
+  { contentType: string; base64: string }
+>('getLiveApplicationPhoto');

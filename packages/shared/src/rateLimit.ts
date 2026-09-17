@@ -99,6 +99,20 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   //   string comparisons; it is worth bounding, but not at that price.
   submitContactMessage: { max: 5, windowMs: 10 * MIN },
   submitContactMessageAttempt: { max: 120, windowMs: 10 * MIN },
+  // RushPoint Live team applications (change: rushpoint-live-signup). The THIRD
+  // unauthenticated write endpoint, and the same pair of budgets for the same
+  // reasons — see the paragraphs above, which govern both.
+  //
+  // The store budget is tighter than the contact form's because a team applies once
+  // to an event that takes ten of them, and because each stored application carries
+  // a photograph: the resource being protected is bigger per unit.
+  //
+  // The attempt budget is WIDER than the store budget by the same large factor. Nine
+  // answers and a photo is a lot to get right in one go, and a group that keeps being
+  // refused is a group actively trying to comply — locking them out over a mistyped
+  // phone number would cost the event a team it wanted.
+  submitLiveApplication: { max: 3, windowMs: 10 * MIN },
+  submitLiveApplicationAttempt: { max: 60, windowMs: 10 * MIN },
   // Share links for an unpublished game (change: game-share-link). `getSharedGame`
   // is the second unauthenticated callable on the platform, keyed on the
   // connection for the same reason the contact form is: there is no uid.

@@ -141,6 +141,24 @@ export function standingPages(): Array<{ language: Language; subject: string; pa
 }
 
 /**
+ * The RushPoint Live application form (change: rushpoint-live-signup).
+ *
+ * Deliberately NOT a member of STANDING_SUBJECTS. A standing page is one that
+ * exists in both languages by definition, and this one does not: the event is a
+ * single race across Jerusalem for teams living in Israel, so an English version
+ * would be advertising to people who cannot attend. Adding it to that list would
+ * make the hreflang cluster, the language switch and the paired content check all
+ * demand a counterpart that should not exist.
+ *
+ * Declared here with the other addresses rather than inline at each link, for the
+ * reason the origins above give: a path spelled inline is a path nobody finds when
+ * it moves.
+ */
+export const LIVE_EVENT_LANGUAGE: Language = 'he';
+export const LIVE_EVENT_PATH = `/${LIVE_EVENT_LANGUAGE}/live/`;
+export const LIVE_EVENT_URL = `${SITE_ORIGIN}${LIVE_EVENT_PATH}`;
+
+/**
  * A direct address to fall back to when the contact form cannot reach the API.
  *
  * Configuration rather than copy: it is the same in both languages, and it must

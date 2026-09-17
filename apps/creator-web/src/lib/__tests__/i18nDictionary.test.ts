@@ -36,6 +36,12 @@ const HEBREW = /[֐-׿]/;
 // copy, the language-toggle label, and the structural direction values.
 // Kept in sync with scripts/check-i18n.ts (the authoritative gate).
 const LATIN_WHITELIST = [
+  // ORDER MATTERS: stripAll removes these in array order, so a multi-word name has to
+  // come BEFORE any shorter name it contains, or its first word is eaten and the rest
+  // is left behind to read as an English leak. 'RushPoint Live' is the flagship
+  // event's own name (change: rushpoint-live-signup) — the same class of thing as
+  // 'Creator Pro', a product name that is not translated in either language.
+  'RushPoint Live',
   'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA',
   // A file format acronym, same class as QR/GPS: Hebrew speakers read and write "CSV",
   // and translating it would make the export button less clear, not more.

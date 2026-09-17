@@ -44,6 +44,17 @@ export const PUBLIC_CALLABLES = {
     + 'bound, and a rate limit keyed on the CONNECTION rather than on anything the caller sends. '
     + 'It returns only { ok }, never a document id, and the collection it writes is closed to '
     + 'clients in both directions.',
+  submitLiveApplication:
+    'The RushPoint Live application form on the marketing site (change: rushpoint-live-signup). '
+    + 'The applicant is a group of friends putting themselves forward for one event, who by '
+    + 'definition have no account and are not signing up for one — requiring authentication would '
+    + 'mean only existing creators could apply, which is the opposite of the point. What '
+    + 'authentication would normally carry is carried by field validation naming the field it '
+    + 'refused, a hard cap on the photo that keeps the body inside the JSON parser\'s own limit, '
+    + 'and TWO rate budgets keyed on the CONNECTION rather than on anything the caller sends. It '
+    + 'returns only { ok }, never a document id, and the collection it writes is closed to clients '
+    + 'in both directions — these records carry phone numbers and a photograph of identifiable '
+    + 'people, so the read half matters more here than it does for the contact form.',
   getSharedGame:
     'A share link for an unpublished game (change: game-share-link). The recipient is by '
     + 'definition someone the creator wants to show a game to, which is very often somebody '

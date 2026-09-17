@@ -37,6 +37,16 @@ export const DIGIT_CODE_RE = /[A-Za-z]*\d[A-Za-z\d]*/g;
  * copy, the language-toggle label, and the structural direction values.
  */
 export const LATIN_WHITELIST = [
+  // ⚠ ORDER MATTERS: stripAll removes these in array order, so a multi-word name
+  // must come BEFORE any shorter name it contains. 'RushPoint Live' listed after
+  // 'RushPoint' would have its first word eaten and leave a bare "Live" behind,
+  // which then reads as an English leak in Hebrew copy — a false failure on a
+  // proper noun, reported against a page that is perfectly correct.
+  //
+  // 'RushPoint Live' is the flagship event's own name (change: rushpoint-live-signup),
+  // the same class of thing as 'Creator Pro': a product name that is not translated
+  // in either language, because it is what the event is CALLED.
+  'RushPoint Live',
   'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA',
   // A file format acronym, same class as QR/GPS above: Hebrew speakers read and write
   // "CSV", and translating it would make the export button LESS clear, not more.

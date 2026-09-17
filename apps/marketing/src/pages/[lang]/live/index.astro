@@ -1,0 +1,723 @@
+---
+/**
+ * RushPoint Live — the team application form (change: rushpoint-live-signup).
+ *
+ * HEBREW ONLY, and the route enforces it rather than the copy: `getStaticPaths`
+ * emits the `he` path and nothing else, so `/en/live/` is a 404 rather than a page
+ * of Hebrew served under an English URL. The event is one race across Jerusalem for
+ * teams living in Israel — an English version would be advertising to people who
+ * cannot attend, and a half-translated one is worse than none. See LIVE_EVENT_PATH
+ * in utils/i18n.ts for why this is deliberately not a STANDING_SUBJECT.
+ *
+ * A PAGE, NOT A DIALOG. Nine answers and a group photograph is a form somebody
+ * starts on the bus and finishes at home after asking four friends how old they
+ * are. That needs an address they can send to the team, which a modal does not
+ * have; it also needs the browser's own back button to mean something.
+ *
+ * The copy is inline rather than in src/data/pages/*.json because those files are
+ * checked in matching language PAIRS, and this page has no counterpart by design.
+ *
+ * ── The photo ────────────────────────────────────────────────────────────────
+ * The upload route on the API requires a Firebase ID token and checks the path
+ * belongs to the caller; an applicant has neither and never will. Rather than open
+ * an anonymous binary endpoint for one form, the picture is downscaled IN THE
+ * BROWSER and travels inside the callable that is already validated and already
+ * rate limited. The downscale is not a nicety: a modern phone photo is 3-8 MB and
+ * `express.json` on the API refuses a body over 1 MB, so an undownscaled upload
+ * would fail at the PARSER, before any code that could name the field.
+ */
+import PageLayout from '~/layouts/PageLayout.astro';
+import TopoBackdrop from '~/components/TopoBackdrop.astro';
+import { Icon } from 'astro-icon/components';
+
+import {
+  API_ORIGIN,
+  CONTACT_FALLBACK_EMAIL,
+  HREFLANG,
+  LIVE_EVENT_LANGUAGE,
+  LIVE_EVENT_URL,
+  OG_LOCALE,
+} from '~/utils/i18n';
+
+export function getStaticPaths() {
+  // ONE language. Returning both would publish an English URL serving Hebrew.
+  return [{ params: { lang: LIVE_EVENT_LANGUAGE } }];
+}
+
+const language = LIVE_EVENT_LANGUAGE;
+
+const metadata = {
+  title: 'RushPoint Live · המירוץ הגדול על ירושלים',
+  description:
+    'עשר קבוצות בלבד, מכל המגזרים בישראל, מתמודדות ביום אחד של מירוץ בשטח על פני ירושלים. ' +
+    'פרס ראשון 1,000 ש"ח. ההרשמה פתוחה לקבוצות של 5 עד 8 חברים.',
+  canonical: LIVE_EVENT_URL,
+  openGraph: { url: LIVE_EVENT_URL, locale: OG_LOCALE[language], type: 'website' },
+};
+
+/**
+ * A page with no counterpart names only ITSELF. An x-default pointing at a page
+ * that does not exist would be a broken promise to a crawler, and an entry for a
+ * language this page is not published in would make the cluster asymmetric.
+ */
+const alternates = [{ hreflang: HREFLANG[language], href: LIVE_EVENT_URL }];
+
+/** The sectors, as the server's own allowlist spells them. */
+const SECTORS = [
+  { value: 'religious', label: 'דתי' },
+  { value: 'secular', label: 'חילוני' },
+  { value: 'mixed', label: 'מעורב' },
+  { value: 'other', label: 'אחר' },
+];
+
+/** The camera scale, 1 = מעדיפים לא, 5 = תנו לנו את המצלמה. */
+const CAMERA = [
+  { value: 1, label: 'מעדיפים בלי' },
+  { value: 2, label: 'קצת ביישנים' },
+  { value: 3, label: 'זורמים' },
+  { value: 4, label: 'נהנים' },
+  { value: 5, label: 'תנו לנו מצלמה' },
+];
+
+/** Shared input styling. One string so nine fields cannot drift from one another. */
+const FIELD =
+  'w-full rounded-xl border border-line bg-page px-4 py-3 text-base text-default ' +
+  'placeholder:text-muted/70 transition focus:border-primary focus:outline-none ' +
+  'focus-visible:ring-2 focus-visible:ring-primary/40 ' +
+  'aria-[invalid=true]:border-red-500 aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-red-500/25';
+---
+
+<PageLayout metadata={metadata} language={language} alternates={alternates}>
+  {/* ── The pitch ───────────────────────────────────────────────────────── */}
+  <section class="relative overflow-hidden bg-[#14110d] text-[#faf7f2]">
+    <TopoBackdrop class="opacity-[0.07]" />
+    <div
+      aria-hidden="true"
+      class="pointer-events-none absolute -top-40 start-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-primary/25 blur-3xl rtl:translate-x-1/2"
+    >
+    </div>
+
+    <div class="relative mx-auto max-w-3xl px-4 py-14 text-center sm:px-6 sm:py-20">
+      <p
+        class="mx-auto flex w-fit items-center gap-2 rounded-full border border-primary/40 bg-primary/15 px-4 py-1.5 text-sm font-bold text-[#ffb59a]"
+      >
+        <Icon name="tabler:flame" class="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>RushPoint Live</span>
+      </p>
+
+      <h1 class="mt-5 font-heading text-4xl font-black leading-tight tracking-tight sm:text-6xl">
+        המירוץ הגדול
+        <span class="block text-primary">על ירושלים</span>
+      </h1>
+
+      <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-[#d8d0c5] sm:text-xl">
+        יום אחד. עיר שלמה. <strong class="font-bold text-[#faf7f2]">עשר קבוצות בלבד</strong>, נבחרות
+        מכל המגזרים בישראל, רצות אחרי משימות אמיתיות בשטח עד שנשארת אחת.
+      </p>
+
+      <ul class="mx-auto mt-8 grid max-w-xl grid-cols-3 gap-3 text-center">
+        <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
+          <div class="font-heading text-2xl font-black sm:text-3xl">10</div>
+          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">קבוצות בלבד</div>
+        </li>
+        <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
+          <div class="font-heading text-2xl font-black sm:text-3xl">5 עד 8</div>
+          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">חברים בקבוצה</div>
+        </li>
+        <li class="rounded-2xl border border-white/10 bg-white/[0.04] px-2 py-4">
+          <div class="font-heading text-2xl font-black sm:text-3xl">₪1,000</div>
+          <div class="mt-1 text-xs text-[#b6ada1] sm:text-sm">לקבוצה המנצחת</div>
+        </li>
+      </ul>
+
+      <p class="mx-auto mt-6 max-w-xl text-base text-[#b6ada1]">
+        ובנוסף: הטבות בלעדיות משיתופי פעולה עם מותגים, ותיעוד מלא של היום. הקבוצות מצולמות
+        לאורך כל המירוץ.
+      </p>
+    </div>
+  </section>
+
+  {/* ── The form ────────────────────────────────────────────────────────── */}
+  <section class="mx-auto max-w-2xl px-4 py-12 sm:px-6 sm:py-16">
+    <h2 class="font-heading text-3xl font-black tracking-tight text-heading sm:text-4xl">
+      ספרו לנו על הקבוצה
+    </h2>
+    <p class="mt-3 text-lg leading-relaxed text-muted">
+      תשע שאלות קצרות. אנחנו בוחרים עשר קבוצות, אז מה שתכתבו כאן הוא מה שיכריע. כתבו כמו
+      שאתם מדברים.
+    </p>
+
+    {/*
+      A real <form> with real labels, and `novalidate` so the page — not the
+      browser's own bubble — decides what a refusal says. The fields, the labels and
+      the copy are all in the static markup, so the page still says what it is for
+      with scripting disabled.
+    */}
+    <form id="live-form" class="mt-10 flex flex-col gap-7" novalidate>
+      {/* Who they are. Not one of the nine questions, but an application nobody can
+          refer to by name cannot be discussed, shortlisted or called back. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-teamName">
+          שם הקבוצה <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">איך נקרא לכם. אפשר שם רציני ואפשר בדיחה פנימית.</p>
+        <input class={FIELD} id="f-teamName" name="teamName" type="text" maxlength="80" required />
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="teamName"></p>
+      </div>
+
+      {/* 1. Team size — the event's own rule, so the control cannot express a
+             number outside it in the first place. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-teamSize">
+          כמה אתם בקבוצה? <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">בין חמישה לשמונה חברים. זה תנאי, לא המלצה.</p>
+        <select class={FIELD} id="f-teamSize" name="teamSize" required>
+          <option value="">בחרו מספר</option>
+          <option value="5">5 חברים</option>
+          <option value="6">6 חברים</option>
+          <option value="7">7 חברים</option>
+          <option value="8">8 חברים</option>
+        </select>
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="teamSize"></p>
+      </div>
+
+      {/* 2. Sectors — checkboxes, because a mixed team is the interesting case. */}
+      <fieldset>
+        <legend class="mb-1.5 font-semibold text-heading">
+          מאיזה מגזר אתם? <span class="text-primary" aria-hidden="true">*</span>
+        </legend>
+        <p class="mb-3 text-sm text-muted">אפשר לסמן יותר מאחד. אנחנו מרכיבים מירוץ מכל הארץ.</p>
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4" data-group="sectors">
+          {
+            SECTORS.map((sector) => (
+              <label class="flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border border-line bg-page px-3 py-2.5 transition has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/40">
+                <input
+                  class="h-5 w-5 shrink-0 accent-[#ff5722]"
+                  type="checkbox"
+                  name="sectors"
+                  value={sector.value}
+                />
+                <span class="text-base font-medium text-default">{sector.label}</span>
+              </label>
+            ))
+          }
+        </div>
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="sectors"></p>
+      </fieldset>
+
+      {/* 3. Where they live. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-location">
+          מאיפה אתם? <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">עיר או אזור. אם אתם מפוזרים, כתבו את כולם.</p>
+        <input
+          class={FIELD}
+          id="f-location"
+          name="location"
+          type="text"
+          maxlength="200"
+          placeholder="למשל: ירושלים, ומשניים מבית שמש"
+          required
+        />
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="location"></p>
+      </div>
+
+      {/* 4. How they know each other. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-howTheyMet">
+          איך אתם מכירים? <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">צבא, תנועה, שכונה, עבודה, משפחה. מה שזה לא יהיה.</p>
+        <textarea class={FIELD} id="f-howTheyMet" name="howTheyMet" rows="3" maxlength="1500" required></textarea>
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="howTheyMet"></p>
+      </div>
+
+      {/* 5. Ages. Free text on purpose: "16-18" and "רובנו בני 30, אחד בן 52" are
+             both real answers and a range picker refuses the second one. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-ageRange">
+          בני כמה אתם? <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">טווח הגילאים בקבוצה.</p>
+        <input
+          class={FIELD}
+          id="f-ageRange"
+          name="ageRange"
+          type="text"
+          maxlength="120"
+          placeholder="למשל: 16 עד 18"
+          required
+        />
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="ageRange"></p>
+      </div>
+
+      {/* 6. The pitch. The field that actually decides it, so it gets the room. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-motivation">
+          למה שנבחר דווקא בכם? <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">
+          זו השאלה שמכריעה. אל תכתבו מה שנשמע טוב. כתבו מה שנכון עליכם.
+        </p>
+        <textarea class={FIELD} id="f-motivation" name="motivation" rows="5" maxlength="2000" required></textarea>
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="motivation"></p>
+      </div>
+
+      {/* 7. On camera. Radios rather than a slider: a slider on a phone has a
+             default value that reads as an answer nobody gave. */}
+      <fieldset>
+        <legend class="mb-1.5 font-semibold text-heading">
+          כמה נוח לכם מול מצלמה? <span class="text-primary" aria-hidden="true">*</span>
+        </legend>
+        <p class="mb-3 text-sm text-muted">המירוץ מצולם. אין תשובה נכונה, רק תשובה כנה.</p>
+        <div class="grid grid-cols-5 gap-1.5 sm:gap-2" data-group="cameraComfort">
+          {
+            CAMERA.map((step) => (
+              <label class="flex min-h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-line bg-page px-1 py-2 text-center transition has-[:checked]:border-primary has-[:checked]:bg-primary/10 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/40">
+                <input class="sr-only" type="radio" name="cameraComfort" value={step.value} />
+                <span class="font-heading text-xl font-black text-default">{step.value}</span>
+                <span class="text-[11px] leading-tight text-muted">{step.label}</span>
+              </label>
+            ))
+          }
+        </div>
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="cameraComfort"></p>
+      </fieldset>
+
+      {/* 8. The one phone number we will actually call. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-phone">
+          טלפון של נציג הקבוצה <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">מספר אחד שעונים בו. נתקשר רק אם נתקדם איתכם.</p>
+        {/*
+          `type="tel"` for the numeric keypad, `dir="ltr"` because a phone number
+          reads left to right inside a right-to-left page, and `text-start` so it
+          still sits against the edge the rest of the form does.
+        */}
+        <input
+          class={`${FIELD} text-start`}
+          id="f-phone"
+          name="phone"
+          type="tel"
+          inputmode="tel"
+          dir="ltr"
+          maxlength="40"
+          autocomplete="tel"
+          placeholder="050 000 0000"
+          required
+        />
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="phone"></p>
+      </div>
+
+      {/* 9. The group photo. */}
+      <div>
+        <label class="mb-1.5 block font-semibold text-heading" for="f-photo">
+          תמונה קבוצתית <span class="text-primary" aria-hidden="true">*</span>
+        </label>
+        <p class="mb-2 text-sm text-muted">
+          לא חייבת להיות מקצועית. סלפי מהטלפון מספיק. רק שנראה מי אתם.
+        </p>
+
+        {/*
+          The real input is hidden and the label is the control, so the button can
+          be a real 56px target instead of the browser's own ~24px file chooser.
+          It stays a <label for>, not a scripted click, so it works from the
+          keyboard and with assistive technology exactly as a file input should.
+        */}
+        <input class="sr-only" id="f-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" required />
+        <label
+          class="flex min-h-14 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line bg-page px-4 py-4 text-base font-semibold text-default transition hover:border-primary hover:bg-primary/5 focus-within:border-primary"
+          for="f-photo"
+        >
+          <Icon name="tabler:camera-plus" class="h-6 w-6 shrink-0 text-primary" aria-hidden="true" />
+          <span data-photo-label>בחרו תמונה מהטלפון</span>
+        </label>
+
+        {/* The preview is the receipt. A file input that says only "photo.jpg" gives
+            no way to notice you picked the wrong picture. */}
+        <div class="mt-3 hidden" data-photo-preview>
+          <img class="max-h-56 w-full rounded-xl object-cover" alt="התמונה שנבחרה" data-photo-image />
+          <p class="mt-1.5 text-sm text-muted" data-photo-meta></p>
+        </div>
+
+        <p class="mt-1.5 hidden text-sm font-medium text-red-600 dark:text-red-400" data-error-for="photo"></p>
+      </div>
+
+      {/*
+        NEVER DISABLED. A disabled primary button explains nothing, cannot fire, and
+        is out of the tab order — so a team with one blank field taps the big orange
+        button and nothing happens at all. It answers instead: the first press marks
+        every missing field and moves focus to the first of them. This is the same
+        conclusion the participant app's join form reached; see the note about
+        `joinReadiness` in CLAUDE.md.
+      */}
+      <button
+        class="mt-2 inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-primary px-8 text-lg font-black text-white shadow-lg shadow-primary/25 transition hover:bg-secondary focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/50 disabled:opacity-70"
+        id="live-submit"
+        type="submit"
+        data-label="שליחת המועמדות"
+        data-sending="שולחים..."
+      >
+        שליחת המועמדות
+      </button>
+
+      {/* One status region for every outcome, announced to assistive technology. It
+          starts EMPTY rather than hidden, so the live region already exists when the
+          first message lands in it. */}
+      <p class="min-h-6 text-base font-medium" id="live-status" role="status" aria-live="polite"></p>
+
+      <p class="text-sm leading-relaxed text-muted">
+        הפרטים נשמרים אצלנו בלבד, משמשים רק לבחירת הקבוצות למירוץ הזה, ולא מועברים לאף גורם
+        אחר. אם משהו לא עובד, כתבו לנו אל 
+        <a class="text-secondary underline hover:text-primary" dir="ltr" href={`mailto:${CONTACT_FALLBACK_EMAIL}`}>
+          {CONTACT_FALLBACK_EMAIL}
+        </a>
+      </p>
+    </form>
+  </section>
+</PageLayout>
+
+<script
+  define:vars={{
+    language,
+    apiOrigin: API_ORIGIN,
+  }}
+>
+  // Page local. No framework, no hydration: the page is readable and says what it
+  // is for without this, and this only exists to check the answers and send them.
+
+  const form = document.getElementById('live-form');
+  const status = document.getElementById('live-status');
+  const submit = document.getElementById('live-submit');
+
+  /**
+   * The photo, downscaled and ready to send. Held here rather than read off the
+   * input at submit time because the downscale is asynchronous: by the time it
+   * resolves the input may hold a different file, and committing the file the
+   * handler STARTED with is how you send the wrong picture.
+   */
+  let photoDataUrl = null;
+
+  // ── Messages ───────────────────────────────────────────────────────────────
+  // Every refusal names the field and says what to do about it. "שדה חובה" on nine
+  // fields at once is a form that scolds; naming the thing is a form that helps.
+
+  const FIELD_ERRORS = {
+    teamName: 'צריך שם לקבוצה',
+    teamSize: 'בחרו כמה אתם, בין חמישה לשמונה',
+    sectors: 'סמנו לפחות מגזר אחד',
+    location: 'כתבו מאיפה אתם',
+    howTheyMet: 'ספרו איך אתם מכירים',
+    ageRange: 'כתבו את טווח הגילאים',
+    motivation: 'זו השאלה שמכריעה, אל תדלגו עליה',
+    cameraComfort: 'בחרו כמה נוח לכם מול מצלמה',
+    phone: 'צריך מספר טלפון נייד ישראלי תקין',
+    photo: 'צרפו תמונה קבוצתית',
+  };
+
+  const PHOTO_ERRORS = {
+    type: 'התמונה צריכה להיות JPG, PNG או WebP',
+    unreadable: 'לא הצלחנו לקרוא את התמונה. נסו תמונה אחרת',
+    huge: 'התמונה גדולה מדי גם אחרי הקטנה. נסו תמונה אחרת',
+  };
+
+  /**
+   * Both `document.querySelector` lookups and the caps below live next to each
+   * other on purpose: they are one contract with the server.
+   *
+   * MAX_BASE64 mirrors PHOTO_MAX_BASE64_CHARS in
+   * functions/src/contact/liveApplicationValidate.ts. It is deliberately a
+   * DUPLICATE and not an import — this is a static Astro page with no build-time
+   * dependency on the functions workspace — so it is set well BELOW the server's
+   * own cap. Erring low means the browser refuses a picture the server would have
+   * taken; erring high means the server refuses one the browser promised, which is
+   * the failure the applicant cannot do anything about.
+   */
+  const MAX_EDGE_PX = 1280;
+  const MAX_BASE64 = 400_000;
+  const QUALITY_LADDER = [0.82, 0.7, 0.58, 0.45];
+
+  // ── Field state ────────────────────────────────────────────────────────────
+
+  function errorSlot(field) {
+    return form.querySelector(`[data-error-for="${field}"]`);
+  }
+
+  /** Every control that carries this field's answer — one input, or a whole group. */
+  function controlsFor(field) {
+    return [...form.querySelectorAll(`[name="${field}"]`)];
+  }
+
+  function clearError(field) {
+    const slot = errorSlot(field);
+    if (slot) {
+      slot.textContent = '';
+      slot.classList.add('hidden');
+    }
+    for (const control of controlsFor(field)) control.removeAttribute('aria-invalid');
+  }
+
+  function markError(field, message) {
+    const slot = errorSlot(field);
+    if (slot) {
+      slot.textContent = message ?? FIELD_ERRORS[field] ?? 'משהו כאן חסר';
+      slot.classList.remove('hidden');
+    }
+    // A checkbox/radio group gets the flag on its first control, which is what a
+    // screen reader lands on when it reaches the group.
+    const controls = controlsFor(field);
+    if (controls[0]) controls[0].setAttribute('aria-invalid', 'true');
+    return controls[0] ?? null;
+  }
+
+  function clearAllErrors() {
+    for (const field of Object.keys(FIELD_ERRORS)) clearError(field);
+  }
+
+  // Clearing as they fix it. Waiting for the next submit to withdraw a complaint
+  // the person has already answered makes the form look broken.
+  form.addEventListener('input', (event) => {
+    const field = event.target?.name;
+    if (field && FIELD_ERRORS[field]) clearError(field);
+  });
+  form.addEventListener('change', (event) => {
+    const field = event.target?.name;
+    if (field && FIELD_ERRORS[field]) clearError(field);
+  });
+
+  // ── The photo ──────────────────────────────────────────────────────────────
+
+  const photoInput = document.getElementById('f-photo');
+  const photoLabel = form.querySelector('[data-photo-label]');
+  const photoPreview = form.querySelector('[data-photo-preview]');
+  const photoImage = form.querySelector('[data-photo-image]');
+  const photoMeta = form.querySelector('[data-photo-meta]');
+
+  const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+  function readAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(new Error('unreadable'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function loadImage(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('unreadable'));
+      img.src = dataUrl;
+    });
+  }
+
+  /**
+   * Downscale to a JPEG small enough to travel inside the callable.
+   *
+   * Always re-encodes as JPEG, even from a JPEG: a 4000px photo straight off a
+   * phone is several megabytes, and `express.json` on the API caps a body at 1 MB.
+   * The quality ladder walks DOWN only as far as it has to, so a small picture
+   * keeps its quality and only a large one pays.
+   */
+  async function downscale(file) {
+    const original = await readAsDataUrl(file);
+    const img = await loadImage(original);
+
+    const scale = Math.min(1, MAX_EDGE_PX / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('unreadable');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of QUALITY_LADDER) {
+      const encoded = canvas.toDataURL('image/jpeg', quality);
+      const base64 = encoded.slice(encoded.indexOf(',') + 1);
+      if (base64.length <= MAX_BASE64) return { dataUrl: encoded, bytes: Math.floor((base64.length * 3) / 4) };
+    }
+    throw new Error('huge');
+  }
+
+  photoInput.addEventListener('change', async () => {
+    clearError('photo');
+    photoDataUrl = null;
+    photoPreview.classList.add('hidden');
+
+    const file = photoInput.files?.[0];
+    if (!file) {
+      photoLabel.textContent = 'בחרו תמונה מהטלפון';
+      return;
+    }
+
+    // The type is read from the FILE, never from its name: an extension is a claim
+    // the sender makes about bytes we already hold. The server checks again.
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      photoLabel.textContent = 'בחרו תמונה מהטלפון';
+      photoInput.value = '';
+      markError('photo', PHOTO_ERRORS.type);
+      return;
+    }
+
+    photoLabel.textContent = 'מקטינים את התמונה...';
+    try {
+      const { dataUrl, bytes } = await downscale(file);
+      photoDataUrl = dataUrl;
+      photoLabel.textContent = 'החלפת התמונה';
+      photoImage.src = dataUrl;
+      photoMeta.textContent = `התמונה מוכנה · ${Math.round(bytes / 1024)} KB`;
+      photoPreview.classList.remove('hidden');
+    } catch (e) {
+      photoLabel.textContent = 'בחרו תמונה מהטלפון';
+      photoInput.value = '';
+      markError('photo', e?.message === 'huge' ? PHOTO_ERRORS.huge : PHOTO_ERRORS.unreadable);
+    }
+  });
+
+  // ── Validation ─────────────────────────────────────────────────────────────
+
+  /**
+   * The same rule the server applies, so a number that will be refused is refused
+   * here — where the person can still see the field. The server remains the
+   * authority; this exists so they are not told at the END of nine answers.
+   */
+  function phoneIsDialable(raw) {
+    const digits = String(raw).replace(/[^0-9]/g, '');
+    return /^05\d{8}$/.test(digits) || /^9725\d{8}$/.test(digits) || /^009725\d{8}$/.test(digits);
+  }
+
+  /** Every missing answer, in the order they appear on the page. */
+  function missingFields(data) {
+    const missing = [];
+    const text = (field) => String(data.get(field) ?? '').trim();
+
+    if (!text('teamName')) missing.push('teamName');
+    if (!text('teamSize')) missing.push('teamSize');
+    if (data.getAll('sectors').length === 0) missing.push('sectors');
+    if (!text('location')) missing.push('location');
+    if (!text('howTheyMet')) missing.push('howTheyMet');
+    if (!text('ageRange')) missing.push('ageRange');
+    if (!text('motivation')) missing.push('motivation');
+    if (!text('cameraComfort')) missing.push('cameraComfort');
+    if (!text('phone') || !phoneIsDialable(text('phone'))) missing.push('phone');
+    if (!photoDataUrl) missing.push('photo');
+
+    return missing;
+  }
+
+  // ── Status ─────────────────────────────────────────────────────────────────
+
+  function show(text, ok) {
+    status.textContent = text;
+    status.className = ok
+      ? 'min-h-6 text-base font-medium text-green-700 dark:text-green-400'
+      : 'min-h-6 text-base font-medium text-red-700 dark:text-red-400';
+  }
+
+  // ── Submit ─────────────────────────────────────────────────────────────────
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAllErrors();
+    status.textContent = '';
+
+    const data = new FormData(form);
+    const missing = missingFields(data);
+
+    if (missing.length > 0) {
+      // Mark every one of them, then move to the FIRST — so the person sees the
+      // full extent of what is left and lands on the one to do next.
+      let firstControl = null;
+      for (const field of missing) {
+        const control = markError(field);
+        if (!firstControl) firstControl = control;
+      }
+      show(missing.length === 1 ? 'חסרה תשובה אחת' : `חסרות ${missing.length} תשובות`, false);
+      firstControl?.focus?.({ preventScroll: true });
+      firstControl?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    submit.disabled = true;
+    submit.textContent = submit.dataset.sending;
+
+    try {
+      const response = await fetch(`${apiOrigin}/submitLiveApplication`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data: {
+            teamName: String(data.get('teamName') ?? '').trim(),
+            teamSize: Number(data.get('teamSize')),
+            sectors: data.getAll('sectors').map(String),
+            location: String(data.get('location') ?? '').trim(),
+            howTheyMet: String(data.get('howTheyMet') ?? '').trim(),
+            ageRange: String(data.get('ageRange') ?? '').trim(),
+            motivation: String(data.get('motivation') ?? '').trim(),
+            cameraComfort: Number(data.get('cameraComfort')),
+            phone: String(data.get('phone') ?? '').trim(),
+            photo: photoDataUrl,
+            language,
+          },
+        }),
+      });
+
+      if (response.ok) {
+        // Replace the form with the confirmation rather than clearing it. A blank
+        // form under a success line is indistinguishable from one that failed and
+        // wiped what they wrote.
+        form.innerHTML =
+          '<div class="rounded-2xl border border-line bg-surface-tint p-8 text-center">' +
+          '<p class="font-heading text-2xl font-black text-heading">המועמדות נשלחה</p>' +
+          '<p class="mt-3 text-lg leading-relaxed text-muted">קיבלנו אתכם. אנחנו עוברים על כל ' +
+          'הקבוצות ומודיעים לנבחרות בטלפון שהשארתם. בהצלחה.</p>' +
+          '</div>';
+        form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+
+      // The callable transport reports its reason in the body, and this server
+      // puts the FIELD NAME at the front of an invalid-argument message. Carrying
+      // that through is the difference between a form that can be completed and
+      // one that says "something was wrong" nine answers in.
+      let code = '';
+      let message = '';
+      try {
+        const body = await response.json();
+        code = body?.error?.status ?? '';
+        message = String(body?.error?.message ?? '');
+      } catch {
+        code = '';
+      }
+
+      if (code === 'INVALID_ARGUMENT') {
+        const field = message.split(':')[0]?.trim();
+        if (FIELD_ERRORS[field]) {
+          const control = markError(field);
+          show('משהו אחד עוד לא תקין', false);
+          control?.focus?.({ preventScroll: true });
+          control?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+        } else {
+          show('חלק מהפרטים לא התקבלו. עברו על הטופס ונסו שוב', false);
+        }
+      } else if (code === 'RESOURCE_EXHAUSTED') {
+        show('נשלחו יותר מדי בקשות מהחיבור הזה. נסו שוב בעוד כמה דקות', false);
+      } else {
+        show('משהו השתבש בשליחה. נסו שוב, ואם זה חוזר כתבו לנו במייל', false);
+      }
+    } catch {
+      // fetch throws on a network failure, which is the one case where the server
+      // never saw the application at all.
+      show('אין חיבור לרשת. הפרטים נשמרו בטופס, נסו שוב כשיחזור', false);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = submit.dataset.label;
+    }
+  });
+</script>

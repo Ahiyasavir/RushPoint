@@ -12203,6 +12203,154 @@ async function main() {
       JSON.stringify((listed?.messages ?? [])[0] ?? {}).slice(0, 140));
   });
 
+  // ── RushPoint Live applications (change: rushpoint-live-signup) ────────────
+  // The event's application form, and the platform's THIRD unauthenticated write
+  // endpoint. Everything asserted for the contact form above applies here, plus
+  // the two things that are new: a photo travelling inside the callable, and a
+  // read path split in two so the sensitive half is its own audited act.
+  await scenario('live applications (public submit, photo bounded, admin only read)', async () => {
+    // No sign in at all, which is the actual condition on the marketing site.
+    const applicant = makeParty('liveApplicant');
+
+    // A tiny but REAL data URL, built the way the browser builds one. 64 base64
+    // characters, a multiple of four, so it is well formed rather than merely short.
+    const photo = `data:image/jpeg;base64,${'A'.repeat(64)}`;
+
+    const valid = {
+      teamName: 'הנשרים',
+      teamSize: 6,
+      sectors: ['religious', 'secular'],
+      location: 'ירושלים',
+      howTheyMet: 'נפגשנו בתנועת הנוער לפני חמש שנים.',
+      ageRange: '16-18',
+      motivation: 'כי אנחנו מכירים כל סמטה בעיר ולא נוותר עד השורה האחרונה.',
+      cameraComfort: 4,
+      phone: '054-123-4567',
+      photo,
+      language: 'he',
+    };
+
+    const ok = await applicant.call('submitLiveApplication', valid);
+    check('an unauthenticated team can apply', ok?.ok === true, JSON.stringify(ok));
+    check('the response reveals no document id or storage path',
+      !/liveApplications|\//i.test(JSON.stringify(ok ?? {})),
+      JSON.stringify(ok));
+
+    // The event's own rule. A team outside 5-8 cannot compete as a team, so the
+    // server must refuse it rather than leaving it to the form to remember.
+    await expectError('a team of four is refused',
+      applicant.call('submitLiveApplication', { ...valid, teamSize: 4 }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a team of nine is refused',
+      applicant.call('submitLiveApplication', { ...valid, teamSize: 9 }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    await expectError('an unknown sector is refused',
+      applicant.call('submitLiveApplication', { ...valid, sectors: ['pirates'] }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a team naming no sector is refused',
+      applicant.call('submitLiveApplication', { ...valid, sectors: [] }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a phone number that cannot be dialled is refused',
+      applicant.call('submitLiveApplication', { ...valid, phone: '02-1234567' }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('an off-scale camera answer is refused',
+      applicant.call('submitLiveApplication', { ...valid, cameraComfort: 9 }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('an application with no photo is refused',
+      applicant.call('submitLiveApplication', { ...valid, photo: null }),
+      { codeIn: ['functions/invalid-argument'] });
+    // A filename is a claim the sender makes about bytes we already hold; the
+    // content type is read from the data URL itself, so a non-image is refused
+    // however it is labelled.
+    await expectError('a non-image data URL is refused',
+      applicant.call('submitLiveApplication', { ...valid, photo: `data:application/pdf;base64,${'A'.repeat(64)}` }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // The refusal has to NAME the field. Nine answers and a photo is a lot to get
+    // right, and "something was wrong" is not a thing an applicant can act on.
+    let named = null;
+    try {
+      await applicant.call('submitLiveApplication', { ...valid, teamSize: 4 });
+    } catch (e) {
+      named = e;
+    }
+    check('a refusal names the field the applicant must fix',
+      /teamSize/.test(named?.message ?? ''),
+      named?.message ?? 'no error at all');
+
+    // Eight refusals have just happened. Charged against the budget that governs
+    // STORED applications, a team actively trying to comply would now be locked
+    // out of the event. The two budgets exist precisely so this still works.
+    const afterMistakes = await applicant.call('submitLiveApplication', {
+      ...valid, teamName: 'אחרי הטעויות',
+    });
+    check('a refused application does not consume the budget for accepted ones',
+      afterMistakes?.ok === true, JSON.stringify(afterMistakes));
+
+    // Reading them back is admin only, in BOTH halves.
+    await expectError('a stranger cannot list applications',
+      applicant.call('listLiveApplications', {}),
+      { codeIn: ['functions/permission-denied', 'functions/unauthenticated'] });
+    await expectError('an ordinary signed in creator cannot list applications',
+      creator.call('listLiveApplications', {}),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('a stranger cannot fetch a group photo',
+      applicant.call('getLiveApplicationPhoto', { applicationId: 'anything' }),
+      { codeIn: ['functions/permission-denied', 'functions/unauthenticated'] });
+
+    const listed = await platformAdmin.call('listLiveApplications', {});
+    check('an admin can list the applications', Array.isArray(listed?.applications),
+      JSON.stringify(listed).slice(0, 120));
+    const mine = (listed?.applications ?? []).find((a) => a.teamName === 'הנשרים');
+    check('the application that was accepted is actually there', Boolean(mine),
+      `${(listed?.applications ?? []).length} application(s)`);
+    check('every spelling of one phone number is stored as one number',
+      mine?.phoneNormalized === '972541234567', String(mine?.phoneNormalized));
+    check('ordering does not depend on a value the sender supplied',
+      typeof mine?.receivedAt === 'number' && mine.receivedAt > 0, String(mine?.receivedAt));
+
+    // The list must not drag the images through it. Half a megabyte per row would
+    // make the admin screen unusable, and the photo is the sensitive half.
+    // The detail is printed on a PASS too, so it states what was MEASURED rather
+    // than what would have been wrong — a pass line reading like a failure is how a
+    // green run gets misread as a red one.
+    const listedJson = JSON.stringify(listed?.applications ?? []);
+    check('the list carries no image bytes',
+      !/[A-Za-z0-9+/]{200,}/.test(listedJson),
+      `${listedJson.length} chars for ${(listed?.applications ?? []).length} application(s)`);
+
+    const fetched = await platformAdmin.call('getLiveApplicationPhoto', { applicationId: mine?.id });
+    check('an admin can fetch one group photo by id',
+      fetched?.base64?.length === 64 && fetched?.contentType === 'image/jpeg',
+      JSON.stringify({ type: fetched?.contentType, len: fetched?.base64?.length }));
+    await expectError('a photo request naming no application is refused',
+      platformAdmin.call('getLiveApplicationPhoto', {}),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a photo request for an application that does not exist is refused',
+      platformAdmin.call('getLiveApplicationPhoto', { applicationId: 'no-such-application' }),
+      { codeIn: ['functions/not-found'] });
+
+    // The rate limit, and that nothing in the payload can move it: a key the sender
+    // chooses is a key the sender can rotate.
+    let exhausted = null;
+    for (let i = 0; i < 20 && !exhausted; i++) {
+      try {
+        await applicant.call('submitLiveApplication', { ...valid, teamName: `Flood ${i}` });
+      } catch (e) {
+        exhausted = e;
+      }
+    }
+    check('a flood of applications is eventually refused',
+      exhausted?.code === 'functions/resource-exhausted',
+      exhausted ? `${exhausted.code} :: ${exhausted.message}` : 'never refused');
+    await expectError('a forged client identifier does not reset the limit',
+      applicant.call('submitLiveApplication', {
+        ...valid, teamName: 'Forged', clientId: 'someone-else', ip: '10.0.0.1', uid: 'not-me',
+      }),
+      { codeIn: ['functions/resource-exhausted'] });
+  });
+
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();
     check('coverage: introspected the deployed callable set', deployed.length > 0, `${deployed.length} callables`);

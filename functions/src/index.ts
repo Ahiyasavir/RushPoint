@@ -86,6 +86,16 @@ export { listPlatformUsers, recordEngagement, setUserNote } from './admin/index'
 // UNAUTHENTICATED by necessity and is declared in PUBLIC_CALLABLES with its
 // reason; listContactMessages is admin only and audit logged.
 export { submitContactMessage, listContactMessages } from './contact/index';
+// RushPoint Live team applications (change: rushpoint-live-signup). Same shape and
+// the same reasoning as the contact form above: submitLiveApplication is
+// UNAUTHENTICATED by necessity and declared in PUBLIC_CALLABLES with its reason,
+// while listLiveApplications and getLiveApplicationPhoto are admin only and audit
+// logged. The photo is a separate callable because it is the sensitive half.
+export {
+  submitLiveApplication,
+  listLiveApplications,
+  getLiveApplicationPhoto,
+} from './contact/liveApplication';
 // Admin-managed game templates (change: admin-manage-game-templates).
 export { setGameTemplateFlag, listAdminTemplates, listGameTemplates, createGameFromTemplate } from './admin/templates';
 // Admin edits to the smart-build mission bank (change: admin-editable-mission-bank).

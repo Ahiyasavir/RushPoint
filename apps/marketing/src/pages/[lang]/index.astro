@@ -11,7 +11,19 @@ import GamePlanner from '~/components/widgets/GamePlanner.astro';
 import FAQs from '~/components/widgets/FAQs.astro';
 import { Icon } from 'astro-icon/components';
 
-import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, PLAYER_ORIGIN, type Language } from '~/utils/i18n';
+import LiveEventBanner from '~/components/widgets/LiveEventBanner.astro';
+
+import {
+  LANGUAGES,
+  LIVE_EVENT_LANGUAGE,
+  LIVE_EVENT_PATH,
+  alternatesFor,
+  pageUrl,
+  pagePath,
+  OG_LOCALE,
+  PLAYER_ORIGIN,
+  type Language,
+} from '~/utils/i18n';
 import { landingPageUrl, mediaLabels, CREATOR_BUILD_URL } from '~/navigation';
 import { pageContent } from '~/utils/pages';
 import Media from '~/components/Media.astro';
@@ -73,6 +85,21 @@ const metadata = {
       { text: t.secondaryAction, href: `#${TRY_MISSION_ID}` },
     ]}
   />
+
+  {
+    /*
+      The one dated, scarce offer on a page that is otherwise evergreen
+      (change: rushpoint-live-signup). Directly under the hero because that is
+      where a time-bound announcement has to be to do its job, and ABOVE the
+      occasion doors because those are four evergreen ways in and this is a
+      deadline.
+
+      Hebrew only: the race is one day in Jerusalem for teams living in Israel,
+      so the English home page renders exactly as it did before. The guard is the
+      language, not a flag, so there is nothing to forget to turn off.
+    */
+    language === LIVE_EVENT_LANGUAGE && <LiveEventBanner href={LIVE_EVENT_PATH} />
+  }
 
   {
     /*

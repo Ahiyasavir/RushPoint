@@ -324,6 +324,31 @@ service cloud.firestore {
     }
 
 
+    // ── liveApplications/{applicationId} ─────────────────────────────────────
+    //    Team applications for the RushPoint Live event (change:
+    //    rushpoint-live-signup). Written by the unauthenticated
+    //    submitLiveApplication callable, read by the admin-only
+    //    listLiveApplications and getLiveApplicationPhoto, all through the Admin SDK.
+    //
+    //    Closed to clients in BOTH directions, and the read half matters MORE here
+    //    than it does for contactMessages one block up. These documents carry a
+    //    phone number, a home town, an age range and — in the `photo` subcollection
+    //    — a photograph of a group of identifiable people, many of whom will be
+    //    minors. An open read would not leak a message; it would publish a roster.
+    //
+    //    The recursive wildcard is load-bearing: a rule on the parent alone says
+    //    nothing about a subcollection, so photo/{photoId} would fall through to
+    //    whatever the catch-all at the top of this file decides. Naming it here
+    //    means the photo cannot outlive the closure of the record it belongs to.
+    match /liveApplications/{applicationId} {
+      allow read, write: if false;
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+
     // ── gameShareLinks/{token} ───────────────────────────────────────────────
     //    Read-only share links for an UNPUBLISHED game (change: game-share-link).
     //    Written by createGameShareLink / revokeGameShareLink, read by
