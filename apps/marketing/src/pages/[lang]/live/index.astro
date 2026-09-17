@@ -49,9 +49,12 @@ const language = LIVE_EVENT_LANGUAGE;
 
 const metadata = {
   title: 'RushPoint Live · המירוץ הגדול על ירושלים',
+  // This is what WhatsApp and Google show when the link is SHARED, which is how
+  // most of these applications will actually arrive — so it carries the same
+  // promise the page does, and names no prize the page does not name either.
   description:
-    'עשר קבוצות בלבד, מכל המגזרים בישראל, מתמודדות ביום אחד של מירוץ בשטח על פני ירושלים. ' +
-    'פרס ראשון 1,000 ש"ח. ההרשמה פתוחה לקבוצות של 5 עד 8 חברים.',
+    'עשר קבוצות בלבד, מכל המגזרים בישראל, מתמודדות בערב אחד של מירוץ בשטח על פני ירושלים. ' +
+    'יום חמישי, 22 באוקטובר. ההרשמה פתוחה לקבוצות של 5 עד 8 חברים.',
   canonical: LIVE_EVENT_URL,
   openGraph: { url: LIVE_EVENT_URL, locale: OG_LOCALE[language], type: 'website' },
 };
