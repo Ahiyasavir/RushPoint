@@ -48,6 +48,7 @@ export interface LiveCopy {
   blurb: string;
   facts: LiveFact[];
   cta: string;
+  jumpToForm: string;
   ctaNote: string;
   prize: string;
 
@@ -151,6 +152,7 @@ export const liveCopy: Record<Language, LiveCopy> = {
       },
     ],
     cta: 'אנחנו רוצים להתמודד',
+    jumpToForm: 'קחו אותי לשאלון',
     ctaNote: 'כשלוש דקות · בלי תשלום · בלי התחייבות',
     prize:
       'לקבוצה המנצחת מחכה פרס. מה הוא בדיוק נחשוף לקראת המירוץ, יחד עם ההטבות משיתופי הפעולה עם המותגים. מה שכבר סגור: הערב הזה מצולם מהתחלה ועד הסוף, וכל קבוצה יוצאת איתו בידיים.',
@@ -341,6 +343,7 @@ export const liveCopy: Record<Language, LiveCopy> = {
       },
     ],
     cta: 'We want in',
+    jumpToForm: 'Take me to the questions',
     ctaNote: 'About three minutes · Free · No commitment',
     prize:
       'There is a prize waiting for the winning team. Exactly what it is, we will reveal closer to the race, along with the perks from our brand partners. What is already settled: the whole evening is filmed, start to finish, and every team walks away with the footage.',

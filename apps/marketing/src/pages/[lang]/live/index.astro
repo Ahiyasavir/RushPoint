@@ -151,6 +151,33 @@ const FIELD =
       {/* The deadline. Real, anchored, and printed beside the date it counts to. */}
       <EventCountdown class="mt-9" tone="dark" language={language} />
 
+      {/*
+        The way in, at the TOP (change: rushpoint-live-findability).
+
+        Measured before this existed: on a 375x812 phone the first question sat
+        1693px down — 2.1 full screens — behind the hero, the countdown, three
+        stat tiles, the prize paragraph and the "what we are looking for" section.
+        During the first real intake people could not find the questions. They had
+        already decided to apply; they simply could not locate the form.
+
+        Everything above the questions earns its place, because it is what
+        convinces somebody to apply at all. So the fix is not to cut the pitch —
+        it is to stop making a person who has ALREADY decided scroll through an
+        argument they no longer need.
+
+        A real anchor, not a scripted scroll, so it works with scripting off and a
+        long press can still open it in a new tab. `scroll-margin-top` on the
+        target does the rest; see the note there.
+      */}
+      <a
+        class="mt-8 inline-flex min-h-14 w-full max-w-sm items-center justify-center gap-2 rounded-full bg-primary px-8 text-lg font-black text-white shadow-lg shadow-primary/25 transition hover:bg-secondary focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/50 sm:w-auto"
+        href="#apply"
+        data-hero-jump
+      >
+        <Icon name="tabler:arrow-down" class="h-6 w-6 shrink-0" aria-hidden="true" />
+        <span>{t.jumpToForm}</span>
+      </a>
+
       <ul class="mx-auto mt-9 grid max-w-xl grid-cols-3 gap-3 text-center">
         {
           t.facts.map((fact) => (
@@ -219,7 +246,12 @@ const FIELD =
   </section>
 
   {/* ── The form ────────────────────────────────────────────────────────── */}
-  <section class="mx-auto max-w-2xl px-4 py-12 sm:px-6 sm:py-16">
+  {/*
+    `scroll-mt-20` is not decoration. The progress bar below is `sticky top-0`, so
+    a jump to this anchor would otherwise park the heading UNDERNEATH it and land
+    the visitor looking at a bar with no heading above it.
+  */}
+  <section class="mx-auto max-w-2xl scroll-mt-20 px-4 py-12 sm:px-6 sm:py-16" id="apply">
     <h2 class="font-heading text-3xl font-black tracking-tight text-heading sm:text-4xl">
       {t.formTitle}
     </h2>
