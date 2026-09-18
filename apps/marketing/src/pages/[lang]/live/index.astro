@@ -199,6 +199,18 @@ const FIELD =
         promise, and what is CERTAIN does the persuading instead.
       */}
       <p class="mx-auto mt-7 max-w-xl text-base leading-relaxed text-[#b6ada1]">{t.prize}</p>
+
+      {/*
+        Who is eligible, said in the hero rather than left to be inferred from a
+        placeholder. Teams read the old example in the age field, "16 עד 18", as
+        the permitted WINDOW and assumed anyone older was excluded — a sample
+        answer in a form is read as a rule, especially when it is the only number
+        on the subject anywhere on the page.
+      */}
+      <p class="mx-auto mt-4 flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-bold text-[#faf7f2]">
+        <Icon name="tabler:users" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <span>{t.eligibility}</span>
+      </p>
     </div>
   </section>
 
@@ -263,6 +275,8 @@ const FIELD =
       it mean something when it finally appears.
     */}
     <p class="mt-3 text-sm font-semibold text-heading">{t.allRequired}</p>
+    {/* Repeated here because the hero jump button skips the hero entirely. */}
+    <p class="mt-1 text-sm font-semibold text-heading">{t.eligibility}</p>
 
     {/*
       The progress bar (change: rushpoint-live-urgency).

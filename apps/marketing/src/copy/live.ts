@@ -69,6 +69,7 @@ export interface LiveCopy {
   formTitle: string;
   formIntro: string;
   allRequired: string;
+  eligibility: string;
   optionalTag: string;
   choosePrompt: string;
   questions: LiveQuestion[];
@@ -130,7 +131,7 @@ export const liveCopy: Record<Language, LiveCopy> = {
   he: {
     title: 'RushPoint Live · המירוץ הגדול על ירושלים',
     description:
-      'עשר קבוצות בלבד, מכל המגזרים בישראל, מתמודדות בערב אחד של מירוץ בשטח על פני ירושלים. יום חמישי, 22 באוקטובר. ההרשמה פתוחה לקבוצות של 5 עד 8 חברים.',
+      'עשר קבוצות בלבד, מכל המגזרים בישראל, מתמודדות בערב אחד של מירוץ בשטח על פני ירושלים. יום חמישי, 22 באוקטובר. ההרשמה פתוחה לקבוצות של 5 עד 8 חברים, מגיל 16 ומעלה.',
 
     badge: 'האודישן פתוח · RushPoint Live',
     headlineTop: 'המירוץ הגדול',
@@ -184,6 +185,7 @@ export const liveCopy: Record<Language, LiveCopy> = {
     formIntro:
       'אין פה תשובות נכונות ואין מה להתכונן. אנחנו קוראים כל מועמדות, אז כתבו כמו שאתם מדברים. ככל שתהיו יותר אתם, כך נדע טוב יותר אם אתם הקבוצה שאנחנו מחפשים.',
     allRequired: 'כל השאלות קצרות. התמונה בסוף היא רשות.',
+    eligibility: 'המירוץ פתוח מגיל 16 ומעלה, בלי גיל מקסימום.',
     optionalTag: 'רשות',
     choosePrompt: 'בחרו מספר',
     questions: [
@@ -218,8 +220,8 @@ export const liveCopy: Record<Language, LiveCopy> = {
       {
         n: '06',
         title: 'בני כמה אתם?',
-        hint: 'טווח הגילאים בקבוצה. אין גיל נכון.',
-        placeholder: '16 עד 18',
+        hint: 'מגיל 16 ומעלה, ואין גיל מקסימום. כתבו את הטווח שלכם, מהצעיר ועד המבוגר.',
+        placeholder: 'הצעיר ביותר עד המבוגר ביותר',
       },
       {
         n: '07',
@@ -321,7 +323,7 @@ export const liveCopy: Record<Language, LiveCopy> = {
   en: {
     title: 'RushPoint Live · The big race across Jerusalem',
     description:
-      'Ten teams only, from every part of Israeli society, racing across Jerusalem for one evening. Thursday 22 October. Open to teams of 5 to 8 people.',
+      'Ten teams only, from every part of Israeli society, racing across Jerusalem for one evening. Thursday 22 October. Open to teams of 5 to 8 people aged 16 and over.',
 
     badge: 'Auditions are open · RushPoint Live',
     headlineTop: 'The big race',
@@ -375,6 +377,7 @@ export const liveCopy: Record<Language, LiveCopy> = {
     formIntro:
       'There are no right answers here and nothing to prepare. We read every application, so write the way you talk. The more you sound like yourselves, the better we can tell whether you are the team we are looking for.',
     allRequired: 'All of them are short. The photo at the end is optional.',
+    eligibility: 'Open to anyone aged 16 and over. There is no upper age limit.',
     optionalTag: 'optional',
     choosePrompt: 'Choose a number',
     questions: [
@@ -409,8 +412,8 @@ export const liveCopy: Record<Language, LiveCopy> = {
       {
         n: '06',
         title: 'How old are you?',
-        hint: 'The age range in the team. There is no right age.',
-        placeholder: '16 to 18',
+        hint: 'Sixteen and over, with no upper limit. Give us your own range, youngest to oldest.',
+        placeholder: 'Youngest to oldest',
       },
       {
         n: '07',
