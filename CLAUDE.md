@@ -883,6 +883,15 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   is **corruption** rather than staleness. `pruneRunPII` deletes the disk file alongside the
   Firestore sweep, unconditionally, so the 90-day promise holds in whichever mode recorded the run.
   Pinned by `scripts/test-track-store.ts`.
+- **Device presence is in-process too — the SIXTH single-process module.**
+  `functions/src/devicePresenceStore.ts` remembers when each attached phone last called
+  `getMyTeamState` (zero Firestore reads or writes), and `getMyTeamState` returns it as
+  `devicePresence` so the other phones can tell the team its sending phone went quiet
+  (`senderQuiet` in `packages/shared/src/senderQuiet.ts`). Under several processes a phone would
+  look quiet to whichever worker never saw it, so the verdict fails OPEN: unknown or missing
+  presence (including an empty store after a restart) is NEVER "quiet". Same rule as the other
+  five — never run the API as more than one process while this is relied on. Pinned by
+  `scripts/test-device-presence-store.ts` + `scripts/test-sender-quiet.ts`.
 - **`enforceRateLimit` no longer persists anything.** It used to run a Firestore transaction (1
   read + 1 WRITE) on EVERY rate-limited callable — ~1,516 of each in nine minutes of one 29-person
   run, against a 50,000-read / 20,000-write daily quota, which is how the 2026-08-26 exam run hit

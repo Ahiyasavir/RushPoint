@@ -33,6 +33,8 @@ export interface RawSubmission {
   reviewedAt?: string;
   reviewedBy?: string;
   reviewNote?: string;
+  /** Which attached phone sent it (team-phones-simple D2). Server-stamped. */
+  submittedBy?: { uid?: unknown; name?: unknown } | null;
 }
 
 /** The shape a team doc needs to have for the queue (a structural subset of Team). */
@@ -54,6 +56,9 @@ export interface SubmissionRow {
   status: SubmissionStatus;
   reviewedAt: string;
   reviewNote: string;
+  /** Name of the phone that sent it, or '' when unknown or when it is just the
+   *  team's own name (the founding phone) — repeating the team name is noise. */
+  senderName: string;
 }
 
 /** The stable identity of a row. MUST match the key the consoles already use for
@@ -152,7 +157,17 @@ function toRow(team: SubmissionTeamDoc, taskId: string, sub: RawSubmission): Sub
     status: normalizeStatus(sub.status),
     reviewedAt: typeof sub.reviewedAt === 'string' ? sub.reviewedAt : '',
     reviewNote: typeof sub.reviewNote === 'string' ? sub.reviewNote : '',
+    senderName: submissionSenderName(team, sub),
   };
+}
+
+/** The sender line for a submission, shared by both consoles so they agree: the
+ *  phone's name, or '' when unknown or equal to the team's own name. */
+export function submissionSenderName(team: { displayName?: string }, sub: Pick<RawSubmission, 'submittedBy'>): string {
+  const raw = sub.submittedBy && typeof sub.submittedBy === 'object' ? sub.submittedBy.name : undefined;
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  if (!name || name === team.displayName?.trim()) return '';
+  return name;
 }
 
 /** Every submission across every team, unfiltered and unsorted. */

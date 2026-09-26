@@ -28,7 +28,7 @@ import {
 } from '@rushpoint/shared';
 import {
   OTHER_REASON, reasonsForDelta, resolveReason, parseAdjustAmount, type ScoreReasonId,
-  newPendingKeys, submissionKey,
+  newPendingKeys, submissionKey, submissionSenderName,
   // skip-keeps-the-stage: the confirm states the server's own dry run.
   skipPreviewLines, type SkipPreviewLine,
   // send-team-back: the same targets the organizer's console offers.
@@ -62,6 +62,8 @@ interface PendingSubmission {
   submittedAt: string;
   // audio-tasks: how to render the submission (absent ⇒ 'photo' for legacy rows).
   mediaKind?: 'photo' | 'audio' | 'video';
+  /** team-phones-simple D2: which phone sent it ('' = the team's own phone / unknown). */
+  senderName: string;
 }
 
 interface Alert {
@@ -301,7 +303,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           outOfBounds?: boolean;
           activeTaskId?: string | null;
           stages?: { status?: string; tasks?: { taskId?: string; status?: string }[] }[];
-          taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' | 'video' }>;
+          taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' | 'video'; submittedBy?: { uid?: unknown; name?: unknown } | null }>;
         };
         // Which missions force-assign may offer: the still-unassigned ones in the
         // team's ACTIVE stage. Derived here (not in the row component) because the
@@ -335,6 +337,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               photoUrl: sub.photoUrl ?? '',
               submittedAt: sub.submittedAt ?? '',
               mediaKind: sub.mediaKind,
+              senderName: submissionSenderName(td, sub),
             });
           }
         }
@@ -601,6 +604,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
             return (
               <Card key={key} className="p-3 mb-2">
                 <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
+                {s.senderName && <div dir="auto" className="text-xs text-zinc-500">{t.staff.mediaSentBy({ name: s.senderName })}</div>}
                 <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} <span dir="auto">{titleOf(s.taskId)}</span></div>
                 {hasUrl && isAudio
                   ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />

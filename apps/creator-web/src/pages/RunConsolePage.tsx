@@ -2750,6 +2750,7 @@ function PhotoReviewConsole({
                   >
                     <Media row={row} />
                     <div dir="auto" className="text-xs text-[--ink-2] truncate mt-2">{row.displayName}</div>
+                    {row.senderName && <div dir="auto" className="text-[13px] text-[--ink-3] truncate">{rc.mediaSentBy({ name: row.senderName })}</div>}
                     {/* One formatter, not a bare prefix glued to a name: the old
                         concatenation rendered "task Old Market". */}
                     <div dir="auto" className="text-[13px] text-[--ink-3] truncate">
@@ -3010,6 +3011,7 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
                 <div key={key} className="rounded-lg bg-[--surface-2] p-2">
                   <Media row={row} />
                   <div dir="auto" className="text-xs text-[--ink-2] truncate mt-2">{row.displayName}</div>
+                  {row.senderName && <div dir="auto" className="text-[13px] text-[--ink-3] truncate">{rc.mediaSentBy({ name: row.senderName })}</div>}
                   <div dir="auto" className="text-[13px] text-[--ink-3] truncate">
                     {rc.mediaGalleryTaskLine({ name: taskLabel(row.taskId) })}
                   </div>

@@ -1063,6 +1063,8 @@ const HE = {
     photoReviewOverdue: 'הקבוצה תקועה וממתינה לכם',
     photoReviewTeamFinished: 'הקבוצה כבר סיימה, אף אחד לא ממתין',
     photoReviewRowFailed: ({ team }: { team: string }) => `הבדיקה של ${team} לא נשמרה. הקבוצה עדיין ממתינה.`,
+    // team-phones-simple D2: any phone in the team may send media, so name which one did.
+    mediaSentBy: ({ name }: { name: string }) => `נשלח מהטלפון של ${name}`,
     photoReviewRetry: 'לנסות שוב',
     photoReviewKeyboardHint: 'מקלדת: J או K למעבר בין הגשות, A לאישור, R לדחייה',
     photoReviewQueueLabel: 'הגשות שממתינות לבדיקה',
@@ -3843,6 +3845,8 @@ const EN: typeof HE = {
     photoReviewOverdue: 'this team is stuck waiting for you',
     photoReviewTeamFinished: 'team already finished, nobody is waiting',
     photoReviewRowFailed: ({ team }: { team: string }) => `The review for ${team} was not saved. That team is still waiting.`,
+    // team-phones-simple D2: any phone in the team may send media, so name which one did.
+    mediaSentBy: ({ name }: { name: string }) => `Sent from ${name}'s phone`,
     photoReviewRetry: 'Try again',
     photoReviewKeyboardHint: 'Keyboard: J or K to move between submissions, A to approve, R to reject',
     photoReviewQueueLabel: 'Submissions waiting for review',

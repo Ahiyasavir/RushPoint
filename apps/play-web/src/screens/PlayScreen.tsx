@@ -642,7 +642,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           <HowToPlayCard instructions={game.instructions} lang={lang} />
         </div>
         {hasTeammateDevices && myUid && (
-          <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
+          <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} defaultOpen />
         )}
         <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
       </Screen>

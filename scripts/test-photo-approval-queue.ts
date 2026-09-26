@@ -252,5 +252,19 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
   ok(!isRenderableMedia('gs://bucket/x.jpg'), 'a gs:// path is not renderable');
 }
 
+// ── 11. Who sent it (team-phones-simple D2) ─────────────────────────────────
+// Any attached phone may send media now, so the reviewer sees WHICH phone did.
+// The founding phone's name IS the team name — repeating it is noise, so it is ''.
+{
+  const [second] = flattenSubmissions([team('t1', { a: sub({ submittedBy: { uid: 'd2', name: 'Noa' } }) })]);
+  ok(second.senderName === 'Noa', 'a second phone\'s submission carries its sender name');
+  const [founder] = flattenSubmissions([{ id: 't1', displayName: 'Lions', taskSubmissions: { a: sub({ submittedBy: { uid: 't1', name: 'Lions' } }) } }]);
+  ok(founder.senderName === '', 'the founding phone (name == team name) shows no sender');
+  const [legacy] = flattenSubmissions([team('t1', { a: sub() })]);
+  ok(legacy.senderName === '', 'a submission without submittedBy has an empty sender name');
+  const [junk] = flattenSubmissions([team('t1', { a: sub({ submittedBy: { uid: 5, name: { x: 1 } } as never }) })]);
+  ok(junk.senderName === '', 'a malformed submittedBy never reaches the screen');
+}
+
 console.log(`\nphoto approval queue: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
