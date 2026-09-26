@@ -1,7 +1,7 @@
 // Phone numbers -> call and WhatsApp links (change: quick-dial-and-actions, D1).
 //   npx tsx scripts/test-phone-link.ts
 import { toTelHref, toWhatsAppHref, normalizePhone } from '../packages/shared/src/phoneLink';
-import { validateRunContacts, contactsFor } from '../packages/shared/src/runContacts';
+import { validateRunContacts, contactsFor, teamCallTargets } from '../packages/shared/src/runContacts';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -45,6 +45,19 @@ check('no link for garbage', toTelHref('abc') === null && toWhatsAppHref('abc') 
   const p = contactsFor(list, 'players');
   check('players get only theirs, stripped to id/label/phone', JSON.stringify(p) === JSON.stringify([{ id: 'c1', label: 'A', phone: '1' }, { id: 'c3', label: 'C', phone: '3' }]), JSON.stringify(p));
   check('garbage contacts -> empty', contactsFor('x', 'staff').length === 0);
+}
+
+// quick-dial-and-actions 2.5: whom to call in a team, shared by the console's team page and the
+// staff app. ONLY the game's declared phone fields: a number typed into a name field is not an
+// invitation to call it.
+{
+  const fields = [{ id: 'p1', label: 'טלפון מוביל' }, { id: 'p2', label: 'טלפון נוסף' }];
+  const t = teamCallTargets({ p1: '052-1234567', p2: ['054-7654321', 'nope'], name: '050-0000000' }, fields);
+  check('declared phone fields only, every valid value', JSON.stringify(t) === JSON.stringify([
+    { label: 'טלפון מוביל', phone: '052-1234567' }, { label: 'טלפון נוסף', phone: '054-7654321' },
+  ]), JSON.stringify(t));
+  check('a number in a non-phone field is never offered', !t.some((x) => x.phone === '050-0000000'));
+  check('garbage in, empty out', teamCallTargets(null, fields).length === 0 && teamCallTargets({ p1: '052-1234567' }, null).length === 0);
 }
 
 console.log(failures === 0 ? '\nphone link: all passed' : `\nphone link: ${failures} FAILED`);

@@ -18,7 +18,7 @@ import {
   clearTeamOutOfBounds,
   skipTaskForTeam,
   // send-team-back
-  returnTeamTo, getRunOutline, type SendBackTarget,
+  returnTeamTo, getRunOutline, refreshStaffSession, type SendBackTarget,
   sendStaffChannelMessage,
 } from '../services/calls';
 import {
@@ -33,8 +33,12 @@ import {
   skipPreviewLines, type SkipPreviewLine,
   // send-team-back: the same targets the organizer's console offers.
   sendBackTargets,
+  // quick-dial-and-actions 2.5: the same call targets the organizer's team page offers.
+  teamCallTargets, toTelHref, toWhatsAppHref, type PublicContact,
 } from '@rushpoint/shared';
 import { filterTeamsByName } from '../lib/staffTeamFilter';
+import { TAP_TARGET } from '../lib/interaction';
+import StaffQuickBar from '../components/StaffQuickBar';
 import type { StaffCtx } from '../lib/playRoute';
 import {
   loadStaffSession,
@@ -92,10 +96,16 @@ interface TeamRow {
   assignableTaskIds?: string[];
   /** The team's stage records, for the send-back panel (change: send-team-back). */
   stages?: unknown;
+  /** Registration answers, for the call buttons (quick-dial-and-actions 2.5). */
+  registrationData?: unknown;
 }
 
 /** Stage and mission names for the run (getRunOutline), since staff cannot read the game. */
-type RunOutline = { stages: { id: string; title: string; tasks: { id: string; title: string }[] }[] };
+type RunOutline = {
+  stages: { id: string; title: string; tasks: { id: string; title: string }[] }[];
+  /** quick-dial-and-actions 2.5: the game's phone-type registration fields (ids + labels). */
+  phoneFields?: { id: string; label: string }[];
+};
 
 export default function StaffConsole({ ctx, onExit }: { ctx: StaffCtx | null; onExit: () => void }) {
   const [staff, setStaff] = useState<StaffSession | null>(() => loadStaffSession());
@@ -248,6 +258,14 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // send-team-back: mission NAMES for this run, fetched once. Without them the force-assign and
   // send-back menus could only show raw mission ids. A failure keeps the ids as the fallback.
   const [outline, setOutline] = useState<RunOutline | null>(null);
+  // quick-dial-and-actions 2.5: tonight's numbers marked for staff. Staff cannot read the run
+  // document, so they come from the session refresh; the token it also returns is not needed here.
+  const [contacts, setContacts] = useState<PublicContact[]>([]);
+  useEffect(() => {
+    let alive = true;
+    refreshStaffSession(ctx).then((r) => { if (alive) setContacts(Array.isArray(r.contacts) ? r.contacts : []); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [ctx]);
   useEffect(() => {
     let alive = true;
     getRunOutline(ctx).then((o) => { if (alive) setOutline(o); }).catch(() => undefined);
@@ -303,6 +321,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           outOfBounds?: boolean;
           activeTaskId?: string | null;
           stages?: { status?: string; tasks?: { taskId?: string; status?: string }[] }[];
+          registrationData?: unknown;
           taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' | 'video'; submittedBy?: { uid?: unknown; name?: unknown } | null }>;
         };
         // Which missions force-assign may offer: the still-unassigned ones in the
@@ -326,6 +345,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           activeTaskId: td.activeTaskId ?? null,
           assignableTaskIds,
           stages: td.stages,
+          registrationData: td.registrationData,
         });
         const subs = td.taskSubmissions ?? {};
         for (const [taskId, sub] of Object.entries(subs)) {
@@ -537,7 +557,27 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       )}
 
       {/* ── SOS alerts ── */}
-      {can('safety') && <section className="mb-6">
+      <StaffQuickBar runId={runId} can={(c) => can(c as never)} />
+
+      {contacts.length > 0 && (
+        <section className="mb-6" data-testid="staff-contacts" aria-label={t.staff.contactsTitle}>
+          <h2 className="text-sm font-semibold text-zinc-300 mb-2">📞 {t.staff.contactsTitle}</h2>
+          <div className="space-y-1.5">
+            {contacts.map((c) => (
+              <div key={c.id} className="flex flex-wrap items-center gap-2">
+                <span dir="auto" className="text-sm text-zinc-200 flex-1 min-w-0 truncate">{c.label}</span>
+                <a href={toTelHref(c.phone) ?? undefined} className={`${TAP_TARGET} inline-flex items-center gap-1 px-2 rounded-lg border border-glass-border text-sm font-semibold text-ink-fire`}>
+                  📞 <span dir="ltr">{c.phone}</span>
+                </a>
+                <a href={toWhatsAppHref(c.phone) ?? undefined} target="_blank" rel="noreferrer" aria-label={t.staff.whatsappContact({ label: c.label })}
+                  className={`${TAP_TARGET} inline-flex items-center justify-center rounded-lg border border-glass-border text-sm text-ink-fire`}>💬</a>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {can('safety') && <section className="mb-6 scroll-mt-4" id="staff-alerts">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
           🆘 {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
         </h2>
@@ -583,7 +623,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       )}
 
       {/* ── Photo review ── */}
-      {can('review') && <section className="mb-6 flex-1">
+      {can('review') && <section className="mb-6 flex-1 scroll-mt-4" id="staff-review">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
           📷 {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
         </h2>
@@ -639,7 +679,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           they never have to find a laptop mid-event (change: staff-console-field-ops).
           The search box exists because this list is a flat scroll — at 20+ teams,
           finding one by thumb is the slowest part of the job. */}
-      <section className="mb-6">
+      <section className="mb-6 scroll-mt-4" id="staff-teams">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
           ⚖️ {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
         </h2>
@@ -664,6 +704,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               ack={adjustAck[tm.id]}
               busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
               can={{ score: can('score'), hold: can('hold'), route: can('route') }}
+              callTargets={can('contactTeams') ? teamCallTargets(tm.registrationData, outline?.phoneFields) : []}
               onAdjust={(delta, reason) => void adjustAction.run(tm, delta, reason)}
               onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
               onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
@@ -707,7 +748,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 // force-assign, skip) only after a deliberate tap on "more". A marshal awards
 // points dozens of times a run and holds a team maybe twice.
 function TeamOpsCard({
-  team, ack, busy, can, onAdjust, onHold, onClearOob, onSkipTask, onForceAssign, onSendBack, titleOf, outlineStages,
+  team, ack, busy, can, onAdjust, onHold, onClearOob, onSkipTask, onForceAssign, onSendBack, titleOf, outlineStages, callTargets = [],
 }: {
   team: TeamRow;
   ack?: string;
@@ -724,6 +765,8 @@ function TeamOpsCard({
   onSendBack: (target: SendBackTarget, title: string) => void;
   titleOf: (taskId: string) => string;
   outlineStages: { id: string; title: string; tasks: { id: string; title: string }[] }[];
+  /** Numbers to call this team on; empty when the code lacks contactTeams or the team gave none. */
+  callTargets?: { label: string; phone: string }[];
 }) {
   const { t } = useT();
   const [openPanel, setOpenPanel] = useState<null | 'amount' | 'assign' | 'hold' | 'sendBack'>(null);
@@ -779,6 +822,21 @@ function TeamOpsCard({
           </div>
           {team.held && team.heldReason && (
             <div dir="auto" className="text-xs text-zinc-500 mt-0.5">{team.heldReason}</div>
+          )}
+          {/* quick-dial-and-actions 2.5: call the team, only with the contactTeams capability and
+              only on a number the game's registration asked for. */}
+          {callTargets.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mt-1.5" data-testid="staff-team-call">
+              {callTargets.map((c, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5">
+                  <a href={toTelHref(c.phone) ?? undefined} className={`${TAP_TARGET} inline-flex items-center gap-1 px-1 text-xs font-semibold text-ink-fire`}
+                    aria-label={t.staff.callTeam({ label: c.label })}>📞 <span dir="ltr">{c.phone}</span></a>
+                  <a href={toWhatsAppHref(c.phone) ?? undefined} target="_blank" rel="noreferrer"
+                    className={`${TAP_TARGET} inline-flex items-center justify-center text-xs font-semibold text-ink-fire`}
+                    aria-label={t.staff.whatsappTeam({ label: c.label })}>💬</a>
+                </span>
+              ))}
+            </div>
           )}
           {ack && (
             <div role="status" aria-live="polite" className="text-xs font-semibold text-ink-fire">
@@ -1166,7 +1224,7 @@ function StaffChatSection({
     (n, th) => n + (countUnreadChatMessages(th.messages, markerFor(th.teamId), myUid) > 0 ? 1 : 0), 0);
 
   return (
-    <section className="mb-6">
+    <section className="mb-6 scroll-mt-4" id="staff-chat">
       <Collapsible
         open={open}
         onToggle={() => setOpen((o) => !o)}
@@ -1312,7 +1370,7 @@ function StaffAdminChannelSection({
   const sendAction = useAsyncAction(send);
 
   return (
-    <section className="mb-6">
+    <section className="mb-6 scroll-mt-4" id="staff-channel">
       <Collapsible
         open={open}
         onToggle={() => setOpen((o) => !o)}
@@ -1394,7 +1452,7 @@ function StaffTeamMapSection({
   const { t } = useT();
   const [open, setOpen] = useState(false);
   return (
-    <section className="mb-6">
+    <section className="mb-6 scroll-mt-4" id="staff-map">
       <Collapsible
         open={open}
         onToggle={() => setOpen((o) => !o)}
@@ -1465,7 +1523,7 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
   const busy = sendAction.busy;
 
   return (
-    <section className="pt-2 border-t border-glass-border">
+    <section className="pt-2 border-t border-glass-border scroll-mt-4" id="staff-broadcast">
       <h2 className="text-sm font-semibold text-zinc-300 mb-2">📢 {t.staff.announcement}</h2>
       {/* Hebrew is the primary field (this is a Hebrew-first product and the
           volunteers are Hebrew speakers); English is explicitly optional. */}

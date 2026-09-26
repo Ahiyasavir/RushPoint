@@ -16,17 +16,21 @@ Depends on: `team-dossier-and-search` (team page), `staff-capabilities` (`contac
 - [x] 2.3 Console contacts editor (in "share and screens" or the run header menu).
 - [x] 2.4 Player: "call the organizer" in the SOS sheet and the mission help menu.
       (Built as a call button beside SOS in the play header + the numbers on the waiting screen.)
-- [~] 2.5 Team page + staff app: call/WhatsApp for team phone fields; `contactTeams` capability.
-      (Team page: done. Staff app buttons, staff-visible contacts in the staff bootstrap and the
-      `contactTeams` capability: NOT done.)
-- [~] 2.6 Quick-actions bar + customiser (console), saved to `users/{uid}.consolePrefs`; staff bar in localStorage.
-      (Console bar + customiser: done, persisted and checked across a reload. No drag-to-reorder:
-      order is the order chosen. Staff bar: NOT done.)
+- [x] 2.5 Team page + staff app: call/WhatsApp for team phone fields; `contactTeams` capability.
+      (Team page and staff app share `teamCallTargets` (shared/runContacts.ts). `getRunOutline` returns the
+      game's phone fields; the staff team card shows 📞/💬 only with `contactTeams` (now also in the
+      "judge" preset). `staffSignIn` and `refreshStaffSession` return the STAFF-visible contacts, shown
+      as "טלפונים של האירוע" at the top of the staff app. e2e: run contacts scenario.)
+- [x] 2.6 Quick-actions bar + customiser (console), saved to `users/{uid}.consolePrefs`; staff bar in localStorage.
+      (Reorder is ▲/▼ buttons (`moveQuickAction`), not a drag: a drag is fiddly on a phone and invisible to
+      a screen reader. Staff bar: `StaffQuickBar`, shortcuts to the staff console's own sections, filtered
+      by the code's capabilities (`readStaffQuickActions`), per device; checked in the browser across a
+      reload.)
 - [x] 2.7 i18n he/en, both apps.
 
 ## 3. REFACTOR
 
-- [ ] 3.1 The console's existing action handlers are referenced by id from one map used by both the panels
+- [ ] 3.1 (Open: the console bar already maps ids to the console's own handlers; a single shared map with the panels is a refactor for later.) The console's existing action handlers are referenced by id from one map used by both the panels
       and the bar (no duplicated handler code).
 
 ## 4. Verify

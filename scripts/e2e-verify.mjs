@@ -12962,7 +12962,20 @@ async function main() {
     check('the player copy carries no visibility list or other fields', seen.every((c) => Object.keys(c).sort().join() === 'id,label,phone'),
       JSON.stringify(seen));
 
+    // quick-dial-and-actions 2.5: staff get the STAFF-visible contacts at sign in (they cannot read
+    // the run document), and a refresh brings the current list.
+    const { pin: ctPin } = await creator.call('inviteStaff', { ownerUid: creatorCred.user.uid, gameId: cg, runId: cr, name: 'Marshal' });
+    const cStaff = makeParty('contactsStaff');
+    await signInAnonymously(cStaff.auth);
+    const signed = await cStaff.call('staffSignIn', { ownerUid: creatorCred.user.uid, gameId: cg, runId: cr, pin: ctPin, name: 'Marshal' });
+    check('staff sign in returns the staff-visible contacts (both)',
+      (signed?.contacts ?? []).map((c) => c.label).join('|') === 'המארגן|רכז צוות', JSON.stringify(signed?.contacts));
+    check('the staff copy carries no visibility list', (signed?.contacts ?? []).every((c) => Object.keys(c).sort().join() === 'id,label,phone'));
+
     await creator.call('setRunContacts', { gameId: cg, runId: cr, contacts: [] });
+    await signInWithCustomToken(cStaff.auth, signed.customToken);
+    const refreshed = await cStaff.call('refreshStaffSession', { ownerUid: creatorCred.user.uid, gameId: cg, runId: cr });
+    check('a staff refresh returns the CURRENT list (now empty)', Array.isArray(refreshed?.contacts) && refreshed.contacts.length === 0, JSON.stringify(refreshed?.contacts));
     const cleared = await pc.call('getMyTeamState', { code: cc });
     check('an empty list clears them', (cleared?.contacts ?? []).length === 0, JSON.stringify(cleared?.contacts));
 

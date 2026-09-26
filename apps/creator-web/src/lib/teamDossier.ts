@@ -8,7 +8,7 @@
 // galleryTaskDetail.ts pattern), so a field added to the team document tomorrow can never reach
 // the organizer's screen by accident, and a malformed value is dropped rather than rendered.
 
-import { isRenderableMedia, normalizePhone, submissionSenderName } from '@rushpoint/shared';
+import { isRenderableMedia, submissionSenderName, teamCallTargets } from '@rushpoint/shared';
 
 export interface DossierPhone { uid: string; name: string; sending: boolean }
 export interface DossierAnswer { answer: string; correct?: boolean }
@@ -184,15 +184,7 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
 
   // Only fields the GAME declared as phone fields: a number typed into a name field
   // is not an invitation to call it.
-  const callTargets: { label: string; phone: string }[] = [];
-  const reg = isObj(t.registrationData) ? t.registrationData : {};
-  for (const f of input.phoneFields ?? []) {
-    const v = reg[f.id];
-    const values = Array.isArray(v) ? v : [v];
-    for (const x of values) {
-      if (typeof x === 'string' && normalizePhone(x)) callTargets.push({ label: f.label, phone: x.trim() });
-    }
-  }
+  const callTargets = teamCallTargets(t.registrationData, input.phoneFields);
 
   // Last known place. A 0,0 placeholder or an out-of-range value is "unknown", never a pin in the
   // sea: the organizer would drive to it.

@@ -56,3 +56,25 @@ export function contactsFor(contacts: unknown, audience: ContactAudience): Publi
       && (c as RunContact).visibleTo.includes(audience))
     .map((c) => ({ id: c.id, label: c.label, phone: c.phone }));
 }
+
+/**
+ * Whom to call in a team (quick-dial-and-actions D3), shared by the console's team page and the
+ * staff app so the two can never disagree. ONLY the game's declared phone-type registration fields:
+ * a number typed into a name field is not an invitation to call it. Total.
+ */
+export function teamCallTargets(
+  registrationData: unknown,
+  phoneFields: ReadonlyArray<{ id: string; label: string }> | null | undefined,
+): { label: string; phone: string }[] {
+  const out: { label: string; phone: string }[] = [];
+  if (!registrationData || typeof registrationData !== 'object' || !Array.isArray(phoneFields)) return out;
+  const reg = registrationData as Record<string, unknown>;
+  for (const f of phoneFields) {
+    if (!f || typeof f.id !== 'string') continue;
+    const v = reg[f.id];
+    for (const x of Array.isArray(v) ? v : [v]) {
+      if (typeof x === 'string' && normalizePhone(x)) out.push({ label: String(f.label ?? ''), phone: x.trim() });
+    }
+  }
+  return out;
+}

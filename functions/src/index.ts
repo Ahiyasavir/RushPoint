@@ -23,7 +23,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // Undoing an approval and taking the points back with it (change:
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
-import { planApprovalReversal, appendScoreLedger, validateRunContacts, matchAnswerOutcome, mediaDurationForRecord, type AnswerOutcome } from '@rushpoint/shared';
+import { planApprovalReversal, appendScoreLedger, validateRunContacts, contactsFor, matchAnswerOutcome, mediaDurationForRecord, type AnswerOutcome } from '@rushpoint/shared';
 import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
@@ -393,11 +393,24 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     throw new functions.https.HttpsError('internal', 'Could not complete staff sign-in. Please try again.');
   }
 
-  return { customToken, name: invite.name, capabilities: caps, codeId: invite.id };
+  // quick-dial-and-actions 2.5: staff cannot read the run document, so the STAFF-visible contacts
+  // travel with the session.
+  return { customToken, name: invite.name, capabilities: caps, codeId: invite.id, contacts: await staffContacts(ownerUid, gameId, runId) };
 });
 
 
 // ─── Staff codes: edit, remove a person, refresh a session (change: staff-capabilities) ──
+
+/** The run's STAFF-visible contacts (quick-dial-and-actions D2). Never fails a sign in. */
+async function staffContacts(ownerUid: string, gameId: string, runId: string) {
+  try {
+    const snap = await db.doc(FIRESTORE_PATHS.run(ownerUid, gameId, runId)).get();
+    return contactsFor((snap.data() as { contacts?: unknown } | undefined)?.contacts, 'staff');
+  } catch (e) {
+    logBestEffort('staff.contacts', { runId }, e);
+    return [];
+  }
+}
 
 function staffCodeRef(ownerUid: string, gameId: string, runId: string, codeId: string) {
   return db.doc(FIRESTORE_PATHS.staffInvite(ownerUid, gameId, runId, codeId));
@@ -585,7 +598,7 @@ export const refreshStaffSession = loggedCallable('refreshStaffSession', async (
     codeId: grant?.codeId ?? (typeof t.codeId === 'string' ? t.codeId : ''),
     ownerUid, gameId, runId,
   });
-  return { customToken, capabilities: caps };
+  return { customToken, capabilities: caps, contacts: await staffContacts(ownerUid, gameId, runId) };
 });
 
 

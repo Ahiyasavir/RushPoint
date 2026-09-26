@@ -2553,6 +2553,12 @@ export const getRunOutline = loggedCallable('getRunOutline', async (data, contex
       title: typeof s.title === 'string' ? s.title : '',
       tasks: (s.tasks ?? []).map((tk) => ({ id: tk.id, title: typeof tk.title === 'string' ? tk.title : '' })),
     })),
+    // quick-dial-and-actions 2.5: which registration fields hold a phone (ids + labels, not the
+    // numbers: those are on the team documents staff already read). Lets the staff app offer a
+    // "call the team" button, gated by the contactTeams capability.
+    phoneFields: (game.registrationFields ?? [])
+      .filter((f) => f?.type === 'phone' && typeof f.id === 'string')
+      .map((f) => ({ id: f.id, label: typeof f.label === 'string' ? f.label : '' })),
   };
 });
 

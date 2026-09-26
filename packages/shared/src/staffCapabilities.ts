@@ -38,7 +38,8 @@ export const ALWAYS_GRANTED_CAPABILITIES: readonly StaffCapability[] = ['safety'
 const MARSHAL: StaffCapability[] = ['chat', 'hold', 'locations'];
 export const STAFF_PRESETS: Readonly<Record<'marshal' | 'judge' | 'full', readonly StaffCapability[]>> = {
   marshal: MARSHAL,
-  judge: [...MARSHAL, 'review'],
+  // A judge calls teams about what they sent (quick-dial-and-actions D3).
+  judge: [...MARSHAL, 'review', 'contactTeams'],
   full: [...STAFF_CAPABILITIES],
 };
 

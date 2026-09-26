@@ -418,14 +418,15 @@ export const staffSignIn = callable<
   // `name` is the staffer's self-declared display name (attribution only — the
   // server treats it as untrusted and it grants nothing). Omitted ⇒ the invite's name.
   { ownerUid: string; gameId: string; runId: string; pin: string; name?: string },
-  { customToken: string; name: string; capabilities: string[]; codeId: string }
+  // contacts: the run's staff-visible numbers (quick-dial-and-actions 2.5).
+  { customToken: string; name: string; capabilities: string[]; codeId: string; contacts?: { id: string; label: string; phone: string }[] }
 >('staffSignIn');
 
 // Re-mint this staff member's token with their code's CURRENT capabilities (staff-capabilities).
 // Called when the organizer edits the code, so rule-gated reads (the live map) follow the edit.
 export const refreshStaffSession = callable<
   { ownerUid: string; gameId: string; runId: string },
-  { customToken: string; capabilities: string[] }
+  { customToken: string; capabilities: string[]; contacts?: { id: string; label: string; phone: string }[] }
 >('refreshStaffSession');
 
 // ── Staff console actions ──
@@ -485,7 +486,7 @@ export const returnTeamTo = callable<
 // document, so without this every mission appeared as a raw id.
 export const getRunOutline = callable<
   Ctx,
-  { stages: { id: string; title: string; tasks: { id: string; title: string }[] }[] }
+  { stages: { id: string; title: string; tasks: { id: string; title: string }[] }[]; phoneFields?: { id: string; label: string }[] }
 >('getRunOutline');
 
 // Release a team from the safety-zone latch — previously reachable only from the

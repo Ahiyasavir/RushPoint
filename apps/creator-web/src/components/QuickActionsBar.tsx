@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
-  FIRESTORE_PATHS, MAX_QUICK_ACTIONS, QUICK_ACTIONS, QUICK_ACTION_IDS, readQuickActions, type QuickActionId,
+  FIRESTORE_PATHS, MAX_QUICK_ACTIONS, QUICK_ACTIONS, QUICK_ACTION_IDS, readQuickActions, moveQuickAction, type QuickActionId,
 } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useT } from './LanguageContext';
 import { Button } from './ui';
+import { TAP_CLUSTER } from '../lib/interaction';
 import { searchTeams, type TeamSearchRow } from '../lib/teamSearch';
 
 // The Run Console's quick-actions bar (change: quick-dial-and-actions, D4/D5).
@@ -80,18 +81,30 @@ export default function QuickActionsBar({ uid, teams, handlers }: {
           <div className="w-full max-w-md rounded-2xl bg-[--surface-0] p-4 shadow-xl">
             <h2 className="text-base font-bold text-[--ink-1]">{qa.customise}</h2>
             <p className="text-[13px] text-[--ink-3] mt-1 mb-3">{qa.customiseHelp({ max: MAX_QUICK_ACTIONS })}</p>
+            {/* The chosen ones, in bar order, each with up/down (a drag is fiddly on a phone and
+                invisible to a screen reader). The rest follow as plain checkboxes. */}
             <ul className="space-y-1">
-              {QUICK_ACTION_IDS.map((id) => {
+              {[...chosen, ...QUICK_ACTION_IDS.filter((x) => !chosen.includes(x))].map((id) => {
                 const on = chosen.includes(id);
                 const full = !on && chosen.length >= MAX_QUICK_ACTIONS;
                 return (
-                  <li key={id}>
-                    <label className={`flex items-center gap-3 min-h-[44px] rounded-lg px-2 ${full ? 'opacity-50' : 'hover:bg-[--surface-2]'}`}>
+                  <li key={id} className="flex items-center gap-2">
+                    <label className={`flex flex-1 items-center gap-3 min-h-[44px] rounded-lg px-2 ${full ? 'opacity-50' : 'hover:bg-[--surface-2]'}`}>
                       <input type="checkbox" checked={on} disabled={full}
                         onChange={() => void save(on ? chosen.filter((x) => x !== id) : [...chosen, id])} />
                       <span aria-hidden="true">{qa.icon[id]}</span>
                       <span className="text-sm text-[--ink-1]">{qa.label[id]}</span>
                     </label>
+                    {on && (
+                      <span className="inline-flex gap-2 shrink-0">
+                        <button type="button" className={`${TAP_CLUSTER} rounded-md border border-[--rp-border] text-[--ink-2] disabled:opacity-30`}
+                          disabled={chosen.indexOf(id) === 0} aria-label={qa.moveUp({ name: qa.label[id] })}
+                          onClick={() => void save(moveQuickAction(chosen, id, -1))}>▲</button>
+                        <button type="button" className={`${TAP_CLUSTER} rounded-md border border-[--rp-border] text-[--ink-2] disabled:opacity-30`}
+                          disabled={chosen.indexOf(id) === chosen.length - 1} aria-label={qa.moveDown({ name: qa.label[id] })}
+                          onClick={() => void save(moveQuickAction(chosen, id, 1))}>▼</button>
+                      </span>
+                    )}
                   </li>
                 );
               })}

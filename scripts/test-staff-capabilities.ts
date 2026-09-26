@@ -37,7 +37,7 @@ for (const c of ALWAYS_GRANTED_CAPABILITIES) check(`always-granted ${c} is a kno
 
 // ── Presets ───────────────────────────────────────────────────────────────────
 check('marshal = chat + hold + locations', sorted(STAFF_PRESETS.marshal) === sorted(['chat', 'hold', 'locations']), sorted(STAFF_PRESETS.marshal));
-check('judge = marshal + review', sorted(STAFF_PRESETS.judge) === sorted(['chat', 'hold', 'locations', 'review']), sorted(STAFF_PRESETS.judge));
+check('judge = marshal + review + contactTeams (a judge calls teams about what they sent)', sorted(STAFF_PRESETS.judge) === sorted(['chat', 'hold', 'locations', 'review', 'contactTeams']), sorted(STAFF_PRESETS.judge));
 check('full = every capability', sorted(STAFF_PRESETS.full) === sorted(STAFF_CAPABILITIES));
 
 // ── The declared callable table is total and honest ──────────────────────────
