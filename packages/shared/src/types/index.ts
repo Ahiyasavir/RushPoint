@@ -1592,6 +1592,10 @@ export interface FeedItem {
    * the feed, so this is only ever `'photo'` or `'video'` in practice.
    */
   mediaKind?: MediaKind;
+  /** video-upload-speed D7: poster frame for a video item; absent for photos and older clips. */
+  posterUrl?: string;
+  /** video-upload-speed D7: the clip's measured length in seconds (display only). */
+  mediaDurationSec?: number;
   /** emoji → count, e.g. { '🔥': 3 }. Zero-count keys are dropped. */
   reactions: Record<string, number>;
   /** uid → emoji: dedup/switch source of truth (one reaction per uid). */

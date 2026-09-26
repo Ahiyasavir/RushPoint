@@ -3274,26 +3274,45 @@ async function main() {
     const vFeedCol = `users/${OWNER}/games/${vg}/runs/${vr}/feedItems`;
 
     // 1) autoApprove video → feeds with mediaKind:'video'.
-    const autoVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-auto', photoUrl: feedPhotoUrl(vr, vUid, 'auto.webm'), contentType: 'video/webm' });
+    // video-upload-speed D7: a poster frame + the clip's measured length ride along, so the
+    // console can show many clips without pulling video. A poster in ANOTHER team's folder is
+    // refused exactly like a photoUrl there.
+    await expectError('video-poster: a poster in another team\'s folder is refused',
+      vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-auto', photoUrl: feedPhotoUrl(vr, vUid, 'auto.webm'), contentType: 'video/webm',
+        posterUrl: feedPhotoUrl(vr, 'someone-else', 'auto.poster.jpg') }),
+      { codeIn: ['functions/invalid-argument'] });
+    const autoVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-auto', photoUrl: feedPhotoUrl(vr, vUid, 'auto.webm'), contentType: 'video/webm',
+      posterUrl: feedPhotoUrl(vr, vUid, 'auto.poster.jpg'), mediaDurationSec: 12.34 });
     check('video-feed: autoApprove video is approved', autoVideo?.autoApproved === true, JSON.stringify(autoVideo));
     const afterAutoVideo = await vp.getColAt(vFeedCol);
     const autoItem = afterAutoVideo.find((d) => d.taskId === 'vf-auto');
     check('video-feed: autoApprove video broadcasts a feed item', !!autoItem, JSON.stringify(afterAutoVideo.map((d) => d.taskId)));
     check('video-feed: the autoApprove feed item carries mediaKind "video"', autoItem?.mediaKind === 'video', JSON.stringify(autoItem));
+    check('video-poster: the feed item carries the poster and the length', autoItem?.posterUrl === feedPhotoUrl(vr, vUid, 'auto.poster.jpg') && autoItem?.mediaDurationSec === 12.3, JSON.stringify(autoItem));
+    const vTeamPath = `users/${OWNER}/games/${vg}/runs/${vr}/teams/${vUid}`;
+    const autoSub = (await creator.getDocAt(vTeamPath)).data?.taskSubmissions?.['vf-auto'];
+    check('video-poster: the submission stores the poster and the length', autoSub?.posterUrl === feedPhotoUrl(vr, vUid, 'auto.poster.jpg') && autoSub?.mediaDurationSec === 12.3, JSON.stringify(autoSub));
 
     // 2) staff-reviewed video → feeds with mediaKind:'video'.
-    await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-rev', photoUrl: feedPhotoUrl(vr, vUid, 'rev.webm'), contentType: 'video/webm' });
+    // An out-of-range length is DROPPED, never a refusal: it is a display hint.
+    await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-rev', photoUrl: feedPhotoUrl(vr, vUid, 'rev.webm'), contentType: 'video/webm',
+      posterUrl: feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), mediaDurationSec: 9999 });
+    const revSub = (await creator.getDocAt(`users/${OWNER}/games/${vg}/runs/${vr}/teams/${vUid}`)).data?.taskSubmissions?.['vf-rev'];
+    check('video-poster: an out-of-range length is dropped, the poster kept', revSub?.mediaDurationSec === undefined && revSub?.posterUrl === feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), JSON.stringify(revSub));
     const revVideo = await creator.call('reviewStationSubmission', { ...VCTX, teamId: vUid, taskId: 'vf-rev', approved: true });
     check('video-feed: staff approves the video submission', revVideo?.approved === true, JSON.stringify(revVideo));
     const afterRevVideo = await creator.getColAt(vFeedCol);
     const revItem = afterRevVideo.find((d) => d.taskId === 'vf-rev');
     check('video-feed: staff-approved video broadcasts a feed item', !!revItem, JSON.stringify(afterRevVideo.map((d) => d.taskId)));
     check('video-feed: the staff-approved feed item carries mediaKind "video"', revItem?.mediaKind === 'video', JSON.stringify(revItem));
+    check('video-poster: the staff-approved feed item carries the poster', revItem?.posterUrl === feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), JSON.stringify(revItem));
 
     // 3) hidden-location video → still excluded, exactly like a hidden photo.
     const vArr = await vp.call('reportArrival', { ...VCTX, taskId: 'vf-hidden', lat: 31.78, lng: 35.21 });
     check('video-feed: arrival at the hidden spot latches', vArr?.arrived === true, JSON.stringify(vArr));
-    const autoHiddenVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-hidden', photoUrl: feedPhotoUrl(vr, vUid, 'hidden.webm'), contentType: 'video/webm' });
+    // null from an older client is ABSENT, never a refusal (the undefined-to-null transport trap).
+    const autoHiddenVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-hidden', photoUrl: feedPhotoUrl(vr, vUid, 'hidden.webm'), contentType: 'video/webm',
+      posterUrl: null, mediaDurationSec: null });
     check('video-feed: hidden video still auto-approves (completion unaffected)', autoHiddenVideo?.autoApproved === true, JSON.stringify(autoHiddenVideo));
     const afterHiddenVideo = await vp.getColAt(vFeedCol);
     check('video-feed: the hidden-location video is excluded from the feed',

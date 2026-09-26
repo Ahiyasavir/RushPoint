@@ -124,3 +124,15 @@ export function videoDurationProblem(min: unknown, max: unknown): string | null 
   }
   return null;
 }
+
+/**
+ * The clip length a submission may store beside its media (change: video-upload-speed, D7): the
+ * organizer's duration badge, because MediaRecorder output often carries no up-front duration.
+ * A display hint, never a gate, so anything outside (0, ceiling + 5 s] is DROPPED (undefined),
+ * never refused. One decimal; a tiny positive value is kept as 0.1 rather than rounded to 0.
+ */
+export function mediaDurationForRecord(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
+  if (raw > VIDEO_DURATION_LIMITS.ceilingSeconds + 5) return undefined;
+  return Math.max(0.1, Math.round(raw * 10) / 10);
+}

@@ -85,7 +85,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 - [ ] 4.1 New `scripts/test-poster-path.ts`: `posterUploadPath(videoPath)` replaces the extension with
       `.poster.jpg`, stays in the same `runs/{run}/teams/{uid}/` folder, and is total on odd input.
       Confirm RED.
-- [ ] 4.2 `scripts/e2e-verify.mjs`, video-submission scenario: a valid `posterUrl` + `mediaDurationSec`
+- [x] 4.2 `scripts/e2e-verify.mjs`, video-submission scenario: a valid `posterUrl` + `mediaDurationSec`
       are stored on the task record and the feed item; a `posterUrl` in another team's folder →
       `invalid-argument`; `null` for either is accepted as absent; `mediaDurationSec` of `-1`/`9999`/
       `NaN` is dropped, not refused. Confirm RED with `npm run e2e` (exit code captured to a file,
@@ -96,7 +96,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 
 ### GREEN
 
-- [ ] 5.1 `submitStationPhoto` (`functions/src/index.ts:1682`): optional `posterUrl` (validated with
+- [x] 5.1 (stored on `taskSubmissions[taskId]`, where the media already lives, plus the feed item; the length rule is `mediaDurationForRecord` in shared/videoDuration.ts, scripts/test-media-duration-record.ts) `submitStationPhoto` (`functions/src/index.ts:1682`): optional `posterUrl` (validated with
       `requireStorageUrl`, same run + uid) and `mediaDurationSec` (finite, 0 < x ≤ ceiling + 5, else
       dropped). Stored beside `photoUrl` at the task record and the feed item writes. `null` counts as
       absent. 4.2 → green.

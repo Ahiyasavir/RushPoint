@@ -23,7 +23,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // Undoing an approval and taking the points back with it (change:
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
-import { planApprovalReversal, appendScoreLedger, validateRunContacts, matchAnswerOutcome, type AnswerOutcome } from '@rushpoint/shared';
+import { planApprovalReversal, appendScoreLedger, validateRunContacts, matchAnswerOutcome, mediaDurationForRecord, type AnswerOutcome } from '@rushpoint/shared';
 import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
@@ -1342,6 +1342,9 @@ async function writeFeedItem(
     // run-media-gallery-and-video-feed: only ever 'video' in practice (a 'photo'
     // caller can simply omit it — absent already means photo on read).
     mediaKind?: MediaKind;
+    // video-upload-speed D7: omitted (never null) when absent.
+    posterUrl?: string;
+    mediaDurationSec?: number;
   },
 ): Promise<void> {
   try {
@@ -1354,6 +1357,8 @@ async function writeFeedItem(
       teamName: entry.teamName,
       photoUrl: entry.photoUrl,
       ...(entry.mediaKind && entry.mediaKind !== 'photo' ? { mediaKind: entry.mediaKind } : {}),
+      ...(entry.posterUrl ? { posterUrl: entry.posterUrl } : {}),
+      ...(entry.mediaDurationSec !== undefined ? { mediaDurationSec: entry.mediaDurationSec } : {}),
       reactions: {},
       reactedBy: {},
       active: true,
@@ -1682,13 +1687,17 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
 export const submitStationPhoto = loggedCallable('submitStationPhoto', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'submitStationPhoto');
-  const { ownerUid, gameId, runId, teamId, taskId, photoUrl, contentType } = data as {
+  const { ownerUid, gameId, runId, teamId, taskId, photoUrl, contentType, posterUrl: rawPosterUrl, mediaDurationSec: rawDuration } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     teamId: string;
     taskId: string;
     photoUrl: string;
+    // video-upload-speed D7: a poster frame + the clip's length, both optional. null (an older
+    // client, or the callable transport's undefined) is ABSENT, never a refusal.
+    posterUrl?: string | null;
+    mediaDurationSec?: number | null;
     // audio-tasks: the declared blob content-type. Validated against the task's
     // captureKind below. Photo clients that never send it stay accepted.
     contentType?: string;
@@ -1721,6 +1730,11 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // the exact old accept-set. The runs/{runId}/teams/{uid}/ prefix (the IDOR guard)
   // is enforced in both modes. See docs/wave-c/photo-upload-fix.md.
   validate(() => requireStorageUrl(photoUrl, runId, uid, storageOriginOpts()));
+  // The poster obeys the SAME folder rule as the media: this run, this phone's own folder.
+  const posterUrl = typeof rawPosterUrl === 'string' && rawPosterUrl.trim() ? rawPosterUrl.trim() : undefined;
+  if (posterUrl) validate(() => requireStorageUrl(posterUrl, runId, uid, storageOriginOpts()));
+  // A display hint: out of range is dropped, never refused.
+  const mediaDurationSec = mediaDurationForRecord(rawDuration);
 
   // Check the task's smart config for autoApprove (staffless events). The same
   // snapshot also yields the task title + the photoFeedEnabled gate for the
@@ -1845,6 +1859,10 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
           mediaKind: kind,
           // Which phone sent it (team-phones-simple D2), from the team's own device list.
           submittedBy,
+          // video-upload-speed D7. Only for a video: a photo IS its own poster. A resubmission
+          // without a poster must not keep the previous clip's frame, so the key is deleted.
+          posterUrl: kind === 'video' && posterUrl ? posterUrl : admin.firestore.FieldValue.delete(),
+          mediaDurationSec: kind !== 'photo' && mediaDurationSec !== undefined ? mediaDurationSec : admin.firestore.FieldValue.delete(),
         },
       },
     },
@@ -1881,6 +1899,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
         teamName: team.displayName ?? '',
         photoUrl: photoUrl.trim(),
         mediaKind: kind,
+        ...(kind === 'video' && posterUrl ? { posterUrl } : {}),
+        ...(kind !== 'photo' && mediaDurationSec !== undefined ? { mediaDurationSec } : {}),
       });
     }
   }
@@ -2036,7 +2056,7 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         }
         const teamData = (await teamRef.get()).data() as {
           displayName?: string;
-          taskSubmissions?: Record<string, { photoUrl?: string; mediaKind?: MediaKind }>;
+          taskSubmissions?: Record<string, { photoUrl?: string; mediaKind?: MediaKind; posterUrl?: string; mediaDurationSec?: number }>;
         } | undefined;
         const submission = teamData?.taskSubmissions?.[taskId];
         const submittedPhotoUrl = submission?.photoUrl;
@@ -2057,6 +2077,8 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
             teamName: teamData?.displayName ?? '',
             photoUrl: submittedPhotoUrl,
             mediaKind: submissionKind,
+            ...(typeof submission?.posterUrl === 'string' && submission.posterUrl ? { posterUrl: submission.posterUrl } : {}),
+            ...(typeof submission?.mediaDurationSec === 'number' ? { mediaDurationSec: submission.mediaDurationSec } : {}),
           });
         }
       }

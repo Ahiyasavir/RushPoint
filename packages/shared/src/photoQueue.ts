@@ -30,6 +30,10 @@ export interface RawSubmission {
   submittedAt?: string;
   status?: string;
   mediaKind?: MediaKind;
+  /** video-upload-speed D7: a small JPEG frame, so a console shows the clip without pulling it. */
+  posterUrl?: string;
+  /** video-upload-speed D7: the clip's measured length in seconds (display only). */
+  mediaDurationSec?: number;
   reviewedAt?: string;
   reviewedBy?: string;
   reviewNote?: string;
@@ -53,6 +57,10 @@ export interface SubmissionRow {
   /** ISO string, or '' when the server never wrote one (legacy/partial doc). */
   submittedAt: string;
   mediaKind: MediaKind;
+  /** '' when the submission carries no poster (every photo, every older clip). */
+  posterUrl: string;
+  /** null when unknown. */
+  mediaDurationSec: number | null;
   status: SubmissionStatus;
   reviewedAt: string;
   reviewNote: string;
@@ -154,6 +162,8 @@ function toRow(team: SubmissionTeamDoc, taskId: string, sub: RawSubmission): Sub
     // to 'photo' is what sent a VIDEO submission to the reviewer's <img> tag,
     // where it rendered as nothing but its link (change: video-submission-task).
     mediaKind: sub.mediaKind === 'audio' ? 'audio' : sub.mediaKind === 'video' ? 'video' : 'photo',
+    posterUrl: typeof sub.posterUrl === 'string' ? sub.posterUrl : '',
+    mediaDurationSec: typeof sub.mediaDurationSec === 'number' && Number.isFinite(sub.mediaDurationSec) && sub.mediaDurationSec > 0 ? sub.mediaDurationSec : null,
     status: normalizeStatus(sub.status),
     reviewedAt: typeof sub.reviewedAt === 'string' ? sub.reviewedAt : '',
     reviewNote: typeof sub.reviewNote === 'string' ? sub.reviewNote : '',
