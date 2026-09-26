@@ -73,7 +73,7 @@ import {
   normalizeGroups, setTaskGroup, removeTaskFromGroups, groupIndexOfTask,
 } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
-import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
+import { initDraft, replaceDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, shouldAutoOpenFirstTask } from '../lib/wizardLogic';
 // ONE readiness computation, shared by the persistent panel and the launch guard
 // (change: builder-first-task-flow), so the two can never drift.
@@ -3629,7 +3629,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
     // Update the local draft (keeps inputs responsive) and push to global state
     // immediately so the canvas + undo/redo update live. commit() keeps the draft
     // and committed in sync so the unmount safety flush stays a no-op.
-    setState((d) => commit(editDraft(d, t)));
+    setState((d) => commit(replaceDraft(d, t)));
     onFlush(t);
   }
 

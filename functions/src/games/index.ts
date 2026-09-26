@@ -578,7 +578,11 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (autoStartLateJoiners !== undefined) updates.autoStartLateJoiners = autoStartLateJoiners === true;
   if (autoApproveAllMedia !== undefined)  updates.autoApproveAllMedia = autoApproveAllMedia === true;
   // change: staff-capabilities. Read when a staff code is MINTED, never afterwards.
-  if (staffDefaults !== undefined) updates.staffDefaults = validateStaffDefaults(staffDefaults);
+  // null is the callable transport's encoding of undefined: the Builder's payload always
+  // carries this key, and for a game that never set a default its value is undefined.
+  // null therefore means "not set" (like absent), never a malformed value. Refusing it
+  // refused every Builder autosave of such a game (the cleared-optional-field trap).
+  if (staffDefaults !== undefined && staffDefaults !== null) updates.staffDefaults = validateStaffDefaults(staffDefaults);
   // change: every-member-plays. STRICT boolean for the same reason as above: this one
   // holds a team out of a game they turned up to play.
   if (requireAllMembersOnline !== undefined) updates.requireAllMembersOnline = requireAllMembersOnline === true;
@@ -1531,7 +1535,8 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
 
   // staff-capabilities: validated like updateGame (a file is still client-supplied bytes).
   const rawStaffDefaults = (parsed as { staffDefaults?: unknown }).staffDefaults;
-  const importedStaffDefaults = rawStaffDefaults === undefined ? undefined : validateStaffDefaults(rawStaffDefaults);
+  // null = "not set", exactly as updateGame treats it.
+  const importedStaffDefaults = rawStaffDefaults == null ? undefined : validateStaffDefaults(rawStaffDefaults);
 
   if (target) {
     // Replace = every authored field the file format carries. A field the file does

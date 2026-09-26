@@ -56,6 +56,8 @@ import {
   type RevealState, type ValidationField,
   initialRevealState, markTouched, shouldReveal, nextFinishAction, taskRevealBlockers,
 } from '../lib/taskValidationGating';
+import OutcomesEditor from './OutcomesEditor';
+import { enableOutcomes, disableOutcomes } from '../lib/outcomeEditor';
 import {
   type TaskSample, type SampleOverwriteField, applySample, samplesForType, sampleWouldOverwrite,
 } from '../lib/taskTemplates';
@@ -1712,7 +1714,6 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
   const TYPE_META = typeMetaOf(b);
   const siblingCount = siblings?.length ?? 1;
   const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
-  void replace;
 
   const GROUP_TITLE: Record<OptInGroupKey, string> = {
     hint: b.hintField, timerPoints: b.groupTimerPoints, rules: b.groupRules,
@@ -1734,13 +1735,26 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
     <>
       <div className="space-y-2">
         {task.type === 'smart_station' && (
-          <div>
-            <Label dense>{b.secretCode}</Label>
-            <Input dense data-qs-field="smart.secretCode" value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
-              onChange={(e) => {
-                touch('stationCode');
-                setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true });
-              }} />
+          <div className="space-y-2">
+            {/* answer-scored-question: ONE code, or several codes each with its own
+                points (the operator decides which code to hand out). */}
+            <label className="flex items-center gap-2 text-xs text-[--ink-2]">
+              <input type="checkbox" checked={(task.answerOutcomes?.length ?? 0) > 0}
+                onChange={(e) => { touch('stationCode'); replace(e.target.checked ? enableOutcomes(task) : disableOutcomes(task)); }} />
+              {b.outcomes.severalCodes}
+            </label>
+            {(task.answerOutcomes?.length ?? 0) > 0 ? (
+              <OutcomesEditor task={task} replace={replace} kind="codes" />
+            ) : (
+              <div>
+                <Label dense>{b.secretCode}</Label>
+                <Input dense data-qs-field="smart.secretCode" value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
+                  onChange={(e) => {
+                    touch('stationCode');
+                    setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true });
+                  }} />
+              </div>
+            )}
           </div>
         )}
         {task.type === 'photo' && (
@@ -1841,8 +1855,19 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           </div>
         )}
         {task.type === 'quiz' && (
-          <div data-qs-field="answers">
-            <QuizModeSection task={task} set={set} b={b} revealed={revealed} touch={touch} />
+          <div data-qs-field="answers" className="space-y-2">
+            {/* answer-scored-question: points by answer. Each row's text is a button
+                the players tap, and its points replace the mission's points. */}
+            {!(task.orderItems && task.orderItems.length > 0) && (
+              <label className="flex items-center gap-2 text-xs text-[--ink-2]">
+                <input type="checkbox" checked={(task.answerOutcomes?.length ?? 0) > 0}
+                  onChange={(e) => { touch('quizChoices'); replace(e.target.checked ? enableOutcomes(task) : disableOutcomes(task)); }} />
+                {b.outcomes.pointsByAnswer}
+              </label>
+            )}
+            {(task.answerOutcomes?.length ?? 0) > 0
+              ? <OutcomesEditor task={task} replace={replace} kind="answers" />
+              : <QuizModeSection task={task} set={set} b={b} revealed={revealed} touch={touch} />}
           </div>
         )}
         {task.type === 'numeric' && (

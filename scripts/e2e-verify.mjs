@@ -11786,6 +11786,14 @@ async function main() {
     const OWNER = creatorCred.user.uid;
     const aDb = adminSdk.firestore();
     const { gameId: g } = await creator.call('createGame', { title: 'Staff caps', mode: 'individual' });
+    // The Builder's save payload ALWAYS carries the staffDefaults key, and for a game
+    // that never set one its value is undefined, which the callable transport sends
+    // as null. Refusing that refused EVERY Builder autosave of such a game (found in
+    // the browser, 2026-09-26). null means "not set", exactly like absent.
+    let nullAccepted = false;
+    try { await creator.call('updateGame', { gameId: g, title: 'Staff caps', staffDefaults: null }); nullAccepted = true; }
+    catch (e) { console.log('  staffDefaults null err ::', e.message); }
+    check('updateGame accepts staffDefaults: null (the Builder autosave of a game without defaults)', nullAccepted);
     await expectError('updateGame refuses an unknown staff capability (a typo must not widen anything)',
       creator.call('updateGame', { gameId: g, staffDefaults: { capabilities: ['chat', 'godmode'] } }),
       { codeIn: ['functions/invalid-argument'] });

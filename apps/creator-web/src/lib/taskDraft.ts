@@ -33,6 +33,14 @@ export function editDraft(state: DraftState, patch: Partial<Task>): DraftState {
   return { committed: state.committed, draft: { ...state.draft, ...patch } };
 }
 
+// A WHOLE-task edit (the task editor always hands back the full task). Unlike the
+// merging editDraft, a key the editor REMOVED stays removed: merging kept it, so
+// switching a quiz to "points by answer" (which drops `answers`) had the old answer
+// written back on the next keystroke and every save refused (answer-scored-question).
+export function replaceDraft(state: DraftState, task: Task): DraftState {
+  return { committed: state.committed, draft: task };
+}
+
 // True when the draft has diverged from what the canvas shows.
 export function isDirty(state: DraftState): boolean {
   return serialize(state.draft) !== serialize(state.committed);
