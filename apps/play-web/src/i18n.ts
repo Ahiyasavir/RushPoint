@@ -715,6 +715,7 @@ const HE = {
     addPhoneQrAlt: 'קוד QR להצטרפות לקבוצה',
     shareLink: 'שליחת קישור הצטרפות',
     shareText: 'הצטרפו לקבוצה שלנו במשחק:',
+    phonesChipAria: ({ n }: { n: number }) => (n === 1 ? 'טלפון אחד בקבוצה. פתיחת הטלפונים של הקבוצה' : `${n} טלפונים בקבוצה. פתיחת הטלפונים של הקבוצה`),
   },
   feed: {
     feedTitle: 'פיד התמונות',
@@ -1527,6 +1528,7 @@ const EN: typeof HE = {
     addPhoneQrAlt: 'QR code to join the team',
     shareLink: 'Send a join link',
     shareText: 'Join our team on RushPoint:',
+    phonesChipAria: ({ n }: { n: number }) => (n === 1 ? 'One phone in the team. Open team phones' : `${n} phones in the team. Open team phones`),
   },
   feed: {
     feedTitle: 'Photo feed',

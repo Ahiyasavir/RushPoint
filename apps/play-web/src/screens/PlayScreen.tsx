@@ -754,6 +754,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
         isTestDrive={session.isTestDrive}
+        phones={hasTeammateDevices && myUid
+          ? { count: team.devices?.length ?? team.deviceUids?.length ?? 1, onOpen: () => setDrawerRequest({ tab: 'devices', nonce: Date.now() }) }
+          : undefined}
         streak={streak} streakMilestone={milestone}
         progress={progress.total > 0 ? (
           <MissionProgressRow progress={progress} beat={beat} accent={accent} />
@@ -1398,7 +1401,7 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
 
 function Header({
   game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy,
-  isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing,
+  isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing, phones,
 }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
   // time_only runs are ranked purely by time and never award points, so the
@@ -1416,6 +1419,9 @@ function Header({
   progress?: ReactNode;
   howToPlay?: ReactNode;
   onShare?: () => void; sharing?: boolean;
+  // team-phones-simple D6: how many phones the team has, one tap from the devices
+  // panel. Omitted for a solo game with a single phone.
+  phones?: { count: number; onOpen: () => void };
 }) {
   const { t } = useT();
   // Test mode (change: test-mode-hidden-scoring): no score, no streak, no power-up
@@ -1459,6 +1465,13 @@ function Header({
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          {phones && (
+            <button type="button" onClick={phones.onOpen} data-testid="phones-chip"
+              aria-label={t.devices.phonesChipAria({ n: phones.count })} title={t.devices.panelTitle}
+              className="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[44px] px-1 rounded-lg text-sm font-bold text-zinc-300">
+              📱<span className="font-mono">{phones.count}</span>
+            </button>
+          )}
           {howToPlay}
           {onShare && (
             <button type="button" onClick={onShare} disabled={sharing}
