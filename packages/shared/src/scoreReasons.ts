@@ -45,6 +45,11 @@ export type ScoreReasonId =
  * disappears mid-typing (while the amount field is momentarily empty) is worse
  * than one showing a harmless default.
  */
+export function isScoreReasonId(v: unknown): v is ScoreReasonId {
+  return typeof v === 'string'
+    && ((BONUS_REASONS as readonly string[]).includes(v) || (PENALTY_REASONS as readonly string[]).includes(v) || v === OTHER_REASON);
+}
+
 export function reasonsForDelta(delta: number): readonly ScoreReasonId[] {
   return Number.isFinite(delta) && delta < 0 ? PENALTY_REASONS : BONUS_REASONS;
 }

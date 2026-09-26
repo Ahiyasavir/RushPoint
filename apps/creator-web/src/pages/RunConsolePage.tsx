@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
@@ -21,7 +21,7 @@ import {
 import {
   buildSubmissionQueues, submissionKey, isRenderableMedia,
   newPendingKeys, pendingLateJoiners,
-  OTHER_REASON, reasonsForDelta, resolveReason, type ScoreReasonId,
+  OTHER_REASON, reasonsForDelta, resolveReason, isScoreReasonId, type ScoreReasonId,
   type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
 } from '@rushpoint/shared';
 // Review triage (change: photo-review-throughput): wait time, "who is actually
@@ -42,6 +42,8 @@ import { OverflowMenu } from '../components/OverflowMenu';
 import SendBackPicker, { type SendBackChoice } from '../components/SendBackPicker';
 import ConsoleTabs from '../components/ConsoleTabs';
 import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
+import { buildTeamDossier } from '../lib/teamDossier';
+import TeamPage from '../components/TeamPage';
 import StaffCodesPanel from '../components/StaffCodesPanel';
 import { defaultCodeCapabilities, type StaffCapability } from '@rushpoint/shared';
 import { sendBackTargets } from '../lib/sendBackTargets';
@@ -394,6 +396,20 @@ export default function RunConsolePage() {
   // send-team-back: each team's stage records, from the SAME listener (the full documents already
   // arrive; this used to keep only the name and the submissions).
   const [teamStages, setTeamStages] = useState<Map<string, unknown>>(new Map());
+  // team-dossier-and-search D1: the FULL team documents. The bytes already arrive
+  // on this listener; it used to keep only the name and the submissions.
+  const [teamFullDocs, setTeamFullDocs] = useState<Map<string, Record<string, unknown>>>(new Map());
+  // The open team page lives in the URL (?team=), so a refresh keeps it open and
+  // the browser's back button closes it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openTeamId = searchParams.get('team');
+  const openTeamPage = useCallback((id: string) => {
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('team', id); return n; });
+  }, [setSearchParams]);
+  const closeTeamPage = useCallback(() => {
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('team'); return n; });
+  }, [setSearchParams]);
+  const [teamPageReviewBusy, setTeamPageReviewBusy] = useState<Set<string>>(new Set());
   const [sendBackFor, setSendBackFor] = useState<RunTeamRow | null>(null);
   // A read failure must NOT look like "no pending photos": at a live event a
   // manager would silently miss submissions. The listener auto retries, so this
@@ -410,6 +426,7 @@ export default function RunConsolePage() {
         return { id: d.id, displayName: data.displayName, taskSubmissions: data.taskSubmissions };
       }));
       setTeamStages(new Map(snap.docs.map((d) => [d.id, (d.data() as { stages?: unknown }).stages])));
+      setTeamFullDocs(new Map(snap.docs.map((d) => [d.id, { ...(d.data() as Record<string, unknown>), id: d.id }])));
     }, (err) => {
       console.warn('[RunConsole] submissions listener error', err);
       setPhotoLoadError(true);
@@ -1059,6 +1076,38 @@ export default function RunConsolePage() {
     );
   }
 
+  // Review from inside the team page (team-dossier-and-search D5). The SAME rules
+  // as the photo queue: a reversal is confirmed, a rejection may carry a reason,
+  // and the toast says what it cost. No optimistic change: the snapshot updates it.
+  async function reviewFromTeamPage(teamId: string, taskId: string, approved: boolean) {
+    const teamName = teams.find((tm) => tm.id === teamId)?.displayName ?? teamId;
+    const status = (teamFullDocs.get(teamId)?.taskSubmissions as Record<string, { status?: string }> | undefined)?.[taskId]?.status;
+    const isReversal = !approved && status === 'approved';
+    if (isReversal && !(await dialog.confirm(
+      rc.reverseApprovalConfirm({ team: teamName }),
+      rc.reverseApprovalCta, true, { title: rc.reverseApprovalTitle },
+    ))) return;
+    let note = '';
+    if (!approved) {
+      const answer = await dialog.prompt(rc.photoReviewRejectPrompt, '', rc.photoReviewRejectCta);
+      if (answer === null) return;
+      note = answer;
+    }
+    const key = `${teamId}:${taskId}`;
+    setTeamPageReviewBusy((prev) => new Set(prev).add(key));
+    try {
+      const res = await reviewStationSubmission({ ...ctx, teamId, taskId, approved, ...(note ? { note } : {}) });
+      const delta = typeof res?.scoreDelta === 'number' ? res.scoreDelta : 0;
+      toast.success(approved ? rc.photoReviewApproved
+        : isReversal ? rc.reverseApprovalDone({ team: teamName, points: Math.abs(delta) })
+          : rc.photoReviewRejected);
+    } catch {
+      toast.error(rc.photoReviewFailed);
+    } finally {
+      setTeamPageReviewBusy((prev) => { const n = new Set(prev); n.delete(key); return n; });
+    }
+  }
+
   async function adjustScore(team: RunTeamRow) {
     const raw = await dialog.prompt(rc.scoreAdjustmentPrompt);
     // `parseInt(v) || 0` used to send a zero delta for any garbage input,
@@ -1399,7 +1448,12 @@ export default function RunConsolePage() {
                 {shownTeams.map((team) => (
                   <div key={team.id} className="flex flex-wrap items-center gap-3 p-2 rounded-lg bg-[--surface-2]">
                     <div className="flex-1 min-w-[10rem]">
-                      <div dir="auto" className="text-sm text-[--ink-2]">{team.displayName}</div>
+                      {/* team-dossier-and-search: the name opens everything about the team. */}
+                      <button type="button" onClick={() => openTeamPage(team.id)}
+                        aria-label={rc.openTeamAria({ team: team.displayName })}
+                        className="text-start text-sm font-semibold text-[--ink-1] underline decoration-dotted underline-offset-4 hover:text-ink-fire min-h-[44px]">
+                        <span dir="auto">{team.displayName}</span>
+                      </button>
                       <div className="text-[13px] text-[--ink-3]">
                         {team.finished
                           ? rc.teamStatusFinished
@@ -1830,6 +1884,34 @@ export default function RunConsolePage() {
           </section>
         </div>
       )}
+
+      {openTeamId && (() => {
+        const row = teams.find((tm) => tm.id === openTeamId);
+        const rankIndex = (activeRun.leaderboard?.rankings ?? []).findIndex((r) => r.teamId === openTeamId);
+        const dossier = buildTeamDossier({
+          teamDoc: teamFullDocs.get(openTeamId),
+          taskTitle: (id) => taskTitles.get(id) ?? '',
+          stageTitle: (order) => rc.teamPage.stage({ n: order + 1 }),
+          // A preset reason is stored as its code (the staff console's picker sends
+          // ids); a free-text reason is shown as written.
+          reasonLabel: (r) => (isScoreReasonId(r) ? rc[r] : r),
+          nowMs,
+          rank: rankIndex >= 0 ? rankIndex + 1 : null,
+        });
+        // Not loaded yet, or a stale ?team= for a team not in this run: nothing to show.
+        if (!dossier || !row) return null;
+        return (
+          <TeamPage
+            dossier={dossier}
+            onClose={closeTeamPage}
+            onAdjust={() => void adjustScore(row)}
+            onSkip={!finished && row.launched && !row.finished ? () => void skipTeamTask(row) : undefined}
+            onSendBack={!finished ? () => setSendBackFor(row) : undefined}
+            onReview={(taskId, approved) => void reviewFromTeamPage(row.id, taskId, approved)}
+            reviewBusy={(taskId) => teamPageReviewBusy.has(`${row.id}:${taskId}`)}
+          />
+        );
+      })()}
 
       {sendBackFor && (
         <SendBackPicker

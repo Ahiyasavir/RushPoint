@@ -2,7 +2,7 @@
 
 ## 1. RED
 
-- [~] 1.1 Vitest `teamDossier.test.ts` (TODO) + `teamSearch.test.ts` (done) against the not-yet-existing modules. Confirm RED.
+- [x] 1.1 Vitest `teamDossier.test.ts` + `teamSearch.test.ts` against the not-yet-existing modules. Confirm RED.
 - [x] 1.2 e2e ledger assertions (design, test strategy), including the sanitizer exclusion. Confirm RED.
 
 ## 2. GREEN
@@ -13,13 +13,17 @@
       (Phone names / team code are matched when the row carries them; `listRunTeams` rows do
       not yet, so today the box finds team and member names. Not checked in a browser yet:
       the seeded demo run has no teams.)
-- [ ] 2.3 Keep full team docs in the console's teams listener; derive the existing projections from them.
+- [x] 2.3 Keep full team docs in the console's teams listener; derive the existing projections from them.
 - [ ] 2.4 Lift the `teamLocations` stream so the live map and the team page share it.
-- [ ] 2.5 `lib/teamDossier.ts`. 1.1 → green.
-- [ ] 2.6 `components/TeamPage.tsx`: drawer/sheet, `?team=` routing, sections from the view-model, actions
+      (NOT DONE: the team page has no location section yet.)
+- [x] 2.5 `lib/teamDossier.ts`. 1.1 → green.
+- [x] 2.6 `components/TeamPage.tsx`: drawer/sheet, `?team=` routing, sections from the view-model, actions
       wired to the console's existing handlers (design D5).
-- [ ] 2.7 Rows become buttons that open the page (whole row is the target; the overflow menu stays).
-- [ ] 2.8 i18n he/en.
+      (Built: current mission + time, people and phones, media with approve/reject/undo, the score
+      ledger, the timeline with answers; actions: score, skip mission, send back. NOT built: the
+      chat with the team inside the page, and location.)
+- [x] 2.7 Rows become buttons that open the page (the team NAME is the button; the overflow menu stays).
+- [x] 2.8 i18n he/en.
 
 ## 3. REFACTOR
 
@@ -27,5 +31,9 @@
 
 ## 4. Verify
 
-- [ ] 4.1 Preview flows (design, test strategy), screenshots at both sizes.
+- [x] 4.1 Preview flows (design, test strategy), screenshots at both sizes.
+      (1400 and 375: open from a row, `?team=` survives a reload, Esc closes and clears it, `/`
+      focuses search, an empty search says so, a +20 adjustment from inside the page appears live
+      in the ledger with its translated reason. Found and fixed on the way: the site header was
+      drawn over the drawer (portal), and preset reasons showed as raw codes.)
 - [ ] 4.2 `npm run verify`, `npm run e2e` green, exit codes to a file.
