@@ -13,12 +13,14 @@
 
 - [x] 2.1 Type `preferredCamera` in shared; sanitizer passthrough; `updateGame` validation (enum or absent). 1.3 → green.
 - [x] 2.2 `lib/cameraChoice.ts`. 1.1 → green.
-- [~] 2.3 Extract `CameraViewfinder` from `VideoEntry` (no behaviour change for video), add the switch
+- [~] 2.3 (photo got its own viewfinder component; video's stays inside VideoEntry, see 3.1) Extract `CameraViewfinder` from `VideoEntry` (no behaviour change for video), add the switch
       button (design D2) and mirroring (D3).
       (Switch + mirroring shipped INSIDE `VideoEntry`; the extraction is not done.)
-- [ ] 2.4 (DEFERRED: a selfie photo mission asks the phone camera for the front side via
-      `capture="user"`, and the phone's own camera keeps its flip button. The in-app photo
-      viewfinder is not built.) Photo mode: shutter → still → `compressImageWithReport` → existing preview/retake; native input as
+- [x] 2.4 (Built 2026-09-26 as `components/PhotoViewfinder.tsx`: opens on choice > selfie default >
+      rear, front/back switch when a second camera exists, mirrored selfie PREVIEW with an unmirrored
+      saved still (`stillSize`), deadline + any failure hands over to the phone's camera, which also
+      stays one tap away. Every still goes through the same `acceptPhoto` pipeline as a native
+      capture. scripts/test-photo-viewfinder.ts; browser-checked with a fake camera.) Photo mode: shutter → still → `compressImageWithReport` → existing preview/retake; native input as
       secondary and fallback. 1.2 → green.
 - [x] 2.5 Preference precedence + sessionStorage memory (design D4).
 - [x] 2.6 Builder toggle "selfie" on photo/video missions; clearing sends absent. i18n he/en both apps.

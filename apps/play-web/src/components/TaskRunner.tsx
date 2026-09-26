@@ -57,6 +57,7 @@ import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import { Working } from './Working';
 import { capturePosterFrame, posterTaskId } from '../lib/posterFrame';
+import PhotoViewfinder from './PhotoViewfinder';
 import { estimateUploadEta, etaLabel, readUplinkSample, uplinkPrior, type EtaLabel } from '../lib/uploadEta';
 import { currentPrior, localStorageOrNull, useUploadEta } from '../hooks/useUploadEta';
 import { LoadingView } from './LoadingView';
@@ -1578,6 +1579,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           <PhotoEntry
             key={task.id}
             selfie={task.smart?.preferredCamera === 'front'}
+            runId={session.runId}
             busy={frozen}
             working={busy}
             onSubmit={photo}
@@ -2397,7 +2399,9 @@ function SubmissionWaitingCard({ phase, mediaKind, canReplace, onReplace, onOpen
   );
 }
 
-function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = false }: {
+function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = false, runId = '' }: {
+  /** Keys the remembered camera side to this run (camera-switch D4). */
+  runId?: string;
   /** A "selfie" mission (smart.preferredCamera 'front'): ask the phone camera to open
    *  facing the players. It is only a hint, and the phone's camera app keeps its own
    *  flip button either way (camera-switch D4). */
@@ -2473,11 +2477,21 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
   // And it says so out loud now: one `[rp:photo]` breadcrumb per change event, so the
   // next report can distinguish "the event never fired" from "it fired and we lost it"
   // instead of guessing between them.
+  // The in-app camera (camera-switch 2.4) and the phone's own camera. `nativeOnly` once the in-app
+  // camera could not open: then the phone camera is the main button, with a note saying why.
+  const [viewfinder, setViewfinder] = useState(false);
+  const [nativeOnly, setNativeOnly] = useState(false);
+
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
     e.target.value = ''; // allow re-selecting the same capture
     console.info('[rp:photo] change', f ? { name: f.name, type: f.type, size: f.size } : 'no file');
+    await acceptPhoto(f);
+  }
 
+  // ONE pipeline for every capture, in-app or native: the same size checks, compression, preview
+  // and error wording, so the in-app camera cannot reintroduce a way to lose a photo.
+  async function acceptPhoto(f: File | null) {
     const verdict = pickedFileVerdict(f, MAX_RAW_PHOTO_BYTES);
     // NOTHING ARRIVED. Keep the photo, keep the preview, say nothing: the player
     // backed out of the camera, which is not a request to throw their work away.
@@ -2541,9 +2555,31 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
       <input ref={inputRef} type="file" accept="image/*" capture={selfie ? 'user' : 'environment'} onChange={pickFile}
         data-testid="photo-file" tabIndex={-1} aria-hidden="true"
         className="absolute w-px h-px opacity-0 pointer-events-none -z-10" />
-      <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
-        {file ? t.task.retakePhoto : t.task.takePhoto}
-      </Button>
+      {nativeOnly || !canUseInAppCamera() ? (
+        <>
+          <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
+            {file ? t.task.retakePhoto : t.task.takePhoto}
+          </Button>
+          {nativeOnly && <p className="text-xs text-zinc-400" data-testid="photo-native-note">{t.task.inAppCameraUnavailable}</p>}
+        </>
+      ) : (
+        <>
+          <Button variant="ghost" disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
+            {file ? t.task.retakePhoto : t.task.takePhoto}
+          </Button>
+          {/* The phone's own camera stays one tap away (camera-switch D1). */}
+          <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-native"
+            className={`${TAP_TARGET} w-full text-center text-[13px] font-medium text-zinc-400 underline underline-offset-2`}>
+            {t.task.usePhoneCamera}
+          </button>
+        </>
+      )}
+      {viewfinder && (
+        <PhotoViewfinder selfie={selfie} runId={runId}
+          onShot={(file) => { setViewfinder(false); void acceptPhoto(file); }}
+          onClose={() => setViewfinder(false)}
+          onFallback={() => { setViewfinder(false); setNativeOnly(true); }} />
+      )}
       {fileErr && <p className="text-ink-alert text-sm">{fileErr}</p>}
       {!fileErr && warn && <p className="text-sm text-zinc-400" data-testid="photo-warn">{warn}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
@@ -3558,4 +3594,10 @@ function reportedFacing(stream: MediaStream): Facing | null {
     const f = stream.getVideoTracks()[0]?.getSettings?.().facingMode;
     return f === 'user' || f === 'environment' ? f : null;
   } catch { return null; }
+}
+
+// The in-app photo camera needs getUserMedia (camera-switch 2.4). Where it is missing the phone's own
+// camera is the only button, exactly as before.
+function canUseInAppCamera(): boolean {
+  try { return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia; } catch { return false; }
 }

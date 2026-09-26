@@ -103,3 +103,13 @@ export function writeCameraChoice(storage: ChoiceStorage | null | undefined, run
   if (!storage) return;
   try { storage.setItem(key(runId), facing); } catch { /* private mode / blocked: the choice is simply not remembered */ }
 }
+
+/** The in-app photo camera grabs the frame at its own size, capped on the long edge (the upload
+ *  pipeline downsizes to 1280 px anyway, camera-switch D1). null for an unusable frame, so the
+ *  shutter reports a failure rather than saving a blank picture. */
+export const STILL_MAX_EDGE = 2560;
+export function stillSize(width: number, height: number): { width: number; height: number } | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  const scale = Math.min(1, STILL_MAX_EDGE / Math.max(width, height));
+  return { width: Math.round(width * scale), height: Math.round(height * scale) };
+}

@@ -236,6 +236,9 @@ const HE = {
     // Upload ETA (change: video-upload-speed, D5): stable buckets, never a countdown.
     videoAlreadyUp: 'הסרטון כבר עלה בזמן הצילום. אפשר לשלוח.',
     choicePoints: ({ n }: { n: number }) => `${n} נק׳`,
+    usePhoneCamera: 'או צלמו במצלמה של הטלפון',
+    inAppCameraUnavailable: 'המצלמה באפליקציה לא נפתחה בטלפון הזה, אז נצלם במצלמה של הטלפון.',
+    shutter: 'צילום',
     etaSeconds: 'עוד כמה שניות',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 30 ? 'עוד בערך חצי דקה'
@@ -1105,6 +1108,9 @@ const EN: typeof HE = {
     uploadRetrying: 'Slow network. Retrying…',
     videoAlreadyUp: 'The clip already went up while you filmed. Ready to send.',
     choicePoints: ({ n }: { n: number }) => `${n} pts`,
+    usePhoneCamera: 'Or use the phone\'s camera',
+    inAppCameraUnavailable: 'The camera inside the app would not open on this phone, so the phone\'s own camera takes the picture.',
+    shutter: 'Take the picture',
     etaSeconds: 'a few seconds left',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 60 ? 'about a minute left'
