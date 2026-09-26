@@ -3310,9 +3310,10 @@ async function main() {
     // 3) hidden-location video → still excluded, exactly like a hidden photo.
     const vArr = await vp.call('reportArrival', { ...VCTX, taskId: 'vf-hidden', lat: 31.78, lng: 35.21 });
     check('video-feed: arrival at the hidden spot latches', vArr?.arrived === true, JSON.stringify(vArr));
-    // null from an older client is ABSENT, never a refusal (the undefined-to-null transport trap).
+    // A null poster from an older client is ABSENT, never a refusal (the undefined-to-null transport
+    // trap). The length is given: an auto-approved clip must prove it (see the clip-length scenario).
     const autoHiddenVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-hidden', photoUrl: feedPhotoUrl(vr, vUid, 'hidden.webm'), contentType: 'video/webm',
-      posterUrl: null, mediaDurationSec: null });
+      posterUrl: null, mediaDurationSec: 12 });
     check('video-feed: hidden video still auto-approves (completion unaffected)', autoHiddenVideo?.autoApproved === true, JSON.stringify(autoHiddenVideo));
     const afterHiddenVideo = await vp.getColAt(vFeedCol);
     check('video-feed: the hidden-location video is excluded from the feed',
@@ -3327,6 +3328,41 @@ async function main() {
     check('video-feed: audio submissions still never reach the feed',
       !afterAudio.some((d) => d.taskId === 'vf-audio'), JSON.stringify(afterAudio.map((d) => d.taskId)));
   }); // scenario: video enters the live feed
+
+  // Owner (2026-09-26): an AUTO-APPROVED clip must still meet the mission's length range. Outside it
+  // (or with no length to check) it is not approved automatically: it waits for the organizers, and
+  // the reply says why so the phone can tell the team.
+  await scenario('auto-approve respects the clip length range', async () => {
+    const OWNER = creatorCred.user.uid;
+    const url = (rid, uid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rid}/teams/${uid}/${name}`)}?alt=media`;
+    const clipTask = (id) => ({
+      id, title: `Clip ${id}`, type: 'photo', locationless: true, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 9,
+      smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', autoApprove: true, videoMinSeconds: 10, videoMaxSeconds: 30 },
+    });
+    const { gameId: lg } = await creator.call('createGame', { title: 'Clip Length Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: lg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'cl-s', order: 0, title: 'Clips', isFinal: true, requiredTaskCount: 1, tasks: [clipTask('cl-short'), clipTask('cl-none'), clipTask('cl-long'), clipTask('cl-ok')] },
+    ] });
+    const { runId: lr, accessCode: lc } = await creator.call('launchRun', { gameId: lg });
+    const lp = makeParty('clipLengthPlayer');
+    const lUid = (await signInAnonymously(lp.auth)).user.uid;
+    await lp.call('joinRun', { code: lc, displayName: 'Clip Length' });
+    await creator.call('startTeams', { gameId: lg, runId: lr });
+    const LC = { ownerUid: OWNER, gameId: lg, runId: lr, teamId: lUid };
+    const send = (taskId, mediaDurationSec) => lp.call('submitStationPhoto', { ...LC, taskId, photoUrl: url(lr, lUid, `${taskId}.webm`), contentType: 'video/webm', ...(mediaDurationSec === undefined ? {} : { mediaDurationSec }) });
+    const short = await send('cl-short', 4);
+    check('clip-length: a clip under the minimum is NOT auto-approved', short?.autoApproved === false && short?.lengthHold === 'short', JSON.stringify(short));
+    const none = await send('cl-none', undefined);
+    check('clip-length: a clip with no length is not approved blind', none?.autoApproved === false && none?.lengthHold === 'unknown', JSON.stringify(none));
+    const long = await send('cl-long', 45);
+    check('clip-length: a clip over the maximum is NOT auto-approved', long?.autoApproved === false && long?.lengthHold === 'long', JSON.stringify(long));
+    const lTeam = (await creator.getDocAt(`users/${OWNER}/games/${lg}/runs/${lr}/teams/${lUid}`)).data ?? {};
+    check('clip-length: the held clips wait for the organizers (pending), nothing scored',
+      ['cl-short', 'cl-none', 'cl-long'].every((id) => lTeam.taskSubmissions?.[id]?.status === 'pending') && (lTeam.score ?? 0) === 0, JSON.stringify(lTeam.taskSubmissions));
+    const ok = await send('cl-ok', 20);
+    check('clip-length: a clip inside the range IS auto-approved', ok?.autoApproved === true && ok?.lengthHold === undefined, JSON.stringify(ok));
+  }); // scenario: auto-approve respects the clip length range
 
   await scenario('task types: quiz · numeric · geofence · sequence · trigger modes', async () => {
 

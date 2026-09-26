@@ -321,7 +321,8 @@ export const submitStationPhoto = callable<
   // validated server-side against the task's captureKind.
   // video-upload-speed D7: posterUrl + mediaDurationSec are OMITTED when absent, never null.
   Ctx & { teamId: string; taskId: string; photoUrl: string; contentType?: string; posterUrl?: string; mediaDurationSec?: number },
-  { submitted: boolean; autoApproved: boolean }
+  // lengthHold: an auto-approved clip outside the mission's length range waits for the organizers.
+  { submitted: boolean; autoApproved: boolean; lengthHold?: 'short' | 'long' | 'unknown' }
 >('submitStationPhoto');
 
 // Not idempotent — creates a fresh auto-id alert doc each call, so a retry after

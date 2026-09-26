@@ -9,7 +9,7 @@ import {
 // Reduced to the devices this team actually has, the same way the server reduces it at
 // submit time, so the two never disagree about what the team is waiting for
 // (change: every-member-plays).
-import { effectiveContributorRequirement, normalizeContentType } from '@rushpoint/shared';
+import { effectiveContributorRequirement, normalizeContentType, autoApproveLengthVerdict } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
@@ -1071,6 +1071,8 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
         ...(typeof lengthSeconds === 'number' && Number.isFinite(lengthSeconds) && lengthSeconds > 0 ? { mediaDurationSec: lengthSeconds } : {}),
       });
       posterRef.current = null;
+      // Owner rule (2026-09-26): a clip outside the length range is not approved automatically.
+      if (res.lengthHold) setMsg({ text: t.task.videoHeldForLength, tone: 'progress' });
       pending.forget(taskId);
       setJustSent({ taskId: task!.id, status: res.autoApproved ? 'approved' : 'pending', submittedAt: new Date().toISOString(), photoUrl: up.url });
       setMediaStage({ taskId, stage: 'idle', failed: null });
@@ -2939,7 +2941,7 @@ function readVideoDuration(url: string): Promise<number | undefined> {
 }
 
 function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStreamStart, onStreamChunk, onStreamDiscard, isUploaded }: {
-  smart: { videoMinSeconds?: number; videoMaxSeconds?: number; preferredCamera?: 'front' } | undefined;
+  smart: { videoMinSeconds?: number; videoMaxSeconds?: number; preferredCamera?: 'front'; autoApprove?: boolean } | undefined;
   /** Keys the player's remembered camera choice to this run (camera-switch D4). */
   runId?: string;
   busy: boolean;
@@ -3398,6 +3400,7 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
     onCapturedRef.current?.(ready, mimeRef.current);
   }, [blob, clipTooShort]);
   const canSubmit = !!blob && !busy && !clipTooShort;
+  const autoLength = autoApproveLengthVerdict(lengthSeconds, smart);
   const shortBy = Math.max(0, minSeconds - elapsed);
 
   if (unsupported && !blob) {
@@ -3530,7 +3533,15 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
         {err && <p className="text-ink-alert text-sm">{err}</p>}
         {/* Short but sendable: a plain note, NOT the alert colour, because the
             submit button beside it is enabled (change: clip-length-is-guidance). */}
-        {!err && clipGrade === 'short' && (
+        {/* An AUTO-APPROVED mission only approves a clip inside its length range (owner rule,
+            2026-09-26). Say so BEFORE sending, so the team can reshoot instead of waiting. */}
+        {!err && smart?.autoApprove === true && autoLength !== 'ok' ? (
+          <p className="text-sm text-ink-amber" data-testid="video-wont-auto-approve">
+            {autoLength === 'long' ? t.task.videoTooLongForAuto({ sec: maxSeconds })
+              : autoLength === 'short' ? t.task.videoTooShortForAuto({ sec: minSeconds })
+              : t.task.videoLengthUnknownForAuto}
+          </p>
+        ) : !err && clipGrade === 'short' && (
           <p className="text-sm text-zinc-400">{t.task.videoShortButOk({ sec: minSeconds })}</p>
         )}
         <video controls src={previewUrl} className="w-full rounded-xl bg-black" />

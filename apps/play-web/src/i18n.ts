@@ -239,6 +239,10 @@ const HE = {
     usePhoneCamera: 'או צלמו במצלמה של הטלפון',
     inAppCameraUnavailable: 'המצלמה באפליקציה לא נפתחה בטלפון הזה, אז נצלם במצלמה של הטלפון.',
     shutter: 'צילום',
+    videoTooShortForAuto: ({ sec }: { sec: number }) => `הסרטון לא מגיע ל ${sec} שניות, אז הוא לא יאושר אוטומטית: הוא יישלח למארגנים לבדיקה. אפשר לצלם שוב.`,
+    videoTooLongForAuto: ({ sec }: { sec: number }) => `הסרטון עובר את ${sec} השניות, אז הוא לא יאושר אוטומטית: הוא יישלח למארגנים לבדיקה. אפשר לצלם שוב.`,
+    videoLengthUnknownForAuto: 'לא הצלחנו למדוד את אורך הסרטון, אז הוא יישלח למארגנים לבדיקה במקום אישור אוטומטי.',
+    videoHeldForLength: 'הסרטון לא עמד באורך שנדרש, אז הוא נשלח למארגנים לבדיקה.',
     etaSeconds: 'עוד כמה שניות',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 30 ? 'עוד בערך חצי דקה'
@@ -1111,6 +1115,10 @@ const EN: typeof HE = {
     usePhoneCamera: 'Or use the phone\'s camera',
     inAppCameraUnavailable: 'The camera inside the app would not open on this phone, so the phone\'s own camera takes the picture.',
     shutter: 'Take the picture',
+    videoTooShortForAuto: ({ sec }: { sec: number }) => `The clip is under ${sec} seconds, so it will not be approved automatically: the organizers will review it. You can film it again.`,
+    videoTooLongForAuto: ({ sec }: { sec: number }) => `The clip is over ${sec} seconds, so it will not be approved automatically: the organizers will review it. You can film it again.`,
+    videoLengthUnknownForAuto: 'We could not measure the clip\'s length, so the organizers will review it instead of an automatic approval.',
+    videoHeldForLength: 'The clip was not the required length, so it went to the organizers for review.',
     etaSeconds: 'a few seconds left',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 60 ? 'about a minute left'

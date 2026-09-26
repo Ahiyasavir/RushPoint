@@ -23,7 +23,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // Undoing an approval and taking the points back with it (change:
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
-import { planApprovalReversal, appendScoreLedger, validateRunContacts, contactsFor, matchAnswerOutcome, mediaDurationForRecord, type AnswerOutcome } from '@rushpoint/shared';
+import { planApprovalReversal, appendScoreLedger, validateRunContacts, contactsFor, matchAnswerOutcome, mediaDurationForRecord, autoApproveLengthVerdict, type AnswerOutcome } from '@rushpoint/shared';
 import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
@@ -1758,6 +1758,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // an organizer who turned the run-wide switch on mid-event needs to be able to tell
   // that from a mission the game itself declared staffless.
   let perTaskAutoApprove = false;
+  // The mission's clip length range, for the auto-approve length rule below.
+  let taskVideoRange: { videoMinSeconds?: number; videoMaxSeconds?: number } = {};
   let taskTitle = '';
   let feedEnabled = true;
   // wave-f S1: the resolved task's hidden-location flag decides whether its
@@ -1772,7 +1774,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   if (gameSnap.exists) {
     const game = gameSnap.data() as {
       photoFeedEnabled?: boolean;
-      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind } }[] }[];
+      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind; videoMinSeconds?: number; videoMaxSeconds?: number } }[] }[];
     };
     feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
@@ -1780,6 +1782,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
       if (task) {
         autoApprove = task.smart?.autoApprove === true;
         perTaskAutoApprove = autoApprove;
+        taskVideoRange = { videoMinSeconds: task.smart?.videoMinSeconds, videoMaxSeconds: task.smart?.videoMaxSeconds };
         taskTitle = task.title ?? '';
         feedTask = { hideLocation: task.hideLocation };
         kind = task.smart?.captureKind === 'audio' || task.smart?.captureKind === 'video'
@@ -1808,6 +1811,19 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
       db, docCachePolicy, FIRESTORE_PATHS.run(ownerUid, gameId, runId),
     );
     autoApprove = runCached.data?.autoApproveAllMedia === true;
+  }
+  // Owner (2026-09-26): an auto-approved CLIP must still meet the mission's length range. Outside
+  // it, or with no length to check, it is not approved automatically: it waits for the organizers,
+  // and `lengthHold` tells the phone why. Judged on the length the phone reported; the organizer
+  // sees the clip itself before approving.
+  let lengthHold: 'short' | 'long' | 'unknown' | undefined;
+  if (autoApprove && kind === 'video') {
+    const verdict = autoApproveLengthVerdict(rawDuration, taskVideoRange);
+    if (verdict !== 'ok') {
+      lengthHold = verdict;
+      autoApprove = false;
+      perTaskAutoApprove = false;
+    }
   }
   /** Which rule approved this, for the caller and the structured log. */
   const approvalSource = (): 'task' | 'run' | 'none' =>
@@ -1918,7 +1934,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     }
   }
 
-  return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), ...(alreadyCompleted ? { already: true } : {}) };
+  return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), ...(alreadyCompleted ? { already: true } : {}), ...(lengthHold ? { lengthHold } : {}) };
 });
 
 
