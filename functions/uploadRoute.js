@@ -97,9 +97,11 @@ function contentTypeAllowed(kind, contentType) {
 // arrived. Resolves with the byte count on success; rejects with an Error whose
 // `.reason` is 'too-large' | 'stalled' | 'aborted' | 'io' otherwise. The caller
 // owns cleanup of destPath on rejection.
-function streamToFileWithLimit(req, destPath, maxBytes, stallMs = UPLOAD_STALL_MS) {
+// `opts.flags: 'a'` appends (resumable sessions, video-upload-speed D4); maxBytes is then the room
+// LEFT under the cap, which is what makes the cap cumulative across appends.
+function streamToFileWithLimit(req, destPath, maxBytes, stallMs = UPLOAD_STALL_MS, opts = {}) {
   return new Promise((resolve, reject) => {
-    const out = fs.createWriteStream(destPath);
+    const out = fs.createWriteStream(destPath, { flags: opts.flags === 'a' ? 'a' : 'w' });
     let received = 0;
     let settled = false;
     let stallTimer;
@@ -346,13 +348,15 @@ function uploadLogRecord({ contentType, bytes, ms, outcome, uploadPath }) {
   };
 }
 
-function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse, log, limits, statfs }) {
+// `slots` / `belowFloor` may be passed in so PUT /upload and the resumable session routes
+// (uploadSessionRoute.js) share ONE budget; a caller that passes neither gets its own.
+function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse, log, limits, statfs, slots: sharedSlots, belowFloor: sharedFloor }) {
   const emit = (record) => {
     try { (log || ((r) => console.log(JSON.stringify(r))))(record); } catch { /* telemetry never fails an upload */ }
   };
-  const slots = createUploadSlots(limits || {});
+  const slots = sharedSlots || createUploadSlots(limits || {});
   const statfsImpl = statfs || (fs.promises.statfs ? (p) => fs.promises.statfs(p) : null);
-  const belowFloor = statfsImpl ? createDiskGuard(uploadDir, statfsImpl) : async () => false;
+  const belowFloor = sharedFloor || (statfsImpl ? createDiskGuard(uploadDir, statfsImpl) : async () => false);
   async function uploadHandler(req, res) {
     let tempPath;
     let slot;
@@ -490,6 +494,8 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
     }
   }
   uploadHandler.stats = () => slots.stats();
+  // Exposed so the resumable session routes mint the identical url (uploadSessionRoute.js).
+  uploadHandler.resolveOrigin = resolveOrigin;
   uploadHandler.resetPeak = () => slots.resetPeak();
   return uploadHandler;
 }

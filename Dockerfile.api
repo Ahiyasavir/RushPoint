@@ -54,6 +54,7 @@ COPY --from=build /repo/functions/server.js ./server.js
 # oauthRoute.js was added to server.js's require list without a matching line
 # here, and the deploy took the live API down until this was added).
 COPY --from=build /repo/functions/uploadRoute.js ./uploadRoute.js
+COPY --from=build /repo/functions/uploadSessionRoute.js ./uploadSessionRoute.js
 COPY --from=build /repo/functions/oauthRoute.js ./oauthRoute.js
 COPY --from=build /repo/functions/ingestUrlRoute.js ./ingestUrlRoute.js
 COPY --from=build /repo/functions/mediaServing.js ./mediaServing.js

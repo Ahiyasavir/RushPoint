@@ -46,7 +46,8 @@ const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 // The upload route (content-type allowlists, size caps and the streaming write)
 // lives in uploadRoute.js so it can be tested without this file's built-bundle
 // and Admin-SDK dependencies.
-const { createUploadHandler, sweepStaleTempUploads, uploadsTelemetryRecord } = require('./uploadRoute.js');
+const { createUploadHandler, sweepStaleTempUploads, uploadsTelemetryRecord, createUploadSlots, createDiskGuard } = require('./uploadRoute.js');
+const { createUploadSessionRoutes } = require('./uploadSessionRoute.js');
 const { monitorEventLoopDelay } = require('perf_hooks');
 // Pure decisions for GET /uploads/* — content type, byte range, download
 // disposition (change: media-serving-correctness). See functions/mediaServing.js.
@@ -155,7 +156,14 @@ app.options('/upload', (req, res) => {
   res.sendStatus(204);
 });
 
+// ONE concurrency budget and ONE disk guard for every upload route (video-upload-speed D6), so a
+// resumable session cannot dodge the brake PUT obeys.
+const uploadSlots = createUploadSlots();
+const uploadDiskLow = fs.promises.statfs ? createDiskGuard(UPLOAD_DIR, (p) => fs.promises.statfs(p)) : async () => false;
+
 const uploadHandler = createUploadHandler({
+  slots: uploadSlots,
+  belowFloor: uploadDiskLow,
   verifyIdToken: (token) => admin.auth().verifyIdToken(token),
   uploadDir: UPLOAD_DIR,
   // The request-derived form is the LAST resort (change: task-media-durability).
@@ -173,6 +181,35 @@ const uploadHandler = createUploadHandler({
   onResponse: reflectCors,
 });
 app.put('/upload', uploadHandler);
+
+// ── /upload/sessions: resumable uploads (change: video-upload-speed, D4) ─────
+// Send-while-filming and resume-from-offset for clips. SINGLE PROCESS ONLY (see the header of
+// uploadSessionRoute.js). CORS goes on EVERY response here, not only success: the phone must be
+// able to READ a 409's Upload-Offset to resume, and a response without CORS headers reads to the
+// browser as a network error.
+app.use('/upload/sessions', (req, res, next) => {
+  reflectCors(req, res);
+  res.set('Access-Control-Expose-Headers', 'Upload-Offset, Upload-Length, Location, Retry-After');
+  next();
+});
+app.options(['/upload/sessions', '/upload/sessions/:id'], (req, res) => {
+  res.set('Access-Control-Allow-Methods', 'POST, HEAD, PATCH, DELETE, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Upload-Offset, Upload-Length, Tus-Resumable');
+  res.set('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+const sessionRoutes = createUploadSessionRoutes({
+  verifyIdToken: (token) => admin.auth().verifyIdToken(token),
+  uploadDir: UPLOAD_DIR,
+  // The SAME origin rule as PUT /upload above, so a session mints the identical url shape.
+  resolveOrigin: (req) => uploadHandler.resolveOrigin(req),
+  slots: uploadSlots,
+  belowFloor: uploadDiskLow,
+});
+app.post('/upload/sessions', sessionRoutes.create);
+app.head('/upload/sessions/:id', sessionRoutes.head);
+app.patch('/upload/sessions/:id', sessionRoutes.patch);
+app.delete('/upload/sessions/:id', sessionRoutes.remove);
 
 // One `{msg:'uploads'}` line a minute when anything happened (video-upload-speed D6): in-flight
 // streams, the minute's peak, and the event-loop delay p99, so "did uploads starve the

@@ -119,7 +119,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 
 ### RED
 
-- [ ] 7.1 New `functions/uploadSessionRoute.test.ts` (design D4): create validates path, type, IDOR and
+- [x] 7.1 New `functions/uploadSessionRoute.test.ts` (design D4): create validates path, type, IDOR and
       cap with the SAME table as the PUT tests; PATCH appends; a wrong `Upload-Offset` → `409` + true
       offset; a mid-stream abort keeps the bytes and `HEAD` reports them; a resumed PATCH completes
       byte-identical to the source; the cumulative cap trips across PATCHes; a concurrent PATCH →
@@ -135,11 +135,11 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 
 ### GREEN
 
-- [ ] 8.1 `functions/uploadSessionRoute.js` (create/HEAD/PATCH/DELETE), built from `uploadRoute.js`'s
+- [x] 8.1 `functions/uploadSessionRoute.js` (create/HEAD/PATCH/DELETE), built from `uploadRoute.js`'s
       exported checks and `streamToFileWithLimit` (append mode, bytes kept on stall/abort). In-memory
       per-session lock, JSON sidecar, per-uid cap 4. The same "single process only" warning comment as
       `RUSHPOINT_DOC_CACHE`. 7.1 → green.
-- [ ] 8.2 `server.js`: mount the routes, CORS preflight for `POST, HEAD, PATCH, DELETE` with
+- [x] 8.2 (+ Dockerfile.api copies the new module; scripts/test-api-image-contents.ts caught it) `server.js`: mount the routes, CORS preflight for `POST, HEAD, PATCH, DELETE` with
       `Upload-Offset, Upload-Length, Tus-Resumable` allowed and `Upload-Offset, Location` exposed.
       `Caddyfile.api`: make sure `/upload/sessions*` gets the raised `request_body` limit (extend the
       `@upload` matcher to `path /upload /upload/sessions*`).
