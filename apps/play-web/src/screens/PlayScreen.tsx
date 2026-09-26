@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
-import { emergencyTelHref, gateSatisfiedTaskIds, senderQuiet } from '@rushpoint/shared';
+import { emergencyTelHref, gateSatisfiedTaskIds, senderQuiet, toTelHref } from '@rushpoint/shared';
 import { claimController } from '../services/calls';
 import { haptic } from '../lib/haptics';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
@@ -644,6 +644,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         {hasTeammateDevices && myUid && (
           <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} defaultOpen />
         )}
+        {/* quick-dial-and-actions: the numbers the organizer published for players. */}
+        {(state.contacts ?? []).map((c) => {
+          const href = toTelHref(c.phone);
+          return href ? (
+            <a key={c.id} href={href} data-testid="call-contact-waiting"
+              className="flex items-center justify-center gap-2 min-h-[48px] rounded-xl border border-glass-border bg-app-card text-sm font-semibold text-zinc-200 mb-2">
+              📞 <span dir="auto">{t.play.callContact({ label: c.label })}</span>
+            </a>
+          ) : null;
+        })}
         <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
       </Screen>
     );
@@ -753,6 +763,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
+        callContact={state.contacts?.[0]}
         isTestDrive={session.isTestDrive}
         phones={hasTeammateDevices && myUid
           ? { count: team.devices?.length ?? team.deviceUids?.length ?? 1, onOpen: () => setDrawerRequest({ tab: 'devices', nonce: Date.now() }) }
@@ -1401,7 +1412,7 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
 
 function Header({
   game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy,
-  isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing, phones,
+  isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing, phones, callContact,
 }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
   // time_only runs are ranked purely by time and never award points, so the
@@ -1422,6 +1433,8 @@ function Header({
   // team-phones-simple D6: how many phones the team has, one tap from the devices
   // panel. Omitted for a solo game with a single phone.
   phones?: { count: number; onOpen: () => void };
+  // quick-dial-and-actions: one tap to call the organizer, when the run published a number.
+  callContact?: { label: string; phone: string };
 }) {
   const { t } = useT();
   // Test mode (change: test-mode-hidden-scoring): no score, no streak, no power-up
@@ -1480,6 +1493,13 @@ function Header({
               className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base text-ink-fire disabled:opacity-50">
               {sharing ? '…' : '📸'}
             </button>
+          )}
+          {callContact && toTelHref(callContact.phone) && (
+            <a href={toTelHref(callContact.phone)!} data-testid="call-contact"
+              aria-label={t.play.callContact({ label: callContact.label })} title={t.play.callContact({ label: callContact.label })}
+              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base">
+              📞
+            </a>
           )}
           {onSos && (
             <button type="button" onClick={onSos} aria-label={t.play.sosAria} disabled={sosBusy}

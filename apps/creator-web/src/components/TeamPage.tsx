@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useT } from './LanguageContext';
 import { Badge, Button } from './ui';
 import type { TeamDossier } from '../lib/teamDossier';
+import { toTelHref, toWhatsAppHref } from '@rushpoint/shared';
 
 // The team page (change: team-dossier-and-search, D3/D5).
 //
@@ -74,6 +75,24 @@ export default function TeamPage({
             <Button onClick={onAdjust}>{t.runConsole.adjustScore}</Button>
             {onSkip && <Button variant="ghost" onClick={onSkip}>{t.runConsole.skipTask}</Button>}
             {onSendBack && <Button variant="ghost" onClick={onSendBack}>{t.runConsole.sendBack}</Button>}
+          </section>
+
+          {/* quick-dial-and-actions D3: call or WhatsApp the team, from the numbers the
+              game's registration asked for. Never a number typed into another field. */}
+          <section aria-label={tp.callTeam}>
+            {d.callTargets.length > 0 ? (
+              <div className="space-y-1.5">
+                {d.callTargets.map((c, i) => (
+                  <div key={i} className="flex flex-wrap items-center gap-2">
+                    <span dir="auto" className="text-sm text-[--ink-2] flex-1 min-w-0 truncate">{c.label}: <span dir="ltr">{c.phone}</span></span>
+                    <a href={toTelHref(c.phone)!} className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire">📞 {tp.call}</a>
+                    <a href={toWhatsAppHref(c.phone)!} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire">💬 {tp.whatsapp}</a>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[13px] text-[--ink-3]">{d.gameAsksForPhone ? tp.noPhoneGiven : tp.noPhoneField}</p>
+            )}
           </section>
 
           {(d.members.length > 0 || d.phones.length > 0) && (

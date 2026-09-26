@@ -160,6 +160,8 @@ export interface MyTeamState {
   // Seconds since each of this team's phones last asked for the state (team-phones-simple D5).
   // Server memory only: absent after a restart, which the quiet verdict reads as "not quiet".
   devicePresence?: DevicePresence[];
+  /** quick-dial-and-actions: the run's numbers marked for players. */
+  contacts?: { id: string; label: string; phone: string }[];
   // Why this team has not been started, or null when nothing is holding it
   // (change: held-team-visibility). A REASON only: no guardian name, contact or
   // token. Optional on the wire so a console/app talking to a backend that

@@ -44,6 +44,7 @@ import ConsoleTabs from '../components/ConsoleTabs';
 import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import { buildTeamDossier } from '../lib/teamDossier';
 import TeamPage from '../components/TeamPage';
+import RunContactsEditor from '../components/RunContactsEditor';
 import StaffCodesPanel from '../components/StaffCodesPanel';
 import { defaultCodeCapabilities, type StaffCapability } from '@rushpoint/shared';
 import { sendBackTargets } from '../lib/sendBackTargets';
@@ -568,6 +569,8 @@ export default function RunConsolePage() {
   const [gameStagesLite, setGameStagesLite] = useState<{ id: string; title: string; tasks: { id: string; title: string }[] }[]>([]);
   // staff-capabilities: what a new staff code starts with (the game's default; absent = everything).
   const [staffDefaultCaps, setStaffDefaultCaps] = useState<StaffCapability[]>(() => defaultCodeCapabilities(undefined));
+  // quick-dial-and-actions D3: the game's phone-type registration fields, from the SAME read.
+  const [phoneFields, setPhoneFields] = useState<{ id: string; label: string }[]>([]);
   useEffect(() => {
     if (!gameId) return;
     let alive = true;
@@ -577,6 +580,7 @@ export default function RunConsolePage() {
         setGameTitle(game.title ?? '');
         setAutoStartLate(game.autoStartLateJoiners === true);
         setStaffDefaultCaps(defaultCodeCapabilities(game.staffDefaults));
+        setPhoneFields((game.registrationFields ?? []).filter((f) => f?.type === 'phone').map((f) => ({ id: f.id, label: f.label })));
         const map = new Map<string, string>();
         const anchors: LatLng[] = [];
         for (const stage of game.stages ?? []) {
@@ -1280,7 +1284,14 @@ export default function RunConsolePage() {
     switch (panel) {
       // ── Pinned zone. Addressed by id like every other panel so the lane
       //    layout (not a hardcoded span) decides where each one sits.
-      case 'joinShare': return <JoinShare accessCode={activeRun.accessCode} />;
+      // The run's phone numbers sit under the join card: both are what players get
+      // from the organizer (quick-dial-and-actions).
+      case 'joinShare': return (
+        <>
+          <JoinShare accessCode={activeRun.accessCode} />
+          {!finished && <RunContactsEditor ctx={ctx} contacts={activeRun.contacts} />}
+        </>
+      );
       case 'stationQr': return <StationQrPrint gameId={gameId!} />;
       case 'broadcast': return <AnnouncementCard ctx={ctx} teams={teams} />;
 
@@ -1895,6 +1906,7 @@ export default function RunConsolePage() {
           // A preset reason is stored as its code (the staff console's picker sends
           // ids); a free-text reason is shown as written.
           reasonLabel: (r) => (isScoreReasonId(r) ? rc[r] : r),
+          phoneFields,
           nowMs,
           rank: rankIndex >= 0 ? rankIndex + 1 : null,
         });

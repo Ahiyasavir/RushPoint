@@ -8,7 +8,7 @@
 // galleryTaskDetail.ts pattern), so a field added to the team document tomorrow can never reach
 // the organizer's screen by accident, and a malformed value is dropped rather than rendered.
 
-import { isRenderableMedia, submissionSenderName } from '@rushpoint/shared';
+import { isRenderableMedia, normalizePhone, submissionSenderName } from '@rushpoint/shared';
 
 export interface DossierPhone { uid: string; name: string; sending: boolean }
 export interface DossierAnswer { answer: string; correct?: boolean }
@@ -51,6 +51,10 @@ export interface TeamDossier {
   timeline: DossierStage[];
   media: DossierMedia[];
   ledger: DossierLedgerLine[];
+  /** Numbers to call, from the game's phone-type registration fields only. */
+  callTargets: { label: string; phone: string }[];
+  /** Whether the game asks teams for a phone at all (the page explains how when not). */
+  gameAsksForPhone: boolean;
 }
 
 export interface TeamDossierInput {
@@ -62,6 +66,8 @@ export interface TeamDossierInput {
   /** Turns a stored reason (a preset code like `reasonHelpfulness`, or free text)
    *  into words. Never lets a raw code reach the organizer. */
   reasonLabel?: (reason: string) => string;
+  /** The game's registration fields of type 'phone' (quick-dial-and-actions D3). */
+  phoneFields?: { id: string; label: string }[];
 }
 
 type Obj = Record<string, unknown>;
@@ -157,6 +163,18 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
     })
     .reverse();
 
+  // Only fields the GAME declared as phone fields: a number typed into a name field
+  // is not an invitation to call it.
+  const callTargets: { label: string; phone: string }[] = [];
+  const reg = isObj(t.registrationData) ? t.registrationData : {};
+  for (const f of input.phoneFields ?? []) {
+    const v = reg[f.id];
+    const values = Array.isArray(v) ? v : [v];
+    for (const x of values) {
+      if (typeof x === 'string' && normalizePhone(x)) callTargets.push({ label: f.label, phone: x.trim() });
+    }
+  }
+
   return {
     id: t.id,
     name: str(t.displayName) ?? t.id,
@@ -169,5 +187,7 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
     timeline,
     media,
     ledger,
+    callTargets,
+    gameAsksForPhone: (input.phoneFields ?? []).length > 0,
   };
 }

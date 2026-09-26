@@ -138,3 +138,30 @@ describe('buildTeamDossier: reasons are words, never codes', () => {
     expect(d.ledger[0].reason).toBe('r');
   });
 });
+
+describe('buildTeamDossier: numbers to call (quick-dial-and-actions D3)', () => {
+  const phoneFields = [{ id: 'f-phone', label: 'טלפון של הקבוצה' }, { id: 'f-parent', label: 'טלפון הורה' }];
+  it('one call target per phone-type registration value, with its field label', () => {
+    const d = buildTeamDossier({
+      ...input({ id: 't1', displayName: 'X', registrationData: { 'f-phone': '052-1234567', 'f-parent': ['054-1111111', ''], name: '052-9999999' } }),
+      phoneFields,
+    })!;
+    expect(d.callTargets).toEqual([
+      { label: 'טלפון של הקבוצה', phone: '052-1234567' },
+      { label: 'טלפון הורה', phone: '054-1111111' },
+    ]);
+  });
+  it('a value that is not a phone field is never offered, even if it looks like a number', () => {
+    const d = buildTeamDossier({ ...input({ id: 't1', displayName: 'X', registrationData: { name: '052-9999999' } }), phoneFields })!;
+    expect(d.callTargets).toEqual([]);
+  });
+  it('an undialable value is dropped, not linked', () => {
+    const d = buildTeamDossier({ ...input({ id: 't1', displayName: 'X', registrationData: { 'f-phone': 'אין' } }), phoneFields })!;
+    expect(d.callTargets).toEqual([]);
+  });
+  it('no phone fields in the game -> no targets, and the page can explain why', () => {
+    const d = buildTeamDossier(input({ id: 't1', displayName: 'X', registrationData: { 'f-phone': '052-1234567' } }))!;
+    expect(d.callTargets).toEqual([]);
+    expect(d.gameAsksForPhone).toBe(false);
+  });
+});

@@ -392,6 +392,12 @@ export const hideFeedItem          = callable<{ ownerUid: string; gameId: string
 // already holding the task keeps it (`teamsHolding` says how many that is). The
 // server refuses a change that would leave the owning stage unwinnable unless
 // `force` is set, answering with details.code === 'stageUnwinnable'.
+// quick-dial-and-actions: tonight's phone numbers for a run (owner only).
+export const setRunContacts = callable<
+  { ownerUid: string; gameId: string; runId: string; contacts: { label: string; phone: string; visibleTo: ('players' | 'staff')[] }[] },
+  { ok: boolean; count: number }
+>('setRunContacts');
+
 export const setRunTaskStatus      = callable<
   { ownerUid: string; gameId: string; runId: string; taskId: string; status: StationStatus; reason?: string; force?: boolean },
   {
