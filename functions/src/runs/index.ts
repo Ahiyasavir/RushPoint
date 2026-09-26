@@ -1574,6 +1574,9 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
 
     // Skip all pending tasks with a fair award
     let awardTotal = 0;
+    // team-dossier-and-search D2: one ledger line per consolation actually paid.
+    const skipLedger: { at: string; delta: number; kind: 'skipAward'; taskId: string; by: string }[] = [];
+    const skipBy = (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer';
     for (const taskRec of stages[activeIdx].tasks) {
       if (taskRec.status !== 'completed') {
         if (taskRec.status === 'assigned') skippedHeldTaskIds.push(taskRec.taskId);
@@ -1592,6 +1595,7 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
         // later template edits.
         if (gameTask) taskRec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
         awardTotal += award;
+        if (award > 0) skipLedger.push({ at: now, delta: award, kind: 'skipAward', taskId: taskRec.taskId, by: skipBy });
       }
     }
     stages[activeIdx].status = 'completed';
@@ -1607,6 +1611,7 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
     tx.update(teamRef, {
       stages,
       score: (team.score ?? 0) + awardTotal,
+      ...(skipLedger.length > 0 ? { scoreLedger: appendScoreLedger(team.scoreLedger, skipLedger) } : {}),
       ...(allDone ? { status: 'finished', finishedAt: now } : {}),
       activeTaskId: null,
       updatedAt: now,
@@ -1850,7 +1855,15 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
     // because the live board reads the team and the final ranking reads the records.
     tx.update(teamRef, {
       stages,
-      ...(skipConsolation > 0 ? { score: (team.score ?? 0) + skipConsolation } : {}),
+      ...(skipConsolation > 0 ? {
+        score: (team.score ?? 0) + skipConsolation,
+        // team-dossier-and-search D2: the consolation, its mission and the reason given.
+        scoreLedger: appendScoreLedger(team.scoreLedger, [{
+          at: now, delta: skipConsolation, kind: 'skipAward', taskId: targetId,
+          reason: cleanReason || undefined,
+          by: (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer',
+        }]),
+      } : {}),
       ...(allDone ? { status: 'finished', finishedAt: now } : {}),
       activeTaskId: null,
       updatedAt: now,
@@ -5266,10 +5279,16 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
       escalation,
       Date.now(),
     );
+    const hintAt = new Date().toISOString();
     tx.update(teamRef, {
       taskHintsUsed: [...used, taskId],
       ...(free ? {} : { bonusPenalty: (team.bonusPenalty ?? 0) + penalty }),
-      updatedAt: new Date().toISOString(),
+      // team-dossier-and-search D2: a paid hint is a score change the organizer can see.
+      // A free (escalated) hint moves nothing, so it records nothing.
+      ...(free || penalty <= 0 ? {} : {
+        scoreLedger: appendScoreLedger(team.scoreLedger, [{ at: hintAt, delta: -penalty, kind: 'hint', taskId }]),
+      }),
+      updatedAt: hintAt,
     });
     return { alreadyUsed: false, charged: free ? 0 : penalty, free };
   });

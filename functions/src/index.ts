@@ -23,7 +23,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // Undoing an approval and taking the points back with it (change:
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
-import { planApprovalReversal } from '@rushpoint/shared';
+import { planApprovalReversal, appendScoreLedger } from '@rushpoint/shared';
 import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
@@ -1903,6 +1903,7 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         score?: number;
         stages?: { tasks?: { taskId: string; earnedScore?: number; status?: string }[] }[];
         taskSubmissions?: Record<string, { status?: string }>;
+        scoreLedger?: unknown[];
       } | undefined;
       const plan = planApprovalReversal({
         submissionStatus: team?.taskSubmissions?.[taskId]?.status,
@@ -1925,7 +1926,17 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         return { ...s, tasks, earnedScore };
       });
       // Whole-array rewrite, never a dotted update into an array.
-      tx.update(teamRef, { score: plan.nextTeamScore, stages, updatedAt: now });
+      tx.update(teamRef, {
+        score: plan.nextTeamScore,
+        stages,
+        // team-dossier-and-search D2: the clawback and the reviewer's note, on the team.
+        scoreLedger: appendScoreLedger(team?.scoreLedger, [{
+          at: now, delta: plan.scoreDelta, kind: 'reversal', taskId,
+          reason: typeof note === 'string' ? note : undefined,
+          by: (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer',
+        }]),
+        updatedAt: now,
+      });
       return { outcome: plan.outcome, scoreDelta: plan.scoreDelta };
     });
   }
@@ -2072,13 +2083,19 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
     throw new functions.https.HttpsError('invalid-argument', 'delta must be a finite number');
   }
 
+  // Validated BEFORE the transaction now, because the reason is also written into
+  // the team's score ledger inside it (team-dossier-and-search D2).
+  const cleanReason = validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '';
+  const operatorName = (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer';
+
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
   // Transactional read-modify-write so a concurrent captureZone / requestTaskHint (both
   // transactional) can't lose this adjustment via a stale bonusPenalty (scoring integrity).
   const { prev, newPenalty } = await db.runTransaction(async (tx) => {
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
-    const teamData = teamSnap.data() as { bonusPenalty?: number; score?: number };
+    const teamData = teamSnap.data() as { bonusPenalty?: number; score?: number; scoreLedger?: unknown[] };
+    const nowIso = new Date().toISOString();
     const p = teamData.bonusPenalty ?? 0;
     const np = nextBonusPenalty(p, delta);
     tx.update(teamRef, {
@@ -2090,12 +2107,15 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
       // double-count on the leaderboard/final board — it only keeps the
       // player's own live score badge from silently freezing until finalizeRun.
       score: (teamData.score ?? 0) + delta,
-      updatedAt: new Date().toISOString(),
+      // WHY the score moved, on the document the organizer's console already streams.
+      // auditLogs is unreadable by clients, so it could never answer that.
+      scoreLedger: appendScoreLedger(teamData.scoreLedger, [
+        { at: nowIso, delta, kind: 'adjust', reason: cleanReason, by: operatorName },
+      ]),
+      updatedAt: nowIso,
     });
     return { prev: p, newPenalty: np };
   });
-
-  const cleanReason = validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '';
 
   await writeAuditLog({
     ownerUid, gameId, runId, teamId,

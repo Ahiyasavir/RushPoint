@@ -185,7 +185,8 @@ const ONLY = (process.argv.find((a) => a.startsWith('--only=')) ?? '').split('='
 let skippedByFilter = 0;
 
 async function scenario(name, fn) {
-  if (ONLY && !name.toLowerCase().includes(ONLY.toLowerCase())) { skippedByFilter++; return; }
+  // `a|b|c` runs every scenario matching any of the alternatives.
+  if (ONLY && !ONLY.toLowerCase().split('|').some((alt) => alt && name.toLowerCase().includes(alt))) { skippedByFilter++; return; }
   console.log(`\n━━ ${name} ━━`);
   const rec = { name, ms: 0, checks: 0, failures: 0 };
   currentScenario = rec;
@@ -2292,6 +2293,16 @@ async function main() {
   check('control task without thresholds still charges 25', paidHint?.penalty === 25 && paidHint?.free !== true, JSON.stringify(paidHint));
   const sE4 = await playerE.call('getMyTeamState', { code: cE });
   check('control charge landed on bonusPenalty', (sE4?.team?.bonusPenalty ?? 0) === bonusBefore + 25, String(sE4?.team?.bonusPenalty));
+  // team-dossier-and-search D2: a paid hint is a score change the organizer should see.
+  {
+    const eUid = playerE.auth.currentUser.uid;
+    const eTeam = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gE}/runs/${rE}/teams/${eUid}`)).data ?? {};
+    const hintLed = (eTeam.scoreLedger ?? []).filter((l) => l.kind === 'hint');
+    check('ledger: a paid hint appends one hint entry of -25 (the free one appends nothing)',
+      hintLed.length === 1 && hintLed[0].delta === -25 && hintLed[0].taskId === 'e-2', JSON.stringify(eTeam.scoreLedger));
+    check('ledger: getMyTeamState never ships the ledger to the player', sE4?.team?.scoreLedger === undefined,
+      JSON.stringify(Object.keys(sE4?.team ?? {})));
+  }
 
   }); // scenario: hint auto escalation
 
@@ -8877,6 +8888,11 @@ async function main() {
       const notice = (await creator.getColAt(annCol)).find((a) => a.kind === 'score' && a.teamId === cvUid && a.delta === 50);
       check('adjustTeamScore wrote a kind:score notice', !!notice, JSON.stringify(notice));
       check('score notice carries a bilingual message', !!notice?.message && !!notice?.messageHe && notice?.active === true, JSON.stringify(notice));
+      // team-dossier-and-search D2: the reason now lives on the team, not only in auditLogs.
+      const led = (teamDoc.data?.scoreLedger ?? []).find((l) => l.kind === 'adjust');
+      check('ledger: adjustTeamScore appends {delta, reason, by} to the team',
+        led?.delta === 50 && led?.reason === 'great teamwork' && led?.by === 'organizer' && typeof led?.at === 'string',
+        JSON.stringify(teamDoc.data?.scoreLedger));
     }
 
     const deactAnn = await creator.call('deactivateAnnouncement', { ...CV, announcementId: ann.announcementId });
@@ -10919,6 +10935,12 @@ async function main() {
     check('newpaths: the submission reads rejected',
       after.taskSubmissions?.['pa-a']?.status === 'rejected',
       String(after.taskSubmissions?.['pa-a']?.status));
+    {
+      const led = (after.scoreLedger ?? []).filter((l) => l.kind === 'reversal' && l.taskId === 'pa-a');
+      check('ledger: undoing an approval records the clawback and the note',
+        led.length === 1 && led[0].delta === -award && led[0].reason === 'a photo of a hand',
+        JSON.stringify(after.scoreLedger));
+    }
 
     // Reversing twice takes nothing further.
     const again = await creator.call('reviewStationSubmission', {
@@ -11254,6 +11276,12 @@ async function main() {
       stageAfter.requiredTaskCount === 2, JSON.stringify(stageAfter.requiredTaskCount));
     check('skip-task: the team\'s score moved by exactly the consolation',
       (teamAfter.score ?? 0) === 50, String(teamAfter.score));
+    {
+      const led = (teamAfter.scoreLedger ?? []).filter((l) => l.kind === 'skipAward');
+      check('ledger: the skip consolation is recorded with its mission and reason',
+        led.length === 1 && led[0].delta === 50 && led[0].taskId === held && led[0].reason === 'shop shuttered',
+        JSON.stringify(teamAfter.scoreLedger));
+    }
     const siblings = ['sk-a', 'sk-b', 'sk-c'].filter((id) => id !== held);
     check('skip-task: both sibling missions are STILL PLAYABLE (skipStage would have killed them)',
       siblings.every((id) => ['unassigned', 'assigned'].includes(recOf(id)?.status)),
@@ -11361,6 +11389,13 @@ async function main() {
     check('regression: skipStage still marks EVERY task of the stage skipped',
       (stage3.tasks ?? []).every((t) => t.status === 'skipped') && stage3.status === 'completed',
       JSON.stringify((stage3.tasks ?? []).map((t) => [t.taskId, t.status])));
+    {
+      const led = (team3.scoreLedger ?? []).filter((l) => l.kind === 'skipAward');
+      const total = led.reduce((n, l) => n + l.delta, 0);
+      check('ledger: skipStage records its consolation, and the ledger sums to the score it paid',
+        led.length >= 1 && total === (team3.score ?? 0) && total > 0,
+        JSON.stringify({ ledger: team3.scoreLedger, score: team3.score }));
+    }
 
     // ── The durable trail: a skip removes a scoring opportunity from ONE team.
     const skipLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
