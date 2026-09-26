@@ -72,7 +72,7 @@ describe('buildTeamDossier', () => {
   it('every submitted media item, with who sent it', () => {
     expect(d.media).toEqual([{
       taskId: 'c', title: 'צילום קבוצתי', url: 'https://firebasestorage.googleapis.com/v0/b/x/o/c.jpg',
-      kind: 'photo', status: 'approved', submittedAt: '2026-09-26T10:14:00Z', senderName: 'יוסי',
+      kind: 'photo', status: 'approved', submittedAt: '2026-09-26T10:14:00Z', senderName: 'יוסי', posterUrl: '', durationSec: null,
     }]);
   });
 

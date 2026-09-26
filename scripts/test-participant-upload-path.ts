@@ -44,8 +44,11 @@ for (const c of calls) ok(`no teamId passed: ${c.slice(0, 60)}`, !/teamId/.test(
 const svc = fs.readFileSync(path.join(root, 'apps/play-web/src/services/firebase.ts'), 'utf8');
 ok('services/firebase.ts derives the folder in ONE helper built on participantUploadPath + the signed-in uid',
   /participantUploadPath\(\{[^}]*uid: me/.test(svc));
-ok('all three upload functions go through that helper',
-  (svc.match(/await myUploadPath\(/g) ?? []).length === 3);
+// photo, audio, video, the video's poster and the resumable session (video-upload-speed D4/D7):
+// every path a participant upload can take is built by the one helper.
+ok('all five upload paths go through that helper',
+  (svc.match(/await myUploadPath\(/g) ?? []).length === 5, `found ${(svc.match(/await myUploadPath\(/g) ?? []).length}`);
+ok('no upload path is built any other way', (svc.match(/participantUploadPath\(/g) ?? []).length === 1);
 ok('services/firebase.ts no longer builds a teams/${p.teamId} path', !/teams\/\$\{p\.teamId\}/.test(svc));
 
 if (failures > 0) { console.error(`\n${failures} FAILED`); process.exit(1); }
