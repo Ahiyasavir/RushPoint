@@ -104,7 +104,7 @@ import {
   gateSatisfiedTaskIds,
   // send-team-back: the pure rewind plan and the organizer-facing score ledger.
   planTeamRewind,
-  appendScoreLedger,
+  appendScoreLedger, contactsFor,
   resolveExclusions,
   isHintFree,
   // Wrong-answer cost (change: wrong-answer-cost): escalating, capped, preset-aware.
@@ -6396,6 +6396,9 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     // team already knows; an unknown phone is simply absent, which the verdict reads as NOT quiet.
     devicePresence: devicePresence.list(presenceKey, Date.now())
       .filter((p) => attachedDeviceUids(team).includes(p.uid)),
+    // quick-dial-and-actions D2: only the numbers marked for players, stripped to what the
+    // screen needs. The run document was already read above; zero added reads.
+    contacts: contactsFor(run.contacts, 'players'),
     // Why the team is held back from starting, or null when it is not.
     holdReason,
     stageNarratives,

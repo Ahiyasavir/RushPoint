@@ -23,7 +23,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // Undoing an approval and taking the points back with it (change:
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
-import { planApprovalReversal, appendScoreLedger } from '@rushpoint/shared';
+import { planApprovalReversal, appendScoreLedger, validateRunContacts } from '@rushpoint/shared';
 import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
@@ -418,6 +418,43 @@ function assertOwnerOrAdmin(context: functions.https.CallableContext, ownerUid: 
   }
   return uid;
 }
+
+/**
+ * Tonight's phone numbers for a run (change: quick-dial-and-actions, D2): "call the organizer"
+ * for players, the HQ line for staff. Owner (or platform admin) only, audited. The whole list is
+ * replaced on every save, so an empty list clears it. A number that does not parse is REFUSED,
+ * never stored: a call button that dials the wrong digits is worse than none.
+ */
+export const setRunContacts = loggedCallable('setRunContacts', async (data, context) => {
+  const d = (data ?? {}) as { ownerUid?: unknown; gameId?: unknown; runId?: unknown; contacts?: unknown };
+  const callerUid = requireAuth(context);
+  const ownerUid = typeof d.ownerUid === 'string' && d.ownerUid ? d.ownerUid : callerUid;
+  const uid = assertOwnerOrAdmin(context, ownerUid);
+  const gameId = validate(() => requireString(d.gameId, 'gameId', 128));
+  const runId = validate(() => requireString(d.runId, 'runId', 128));
+  await enforceRateLimit(uid, 'setRunContacts');
+  const verdict = validateRunContacts(d.contacts);
+  if (!verdict.ok) {
+    const at = verdict.index !== undefined ? ` (contact ${verdict.index + 1})` : '';
+    throw new functions.https.HttpsError('invalid-argument', `Invalid contacts: ${verdict.problem}${at}`);
+  }
+  const runRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`);
+  const before = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+    const prev = (snap.data() as { contacts?: unknown }).contacts;
+    tx.update(runRef, { contacts: verdict.contacts, updatedAt: new Date().toISOString() });
+    return prev;
+  });
+  await writeAuditLog({
+    ownerUid, gameId, runId,
+    operatorId: uid,
+    actionType: 'run_contacts_set',
+    previousValue: JSON.stringify(Array.isArray(before) ? before.length : 0),
+    newValue: JSON.stringify(verdict.contacts.map((c) => ({ label: c.label, visibleTo: c.visibleTo }))),
+  });
+  return { ok: true, count: verdict.contacts.length };
+});
 
 /**
  * Edit a code during the run: what its people may do, its label, or disable it. Takes effect on

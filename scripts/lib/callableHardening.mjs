@@ -83,6 +83,9 @@ export const PUBLIC_CALLABLES = {
  *                              call would be a cost bug, not accountability.
  */
 export const PRIVILEGED_CALLABLES = {
+  setRunContacts:
+    'Publishes phone numbers to every player and marshal of a live run. A wrong or swapped number '
+    + 'sends a player in trouble to a stranger, so "who set which numbers, when" must stay answerable.',
   deleteGame: 'Removes a creator\'s game from every surface and revokes its join codes.',
   restoreGame: 'Reverses a deletion and reinstates join codes — the counterpart of deleteGame.',
   purgeGameNow: 'Irreversible destruction of a game and everything beneath it.',

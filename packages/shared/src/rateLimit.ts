@@ -147,6 +147,8 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   returnTeamTo: { max: 30, windowMs: MIN },
   // staff-capabilities: organizer edits + a staff console refreshing after an edit.
   updateStaffCode: { max: 60, windowMs: MIN },
+  // quick-dial-and-actions: an organizer editing tonight's numbers, not a hot path.
+  setRunContacts: { max: 30, windowMs: MIN },
   removeStaffMember: { max: 30, windowMs: MIN },
   refreshStaffSession: { max: 20, windowMs: MIN },
   requestGuardianConsent: { max: 10, windowMs: MIN }, // writes a doc per call — bound token spam

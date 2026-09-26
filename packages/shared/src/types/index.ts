@@ -930,6 +930,9 @@ export interface Run {
   // Routing resolves it via effectiveTaskStatus(); the completion path never reads
   // it, so a team already holding a paused task still finishes and scores it.
   taskStatusOverrides?: Record<string, StationStatus>;
+  /** Tonight's phone numbers (quick-dial-and-actions). Written only by setRunContacts;
+   *  players receive only the ones marked for them, via getMyTeamState. */
+  contacts?: import('../runContacts').RunContact[];
   // When the organizer first started a cohort (change: late-joiner-autostart).
   // `startTeams` is point in time and used to leave NO trace on the run, so nothing
   // downstream could tell "joined before the start" from "joined after it and was

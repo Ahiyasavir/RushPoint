@@ -7672,6 +7672,10 @@ async function main() {
       ['other-run staff', staffB, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       // send-team-back: reopening a mission or stage moves ONE team's score and route.
       ['participant', pl, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
+      // quick-dial-and-actions: the run's phone numbers are the owner's to set.
+      ['participant', pl, 'setRunContacts', { ownerUid: OWNER, gameId: ag, runId: ar, contacts: [] }],
+      ['stranger', str, 'setRunContacts', { ownerUid: OWNER, gameId: ag, runId: ar, contacts: [] }],
+      ['other-run staff', staffB, 'setRunContacts', { ownerUid: OWNER, gameId: ag, runId: ar, contacts: [] }],
       ['stranger', str, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
       ['other-run staff', staffB, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
       // post-run-player-report: getRunPlayerReport returns team-level identity
@@ -12877,6 +12881,58 @@ async function main() {
       }),
       { codeIn: ['functions/resource-exhausted'] });
   });
+
+  await scenario('run contacts (quick dial: owner sets, players see only theirs)', async () => {
+    // quick-dial-and-actions D2: tonight's phone numbers live on the RUN, written
+    // only by the owner, and each player sees only what is marked for players.
+    const { gameId: cg } = await creator.call('createGame', { title: 'Contacts Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: cg,
+      stages: [{ id: 'ct-s', order: 0, title: 'One', isFinal: true, tasks: [
+        { id: 'ct-a', title: 'Stop', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 5 },
+      ] }],
+    });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const pc = makeParty('contactsPlayer');
+    await signInAnonymously(pc.auth);
+    await pc.call('joinRun', { code: cc, displayName: 'Callers' });
+
+    const refused = async (label, contacts) => {
+      let ok = false;
+      try { await creator.call('setRunContacts', { gameId: cg, runId: cr, contacts }); } catch (e) { ok = e.code === 'functions/invalid-argument'; }
+      check(`setRunContacts refuses ${label}`, ok);
+    };
+    await refused('a number that does not parse', [{ label: 'HQ', phone: 'call me', visibleTo: ['players'] }]);
+    await refused('an empty label', [{ label: ' ', phone: '052-1234567', visibleTo: ['players'] }]);
+    await refused('nobody to see it', [{ label: 'HQ', phone: '052-1234567', visibleTo: [] }]);
+    await refused('more than five', Array.from({ length: 6 }, (_, i) => ({ label: `c${i}`, phone: '052-1234567', visibleTo: ['staff'] })));
+
+    const res = await creator.call('setRunContacts', { gameId: cg, runId: cr, contacts: [
+      { label: 'המארגן', phone: '052-1234567', visibleTo: ['players', 'staff'] },
+      { label: 'רכז צוות', phone: '054-7654321', visibleTo: ['staff'] },
+    ] });
+    check('setRunContacts saves the list', res?.ok === true && res?.count === 2, JSON.stringify(res));
+    const runDoc = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${cg}/runs/${cr}`)).data ?? {};
+    check('the contacts are stored on the RUN with an id each',
+      Array.isArray(runDoc.contacts) && runDoc.contacts.length === 2 && runDoc.contacts.every((c) => typeof c.id === 'string' && c.id),
+      JSON.stringify(runDoc.contacts));
+
+    const st = await pc.call('getMyTeamState', { code: cc });
+    const seen = st?.contacts ?? [];
+    check('a player sees ONLY the player-visible contact', seen.length === 1 && seen[0].label === 'המארגן' && seen[0].phone === '052-1234567',
+      JSON.stringify(seen));
+    check('the player copy carries no visibility list or other fields', seen.every((c) => Object.keys(c).sort().join() === 'id,label,phone'),
+      JSON.stringify(seen));
+
+    await creator.call('setRunContacts', { gameId: cg, runId: cr, contacts: [] });
+    const cleared = await pc.call('getMyTeamState', { code: cc });
+    check('an empty list clears them', (cleared?.contacts ?? []).length === 0, JSON.stringify(cleared?.contacts));
+
+    let denied = false;
+    try { await pc.call('setRunContacts', { gameId: cg, runId: cr, contacts: [] }); } catch (e) { denied = /permission|not-found|unauthenticated/i.test(String(e.code)); }
+    check('a player cannot set the run contacts', denied);
+  }); // scenario: run contacts
 
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();
