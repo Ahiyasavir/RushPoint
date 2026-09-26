@@ -40,6 +40,7 @@ import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../compo
 import { OverflowMenu } from '../components/OverflowMenu';
 // send-team-back: the "where to?" picker and what it may offer.
 import SendBackPicker, { type SendBackChoice } from '../components/SendBackPicker';
+import ConsoleTabs from '../components/ConsoleTabs';
 import StaffCodesPanel from '../components/StaffCodesPanel';
 import { defaultCodeCapabilities, type StaffCapability } from '@rushpoint/shared';
 import { sendBackTargets } from '../lib/sendBackTargets';
@@ -55,6 +56,7 @@ import RichTooltip from '../components/RichTooltip';
 import {
   buildRunConsolePlan, sectionStateKey,
   buildRunConsoleSections, resolveSectionWithReason, buildPinnedLayout, assignPanelColumns, panelPlacement,
+  sectionHasNew,
   consoleColumnCount, sectionColumnCount, gridTemplateClass, columnSpanClass,
   summaryChips, CONSOLE_MEDIUM_QUERY, CONSOLE_WIDE_QUERY,
   type PanelId, type RunStatus, type GroupSummary, type SectionId, type RunConsoleSection,
@@ -580,6 +582,9 @@ export default function RunConsolePage() {
   // degrades to the default section (resolveSectionWithReason) instead of throwing, and
   // never leaves the console showing nothing.
   const [sectionPref, setSectionPref] = useState<string | null>(null);
+  const [seenSummaries, setSeenSummaries] = useState<Partial<Record<SectionId, GroupSummary>>>({});
+  const sectionSummariesRef = useRef<{ active: SectionId | null; summaries: Partial<Record<SectionId, GroupSummary>> }>({ active: null, summaries: {} });
+  const sectionBaselineRef = useRef<Partial<Record<SectionId, GroupSummary>>>({});
   useEffect(() => {
     if (!runId) return;
     try { setSectionPref(localStorage.getItem(sectionStateKey(runId))); }
@@ -607,12 +612,16 @@ export default function RunConsolePage() {
   // alone would do nothing in exactly that case — which is the most common one
   // during a live run, when the chip and the panel belong to the same section.
   const sectionPaneRef = useRef<HTMLElement | null>(null);
-  // The rail's own active tab, so it can scroll ITSELF into view — the rail is a
-  // horizontal scroller on a phone and the pane is not, so bringing the pane into
-  // view says nothing about whether you can see which section you are in.
-  const activeSectionTabRef = useRef<HTMLButtonElement | null>(null);
   const [revealNonce, setRevealNonce] = useState(0);
   const openSection = useCallback((id: SectionId) => {
+    // Record what the organizer saw in the section they are leaving and the one
+    // they are opening: that is "looked at" for the new-since dots.
+    const { active, summaries } = sectionSummariesRef.current;
+    setSeenSummaries((prev) => ({
+      ...prev,
+      ...(active && summaries[active] ? { [active]: summaries[active] } : {}),
+      ...(summaries[id] ? { [id]: summaries[id] } : {}),
+    }));
     setSectionPref(id);
     setRevealNonce((n) => n + 1);
     try { localStorage.setItem(sectionStateKey(runId ?? ''), id); } catch { /* storage off */ }
@@ -622,9 +631,8 @@ export default function RunConsolePage() {
     // `nearest` moves the minimum: on a desktop where the pane is already in
     // view this is a no-op, so the fix costs the wide layout nothing.
     sectionPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    // `inline: 'nearest'` on the tab moves the RAIL's horizontal scroll only, and
-    // `block: 'nearest'` keeps it from fighting the pane's vertical scroll above.
-    activeSectionTabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    // (The tabs no longer need to scroll themselves into view: they are always on
+    // screen now - run-console-tabs-up-front.)
   }, [revealNonce]);
   // Live DOM handles for the PINNED panels, so a chip whose target is pinned can
   // scroll it into view + flash it. The registry is populated as the pinned lanes
@@ -914,11 +922,24 @@ export default function RunConsolePage() {
   // Not just WHICH section, but WHY: a section that emptied under the
   // organizer's feet used to be replaced silently, which reads as the app
   // losing their place (change: run-console-clarity).
-  const resolution = resolveSectionWithReason(sections, sectionPref, runStatus);
+  const resolution = resolveSectionWithReason(sections, sectionPref, runStatus, teams.length);
   const activeSection = resolution.id;
   const pinnedLayout = buildPinnedLayout(plan, columns, { teamCount: teams.length });
   const sectionPanels = sections.find((s) => s.id === activeSection)?.panels ?? [];
   const sectionLayout = assignPanelColumns(sectionPanels, sectionColumnCount(columns));
+  // "New since you looked" (run-console-tabs-up-front D3). NO hook here: this runs
+  // below the `if (!run) return`, and a hook after an early return is React #300.
+  // The summaries are mirrored into a ref (plain assignment) so `openSection` can
+  // record what the organizer saw when they opened or LEFT a section; a section
+  // never opened is compared with what it said when the console first rendered it.
+  const summaryMap: Partial<Record<SectionId, GroupSummary>> = {};
+  for (const sec of sections) {
+    summaryMap[sec.id] = sec.summary;
+    if (!(sec.id in sectionBaselineRef.current)) sectionBaselineRef.current[sec.id] = sec.summary;
+  }
+  sectionSummariesRef.current = { active: activeSection, summaries: summaryMap };
+  const sectionIsNew = (id: SectionId) =>
+    id !== activeSection && sectionHasNew(seenSummaries[id] ?? sectionBaselineRef.current[id], summaryMap[id]);
 
   const groupTitles: Record<SectionId, string> = {
     teamsAndScores: rc.groupTeams,
@@ -1592,7 +1613,9 @@ export default function RunConsolePage() {
   }
 
   return (
-    <div className="space-y-4">
+    // pb-24 below lg: room for the fixed bottom tab bar (ConsoleTabs), so the end-of-run
+    // row and the last panel never hide underneath it.
+    <div className="space-y-4 pb-24 lg:pb-0">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -1668,6 +1691,25 @@ export default function RunConsolePage() {
         </nav>
       )}
 
+      {/* ── SECTIONS NAVIGATION (change: run-console-tabs-up-front) ───────────────
+          Directly under the header and ABOVE the pinned zone. It used to render
+          after five pinned panels - 1,665 px down on a phone - and organizers
+          never found it. On a phone it is a fixed bottom bar. */}
+      {activeSection && (
+        <ConsoleTabs
+          tabs={sections.map((sec: RunConsoleSection) => ({ id: sec.id, summary: sec.summary }))}
+          active={activeSection}
+          onOpen={openSection}
+          longName={(id) => groupTitles[id]}
+          shortName={(id) => rc.sectionShort[id]}
+          meta={groupMeta}
+          hasNew={sectionIsNew}
+          newLabel={rc.sectionHasNew}
+          shortcutTitle={(name, key) => rc.sectionShortcut({ name, key })}
+          navLabel={rc.sectionsHeader}
+        />
+      )}
+
       {/* ── PINNED ZONE ─────────────────────────────────────────────────────────
           Always on screen, whatever section the rail is showing: an SOS must
           never be one navigation away. The lanes come from the layout module, so
@@ -1695,56 +1737,7 @@ export default function RunConsolePage() {
           phone) picks ONE section and only that section renders. Every panel is
           still reachable: buildRunConsoleSections covers the catalogue. */}
       {activeSection && (
-        <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-start">
-          <aside className="w-full lg:w-52 shrink-0 lg:sticky lg:top-4">
-            <div className="flex items-center justify-between px-1 mb-1">
-              <span className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3]">{rc.sectionsHeader}</span>
-              <span className="text-[12px] text-[--ink-4]">{sections.length}</span>
-            </div>
-            <nav
-              aria-label={rc.sectionsHeader}
-              className="flex lg:flex-col items-stretch gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0"
-            >
-              {/* PHONE: A ROW OF NAMES, NOT A ROW OF CARDS
-                  (change: run-console-rail-fits).
- 
-                  Measured on a live run at 375px: five `w-44` cards with a summary
-                  line each came to 912px of rail in a 343px window — under two
-                  sections visible, the other three behind a sideways scroll inside
-                  a vertically-scrolling page, during a live event. This is the
-                  same defect the Builder's stage rail had, in the other component;
-                  the fix had not travelled.
- 
-                  The summary line goes below `lg`, not because it is unimportant
-                  but because it is REDUNDANT THERE: the "needs you now" chip strip
-                  directly above this rail already ranks every urgency, and it is
-                  what a host actually reads under pressure. Dropping it here takes
-                  the card from 176px to its title's own width.
- 
-                  Five Hebrew section names still cannot all fit 343px, so the
-                  guarantee is the same one the stage rail makes: the ACTIVE
-                  section scrolls itself into view, so you can always see where you
-                  are even when you cannot see everywhere you could go. */}
-              {sections.map((s: RunConsoleSection) => (
-                <button
-                  key={s.id}
-                  ref={s.id === activeSection ? activeSectionTabRef : undefined}
-                  type="button"
-                  aria-current={s.id === activeSection ? 'true' : undefined}
-                  onClick={() => openSection(s.id)}
-                  className={`text-start rounded-xl border px-3 py-2 lg:p-2.5 transition-colors shrink-0 lg:w-auto lg:shrink ${
-                    s.id === activeSection
-                      ? 'border-rp-fire bg-rp-fire/10'
-                      : 'border-[--rp-border] hover:bg-[--surface-2]'
-                  }`}
-                >
-                  <div className="text-sm font-medium text-[--ink-1] whitespace-nowrap lg:whitespace-normal">{groupTitles[s.id]}</div>
-                  <div className="mt-1 hidden lg:block">{groupMeta(s.summary)}</div>
-                </button>
-              ))}
-            </nav>
-          </aside>
-
+        <div>
           <section ref={sectionPaneRef} aria-label={groupTitles[activeSection]} className="flex-1 min-w-0 space-y-3">
             {/* Named in the pane too: on a phone the rail scrolls out of view. */}
             <h2 className="text-sm font-semibold text-[--ink-1] px-1">{groupTitles[activeSection]}</h2>

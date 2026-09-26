@@ -85,16 +85,23 @@ export const GROUP_ORDER: GroupId[] = [
  * without being given a group (it fails typecheck instead of quietly floating).
  */
 export const PANEL_GROUP: Record<PanelId, GroupId> = {
-  joinShare: 'primary',
+  // The pinned zone is what is urgent EVERYWHERE, and nothing else (change:
+  // run-console-tabs-up-front). It used to hold five panels - the join card, the
+  // broadcast composer and the whole live map as well - so on a phone the section
+  // tabs sat 1,665 px down, two full screens, and organizers never found them.
+  // `alerts` renders only while one is open; `startTeams` is the live control bar
+  // (start, refresh standings, invite staff, the late-join switch).
   startTeams: 'primary',
   alerts: 'primary',
-  broadcast: 'primary',
-  liveMap: 'primary',
 
   teams: 'teamsAndScores',
+  // Moved out of the pinned zone: the map is where you look at the TEAMS.
+  liveMap: 'teamsAndScores',
   liveStandings: 'teamsAndScores',
   finalStandings: 'teamsAndScores',
 
+  // Moved out of the pinned zone: a broadcast is a live control, like a flash mission.
+  broadcast: 'gameMechanics',
   hotZone: 'gameMechanics',
   flashMission: 'gameMechanics',
   trackables: 'gameMechanics',
@@ -118,6 +125,9 @@ export const PANEL_GROUP: Record<PanelId, GroupId> = {
   // under, and "primary" is a closed set meaning the always-on incident surface.
   staffChannel: 'moderation',
 
+  // Moved out of the pinned zone. A run with nobody in it yet OPENS on this section
+  // (defaultSection), so the join code is still the first thing a host sees.
+  joinShare: 'shareAndScreens',
   shareScreens: 'shareAndScreens',
   staffInvite: 'shareAndScreens',
   // The printable station QR sheet IS a share artifact (change:
@@ -358,8 +368,12 @@ export const DEFAULT_SECTION: SectionId = 'teamsAndScores';
  * on a live teams table while every report the host came for sat one navigation
  * away (change: run-console-clarity).
  */
-export function defaultSection(status: RunStatus): SectionId {
-  return status === 'finished' ? 'afterTheRun' : DEFAULT_SECTION;
+export function defaultSection(status: RunStatus, teamCount?: number): SectionId {
+  if (status === 'finished') return 'afterTheRun';
+  // Nobody has joined: the only useful thing on screen is how to join. Unknown
+  // (undefined) keeps the old live default rather than guessing.
+  if (teamCount === 0) return 'shareAndScreens';
+  return DEFAULT_SECTION;
 }
 
 /** Why the console is showing the section it is showing. */
@@ -378,6 +392,7 @@ export function resolveSectionWithReason(
   sections: RunConsoleSection[],
   requested: string | null | undefined,
   status: RunStatus = 'live',
+  teamCount?: number,
 ): SectionResolution {
   if (!Array.isArray(sections) || sections.length === 0) return { id: null, reason: 'none' };
   if (typeof requested === 'string' && sections.some((s) => s.id === requested)) {
@@ -385,7 +400,7 @@ export function resolveSectionWithReason(
   }
   const wasReal = typeof requested === 'string'
     && (SECTION_ORDER as string[]).includes(requested);
-  const fallback = defaultSection(status);
+  const fallback = defaultSection(status, teamCount);
   const id = sections.some((s) => s.id === fallback) ? fallback : sections[0].id;
   if (wasReal) return { id, reason: 'sectionEmptied' };
   return { id, reason: id === fallback ? 'default' : 'firstAvailable' };
@@ -403,6 +418,28 @@ export function resolveSection(
   status: RunStatus = 'live',
 ): SectionId | null {
   return resolveSectionWithReason(sections, requested, status).id;
+}
+
+/**
+ * Did a section get something new since the organizer last had it open? True only
+ * when a count GREW (a first look is not "new": the badge already says how many).
+ * `panelCount` is structure, not news, so it never counts. Total: garbage is ignored.
+ * (change: run-console-tabs-up-front, D3)
+ */
+export function sectionHasNew(
+  seen: Partial<GroupSummary> | null | undefined,
+  now: Partial<GroupSummary> | null | undefined,
+): boolean {
+  if (!seen || !now) return false;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  for (const [k, v] of Object.entries(now)) {
+    if (k === 'panelCount') continue;
+    const cur = num(v);
+    if (cur === null || cur <= 0) continue;
+    const before = num((seen as Record<string, unknown>)[k]) ?? 0;
+    if (cur > before) return true;
+  }
+  return false;
 }
 
 /** localStorage key for one run's selected section. */

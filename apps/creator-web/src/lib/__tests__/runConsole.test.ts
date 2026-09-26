@@ -13,7 +13,7 @@ import {
   panelPlacement, buildRunConsoleSections, pinnedPanels, resolveSection, sectionStateKey,
   assignPanelColumns, buildPinnedLayout, pinnedPanelIds, consoleColumnCount, sectionColumnCount,
   gridTemplateClass, columnSpanClass,
-  defaultSection, resolveSectionWithReason, summaryChips,
+  defaultSection, resolveSectionWithReason, summaryChips, sectionHasNew,
   type RunConsoleState, type PanelId, type GroupId, type SectionId, type ColumnCount,
   type RunStatus,
 } from '../runConsoleLayout';
@@ -78,7 +78,9 @@ function emptyState(status: RunConsoleState['status']): RunConsoleState {
 // The station QR sheet moved to the share surface (change: run-console-clarity):
 // it is a share artifact, and pinning it unconditionally cost the incident
 // controls the widest part of the page for the whole event.
-const PRIMARY_PANELS: PanelId[] = ['joinShare', 'startTeams', 'alerts', 'broadcast', 'liveMap'];
+// run-console-tabs-up-front: the join card, the broadcast and the live map moved
+// into sections too, so the tabs are no longer two phone screens down.
+const PRIMARY_PANELS: PanelId[] = ['startTeams', 'alerts'];
 
 describe('buildRunConsolePlan — catalogue totality', () => {
   it('assigns every panel to exactly one group', () => {
@@ -465,16 +467,18 @@ describe('assignPanelColumns', () => {
 });
 
 describe('buildPinnedLayout', () => {
-  it('leads with the join card while nobody has joined and demotes it once teams are in', () => {
+  // run-console-tabs-up-front: the join card is no longer pinned. With nobody in
+  // yet the console OPENS on the section that holds it (defaultSection), and it
+  // stays reachable there for a late joiner at every team count.
+  it('never pins the join card, and leads with an open alert', () => {
     const plan = buildRunConsolePlan(emptyState('live'));
-    const before = buildPinnedLayout(plan, 3, { teamCount: 0 });
-    expect(before.columns[0][0]).toBe('joinShare');
+    expect(buildPinnedLayout(plan, 3, { teamCount: 0 }).columns.flat()).not.toContain('joinShare');
 
     const busy = buildRunConsolePlan(fullState('live'));
     const during = buildPinnedLayout(busy, 3, { teamCount: 6 });
     expect(during.columns[0][0]).toBe('alerts');
-    // Demoted, never removed: a late joiner can arrive at any moment.
-    expect(during.columns.flat()).toContain('joinShare');
+    expect(during.columns.flat()).not.toContain('joinShare');
+    expect(planPanels(busy, 'shareAndScreens')).toContain('joinShare');
   });
 
   it('lays out only the panels the pinned zone decided to keep', () => {
@@ -507,13 +511,14 @@ describe('pinnedPanelIds', () => {
     expect(planPanels(plan, 'shareAndScreens')).toContain('stationQr');
   });
 
-  it('leads with the join card while nobody has joined and demotes it once teams are in', () => {
+  it('keeps the join card out of the pinned zone and reachable in share and screens', () => {
     const quiet = buildRunConsolePlan(emptyState('live'));
-    expect(pinnedPanelIds(quiet, { teamCount: 0 })[0]).toBe('joinShare');
+    expect(pinnedPanelIds(quiet, { teamCount: 0 })).not.toContain('joinShare');
+    expect(planPanels(quiet, 'shareAndScreens')).toContain('joinShare');
     const busy = buildRunConsolePlan(fullState('live'));
     expect(pinnedPanelIds(busy, { teamCount: 6 })[0]).toBe('alerts');
-    // Demoted, never removed: a late joiner can arrive at any moment.
-    expect(pinnedPanelIds(busy, { teamCount: 6 })).toContain('joinShare');
+    // Never removed: a late joiner can arrive at any moment.
+    expect(planPanels(busy, 'shareAndScreens')).toContain('joinShare');
   });
 
   it('lays out exactly the pinned panels of the plan, at every team count', () => {
@@ -1364,5 +1369,77 @@ describe('resolveEnumLabel', () => {
   it('does not accept an inherited or empty label as a name', () => {
     expect(resolveEnumLabel('toString', labels, fallback)).toBe('unknown (toString)');
     expect(resolveEnumLabel('blank', { blank: '  ' }, fallback)).toBe('unknown (blank)');
+  });
+});
+
+// ── run-console-tabs-up-front (field report 2026-09-25) ──────────────────────
+// The section tabs sat two phone screens down because FIVE panels were pinned
+// above them. The pinned zone now holds only what is urgent everywhere.
+describe('run-console-tabs-up-front: a small pinned zone', () => {
+  it('moves the join card, the broadcast and the live map into sections', () => {
+    expect(PANEL_GROUP.joinShare).toBe('shareAndScreens');
+    expect(PANEL_GROUP.broadcast).toBe('gameMechanics');
+    expect(PANEL_GROUP.liveMap).toBe('teamsAndScores');
+  });
+
+  it('pins only the control bar during play when nothing is wrong', () => {
+    const plan = buildRunConsolePlan({ ...fullState('live'), alertCount: 0 });
+    expect(pinnedPanels(plan)).toEqual(['startTeams']);
+  });
+
+  it('pins alerts only while there is one', () => {
+    expect(pinnedPanels(buildRunConsolePlan({ ...fullState('live'), alertCount: 2 }))).toContain('alerts');
+    expect(pinnedPanels(buildRunConsolePlan({ ...fullState('live'), alertCount: 0 }))).not.toContain('alerts');
+  });
+
+  it('pins nothing once the run has finished and no alert is open', () => {
+    expect(pinnedPanels(buildRunConsolePlan({ ...fullState('finished'), alertCount: 0 }))).toEqual([]);
+  });
+
+  it('keeps every moved panel reachable in its section', () => {
+    const plan = buildRunConsolePlan(fullState('live'));
+    const sections = buildRunConsoleSections(plan);
+    const where = (p: PanelId) => sections.find((s) => s.panels.includes(p))?.id;
+    expect(where('joinShare')).toBe('shareAndScreens');
+    expect(where('broadcast')).toBe('gameMechanics');
+    expect(where('liveMap')).toBe('teamsAndScores');
+  });
+});
+
+describe('run-console-tabs-up-front: where the console opens', () => {
+  it('opens on share and screens while nobody has joined, so the join code is the first thing seen', () => {
+    expect(defaultSection('live', 0)).toBe('shareAndScreens');
+    expect(defaultSection('draft', 0)).toBe('shareAndScreens');
+  });
+  it('opens on teams once anyone has joined', () => {
+    expect(defaultSection('live', 3)).toBe('teamsAndScores');
+  });
+  it('a finished run still opens on the reports', () => {
+    expect(defaultSection('finished', 0)).toBe('afterTheRun');
+  });
+  it('an unknown team count keeps the old live default', () => {
+    expect(defaultSection('live')).toBe('teamsAndScores');
+  });
+  it('resolution uses the team-aware default', () => {
+    const sections = buildRunConsoleSections(buildRunConsolePlan(emptyState('live')));
+    expect(resolveSectionWithReason(sections, null, 'live', 0).id).toBe('shareAndScreens');
+  });
+});
+
+describe('run-console-tabs-up-front: sectionHasNew', () => {
+  it('is true only when a count GREW since the section was last looked at', () => {
+    expect(sectionHasNew({ pendingPhotos: 1 }, { pendingPhotos: 3 })).toBe(true);
+    expect(sectionHasNew({ pendingPhotos: 3 }, { pendingPhotos: 1 })).toBe(false);
+    expect(sectionHasNew({ pendingPhotos: 2 }, { pendingPhotos: 2 })).toBe(false);
+  });
+  it('a first look (nothing recorded) is not "new": the badge already says how many', () => {
+    expect(sectionHasNew(undefined, { unreadChats: 4 })).toBe(false);
+  });
+  it('a count appearing from nothing is new', () => {
+    expect(sectionHasNew({}, { attentionTeams: 1 })).toBe(true);
+  });
+  it('ignores the structural panelCount and garbage values', () => {
+    expect(sectionHasNew({ panelCount: 2 }, { panelCount: 5 })).toBe(false);
+    expect(sectionHasNew({ pendingPhotos: 'x' as never }, { pendingPhotos: NaN as never })).toBe(false);
   });
 });

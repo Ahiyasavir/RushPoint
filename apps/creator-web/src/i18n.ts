@@ -1346,6 +1346,10 @@ const HE = {
     sectionsHeader: 'מה מציגים',
     groupTeams: 'קבוצות וניקוד',
     groupModeration: 'מה מגיע מהשטח',
+    // run-console-tabs-up-front: the short names under the phone tab bar's icons.
+    sectionShort: { teamsAndScores: 'קבוצות', moderation: 'מהשטח', gameMechanics: 'שליטה', shareAndScreens: 'שיתוף', afterTheRun: 'דוחות' },
+    sectionHasNew: 'יש משהו חדש',
+    sectionShortcut: ({ name, key }: { name: string; key: number }) => `${name} (מקש ${key})`,
     groupMechanics: 'הפתעות ושליטה במשחק',
     groupShare: 'קישורים ומסכים',
     groupAfter: 'דוחות וניתוח',
@@ -4133,6 +4137,10 @@ const EN: typeof HE = {
     sectionsHeader: 'What to show',
     groupTeams: 'Teams and scores',
     groupModeration: 'Coming in from the field',
+    // run-console-tabs-up-front: the short names under the phone tab bar's icons.
+    sectionShort: { teamsAndScores: 'Teams', moderation: 'Field', gameMechanics: 'Control', shareAndScreens: 'Share', afterTheRun: 'Reports' },
+    sectionHasNew: 'Something new',
+    sectionShortcut: ({ name, key }: { name: string; key: number }) => `${name} (key ${key})`,
     groupMechanics: 'Surprises and game control',
     groupShare: 'Links and screens',
     groupAfter: 'Reports and analytics',
