@@ -224,8 +224,11 @@ async function sweepStaleTempUploads(uploadDir, now = Date.now(), ttlMs = TMP_TT
 // authenticated device) is the other way. Both answers are statuses the phone already RETRIES
 // (5xx), so a player on a busy minute waits a few seconds instead of losing the clip.
 // Process-local counters are correct because the API is ONE process (the rateLimitStore reasoning);
-// 64 x 20 MB = 1.28 GB is the worst temp disk in flight, well inside the floor.
-const MAX_CONCURRENT_UPLOADS = 64;
+// Sized for the Race to Tzion (~35 teams, several phones each, a video mission): one team
+// normally sends one clip, a retake can briefly overlap its aborted first try, so 128 leaves
+// ~2x headroom over "every team at once, twice". An idle stream costs ~80 KB of RAM; the
+// worst temp disk in flight is 128 x 20 MB = 2.5 GB, checked against the disk floor anyway.
+const MAX_CONCURRENT_UPLOADS = 128;
 const MAX_UPLOADS_PER_UID = 2;
 const BUSY_RETRY_AFTER_SECONDS = 3;
 const DISK_FLOOR_MIN_BYTES = 2 * 1024 ** 3;

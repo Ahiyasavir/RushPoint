@@ -3,7 +3,7 @@
 //   VIDEO_CONTENT_TYPES        @rushpoint/shared — the callable's kind gate
 //   ALLOWED_CONTENT_TYPES      functions/uploadRoute.js — the VPS upload server
 //   storage.rules              the emulator/dev upload path
-//   MAX_VIDEO_BYTES            play-web's recorder, refusing before upload
+//   MAX_PARTICIPANT_VIDEO_BYTES play-web's lib/videoCapture.ts, read by the recorder
 //
 // If one is narrower than another the player films, waits through an upload, and is
 // THEN told no — strictly worse than not offering video at all. This is the same
@@ -25,6 +25,7 @@ function check(label: string, cond: boolean, detail = ''): void {
 const uploadRoute = readFileSync(join(repo, 'functions/uploadRoute.js'), 'utf8');
 const rules = readFileSync(join(repo, 'storage.rules'), 'utf8');
 const taskRunner = readFileSync(join(repo, 'apps/play-web/src/components/TaskRunner.tsx'), 'utf8');
+const videoCapture = readFileSync(join(repo, 'apps/play-web/src/lib/videoCapture.ts'), 'utf8');
 
 const sharedTypes = VIDEO_CONTENT_TYPES.map((t) => t.split('/')[1]).sort();
 check('VIDEO_CONTENT_TYPES is parseable', sharedTypes.length === 3, sharedTypes.join(','));
@@ -56,7 +57,9 @@ function mbOf(src: string, pattern: RegExp, label: string): number | undefined {
   return Number(m[1]);
 }
 const serverMb = mbOf(uploadRoute, /MAX_PARTICIPANT_VIDEO_BYTES\s*=\s*(\d+)\s*\*\s*1024\s*\*\s*1024/, 'uploadRoute');
-const clientMb = mbOf(taskRunner, /MAX_VIDEO_BYTES\s*=\s*(\d+)\s*\*\s*1024\s*\*\s*1024/, 'TaskRunner');
+const clientMb = mbOf(videoCapture, /MAX_PARTICIPANT_VIDEO_BYTES\s*=\s*(\d+)\s*\*\s*1024\s*\*\s*1024/, 'videoCapture');
+// One constant, not a copy (video-upload-speed 3.1): the recorder imports it.
+check('TaskRunner keeps no private copy of the video cap', !/const MAX_VIDEO_BYTES\s*=/.test(taskRunner));
 const rulesMb = mbOf(rules, /(\d+)\s*\*\s*1024\s*\*\s*1024;?\s*\/\/\s*20MB max|(\d+)\s*\*\s*1024\s*\*\s*1024\s*\/\/\s*20MB/, 'storage.rules');
 
 check('the server and the recorder agree on the video cap',

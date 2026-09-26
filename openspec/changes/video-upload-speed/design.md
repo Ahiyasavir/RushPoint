@@ -375,10 +375,10 @@ falls over are:
    retried by the client up to 3 times, which is bounded, and the log line is what an operator greps
    for.
 2. **Unbounded concurrency** (a retry storm, a bug, or abuse from an authenticated device).
-   `MAX_CONCURRENT_UPLOADS = 64` streams per process and `MAX_UPLOADS_PER_UID = 2`. Over either:
+   `MAX_CONCURRENT_UPLOADS = 128` (raised from 64 for the ~35-team Race to Tzion) streams per process and `MAX_UPLOADS_PER_UID = 2`. Over either:
    `503` + `Retry-After: 3`, retryable by the client's existing 5xx rule (`firebase.ts:267`). Counted
    in a process-local counter, released in `finally`, which is correct because the API is one
-   process (the `rateLimitStore.ts` reasoning). 64 × 20 MB = 1.28 GB is the worst case of temp disk
+   process (the `rateLimitStore.ts` reasoning). 128 × 20 MB = 2.5 GB is the worst case of temp disk
    in flight, well inside the floor.
 3. **The event loop.** Gameplay callables share it with media. `mediaServing.js` does `existsSync`,
    `statSync` and, for every `.webm`, `openSync`/`readSync` of 64 KB on each GET (`:268-291`). Each

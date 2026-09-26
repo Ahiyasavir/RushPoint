@@ -29,7 +29,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       after 5 s, `almost-done` at 97%, cap 900 s, seeded fuzz never yields NaN/Infinity; `etaLabel`
       bucket table, the 2 s hold, +30% needed to move up, `range` only when high/low > 2. Confirm RED
       (module missing).
-- [x] 1.3 Extend `functions/uploadRoute.test.ts` (design D6): the 65th concurrent upload gets `503` +
+- [x] 1.3 Extend `functions/uploadRoute.test.ts` (design D6): the 129th concurrent upload gets `503` +
       `Retry-After`; a third concurrent upload from one uid gets `503`; slots are released after ok,
       too-large, stalled and aborted; with an injected `statfs` below the floor, `PUT /upload` gets
       `507` and logs `outcome:'disk-floor'`. Confirm RED.
@@ -60,7 +60,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       upload is already running). No ETA while filming.
 - [x] 2.6 i18n he/en for every new line (Hebrew first; buckets "כמה שניות", "בערך חצי דקה",
       "1–2 דקות", "מחכים לקליטה", "כמעט סיימנו"). `npm run i18n:check:strict` clean.
-- [x] 2.7 `uploadRoute.js`: process-local in-flight counter (global 64, per uid 2) → `503` +
+- [x] 2.7 `uploadRoute.js`: process-local in-flight counter (global 128, per uid 2) → `503` +
       `Retry-After: 3`, released in `finally`; `statfs` disk floor (`max(2 GiB, 5%)`, cached 10 s) →
       `507`. Both added to `uploadFailureResponse`/`uploadLogRecord`. Injected dependencies so the
       test can drive them. 1.3 → green.
@@ -73,7 +73,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 
 ### REFACTOR
 
-- [ ] 3.1 Remove the duplicate `MAX_VIDEO_BYTES` in `TaskRunner.tsx`; import
+- [x] 3.1 Remove the duplicate `MAX_VIDEO_BYTES` in `TaskRunner.tsx`; import
       `MAX_PARTICIPANT_VIDEO_BYTES` from `videoCapture.ts`.
 - [ ] 3.2 One helper for "is this a retryable HTTP status" shared by `uploadViaVps` and the session
       transport of stage 3 (408, 429, 5xx), with a test row for 503 and 507.

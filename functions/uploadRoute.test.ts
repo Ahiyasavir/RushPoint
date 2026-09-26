@@ -422,14 +422,14 @@ describe('upload slots (video-upload-speed D6)', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { createUploadSlots, MAX_CONCURRENT_UPLOADS, MAX_UPLOADS_PER_UID, diskFloorBytes } = require('./uploadRoute.js');
 
-  it('defaults are 64 per process and 2 per uid', () => {
-    expect(MAX_CONCURRENT_UPLOADS).toBe(64);
+  it('defaults are 128 per process and 2 per uid', () => {
+    expect(MAX_CONCURRENT_UPLOADS).toBe(128);
     expect(MAX_UPLOADS_PER_UID).toBe(2);
   });
 
-  it('the 65th concurrent upload is refused, globally', () => {
+  it('the 129th concurrent upload is refused, globally', () => {
     const slots = createUploadSlots();
-    const held = Array.from({ length: 64 }, (_, i) => slots.acquire(`u${i}`));
+    const held = Array.from({ length: 128 }, (_, i) => slots.acquire(`u${i}`));
     expect(held.every((h: { ok: boolean }) => h.ok)).toBe(true);
     expect(slots.acquire('u-new')).toMatchObject({ ok: false, reason: 'global' });
     held[0].release();

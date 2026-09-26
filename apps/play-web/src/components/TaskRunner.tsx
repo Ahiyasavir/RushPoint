@@ -66,6 +66,7 @@ import {
 } from '../lib/stuckGuards';
 import {
   CAMERA_OPEN_DEADLINE_MS, withCameraDeadline, captureProfileFor, type CaptureProfile,
+  MAX_PARTICIPANT_VIDEO_BYTES,
   videoTypeFromName, pickedClipVerdict,
   recordedClipVerdict,
 } from '../lib/videoCapture';
@@ -2790,7 +2791,6 @@ function AudioEntry({ busy, working, onSubmit, onCaptured }: {
 //
 // The clip-length range comes from the TASK, resolved through the shared contract
 // so the Builder, the server and this recorder can never disagree about it.
-const MAX_VIDEO_BYTES = 20 * 1024 * 1024; // mirrors MAX_PARTICIPANT_VIDEO_BYTES
 
 function pickVideoMimeType(): string | null {
   const rec = (typeof window !== 'undefined' ? window.MediaRecorder : undefined) as
@@ -2924,8 +2924,8 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
       setMode('idle');
       return;
     }
-    if (out.size > MAX_VIDEO_BYTES) {
-      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+    if (out.size > MAX_PARTICIPANT_VIDEO_BYTES) {
+      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_PARTICIPANT_VIDEO_BYTES / 1024 / 1024) }));
       setMode('idle');
       return;
     }
@@ -3197,7 +3197,7 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
     // The byte check is exact and matches the server's own cap, so refusing here
     // is strictly kinder than letting a 100MB camera clip upload and be rejected.
     // (Unlike the duration read below, there is nothing uncertain to fail open on.)
-    if (file.size > MAX_VIDEO_BYTES) {
+    if (file.size > MAX_PARTICIPANT_VIDEO_BYTES) {
       // "Film a shorter clip" is advice that cannot work here (change:
       // video-capture-profile). A native camera at 4K60 makes roughly 400MB a minute,
       // so a TEN SECOND clip can exceed the cap - and the player has no idea their
@@ -3206,8 +3206,8 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
       // recorder is unavailable on this device does the length advice stand, because
       // then it is the only lever they have.
       setErr(unsupported
-        ? t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) })
-        : t.task.videoTooLargeUseRecorder({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+        ? t.task.videoTooLarge({ mb: Math.round(MAX_PARTICIPANT_VIDEO_BYTES / 1024 / 1024) })
+        : t.task.videoTooLargeUseRecorder({ mb: Math.round(MAX_PARTICIPANT_VIDEO_BYTES / 1024 / 1024) }));
       return;
     }
     const url = URL.createObjectURL(file);
