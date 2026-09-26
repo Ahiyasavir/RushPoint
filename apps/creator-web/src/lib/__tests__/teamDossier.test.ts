@@ -183,3 +183,21 @@ describe('buildTeamDossier: the outcome a team hit', () => {
     expect(buildTeamDossier(input(team))!.timeline[0].tasks[0].outcome).toEqual({ id: 'm', label: '' });
   });
 });
+
+// team-dossier-and-search 2.6: where the team was last seen, from the teamLocations ping.
+describe('buildTeamDossier: last known location', () => {
+  const team = { id: 't3', displayName: 'x', stages: [] };
+  it('a fresh fix: minutes ago and a map link', () => {
+    const d = buildTeamDossier({ ...input(team), location: { lat: 31.7767, lng: 35.2345, updatedAt: '2026-09-26T10:26:00Z' } })!;
+    expect(d.location).toEqual({ lat: 31.7767, lng: 35.2345, minutesAgo: 4, mapsUrl: 'https://www.google.com/maps/search/?api=1&query=31.7767,35.2345' });
+  });
+  it('no ping, a 0,0 placeholder or garbage: no location section, never a wrong pin', () => {
+    expect(buildTeamDossier(input(team))!.location).toBeNull();
+    expect(buildTeamDossier({ ...input(team), location: { lat: 0, lng: 0, updatedAt: '2026-09-26T10:26:00Z' } })!.location).toBeNull();
+    expect(buildTeamDossier({ ...input(team), location: { lat: 'x', lng: 5 } as never })!.location).toBeNull();
+    expect(buildTeamDossier({ ...input(team), location: { lat: 95, lng: 5, updatedAt: 'x' } })!.location).toBeNull();
+  });
+  it('an unreadable time still shows the place, with the age unknown', () => {
+    expect(buildTeamDossier({ ...input(team), location: { lat: 31.7, lng: 35.2 } as never })!.location?.minutesAgo).toBeNull();
+  });
+});

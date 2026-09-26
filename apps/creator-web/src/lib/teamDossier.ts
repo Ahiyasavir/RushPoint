@@ -60,6 +60,8 @@ export interface TeamDossier {
   callTargets: { label: string; phone: string }[];
   /** Whether the game asks teams for a phone at all (the page explains how when not). */
   gameAsksForPhone: boolean;
+  /** Where the team was last seen (their teamLocations ping), or null when unknown. */
+  location: { lat: number; lng: number; minutesAgo: number | null; mapsUrl: string } | null;
 }
 
 export interface TeamDossierInput {
@@ -75,6 +77,8 @@ export interface TeamDossierInput {
   phoneFields?: { id: string; label: string }[];
   /** An outcome's authored text, from the game (answer-scored-question). '' when unknown. */
   outcomeLabel?: (taskId: string, outcomeId: string) => string;
+  /** The team's teamLocations document, when the console has it. */
+  location?: { lat?: unknown; lng?: unknown; updatedAt?: unknown } | null;
 }
 
 type Obj = Record<string, unknown>;
@@ -190,6 +194,22 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
     }
   }
 
+  // Last known place. A 0,0 placeholder or an out-of-range value is "unknown", never a pin in the
+  // sea: the organizer would drive to it.
+  let location: TeamDossier['location'] = null;
+  const loc = input.location;
+  if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number'
+    && Number.isFinite(loc.lat) && Number.isFinite(loc.lng)
+    && Math.abs(loc.lat) <= 90 && Math.abs(loc.lng) <= 180 && !(loc.lat === 0 && loc.lng === 0)) {
+    const at = typeof loc.updatedAt === 'string' ? Date.parse(loc.updatedAt) : NaN;
+    location = {
+      lat: loc.lat,
+      lng: loc.lng,
+      minutesAgo: Number.isFinite(at) ? Math.max(0, Math.round((input.nowMs - at) / 60_000)) : null,
+      mapsUrl: `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`,
+    };
+  }
+
   return {
     id: t.id,
     name: str(t.displayName) ?? t.id,
@@ -201,6 +221,7 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
     current,
     timeline,
     media,
+    location,
     ledger,
     callTargets,
     gameAsksForPhone: (input.phoneFields ?? []).length > 0,

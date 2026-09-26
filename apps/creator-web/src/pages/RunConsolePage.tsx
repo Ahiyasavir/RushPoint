@@ -45,6 +45,7 @@ import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import { buildTeamDossier } from '../lib/teamDossier';
 import TeamPage from '../components/TeamPage';
 import ClipTile from '../components/ClipTile';
+import TeamChatThread from '../components/TeamChatThread';
 import { stationQrCards } from '../lib/stationQrSheet';
 import RunContactsEditor from '../components/RunContactsEditor';
 import QuickActionsBar from '../components/QuickActionsBar';
@@ -529,6 +530,16 @@ export default function RunConsolePage() {
     catch { /* storage off */ }
     setChatSeen((s) => (s[teamId]?.lastSeenId === marker.lastSeenId ? s : { ...s, [teamId]: marker }));
   }, [runId]);
+  // The open team page's last known place (team-dossier-and-search 2.6): ONE document, listened to
+  // only while that page is open, so a closed page costs nothing.
+  const [openTeamLocation, setOpenTeamLocation] = useState<{ lat?: unknown; lng?: unknown; updatedAt?: unknown } | null>(null);
+  useEffect(() => {
+    setOpenTeamLocation(null);
+    if (!gameId || !runId || !openTeamId) return;
+    return onSnapshot(doc(db, FIRESTORE_PATHS.teamLocation(ownerUid, gameId, runId, openTeamId)),
+      (snap) => setOpenTeamLocation(snap.exists() ? (snap.data() as { lat?: unknown; lng?: unknown; updatedAt?: unknown }) : null),
+      () => setOpenTeamLocation(null));
+  }, [gameId, runId, ownerUid, openTeamId]);
   const unreadChatThreads = chatThreads.reduce(
     (n, th) => n + (countUnreadChatMessages(th.messages, chatMarkerFor(th.teamId), ownerUid) > 0 ? 1 : 0), 0);
 
@@ -1948,6 +1959,7 @@ export default function RunConsolePage() {
           teamDoc: teamFullDocs.get(openTeamId),
           taskTitle: (id) => taskTitles.get(id) ?? '',
           outcomeLabel: (taskId, outcomeId) => outcomeLabels.get(`${taskId}:${outcomeId}`) ?? '',
+          location: openTeamLocation,
           stageTitle: (order) => rc.teamPage.stage({ n: order + 1 }),
           // A preset reason is stored as its code (the staff console's picker sends
           // ids); a free-text reason is shown as written.
@@ -1967,6 +1979,19 @@ export default function RunConsolePage() {
             onSendBack={!finished ? () => setSendBackFor(row) : undefined}
             onReview={(taskId, approved) => void reviewFromTeamPage(row.id, taskId, approved)}
             reviewBusy={(taskId) => teamPageReviewBusy.has(`${row.id}:${taskId}`)}
+            chat={{
+              messages: chatThreads.find((th) => th.teamId === row.id)?.messages ?? [],
+              onSend: async (text) => {
+                try {
+                  await sendTeamChatMessage({ ownerUid, gameId: gameId!, runId: runId!, teamId: row.id, text });
+                  return true;
+                } catch (e) {
+                  reportFailure(e, 'sendTeamChatMessage');
+                  return false;
+                }
+              },
+              onSeen: (messages) => markChatRead(row.id, messages),
+            }}
           />
         );
       })()}
@@ -3250,8 +3275,6 @@ function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
 }) {
   const rc = useT().runConsole;
   const [openTeam, setOpenTeam] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
   const reportFailure = useCallFailureToast();
 
   // Keep the currently-open thread marked read as its message count grows — an HQ
@@ -3273,21 +3296,18 @@ function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
       if (next) onRead(teamId, messages);
       return next;
     });
-    setDraft('');
   }
 
-  async function reply(teamId: string) {
-    const clean = draft.trim();
-    if (!clean || busy) return;
-    setBusy(true);
+  // Keeping the draft for a retry was right; saying nothing about why it is still
+  // sitting there was not. TeamChatThread keeps the draft when this returns false.
+  async function reply(teamId: string, text: string): Promise<boolean> {
     try {
-      await sendTeamChatMessage({ ...ctx, teamId, text: clean });
-      setDraft('');
+      await sendTeamChatMessage({ ...ctx, teamId, text });
+      return true;
+    } catch (e) {
+      reportFailure(e, 'sendTeamChatMessage');
+      return false;
     }
-    // Keeping the draft for a retry was right; saying nothing about why it is
-    // still sitting there was not.
-    catch (e) { reportFailure(e, 'sendTeamChatMessage'); }
-    finally { setBusy(false); }
   }
 
   const totalUnread = threads.reduce(
@@ -3316,30 +3336,8 @@ function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
                 {last && <div dir="auto" className="text-[13px] text-[--ink-3] truncate mt-0.5">{last.from === 'hq' ? `${rc.chatHq}: ` : ''}{last.text}</div>}
               </button>
               {expanded && (
-                <div className="mt-2 space-y-2">
-                  <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
-                    {th.messages.map((m) => (
-                      <div key={m.id} className={`flex flex-col ${m.from === 'hq' ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[13px] text-[--ink-3]">{m.from === 'hq' ? rc.chatHq : m.senderName}</span>
-                        <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-neon-blue/15 border border-neon-blue/40 text-[--ink-1]' : 'bg-app-card border border-[--rp-border] text-[--ink-2]'}`}>{m.text}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void reply(th.teamId); } }}
-                      maxLength={CHAT_TEXT_MAX_LEN}
-                      dir="auto"
-                      disabled={busy}
-                      placeholder={rc.chatReplyPlaceholder}
-                      className="flex-1"
-                    />
-                    <Button variant={runActionVariant('sendChatReply')} onClick={() => void reply(th.teamId)} disabled={busy || !draft.trim()}>
-                      {rc.chatSend}
-                    </Button>
-                  </div>
+                <div className="mt-2">
+                  <TeamChatThread messages={th.messages} onSend={(text) => reply(th.teamId, text)} />
                 </div>
               )}
             </div>

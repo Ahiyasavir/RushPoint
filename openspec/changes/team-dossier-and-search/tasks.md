@@ -14,8 +14,10 @@
       not yet, so today the box finds team and member names. Not checked in a browser yet:
       the seeded demo run has no teams.)
 - [x] 2.3 Keep full team docs in the console's teams listener; derive the existing projections from them.
-- [ ] 2.4 Lift the `teamLocations` stream so the live map and the team page share it.
-      (NOT DONE: the team page has no location section yet.)
+- [x] 2.4 Location on the team page. (Reshaped: instead of lifting the whole `teamLocations`
+      collection stream, the console listens to the ONE open team's document while its page is open,
+      so a closed page costs nothing and the live map keeps its own stream unchanged. The dossier
+      rejects 0,0 and out-of-range fixes: an untrusted place is absent, never a pin to drive to.)
 - [x] 2.5 `lib/teamDossier.ts`. 1.1 → green.
 - [x] 2.6 `components/TeamPage.tsx`: drawer/sheet, `?team=` routing, sections from the view-model, actions
       wired to the console's existing handlers (design D5).
@@ -28,6 +30,7 @@
 ## 3. REFACTOR
 
 - [ ] 3.1 Photo review and media gallery panels render their items with the same media card the team page uses.
+      (Partly: every VIDEO in the four places is now one `ClipTile` (video-upload-speed D7). Photos and audio are still per-panel.)
 
 ## 4. Verify
 

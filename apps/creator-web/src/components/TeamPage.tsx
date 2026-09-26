@@ -5,6 +5,8 @@ import { Badge, Button } from './ui';
 import type { TeamDossier } from '../lib/teamDossier';
 import { toTelHref, toWhatsAppHref } from '@rushpoint/shared';
 import ClipTile from './ClipTile';
+import TeamChatThread from './TeamChatThread';
+import type { ChatMessage } from '@rushpoint/shared';
 
 // The team page (change: team-dossier-and-search, D3/D5).
 //
@@ -18,7 +20,7 @@ import ClipTile from './ClipTile';
 // open team lives in the URL (`?team=`), so the browser's back button closes it too.
 
 export default function TeamPage({
-  dossier, onClose, onAdjust, onSkip, onSendBack, onReview, reviewBusy,
+  dossier, onClose, onAdjust, onSkip, onSendBack, onReview, reviewBusy, chat,
 }: {
   dossier: TeamDossier;
   onClose: () => void;
@@ -27,6 +29,8 @@ export default function TeamPage({
   onSendBack?: () => void;
   onReview: (taskId: string, approved: boolean) => void;
   reviewBusy: (taskId: string) => boolean;
+  /** The team's HQ chat thread (team-hq-chat), sent through the console's own handler. */
+  chat?: { messages: ChatMessage[]; onSend: (text: string) => Promise<boolean>; onSeen: (messages: ChatMessage[]) => void };
 }) {
   const t = useT();
   const tp = t.runConsole.teamPage;
@@ -38,6 +42,14 @@ export default function TeamPage({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // Reading the thread here counts as reading it: the chat panel's unread badge clears, as it
+  // does when the thread is opened there.
+  const chatMessages = chat?.messages;
+  const onSeen = chat?.onSeen;
+  useEffect(() => {
+    if (chatMessages && chatMessages.length > 0) onSeen?.(chatMessages);
+  }, [chatMessages, onSeen]);
 
   const d = dossier;
   const statusLabel = d.status === 'finished' ? t.runConsole.teamStatusFinished
@@ -95,6 +107,32 @@ export default function TeamPage({
               <p className="text-[13px] text-[--ink-3]">{d.gameAsksForPhone ? tp.noPhoneGiven : tp.noPhoneField}</p>
             )}
           </section>
+
+          {/* Where they were last seen (their location ping). A place the console cannot trust
+              is simply absent, never a pin to drive to. */}
+          {d.location && (
+            <section aria-label={tp.location}>
+              <h3 className="text-sm font-semibold text-[--ink-1] mb-1">{tp.location}</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[13px] text-[--ink-2]">
+                  {d.location.minutesAgo === null ? tp.lastSeenUnknown
+                    : d.location.minutesAgo < 1 ? tp.lastSeenNow : tp.lastSeen({ minutes: d.location.minutesAgo })}
+                </span>
+                <a href={d.location.mapsUrl} target="_blank" rel="noreferrer" data-testid="team-page-map"
+                  className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire">
+                  🗺️ {tp.openMap}
+                </a>
+              </div>
+            </section>
+          )}
+
+          {chat && (
+            <section aria-label={tp.chat} data-testid="team-page-chat">
+              <h3 className="text-sm font-semibold text-[--ink-1] mb-2">{tp.chat}</h3>
+              {chat.messages.length === 0 && <p className="text-[13px] text-[--ink-3] mb-2">{tp.chatEmpty}</p>}
+              <TeamChatThread messages={chat.messages} onSend={chat.onSend} maxHeightClass="max-h-64" />
+            </section>
+          )}
 
           {(d.members.length > 0 || d.phones.length > 0) && (
             <section>
