@@ -254,7 +254,10 @@ function createUploadsGetHandler(deps) {
   const fsImpl = deps.fs || fs;
   const resolvedRoot = fsPath.resolve(uploadDir);
 
-  return function serveUpload(req, res) {
+  // Async fs throughout (video-upload-speed D6): gameplay callables share this one process with
+  // every dashboard tile's GET, so no request may do synchronous disk work on the event loop.
+  const fsp = fsImpl.promises || fs.promises;
+  return async function serveUpload(req, res) {
     const relativePath = req.params[0];
     // ── Guards, unchanged, and BEFORE any file access ────────────────────────
     if (!relativePath || relativePath.includes('..')) {
@@ -265,13 +268,10 @@ function createUploadsGetHandler(deps) {
     if (!fullPath.startsWith(resolvedRoot)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    if (!fsImpl.existsSync(fullPath)) {
-      return res.status(404).json({ error: 'Not found' });
-    }
 
     let totalBytes;
     try {
-      const stat = fsImpl.statSync(fullPath);
+      const stat = await fsp.stat(fullPath);
       if (!stat.isFile()) return res.status(404).json({ error: 'Not found' });
       totalBytes = stat.size;
     } catch (e) {
@@ -283,15 +283,18 @@ function createUploadsGetHandler(deps) {
     // audio and video submissions). A failed probe is inconclusive, not audio.
     let prefix;
     if (needsContentProbe(fullPath) && totalBytes > 0) {
+      let handle;
       try {
-        const fd = fsImpl.openSync(fullPath, 'r');
-        try {
-          const want = Math.min(PROBE_PREFIX_BYTES, totalBytes);
-          const buf = Buffer.alloc(want);
-          const read = fsImpl.readSync(fd, buf, 0, want, 0);
-          prefix = read === want ? buf : buf.subarray(0, read);
-        } finally { fsImpl.closeSync(fd); }
-      } catch (e) { prefix = undefined; }
+        handle = await fsp.open(fullPath, 'r');
+        const want = Math.min(PROBE_PREFIX_BYTES, totalBytes);
+        const buf = Buffer.alloc(want);
+        const { bytesRead } = await handle.read(buf, 0, want, 0);
+        prefix = bytesRead === want ? buf : buf.subarray(0, bytesRead);
+      } catch (e) {
+        prefix = undefined;
+      } finally {
+        if (handle) { try { await handle.close(); } catch { /* best effort */ } }
+      }
     }
 
     res.set('Content-Type', resolveContentType(fullPath, prefix));

@@ -29,7 +29,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       after 5 s, `almost-done` at 97%, cap 900 s, seeded fuzz never yields NaN/Infinity; `etaLabel`
       bucket table, the 2 s hold, +30% needed to move up, `range` only when high/low > 2. Confirm RED
       (module missing).
-- [ ] 1.3 Extend `functions/uploadRoute.test.ts` (design D6): the 65th concurrent upload gets `503` +
+- [x] 1.3 Extend `functions/uploadRoute.test.ts` (design D6): the 65th concurrent upload gets `503` +
       `Retry-After`; a third concurrent upload from one uid gets `503`; slots are released after ok,
       too-large, stalled and aborted; with an injected `statfs` below the floor, `PUT /upload` gets
       `507` and logs `outcome:'disk-floor'`. Confirm RED.
@@ -60,15 +60,15 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       upload is already running). No ETA while filming.
 - [x] 2.6 i18n he/en for every new line (Hebrew first; buckets "כמה שניות", "בערך חצי דקה",
       "1–2 דקות", "מחכים לקליטה", "כמעט סיימנו"). `npm run i18n:check:strict` clean.
-- [ ] 2.7 `uploadRoute.js`: process-local in-flight counter (global 64, per uid 2) → `503` +
+- [x] 2.7 `uploadRoute.js`: process-local in-flight counter (global 64, per uid 2) → `503` +
       `Retry-After: 3`, released in `finally`; `statfs` disk floor (`max(2 GiB, 5%)`, cached 10 s) →
       `507`. Both added to `uploadFailureResponse`/`uploadLogRecord`. Injected dependencies so the
       test can drive them. 1.3 → green.
-- [ ] 2.8 `mediaServing.js`: replace `existsSync`/`statSync`/`openSync`/`readSync` with
+- [x] 2.8 `mediaServing.js`: replace `existsSync`/`statSync`/`openSync`/`readSync` with
       `fs.promises.stat` + `FileHandle.read`, keeping every guard and header.
       `scripts/test-range-request.ts`, `test-media-content-type.ts` and `test-content-disposition.ts`
       stay green unchanged.
-- [ ] 2.9 `server.js`: one `{msg:'uploads', inFlight, peak, loopDelayP99Ms}` line per minute from
+- [x] 2.9 (logged only for a minute with uploads or a loop p99 ≥ 100 ms, so an idle API stays quiet) `server.js`: one `{msg:'uploads', inFlight, peak, loopDelayP99Ms}` line per minute from
       `perf_hooks.monitorEventLoopDelay` (reset each minute, never throws).
 
 ### REFACTOR

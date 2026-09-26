@@ -203,6 +203,16 @@ async function main(): Promise<void> {
     eq('any range on an empty object is 416', ranged.status, 416);
   }
 
+  // ── video-upload-speed D6: the serving path never blocks the event loop ───
+  // Gameplay callables share the one Node process with every dashboard tile's GET; a sync
+  // stat/probe per request is small work multiplied by every open console.
+  {
+    const src = fs.readFileSync(new URL('../functions/mediaServing.js', import.meta.url), 'utf8');
+    const body = src.slice(src.indexOf('function createUploadsGetHandler'), src.indexOf('module.exports'));
+    const syncCalls = body.match(/\b\w+Sync\s*\(/g) || [];
+    ok(`GET /uploads/* uses no synchronous fs call :: ${syncCalls.join(', ') || 'none'}`, syncCalls.length === 0);
+  }
+
   console.log('');
   if (failures > 0) {
     console.error(`✗ uploads-route: ${failures} assertion(s) failed`);

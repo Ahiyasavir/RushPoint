@@ -46,7 +46,8 @@ const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 // The upload route (content-type allowlists, size caps and the streaming write)
 // lives in uploadRoute.js so it can be tested without this file's built-bundle
 // and Admin-SDK dependencies.
-const { createUploadHandler, sweepStaleTempUploads } = require('./uploadRoute.js');
+const { createUploadHandler, sweepStaleTempUploads, uploadsTelemetryRecord } = require('./uploadRoute.js');
+const { monitorEventLoopDelay } = require('perf_hooks');
 // Pure decisions for GET /uploads/* — content type, byte range, download
 // disposition (change: media-serving-correctness). See functions/mediaServing.js.
 const mediaServing = require('./mediaServing.js');
@@ -154,7 +155,7 @@ app.options('/upload', (req, res) => {
   res.sendStatus(204);
 });
 
-app.put('/upload', createUploadHandler({
+const uploadHandler = createUploadHandler({
   verifyIdToken: (token) => admin.auth().verifyIdToken(token),
   uploadDir: UPLOAD_DIR,
   // The request-derived form is the LAST resort (change: task-media-durability).
@@ -170,7 +171,23 @@ app.put('/upload', createUploadHandler({
       || `${fwdProto || req.protocol}://${req.get('host')}`;
   },
   onResponse: reflectCors,
-}));
+});
+app.put('/upload', uploadHandler);
+
+// One `{msg:'uploads'}` line a minute when anything happened (video-upload-speed D6): in-flight
+// streams, the minute's peak, and the event-loop delay p99, so "did uploads starve the
+// callables" is a number. unref'd so it never keeps a stopping process alive.
+const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+loopDelay.enable();
+setInterval(() => {
+  try {
+    const rec = uploadsTelemetryRecord(uploadHandler.stats(), loopDelay);
+    // eslint-disable-next-line no-console
+    if (rec) console.log(JSON.stringify(rec));
+  } catch { /* telemetry never takes the API down */ }
+  loopDelay.reset();
+  uploadHandler.resetPeak();
+}, 60_000).unref();
 
 // ── POST /ingest-url ────────────────────────────────────────────────────────
 // Same auth, same ownership check, same content-type allowlist, same size caps

@@ -217,6 +217,91 @@ async function sweepStaleTempUploads(uploadDir, now = Date.now(), ttlMs = TMP_TT
   return removed;
 }
 
+// ─── Server brake (change: video-upload-speed, D6) ───────────────────────────
+//
+// At our scale bandwidth, RAM and CPU are not what knocks the box over: a full disk stops the API
+// and every callable with it, and an unbounded pile of streams (a retry storm, a bug, a hostile
+// authenticated device) is the other way. Both answers are statuses the phone already RETRIES
+// (5xx), so a player on a busy minute waits a few seconds instead of losing the clip.
+// Process-local counters are correct because the API is ONE process (the rateLimitStore reasoning);
+// 64 x 20 MB = 1.28 GB is the worst temp disk in flight, well inside the floor.
+const MAX_CONCURRENT_UPLOADS = 64;
+const MAX_UPLOADS_PER_UID = 2;
+const BUSY_RETRY_AFTER_SECONDS = 3;
+const DISK_FLOOR_MIN_BYTES = 2 * 1024 ** 3;
+const DISK_FLOOR_FRACTION = 0.05;
+const DISK_CHECK_CACHE_MS = 10_000;
+
+function createUploadSlots({ maxConcurrent = MAX_CONCURRENT_UPLOADS, maxPerUid = MAX_UPLOADS_PER_UID } = {}) {
+  let inFlight = 0;
+  let peak = 0;
+  const perUid = new Map();
+  return {
+    acquire(uid) {
+      if (inFlight >= maxConcurrent) return { ok: false, reason: 'global' };
+      const mine = perUid.get(uid) || 0;
+      if (mine >= maxPerUid) return { ok: false, reason: 'uid' };
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      perUid.set(uid, mine + 1);
+      let released = false;
+      return {
+        ok: true,
+        release() {
+          if (released) return;
+          released = true;
+          inFlight -= 1;
+          const n = (perUid.get(uid) || 1) - 1;
+          if (n <= 0) perUid.delete(uid); else perUid.set(uid, n);
+        },
+      };
+    },
+    stats() { return { inFlight, peak }; },
+    resetPeak() { peak = inFlight; },
+  };
+}
+
+function diskFloorBytes(totalBytes) {
+  const pct = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes * DISK_FLOOR_FRACTION : 0;
+  return Math.max(DISK_FLOOR_MIN_BYTES, pct);
+}
+
+// Free space under the floor? Cached for 10 s so a burst costs one statfs. FAILS OPEN: a platform
+// without statfs, or any error, must never refuse a player's clip.
+function createDiskGuard(uploadDir, statfs, now = () => Date.now()) {
+  let cached = null;
+  return async function belowFloor() {
+    const t = now();
+    if (cached && t - cached.at < DISK_CHECK_CACHE_MS) return cached.below;
+    let below = false;
+    try {
+      const st = await statfs(uploadDir);
+      const bsize = Number(st && st.bsize);
+      const free = Number(st && st.bavail) * bsize;
+      const total = Number(st && st.blocks) * bsize;
+      below = Number.isFinite(free) && free < diskFloorBytes(total);
+    } catch {
+      below = false;
+    }
+    cached = { at: t, below };
+    return below;
+  };
+}
+
+// One line per minute (video-upload-speed D6): did uploads starve the callables? `loop` is a
+// perf_hooks.monitorEventLoopDelay histogram (nanoseconds). Returns null for a quiet minute (no
+// upload and a healthy loop), so an idle server does not fill the log.
+const LOOP_P99_ALERT_MS = 100;
+function uploadsTelemetryRecord(stats, loop) {
+  const inFlight = stats && Number.isFinite(stats.inFlight) ? stats.inFlight : 0;
+  const peak = stats && Number.isFinite(stats.peak) ? stats.peak : 0;
+  let p99 = 0;
+  try { p99 = loop && typeof loop.percentile === 'function' ? loop.percentile(99) / 1e6 : 0; } catch { p99 = 0; }
+  if (!Number.isFinite(p99) || p99 < 0) p99 = 0;
+  if (peak === 0 && inFlight === 0 && p99 < LOOP_P99_ALERT_MS) return null;
+  return { msg: 'uploads', inFlight, peak, loopDelayP99Ms: Math.round(p99) };
+}
+
 // Build the PUT /upload handler. Dependencies are injected so tests can run it
 // without the callables bundle or real Firebase credentials.
 //   verifyIdToken(token) -> Promise<{uid}>  — throws/rejects on an invalid token
@@ -258,12 +343,16 @@ function uploadLogRecord({ contentType, bytes, ms, outcome, uploadPath }) {
   };
 }
 
-function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse, log }) {
+function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse, log, limits, statfs }) {
   const emit = (record) => {
     try { (log || ((r) => console.log(JSON.stringify(r))))(record); } catch { /* telemetry never fails an upload */ }
   };
-  return async function uploadHandler(req, res) {
+  const slots = createUploadSlots(limits || {});
+  const statfsImpl = statfs || (fs.promises.statfs ? (p) => fs.promises.statfs(p) : null);
+  const belowFloor = statfsImpl ? createDiskGuard(uploadDir, statfsImpl) : async () => false;
+  async function uploadHandler(req, res) {
     let tempPath;
+    let slot;
     const startedAt = Date.now();
     try {
       // 1. Auth — header only, no body bytes consumed yet.
@@ -306,6 +395,21 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
       }
 
       const maxBytes = maxBytesFor(kind, contentType);
+
+      // 4b. The brake (video-upload-speed D6): disk first (nothing else matters on a full disk),
+      // then concurrency. Both are retryable 5xx on the phone.
+      if (await belowFloor()) {
+        emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes: 0, ms: Date.now() - startedAt, outcome: 'disk-floor', uploadPath }));
+        res.set('Retry-After', '30');
+        return res.status(507).json({ error: { status: 'RESOURCE_EXHAUSTED', message: 'Server storage is full' } });
+      }
+      slot = slots.acquire(uid);
+      if (!slot.ok) {
+        emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes: 0, ms: Date.now() - startedAt, outcome: `busy-${slot.reason}`, uploadPath }));
+        slot = undefined;
+        res.set('Retry-After', String(BUSY_RETRY_AFTER_SECONDS));
+        return res.status(503).json({ error: { status: 'UNAVAILABLE', message: 'Too many uploads right now' } });
+      }
 
       // 5. Declared-length fast path. Advisory only — Content-Length can be absent
       // or wrong, so the streaming byte count below is the authoritative guard.
@@ -377,11 +481,23 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
       console.error('Upload error:', e);
       if (res.headersSent || res.writableEnded) return undefined;
       return res.status(500).json({ error: { status: 'INTERNAL', message: 'Upload failed' } });
+    } finally {
+      // Every exit (ok, too-large, stalled, aborted, io) gives the slot back.
+      if (slot) slot.release();
     }
-  };
+  }
+  uploadHandler.stats = () => slots.stats();
+  uploadHandler.resetPeak = () => slots.resetPeak();
+  return uploadHandler;
 }
 
 module.exports = {
+  uploadsTelemetryRecord,
+  MAX_CONCURRENT_UPLOADS,
+  MAX_UPLOADS_PER_UID,
+  createUploadSlots,
+  diskFloorBytes,
+  createDiskGuard,
   ALLOWED_CONTENT_TYPES,
   ALLOWED_CREATOR_TYPES,
   MAX_PARTICIPANT_BYTES,

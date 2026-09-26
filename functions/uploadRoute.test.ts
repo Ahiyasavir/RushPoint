@@ -414,3 +414,149 @@ describe('upload telemetry (media-upload-reliability)', () => {
     expect((lines[0] as { outcome: string; bytes: number }).bytes).toBe(3);
   });
 });
+
+// ── Server brake (change: video-upload-speed, D6) ────────────────────────────
+// The box does not fall over from bandwidth at our scale; it falls over from a full disk or an
+// unbounded pile of streams. Both answers are RETRYABLE statuses the phone already handles.
+describe('upload slots (video-upload-speed D6)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { createUploadSlots, MAX_CONCURRENT_UPLOADS, MAX_UPLOADS_PER_UID, diskFloorBytes } = require('./uploadRoute.js');
+
+  it('defaults are 64 per process and 2 per uid', () => {
+    expect(MAX_CONCURRENT_UPLOADS).toBe(64);
+    expect(MAX_UPLOADS_PER_UID).toBe(2);
+  });
+
+  it('the 65th concurrent upload is refused, globally', () => {
+    const slots = createUploadSlots();
+    const held = Array.from({ length: 64 }, (_, i) => slots.acquire(`u${i}`));
+    expect(held.every((h: { ok: boolean }) => h.ok)).toBe(true);
+    expect(slots.acquire('u-new')).toMatchObject({ ok: false, reason: 'global' });
+    held[0].release();
+    expect(slots.acquire('u-new').ok).toBe(true);
+  });
+
+  it('a third concurrent upload from one uid is refused', () => {
+    const slots = createUploadSlots();
+    const a = slots.acquire('same');
+    const b = slots.acquire('same');
+    expect(a.ok && b.ok).toBe(true);
+    expect(slots.acquire('same')).toMatchObject({ ok: false, reason: 'uid' });
+    expect(slots.acquire('other').ok).toBe(true);
+  });
+
+  it('release is idempotent and tracks the peak', () => {
+    const slots = createUploadSlots({ maxConcurrent: 5, maxPerUid: 5 });
+    const a = slots.acquire('x');
+    const b = slots.acquire('y');
+    a.release(); a.release();
+    expect(slots.stats()).toMatchObject({ inFlight: 1, peak: 2 });
+    b.release();
+    expect(slots.stats().inFlight).toBe(0);
+    expect(slots.acquire('x').ok).toBe(true);
+  });
+
+  it('the disk floor is max(2 GiB, 5% of the volume)', () => {
+    expect(diskFloorBytes(10 * 1024 ** 3)).toBe(2 * 1024 ** 3);
+    expect(diskFloorBytes(100 * 1024 ** 3)).toBe(5 * 1024 ** 3);
+    expect(diskFloorBytes(NaN)).toBe(2 * 1024 ** 3);
+  });
+});
+
+describe('handler brake (video-upload-speed D6)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const http = require('http');
+
+  function brakedApp(opts: Record<string, unknown>, log?: (r: unknown) => void) {
+    const a = express();
+    a.put('/upload', createUploadHandler({
+      verifyIdToken: async () => ({ uid: UID }),
+      uploadDir,
+      resolveOrigin: () => 'https://api.example.test',
+      onResponse: () => {},
+      log,
+      ...opts,
+    }));
+    return a;
+  }
+
+  it('over the cap answers 503 + Retry-After, and the slot is released after the held upload ends', async () => {
+    const a = brakedApp({ limits: { maxConcurrent: 1, maxPerUid: 1 } });
+    const server = a.listen(0);
+    const port = (server.address() as { port: number }).port;
+    try {
+      // Upload A holds the only slot: its body is still being sent.
+      const held = http.request({ port, method: 'PUT', path: `/upload?path=${encodeURIComponent(okPath)}`,
+        headers: { authorization: 'Bearer t', 'content-type': 'image/jpeg' } });
+      const heldDone = new Promise<number>((r) => held.on('response', (res: { statusCode: number; resume: () => void }) => { res.resume(); r(res.statusCode); }));
+      held.write(Buffer.alloc(1024, 1));
+      await new Promise((r) => setTimeout(r, 100));
+
+      const refused = await request(server).put('/upload').query({ path: okPath })
+        .set('Authorization', 'Bearer t').set('Content-Type', 'image/jpeg').send(Buffer.alloc(10, 2));
+      expect(refused.status).toBe(503);
+      expect(refused.headers['retry-after']).toBe('3');
+
+      held.end(Buffer.alloc(1024, 1));
+      expect(await heldDone).toBe(200);
+
+      const after = await request(server).put('/upload').query({ path: okPath })
+        .set('Authorization', 'Bearer t').set('Content-Type', 'image/jpeg').send(Buffer.alloc(10, 2));
+      expect(after.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('releases the slot after a too-large refusal too', async () => {
+    const a = brakedApp({ limits: { maxConcurrent: 1, maxPerUid: 1 } });
+    const big = await request(a).put('/upload').query({ path: okPath })
+      .set('Authorization', 'Bearer t').set('Content-Type', 'image/jpeg').send(Buffer.alloc(MAX_PARTICIPANT_BYTES + 10, 1));
+    expect(big.status).toBe(400);
+    const ok = await request(a).put('/upload').query({ path: okPath })
+      .set('Authorization', 'Bearer t').set('Content-Type', 'image/jpeg').send(Buffer.alloc(10, 1));
+    expect(ok.status).toBe(200);
+  });
+
+  it('below the disk floor answers 507 and logs disk-floor', async () => {
+    const records: Array<{ outcome?: string }> = [];
+    const a = brakedApp({ statfs: async () => ({ bavail: 10, bsize: 4096, blocks: 1_000_000 }) }, (r) => records.push(r as { outcome?: string }));
+    const res = await request(a).put('/upload').query({ path: okPath })
+      .set('Authorization', 'Bearer t').set('Content-Type', 'image/jpeg').send(Buffer.alloc(10, 1));
+    expect(res.status).toBe(507);
+    expect(records.some((r) => r.outcome === 'disk-floor')).toBe(true);
+    expect(fs.existsSync(fsPath.join(uploadDir, okPath))).toBe(false);
+  });
+
+  it('a statfs that throws fails OPEN (the upload goes through)', async () => {
+    const a = brakedApp({ statfs: async () => { throw new Error('ENOSYS'); } });
+    const res = await request(a).put('/upload').query({ path: okPath })
+      .set('Authorization', 'Bearer t').set('Content-Type', 'image/jpeg').send(Buffer.alloc(10, 1));
+    expect(res.status).toBe(200);
+  });
+
+  it('plenty of disk: the upload goes through', async () => {
+    const a = brakedApp({ statfs: async () => ({ bavail: 100_000_000, bsize: 4096, blocks: 200_000_000 }) });
+    const res = await request(a).put('/upload').query({ path: okPath })
+      .set('Authorization', 'Bearer t').set('Content-Type', 'image/jpeg').send(Buffer.alloc(10, 1));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('uploads telemetry line (video-upload-speed D6)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { uploadsTelemetryRecord } = require('./uploadRoute.js');
+  const loop = (ms: number) => ({ percentile: () => ms * 1e6 });
+  it('reports in-flight, peak and the loop p99 in ms', () => {
+    expect(uploadsTelemetryRecord({ inFlight: 3, peak: 9 }, loop(12.4))).toEqual({ msg: 'uploads', inFlight: 3, peak: 9, loopDelayP99Ms: 12 });
+  });
+  it('a quiet minute logs nothing', () => {
+    expect(uploadsTelemetryRecord({ inFlight: 0, peak: 0 }, loop(5))).toBeNull();
+  });
+  it('a slow loop is logged even with no uploads', () => {
+    expect(uploadsTelemetryRecord({ inFlight: 0, peak: 0 }, loop(250))).toMatchObject({ loopDelayP99Ms: 250 });
+  });
+  it('garbage in never throws', () => {
+    expect(uploadsTelemetryRecord(null, { percentile: () => { throw new Error('x'); } })).toBeNull();
+  });
+});
