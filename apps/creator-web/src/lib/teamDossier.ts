@@ -17,6 +17,8 @@ export interface DossierTask {
   title: string;
   status: string;
   earnedScore?: number;
+  /** answer-scored-question: which outcome earned the points ('unmatched' = the catch-all). */
+  outcome?: { id: string; label: string };
   /** Whole minutes from start to finish, when both are known. */
   minutes?: number;
   answers: DossierAnswer[];
@@ -71,6 +73,8 @@ export interface TeamDossierInput {
   reasonLabel?: (reason: string) => string;
   /** The game's registration fields of type 'phone' (quick-dial-and-actions D3). */
   phoneFields?: { id: string; label: string }[];
+  /** An outcome's authored text, from the game (answer-scored-question). '' when unknown. */
+  outcomeLabel?: (taskId: string, outcomeId: string) => string;
 }
 
 type Obj = Record<string, unknown>;
@@ -112,6 +116,12 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
         const out: DossierTask = { taskId: r.taskId as string, title: title(r.taskId as string), status: str(r.status) ?? 'unassigned', answers };
         const earned = num(r.earnedScore);
         if (earned !== undefined) out.earnedScore = earned;
+        const oid = str(r.outcomeId);
+        if (oid) {
+          let label = '';
+          if (oid !== 'unmatched') { try { label = input.outcomeLabel?.(r.taskId as string, oid) ?? ''; } catch { label = ''; } }
+          out.outcome = { id: oid, label };
+        }
         const m = wholeMinutes(ms(r.startedAt), ms(r.completedAt));
         if (m !== undefined) out.minutes = m;
         return out;

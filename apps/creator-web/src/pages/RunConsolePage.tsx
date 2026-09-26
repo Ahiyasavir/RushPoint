@@ -45,6 +45,7 @@ import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import { buildTeamDossier } from '../lib/teamDossier';
 import TeamPage from '../components/TeamPage';
 import ClipTile from '../components/ClipTile';
+import { stationQrCards } from '../lib/stationQrSheet';
 import RunContactsEditor from '../components/RunContactsEditor';
 import QuickActionsBar from '../components/QuickActionsBar';
 import StaffCodesPanel from '../components/StaffCodesPanel';
@@ -553,6 +554,8 @@ export default function RunConsolePage() {
   // Task titles, so the review queue shows a task's NAME where it used to print
   // a raw Firestore id. One owner scoped read of a game the owner already holds.
   const [taskTitles, setTaskTitles] = useState<Map<string, string>>(new Map());
+  // answer-scored-question: `taskId:outcomeId` -> the outcome's authored text, for the team page.
+  const [outcomeLabels, setOutcomeLabels] = useState<Map<string, string>>(new Map());
   // Which game is live, for the console header. Display only — the same
   // owner-scoped read that builds taskTitles already returns it.
   const [gameTitle, setGameTitle] = useState('');
@@ -584,14 +587,20 @@ export default function RunConsolePage() {
         setStaffDefaultCaps(defaultCodeCapabilities(game.staffDefaults));
         setPhoneFields((game.registrationFields ?? []).filter((f) => f?.type === 'phone').map((f) => ({ id: f.id, label: f.label })));
         const map = new Map<string, string>();
+        const outcomes = new Map<string, string>();
         const anchors: LatLng[] = [];
         for (const stage of game.stages ?? []) {
           for (const task of stage.tasks ?? []) {
             map.set(task.id, task.title);
+            for (const o of task.answerOutcomes ?? []) {
+              const text = (o.label ?? '').trim() || (o.accepts ?? []).find((a) => a.trim()) || (o.range ? `${o.range.min}-${o.range.max}` : '');
+              if (o.id && text) outcomes.set(`${task.id}:${o.id}`, text);
+            }
             if (isPlacedCoord(task.coordinates)) anchors.push(task.coordinates);
           }
         }
         setTaskTitles(map);
+        setOutcomeLabels(outcomes);
         setGameAnchors(anchors);
         setGameStagesLite((game.stages ?? []).map((s) => ({
           id: s.id, title: s.title ?? '', tasks: (s.tasks ?? []).map((tk) => ({ id: tk.id, title: tk.title ?? '' })),
@@ -1938,6 +1947,7 @@ export default function RunConsolePage() {
         const dossier = buildTeamDossier({
           teamDoc: teamFullDocs.get(openTeamId),
           taskTitle: (id) => taskTitles.get(id) ?? '',
+          outcomeLabel: (taskId, outcomeId) => outcomeLabels.get(`${taskId}:${outcomeId}`) ?? '',
           stageTitle: (order) => rc.teamPage.stage({ n: order + 1 }),
           // A preset reason is stored as its code (the staff console's picker sends
           // ids); a free-text reason is shown as written.
@@ -2171,19 +2181,20 @@ function StationQrPrint({ gameId }: { gameId: string }) {
     setBusy(true);
     try {
       const { game } = await getGame({ gameId });
-      const stations = (game.stages ?? [])
-        .flatMap((s) => s.tasks ?? [])
-        .filter((task) => task.type === 'smart_station' && !!task.smart?.secretCode);
+      // One card per code: a station scored BY CODE prints a card for each of its codes, with its
+      // points (lib/stationQrSheet.ts). It used to be left off the sheet entirely.
+      const stations = stationQrCards(game.stages ?? []);
       if (stations.length === 0) {
         await dialog.alert(t.runConsole.printQrEmpty);
         return;
       }
-      const cards = await Promise.all(stations.map(async (task) => {
-        const code = task.smart!.secretCode!;
+      const cards = await Promise.all(stations.map(async (card) => {
+        const code = card.code;
         const img = await QRCode.toDataURL(buildStationQrPayload(code), { margin: 1, width: 256 });
         return `
           <section class="station">
-            <h2 dir="auto">${escapeHtml(task.title)}</h2>
+            <h2 dir="auto">${escapeHtml(card.title)}</h2>
+            ${card.points !== undefined ? `<p class="worth" dir="auto">${escapeHtml(t.runConsole.printQrWorth({ code, n: card.points }))}</p>` : ''}
             <img src="${img}" alt="" />
             <p class="fallback">${escapeHtml(t.runConsole.printQrCodeFallback)}</p>
             <p class="code">${escapeHtml(code)}</p>
@@ -2204,6 +2215,7 @@ function StationQrPrint({ gameId }: { gameId: string }) {
           .station img { width: 256px; height: 256px; }
           .fallback { font-size: 11px; color: #666; margin: 8px 0 2px; text-transform: uppercase; letter-spacing: 0.1em; }
           .code { font-family: monospace; font-size: 18px; font-weight: bold; margin: 0; }
+          .worth { font-size: 14px; margin: -6px 0 10px; color: #333; }
         </style></head><body>
         <h1>${escapeHtml(t.runConsole.printQrHeading)}</h1>
         ${cards.join('')}

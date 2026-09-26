@@ -285,7 +285,7 @@ const ALLOWED_TASK_KEYS = new Set([
   'estimatedMinutes', 'expectedDurationMinutes', 'pointValue',
   'maxConcurrentTeams', 'currentTeamCount', 'status', 'maxDurationMinutes',
   'smart', 'triggerMode', 'locationless', 'hideLocation', 'locationClue',
-  'locationClueHe', 'hintPenalty', 'choices', 'numericTolerance',
+  'locationClueHe', 'hintPenalty', 'choices', 'choicePoints', 'numericTolerance',
   'geofenceRadiusMeters', 'steps', 'tags', 'media',
   // pause-clock-tasks: the participant is TOLD the clock is stopped (that is the
   // whole point — a team that does not know will still hurry), so the flag is
@@ -13065,6 +13065,27 @@ async function main() {
     const qTeam = (await creator.getDocAt(`users/${OWNER}/games/${qg}/runs/${or2}/teams/${qp.auth.currentUser.uid}`)).data ?? {};
     const qRec = (qTeam.stages ?? [])[0]?.tasks?.find((x) => x.taskId === 'oq-q') ?? {};
     check('question outcome: "תל אביב" earned 20 (its outcome), not 30', qRec.earnedScore === 20 && qRec.outcomeId === 'tlv', JSON.stringify(qRec));
+    // D4: points on the buttons only when the creator turns it on, parallel to the choices.
+    await creator.call('updateGame', { gameId: qg, stages: [{ id: 'oq-s', order: 0, title: 'Q', isFinal: true, tasks: [
+      { id: 'oq-q', title: 'Best capital', type: 'quiz', triggerMode: 'instant',
+        coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+        revealOutcomePoints: true,
+        answerOutcomes: [{ id: 'jlm', label: 'ירושלים', points: 50 }, { id: 'tlv', label: 'תל אביב', points: 20 }] },
+    ] }] });
+    // A fresh team (the first one has finished the game, so the mission is no longer active for it).
+    const qp2 = makeParty('outcomeQuizReveal');
+    await signInAnonymously(qp2.auth);
+    await qp2.call('joinRun', { code: oc2, displayName: 'Quiz team 2' });
+    await creator.call('startTeams', { gameId: qg, runId: or2 });
+    await qp2.call('requestNextTask', QC);
+    const qs2 = await qp2.call('getMyTeamState', { code: oc2 });
+    const qTask2 = qs2?.activeStageTasks?.find((x) => x.id === 'oq-q');
+    check('question outcome: revealed points ride alongside the buttons', JSON.stringify(qTask2?.choicePoints) === JSON.stringify([50, 20]), JSON.stringify(qTask2));
+    // 2.7: the owner's report names WHICH answer earned the points.
+    const qReport = await creator.call('getRunPlayerReport', { gameId: qg, runId: or2 });
+    const qRow = (qReport?.answers ?? []).find((r) => r.taskId === 'oq-q' && r.teamId === qp.auth.currentUser.uid);
+    check('question outcome: the report names the outcome the team hit', qRow?.outcomeId === 'tlv' && qRow?.outcomeLabel === 'תל אביב', JSON.stringify(qRow));
+    check('question outcome: the report lists every outcome as the answer key', qRow?.expectedAnswer === 'ירושלים 50 · תל אביב 20', qRow?.expectedAnswer);
 
     // ── Validation where the creator can fix it ──────────────────────────────
     let overlapRefused = false;

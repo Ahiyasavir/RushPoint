@@ -1893,8 +1893,10 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
     // server-side and the UI had nowhere to put it.
     return (
       <div className="space-y-2">
-        {task.choices.map((c) => {
+        {task.choices.map((c, i) => {
           const isAnswer = !!prefill && c === prefill;
+          // answer-scored-question D4: the creator chose to show what each answer is worth.
+          const worth = Array.isArray(task.choicePoints) && typeof task.choicePoints[i] === 'number' ? task.choicePoints[i] : null;
           const isPicked = selected === c;
           // The picked option overrides the disabled skin with `!` — the disabled
           // rules in ui.tsx are plain declarations, so importance is what wins,
@@ -1914,6 +1916,9 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
               data-testid="quiz-choice" data-choice={c} data-picked={isPicked || undefined}
               data-rehearsal-answer={isAnswer || undefined}>
               <span dir="auto">{c}</span>
+              {worth !== null && (
+                <span className="ms-2 text-xs font-semibold opacity-80" data-testid="quiz-choice-points">{t.task.choicePoints({ n: worth })}</span>
+              )}
               {isAnswer && !isPicked && <span className="ms-2" aria-label={t.task.rehearseCorrect} title={t.task.rehearseCorrect}>✅</span>}
             </Button>
           );

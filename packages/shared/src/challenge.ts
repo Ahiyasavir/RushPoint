@@ -2,6 +2,7 @@
 // play-web teaser route and the checkChallengeAnswer callable. The answer key
 // is never shipped to the client — matchesTaskAnswer runs server-side only.
 import type { Task } from './types';
+import { matchAnswerOutcome, UNMATCHED_OUTCOME_ID } from './answerOutcomes';
 
 /**
  * Parse a `?challenge=<gameId>:<taskId>` deep-link value into its parts.
@@ -48,4 +49,21 @@ export function matchesTaskAnswer(
   }
   // quiz (and any answer-list task): match any accepted answer, case-insensitive
   return (task.answers ?? []).some((a) => a.trim().toLowerCase() === given);
+}
+
+/**
+ * The teaser's verdict (checkChallengeAnswer). A question graded BY ANSWER (answer-scored-question)
+ * has no `answers` list, so matchesTaskAnswer alone called every guess wrong: any NAMED outcome is
+ * an answer the creator wrote and counts; the catch-all ("anything else earns N") does not.
+ * SERVER-ONLY, like matchesTaskAnswer.
+ */
+export function challengeVerdict(
+  task: Pick<Task, 'type' | 'numericAnswer' | 'numericTolerance' | 'answers' | 'answerOutcomes' | 'unmatchedPoints'>,
+  raw: string,
+): boolean {
+  if (Array.isArray(task.answerOutcomes) && task.answerOutcomes.length > 0) {
+    const m = matchAnswerOutcome(task, raw);
+    return 'outcomeId' in m && m.outcomeId !== UNMATCHED_OUTCOME_ID;
+  }
+  return matchesTaskAnswer(task, raw);
 }

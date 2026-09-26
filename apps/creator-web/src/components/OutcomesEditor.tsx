@@ -2,7 +2,7 @@ import type { Task } from '@rushpoint/shared';
 import { answerOutcomesProblem, MAX_ANSWER_OUTCOMES } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { Button } from './ui';
-import { addOutcome, removeOutcome, setOutcome } from '../lib/outcomeEditor';
+import { addOutcome, removeOutcome, setOutcome, setRevealPoints } from '../lib/outcomeEditor';
 
 // Rows of [code or answer | points] (change: answer-scored-question, D5). The field example:
 // a station whose operator hands out "זעתר" for 50 points or "מרווה" for 100. The same editor
@@ -47,6 +47,13 @@ export default function OutcomesEditor({ task, replace, kind }: {
           <Button variant="ghost" onClick={() => replace(addOutcome(task))}>{kind === 'codes' ? o.addCode : o.addAnswer}</Button>
         )}
       </div>
+      {kind === 'answers' && (
+        <label className="flex items-center gap-2 min-h-[44px] text-[13px] text-[--ink-2]">
+          <input type="checkbox" checked={task.revealOutcomePoints === true}
+            onChange={(e) => replace(setRevealPoints(task, e.target.checked))} />
+          {o.revealPoints}
+        </label>
+      )}
       {problem && <p className="text-xs text-ink-amber">{o.problem[problem]}</p>}
       <p className="text-[12px] text-[--ink-4]">{o.presetNote}</p>
     </div>

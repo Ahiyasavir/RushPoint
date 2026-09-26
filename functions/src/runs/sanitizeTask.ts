@@ -94,13 +94,18 @@ export function sanitizeTaskForParticipant(
   // ALLOWED_TASK_KEYS allowlist.
   // answer-scored-question: answerOutcomes (accepted texts/codes and their points) and
   // unmatchedPoints are the answer key; revealOutcomePoints is authoring config.
-  const { smart, hint, answers, numericAnswer, steps, orderItems, answerOutcomes, unmatchedPoints: _unmatched, revealOutcomePoints: _reveal, ...rest } = task;
-  void _unmatched; void _reveal;
+  const { smart, hint, answers, numericAnswer, steps, orderItems, answerOutcomes, unmatchedPoints: _unmatched, revealOutcomePoints, ...rest } = task;
+  void _unmatched;
   // A question graded by answer renders its outcome LABELS as buttons. A station's
   // codes are handed out by the operator, so a station ships none.
   const outcomeChoices = task.type === 'quiz' && Array.isArray(answerOutcomes) && answerOutcomes.length > 0
     && answerOutcomes.every((o) => typeof o?.label === 'string' && o.label.trim())
     ? answerOutcomes.map((o) => (o.label as string).trim())
+    : undefined;
+  // Points on the buttons ONLY when the creator chose to show them (D4), as a list parallel to
+  // `choices`. Never the accepted alternates, never the catch-all.
+  const choicePoints = outcomeChoices && revealOutcomePoints === true
+    ? answerOutcomes!.map((o) => (typeof o.points === 'number' && Number.isFinite(o.points) ? o.points : 0))
     : undefined;
 
   // Ordering quiz: with a seed, emit a deterministic per-team shuffle (stable
@@ -127,6 +132,7 @@ export function sanitizeTaskForParticipant(
   return {
     ...rest,
     ...(outcomeChoices ? { choices: outcomeChoices } : {}),
+    ...(choicePoints ? { choicePoints } : {}),
     ...(shuffledOrderItems ? { orderItems: shuffledOrderItems } : {}),
     ...(hidden ? { locationHidden: true as const } : {}),
     hasHint: !!hint && hint.trim().length > 0,

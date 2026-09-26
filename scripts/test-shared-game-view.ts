@@ -233,6 +233,7 @@ const WITHHELD_TASK_FIELDS: Record<string, string> = {
   answerOutcomes: 'answer key (accepted answers/codes and their points) — never shared',
   unmatchedPoints: 'part of the answer key (what an unmatched answer earns)',
   revealOutcomePoints: 'a play-time display switch for the points on answer buttons',
+  choicePoints: 'participant-payload output of the sanitizer (points per button), never stored on a template',
 };
 
 const missing = taskFields.filter((f) => {

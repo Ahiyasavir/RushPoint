@@ -452,6 +452,9 @@ export interface Task {
   unmatchedPoints?: number | null;
   /** Show each button's points to the players. */
   revealOutcomePoints?: boolean;
+  /** PARTICIPANT-FACING only (sanitizer output): points per `choices` entry, present only when
+   *  the creator turned on revealOutcomePoints (answer-scored-question D4). */
+  choicePoints?: number[];
   // geofence: auto-checks-in when the participant is within this radius of
   //           `coordinates` (default 50m). Server validates the GPS distance.
   geofenceRadiusMeters?: number;

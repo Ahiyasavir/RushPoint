@@ -59,6 +59,7 @@ export default function RunReportPage() {
     wrong: r.wrong,
     yes: r.yes,
     no: r.no,
+    outcomeOther: r.outcomeOther,
     columns: {
       player: r.player, members: r.colMembers, rank: r.rank, score: r.score,
       penalty: r.penalty, status: r.colStatus, started: r.colStarted,
@@ -66,7 +67,7 @@ export default function RunReportPage() {
       missionsDone: r.colMissionsDone, missionsSkipped: r.colMissionsSkipped,
       hints: r.hints, wrongAnswers: r.wrongAnswers, media: r.media,
       stage: r.colStage, mission: r.colMission, type: r.colType,
-      question: r.question, expected: r.expected, theirAnswer: r.theirAnswer,
+      question: r.question, expected: r.expected, theirAnswer: r.theirAnswer, outcome: r.outcome,
       verdict: r.colVerdict, attempts: r.colAttempts, points: r.colPointsEarned,
       minutes: r.colDuration, mediaLink: r.colMediaLink,
       players: r.players, completed: r.colCompleted, skipped: r.colSkipped,
@@ -301,6 +302,12 @@ function MissionRow({ row }: { row: ReportAnswerRow }) {
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {row.outcomeId && (
+            // answer-scored-question: WHICH answer or code earned these points.
+            <span className="text-xs rounded-full bg-[--surface-2] px-2 py-0.5 text-[--ink-2]" dir="auto" data-testid="report-outcome">
+              {r.outcomeChip({ label: row.outcomeId === 'unmatched' ? r.outcomeOther : (row.outcomeLabel || row.outcomeId) })}
+            </span>
+          )}
           <span className="text-xs text-[--ink-3] tabular-nums">{r.points({ n: row.earnedScore })}</span>
           <StatusChip status={row.status} />
         </div>

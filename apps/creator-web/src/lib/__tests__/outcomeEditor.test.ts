@@ -1,6 +1,6 @@
 // answer-scored-question D5: the Builder's "several codes" / "points by answer" edits.
 import { describe, it, expect } from 'vitest';
-import { enableOutcomes, disableOutcomes, setOutcome, addOutcome, removeOutcome } from '../outcomeEditor';
+import { enableOutcomes, disableOutcomes, setOutcome, addOutcome, removeOutcome, setRevealPoints } from '../outcomeEditor';
 import type { Task } from '@rushpoint/shared';
 
 const station = { id: 's', title: 'Spice', type: 'smart_station', pointValue: 30,
@@ -67,5 +67,18 @@ describe('row edits', () => {
     let t = enableOutcomes(station);
     for (let i = 0; i < 20; i++) t = addOutcome(t);
     expect(t.answerOutcomes?.length).toBe(10);
+  });
+});
+
+describe('setRevealPoints (D4: show players what each answer is worth)', () => {
+  it('on sets true; off REMOVES the key (never false/null on the wire)', () => {
+    const on = setRevealPoints(enableOutcomes(quiz), true);
+    expect(on.revealOutcomePoints).toBe(true);
+    const off = setRevealPoints(on, false);
+    expect('revealOutcomePoints' in off).toBe(false);
+  });
+  it('turning outcomes off also drops the reveal flag', () => {
+    const t = disableOutcomes(setRevealPoints(enableOutcomes(quiz), true));
+    expect('revealOutcomePoints' in t).toBe(false);
   });
 });

@@ -21,6 +21,7 @@ import {
   DEFAULT_SCORING_PRESET,
   describeGameRequirements,
   matchesTaskAnswer,
+  challengeVerdict,
   collectTranslatableFields,
   applyTranslations,
   normalizeTaskMedia,
@@ -1257,7 +1258,8 @@ export const checkChallengeAnswer = loggedCallable('checkChallengeAnswer', async
     throw new functions.https.HttpsError('not-found', 'Task not found');
   }
 
-  return { correct: matchesTaskAnswer(task, String(answer ?? '')) };
+  // challengeVerdict also grades a question scored BY ANSWER (answer-scored-question).
+  return { correct: challengeVerdict(task, String(answer ?? '')) };
 });
 
 

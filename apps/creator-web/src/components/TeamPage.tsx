@@ -187,6 +187,7 @@ export default function TeamPage({
                             <span dir="auto" className="text-sm text-[--ink-1] truncate">{task.title}</span>
                             <span className="shrink-0 text-[12px] text-[--ink-3]">
                               {tp.taskStatus[task.status as keyof typeof tp.taskStatus] ?? task.status}
+                              {task.outcome ? ` · ${tp.outcome({ label: task.outcome.id === 'unmatched' ? tp.outcomeOther : (task.outcome.label || task.outcome.id) })}` : ''}
                               {task.earnedScore !== undefined ? ` · ${tp.points({ n: task.earnedScore })}` : ''}
                               {task.minutes !== undefined ? ` · ${tp.minutes({ n: task.minutes })}` : ''}
                             </span>

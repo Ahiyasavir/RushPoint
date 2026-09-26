@@ -235,6 +235,7 @@ const HE = {
     uploadRetrying: 'הרשת איטית. מנסים שוב…',
     // Upload ETA (change: video-upload-speed, D5): stable buckets, never a countdown.
     videoAlreadyUp: 'הסרטון כבר עלה בזמן הצילום. אפשר לשלוח.',
+    choicePoints: ({ n }: { n: number }) => `${n} נק׳`,
     etaSeconds: 'עוד כמה שניות',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 30 ? 'עוד בערך חצי דקה'
@@ -1090,6 +1091,7 @@ const EN: typeof HE = {
     uploadStarting: 'Starting upload…',
     uploadRetrying: 'Slow network. Retrying…',
     videoAlreadyUp: 'The clip already went up while you filmed. Ready to send.',
+    choicePoints: ({ n }: { n: number }) => `${n} pts`,
     etaSeconds: 'a few seconds left',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 60 ? 'about a minute left'

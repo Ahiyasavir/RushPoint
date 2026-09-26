@@ -347,5 +347,24 @@ check('every answer row carries a defined value for every column (no undefined c
 check('every player row carries a defined value for every column',
   report.players.every((row) => Object.values(row).every((v) => v !== undefined)));
 
+// ── answer-scored-question 2.7: WHICH answer a team gave, not only what it scored ─────────────
+{
+  const g2 = { id: 'g2', title: 'x', stages: [{ id: 's', title: 'S', order: 0, tasks: [
+    { id: 'spice', title: 'תבלין', type: 'smart_station', answerOutcomes: [
+      { id: 'z', label: 'זעתר', accepts: ['זעתר'], points: 50 }, { id: 'm', label: 'מרווה', accepts: ['מרווה'], points: 100 },
+    ], unmatchedPoints: 5 },
+  ] }] } as unknown as Game;
+  const r2 = { id: 'r2', gameId: 'g2', ownerUid: 'o', status: 'finished' } as unknown as Run;
+  const mk = (id: string, outcomeId?: string) => ({ id, displayName: id, status: 'finished', score: 0,
+    stages: [{ stageId: 's', status: 'completed', tasks: [rec({ taskId: 'spice', earnedScore: 100, ...(outcomeId ? { outcomeId } : {}) })] }] }) as unknown as RunTeam;
+  const rep = buildRunPlayerReport({ game: g2, run: r2, teams: [mk('A', 'm'), mk('B', 'unmatched'), mk('C'), mk('D', 'gone')] });
+  const row = (t: string) => rep.answers.find((x) => x.teamId === t);
+  check('the owner sees every outcome as the answer key', row('A')?.expectedAnswer === 'זעתר 50 · מרווה 100 · * 5', row('A')?.expectedAnswer);
+  check('the row names the outcome the team hit', row('A')?.outcomeId === 'm' && row('A')?.outcomeLabel === 'מרווה', JSON.stringify(row('A')));
+  check('"anything else" is marked, not guessed', row('B')?.outcomeId === 'unmatched' && row('B')?.outcomeLabel === '', JSON.stringify(row('B')));
+  check('no outcome recorded -> empty, not undefined', row('C')?.outcomeId === '' && row('C')?.outcomeLabel === '');
+  check('an outcome later deleted from the game keeps its id, empty label', row('D')?.outcomeId === 'gone' && row('D')?.outcomeLabel === '');
+}
+
 console.log(`\n${failures === 0 ? 'ALL RUN-PLAYER-REPORT TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

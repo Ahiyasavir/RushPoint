@@ -177,6 +177,29 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(JSON.stringify(out)).not.toContain('jerusalem');
   });
 
+  // D4: points are shown on the buttons ONLY when the creator chose to reveal them, and only as a
+  // list parallel to `choices`; the accepted alternates stay secret either way.
+  test('revealOutcomePoints: points ride alongside the choices, nothing else leaks', () => {
+    const task = baseTask({
+      type: 'quiz',
+      answerOutcomes: [
+        { id: 'a', label: 'ירושלים', accepts: ['ירושלים', 'jerusalem'], points: 50 },
+        { id: 'b', label: 'תל אביב', points: 20 },
+      ],
+      unmatchedPoints: 5,
+      revealOutcomePoints: true,
+    } as Partial<Task>);
+    const out = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    expect(out.choices).toEqual(['ירושלים', 'תל אביב']);
+    expect(out.choicePoints).toEqual([50, 20]);
+    expect(JSON.stringify(out)).not.toContain('jerusalem');
+    expect(out.unmatchedPoints).toBeUndefined();
+    const hidden = sanitizeTaskForParticipant({ ...task, revealOutcomePoints: false } as Task) as Record<string, unknown>;
+    expect(hidden.choicePoints).toBeUndefined();
+    const junk = sanitizeTaskForParticipant({ ...task, revealOutcomePoints: 'yes' as never } as Task) as Record<string, unknown>;
+    expect(junk.choicePoints).toBeUndefined();
+  });
+
   test('a station with several codes ships no codes and no choices', () => {
     const out = sanitizeTaskForParticipant(
       baseTask({

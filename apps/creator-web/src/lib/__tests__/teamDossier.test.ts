@@ -165,3 +165,21 @@ describe('buildTeamDossier: numbers to call (quick-dial-and-actions D3)', () => 
     expect(d.gameAsksForPhone).toBe(false);
   });
 });
+
+// answer-scored-question 2.7: the team page says WHICH answer or code earned the points.
+describe('buildTeamDossier: the outcome a team hit', () => {
+  const team = { id: 't2', displayName: 'x', stages: [{ order: 0, status: 'completed', tasks: [
+    { taskId: 'spice', status: 'completed', earnedScore: 100, outcomeId: 'm' },
+    { taskId: 'spice2', status: 'completed', earnedScore: 5, outcomeId: 'unmatched' },
+    { taskId: 'plain', status: 'completed', earnedScore: 10 },
+  ] }] };
+  const labels: Record<string, string> = { 'spice:m': 'מרווה' };
+  const d = buildTeamDossier({ ...input(team), outcomeLabel: (taskId: string, id: string) => labels[`${taskId}:${id}`] ?? '' })!;
+  const task = (id: string) => d.timeline[0].tasks.find((x) => x.taskId === id)!;
+  it('names the outcome', () => { expect(task('spice').outcome).toEqual({ id: 'm', label: 'מרווה' }); });
+  it('marks the catch-all without a label', () => { expect(task('spice2').outcome).toEqual({ id: 'unmatched', label: '' }); });
+  it('an ordinary mission has none', () => { expect(task('plain').outcome).toBeUndefined(); });
+  it('works without the lookup (older call sites)', () => {
+    expect(buildTeamDossier(input(team))!.timeline[0].tasks[0].outcome).toEqual({ id: 'm', label: '' });
+  });
+});

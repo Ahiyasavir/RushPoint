@@ -80,3 +80,8 @@ export function removeOutcome(task: Task, index: number): Task {
   if (outcomes.length <= MIN_ANSWER_OUTCOMES) return task;
   return { ...task, answerOutcomes: outcomes.filter((_, i) => i !== index) };
 }
+
+/** D4: whether players see each answer's points on its button. Off REMOVES the key, never false. */
+export function setRevealPoints(task: Task, on: boolean): Task {
+  return on ? { ...task, revealOutcomePoints: true } : withoutKeys(task, ['revealOutcomePoints']);
+}
