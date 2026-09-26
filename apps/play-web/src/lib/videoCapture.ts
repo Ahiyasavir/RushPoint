@@ -289,3 +289,28 @@ export function recordedClipVerdict(
   if (typeof elapsedSeconds !== 'number' || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) return 'ok';
   return gradeClip(elapsedSeconds, minSeconds);
 }
+
+// ─── Send while filming (change: video-upload-speed, D4) ─────────────────────
+//
+// `recorder.start(timeslice)` hands over a slice every few seconds, and each slice is sent while
+// the player is still filming, so after stop only the last slice or so is left to send. 4 s keeps
+// the request rate low (100 teams filming at once is ~25 requests a second). WebKit had timeslice
+// bugs that produced invalid files (WebKit bug 216832), so it records one blob until a device check
+// (task 10.2) says otherwise; it still gets resume. Every iOS browser is WebKit, Chrome included.
+// An unknown engine also records one blob: the safe answer is the one that worked before.
+export const RECORDER_TIMESLICE_MS = 4000;
+
+export type RecorderEngine = 'chromium' | 'gecko' | 'webkit' | 'unknown';
+
+export function recorderEngineFromUserAgent(ua: string | null | undefined): RecorderEngine {
+  if (typeof ua !== 'string' || !ua) return 'unknown';
+  if (/iPhone|iPad|iPod/.test(ua)) return 'webkit';
+  if (/Firefox\//.test(ua)) return 'gecko';
+  if (/Chrome\/|Chromium\/|CriOS\/|Edg\//.test(ua)) return 'chromium';
+  if (/AppleWebKit\//.test(ua) && /Safari\//.test(ua)) return 'webkit';
+  return 'unknown';
+}
+
+export function recorderTimesliceFor(engine: RecorderEngine): number | undefined {
+  return engine === 'chromium' || engine === 'gecko' ? RECORDER_TIMESLICE_MS : undefined;
+}

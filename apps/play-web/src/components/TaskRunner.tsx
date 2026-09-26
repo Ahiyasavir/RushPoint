@@ -9,7 +9,7 @@ import {
 // Reduced to the devices this team actually has, the same way the server reduces it at
 // submit time, so the two never disagree about what the team is waiting for
 // (change: every-member-plays).
-import { effectiveContributorRequirement } from '@rushpoint/shared';
+import { effectiveContributorRequirement, normalizeContentType } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
@@ -23,7 +23,8 @@ import {
 // which secondary actions belong behind the overflow.
 import { selectMissionNotice, type MissionNotice } from '../lib/missionNotice';
 import MissionExtras from './MissionExtras';
-import { uploadTaskMedia, uploadTaskPoster, uid } from '../services/firebase';
+import { uploadTaskMedia, uploadTaskPoster, createVideoStream, finishVideoStream, uid } from '../services/firebase';
+import type { StreamUpload } from '../lib/streamUpload';
 import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
@@ -67,7 +68,7 @@ import {
 } from '../lib/stuckGuards';
 import {
   CAMERA_OPEN_DEADLINE_MS, withCameraDeadline, captureProfileFor, type CaptureProfile,
-  MAX_PARTICIPANT_VIDEO_BYTES,
+  MAX_PARTICIPANT_VIDEO_BYTES, recorderTimesliceFor, recorderEngineFromUserAgent,
   videoTypeFromName, pickedClipVerdict,
   recordedClipVerdict,
 } from '../lib/videoCapture';
@@ -520,15 +521,53 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   const pendingRef = useRef<PendingUploads<{ url: string; contentType: string }> | null>(null);
   if (!pendingRef.current) {
     pendingRef.current = createPendingUploads(
-      (blob, contentType, signal, taskId) => uploadTaskMedia(
-        contentType.startsWith('image/') ? 'photo' : contentType.startsWith('audio/') ? 'audio' : 'video',
-        blob,
-        { runId: sessionRef.current.runId, taskId, contentType, signal },
+      (blob, contentType, signal, taskId) => (
+        contentType.startsWith('image/') || contentType.startsWith('audio/')
+          ? uploadTaskMedia(contentType.startsWith('image/') ? 'photo' : 'audio', blob, { runId: sessionRef.current.runId, taskId, contentType, signal })
+          : uploadVideoRef.current(blob, contentType, signal, taskId)
       ),
       () => setUploadsVersion((v) => v + 1),
     );
   }
   const pending = pendingRef.current;
+
+  // Resumable clip streams, one per task (video-upload-speed D4). A recorded take streams while it
+  // is filmed; anything else (a picked file, a WebKit one-blob recording) gets a stream at send, so
+  // every clip resumes from the server's offset instead of restarting. Where there is no session
+  // route (emulator lane, or an older server) it falls back to the plain upload.
+  const streamsRef = useRef(new Map<string, StreamUpload>());
+  function dropStream(taskId: string) {
+    const s = streamsRef.current.get(taskId);
+    if (s) { s.abort(); streamsRef.current.delete(taskId); }
+  }
+  function startStream(taskId: string, contentType: string) {
+    dropStream(taskId);
+    const s = createVideoStream({ runId: sessionRef.current.runId, taskId, contentType });
+    if (s) streamsRef.current.set(taskId, s);
+  }
+  async function uploadVideo(blob: Blob, contentType: string, signal: AbortSignal, taskId: string): Promise<{ url: string; contentType: string }> {
+    let s = streamsRef.current.get(taskId);
+    if (!s || !s.matches(blob)) {
+      dropStream(taskId);
+      s = createVideoStream({ runId: sessionRef.current.runId, taskId, contentType }) ?? undefined;
+      if (s) { s.append(blob); streamsRef.current.set(taskId, s); }
+    }
+    if (s) {
+      try {
+        const url = await finishVideoStream(s, blob, signal);
+        streamsRef.current.delete(taskId);
+        return { url, contentType: normalizeContentType(contentType) };
+      } catch (e) {
+        const code = String((e as { code?: unknown })?.code ?? '');
+        if (code !== 'session/unsupported' && code !== 'session/mismatch') throw e;
+        streamsRef.current.delete(taskId);
+      }
+    }
+    return uploadTaskMedia('video', blob, { runId: sessionRef.current.runId, taskId, contentType, signal });
+  }
+  // The pending-upload starter is created once; it reaches the current uploadVideo through a ref.
+  const uploadVideoRef = useRef(uploadVideo);
+  uploadVideoRef.current = uploadVideo;
 
   // A video's poster frame (video-upload-speed D7), started the moment the clip exists so it rides
   // along with the capture-time upload. One per task; a retake replaces it. Resolves to a URL or
@@ -1529,8 +1568,11 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
         ) : task.smart?.captureKind === 'video' ? (
           <VideoEntry key={task.id} smart={task.smart} runId={session.runId} busy={frozen} working={busy} onSubmit={video}
             onCaptured={(b, type) => {
-              if (b) { pending.begin(task.id, b, type); void posterFor(task.id, b); } else { pending.forget(task.id); posterRef.current = null; }
-            }} />
+              if (b) { pending.begin(task.id, b, type); void posterFor(task.id, b); } else { pending.forget(task.id); posterRef.current = null; dropStream(task.id); }
+            }}
+            onStreamStart={(type) => startStream(task.id, type)}
+            onStreamChunk={(chunk) => streamsRef.current.get(task.id)?.append(chunk)}
+            onStreamDiscard={() => dropStream(task.id)} />
         ) : (
           <PhotoEntry
             key={task.id}
@@ -2854,7 +2896,7 @@ function readVideoDuration(url: string): Promise<number | undefined> {
   });
 }
 
-function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
+function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStreamStart, onStreamChunk, onStreamDiscard }: {
   smart: { videoMinSeconds?: number; videoMaxSeconds?: number; preferredCamera?: 'front' } | undefined;
   /** Keys the player's remembered camera choice to this run (camera-switch D4). */
   runId?: string;
@@ -2865,9 +2907,16 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
   onSubmit: (blob: Blob | File, contentType: string, lengthSeconds?: number) => void;
   /** The clip now in review (null once discarded or too short to send): starts its upload. */
   onCaptured?: (blob: Blob | File | null, contentType: string) => void;
+  /** Send while filming (video-upload-speed D4): a take started, a slice arrived, a take was dropped. */
+  onStreamStart?: (contentType: string) => void;
+  onStreamChunk?: (chunk: Blob) => void;
+  onStreamDiscard?: () => void;
 }) {
   const { t } = useT();
   const { minSeconds, maxSeconds } = useMemo(() => resolveVideoDuration(smart), [smart]);
+  // Refs, because the recorder's handlers are wired once per take and must call the latest props.
+  const streamCbRef = useRef({ onStreamStart, onStreamChunk, onStreamDiscard });
+  streamCbRef.current = { onStreamStart, onStreamChunk, onStreamDiscard };
 
   // 'idle' → the mission card's own footprint. 'camera' → the fullscreen viewfinder
   // (camera live BEFORE the take starts, so the player frames the shot first).
@@ -2953,17 +3002,20 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
     chunksRef.current = [];
     if (discardRef.current) {
       discardRef.current = false;
+      streamCbRef.current.onStreamDiscard?.();
       setMode('idle');
       return;
     }
     const out = new Blob(parts, { type: mimeRef.current });
     if (out.size === 0) {
+      streamCbRef.current.onStreamDiscard?.();
       setErr(t.task.videoUnsupported);
       setUnsupported(true);
       setMode('idle');
       return;
     }
     if (out.size > MAX_PARTICIPANT_VIDEO_BYTES) {
+      streamCbRef.current.onStreamDiscard?.();
       setErr(t.task.videoTooLarge({ mb: Math.round(MAX_PARTICIPANT_VIDEO_BYTES / 1024 / 1024) }));
       setMode('idle');
       return;
@@ -3198,7 +3250,13 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
       return;
     }
     recorderRef.current = recorder;
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunksRef.current.push(e.data);
+        // The same bytes, in the same order, go up while the player is still filming.
+        try { streamCbRef.current.onStreamChunk?.(e.data); } catch { /* the local clip never depends on the upload */ }
+      }
+    };
     recorder.onstop = () => finalize();
     // A recorder that errors mid-capture never reaches `onstop` on some browsers.
     recorder.onerror = () => finalize();
@@ -3209,7 +3267,10 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
     setElapsed(0);
     elapsedRef.current = 0;
     try {
-      recorder.start();
+      // Slices every 4 s where the engine is known to produce valid slices (not WebKit yet):
+      // lib/videoCapture.ts recorderTimesliceFor.
+      recorder.start(recorderTimesliceFor(recorderEngineFromUserAgent(typeof navigator !== 'undefined' ? navigator.userAgent : '')));
+      try { streamCbRef.current.onStreamStart?.(mimeRef.current); } catch { /* upload is best effort until send */ }
     } catch {
       finalizedRef.current = true;
       stopTracks();

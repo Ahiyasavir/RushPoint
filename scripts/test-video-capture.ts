@@ -23,6 +23,9 @@ import {
   withCameraDeadline,
   captureProfileFor,
   predictedClipBytesFor,
+  RECORDER_TIMESLICE_MS,
+  recorderTimesliceFor,
+  recorderEngineFromUserAgent,
   WEAK_UPLINK_BPS,
   VERY_WEAK_UPLINK_BPS,
 } from '../apps/play-web/src/lib/videoCapture';
@@ -280,6 +283,31 @@ check('CAMERA_OPEN_DEADLINE_MS exists and is under 15 s',
     check(`a ceiling ${p.tier} clip fits under the cap`, predictedClipBytesFor(VIDEO_DURATION_LIMITS.ceilingSeconds, p) < MAX_PARTICIPANT_VIDEO_BYTES);
     check(`${p.tier} profile has no exact constraint`, !JSON.stringify(p.video).includes('exact'));
   }
+}
+
+// ── video-upload-speed D4: send while filming, slice by slice ──────────────────
+{
+  check('the recorder slices every 4 s', RECORDER_TIMESLICE_MS === 4000);
+  check('Chromium slices', recorderTimesliceFor('chromium') === 4000);
+  check('Firefox slices', recorderTimesliceFor('gecko') === 4000);
+  // WebKit had timeslice bugs that produced invalid files (WebKit 216832). Off until a device
+  // check (video-upload-speed task 10.2); an iPhone still gets resume, just not send-while-filming.
+  check('WebKit does not slice until a device check says so', recorderTimesliceFor('webkit') === undefined);
+  const UA = {
+    androidChrome: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36',
+    iphoneSafari: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    iphoneChrome: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0 Mobile/15E148 Safari/604.1',
+    macSafari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+    firefox: 'Mozilla/5.0 (Android 14; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0',
+    samsung: 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0 Mobile Safari/537.36',
+  };
+  check('Android Chrome is chromium', recorderEngineFromUserAgent(UA.androidChrome) === 'chromium');
+  check('Samsung Internet is chromium', recorderEngineFromUserAgent(UA.samsung) === 'chromium');
+  check('iPhone Safari is webkit', recorderEngineFromUserAgent(UA.iphoneSafari) === 'webkit');
+  check('Chrome on iPhone is STILL webkit (every iOS browser is)', recorderEngineFromUserAgent(UA.iphoneChrome) === 'webkit');
+  check('desktop Safari is webkit', recorderEngineFromUserAgent(UA.macSafari) === 'webkit');
+  check('Firefox is gecko', recorderEngineFromUserAgent(UA.firefox) === 'gecko');
+  check('an unknown or missing UA does not slice (fail safe to one blob)', recorderTimesliceFor(recorderEngineFromUserAgent(undefined)) === undefined);
 }
 
 async function deadlineCases(): Promise<void> {

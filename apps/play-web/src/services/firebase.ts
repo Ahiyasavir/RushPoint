@@ -43,6 +43,7 @@ import {
 } from '../lib/uploadResiliency';
 import { participantUploadPath, isFolderRefusal } from '../lib/uploadPath';
 import { meterStart, meterUpdate, sampleFromMeter, writeUplinkSample, type MeterState } from '../lib/uploadEta';
+import { createStreamUpload, type SessionTransport, type StreamUpload } from '../lib/streamUpload';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -515,6 +516,146 @@ export async function uploadTaskPoster(
 ): Promise<string> {
   const path = await myUploadPath(p.runId, p.taskId, 'jpg');
   return uploadResilient(path, blob, 'image/jpeg', p.signal, { quiet: true });
+}
+
+// ── Resumable video stream (change: video-upload-speed, D4) ─────────────────
+// Slices of a clip go up WHILE it is filmed, and a failure resumes from the server's offset
+// (functions/uploadSessionRoute.js). The engine is lib/streamUpload.ts; this is its XHR transport.
+// Returns null where there is no VPS route to talk to (the emulator lane), and the caller then
+// uses the plain upload. An older server without the route answers 404 to create, which the
+// engine reports as `session/unsupported` and the caller also falls back on.
+function sessionError(status: number, body: string, offsetHeader: string | null): Error {
+  if (status === 409 && offsetHeader !== null && Number.isFinite(Number(offsetHeader))) {
+    return Object.assign(new Error('offset conflict'), { code: 'session/conflict', offset: Number(offsetHeader) });
+  }
+  if (status === 404) return Object.assign(new Error('upload session gone'), { code: 'session/gone' });
+  if (status === 403 && isFolderRefusal(body)) return Object.assign(new Error('Upload folder refused'), { code: 'storage/not-your-folder' });
+  if (status === 401 || status === 403) return Object.assign(new Error('Auth failed'), { code: 'storage/unauthorized' });
+  if (status >= 400 && status < 500 && status !== 408 && status !== 429 && status !== 409) {
+    return Object.assign(new Error(`Upload rejected: ${status}`), { code: 'storage/invalid-argument' });
+  }
+  return Object.assign(new Error(`Upload failed: ${status}`), { code: status === 0 ? 'storage/unknown' : 'storage/internal-error' });
+}
+
+async function bearer(): Promise<string> {
+  await ensureAuth();
+  const t = await auth.currentUser?.getIdToken();
+  if (!t) throw Object.assign(new Error('Not authenticated'), { code: 'storage/unauthenticated' });
+  return t;
+}
+
+export function createVideoStream(p: { runId: string; taskId: string; contentType: string }): StreamUpload | null {
+  if (!apiOrigin || typeof XMLHttpRequest === 'undefined') return null;
+  const contentType = normalizeContentType(p.contentType || 'video/webm');
+  const ext = contentType === 'video/mp4' ? 'mp4' : contentType === 'video/quicktime' ? 'mov' : 'webm';
+  const base = `${apiOrigin}/upload/sessions`;
+  const transport: SessionTransport = {
+    async create() {
+      const path = await myUploadPath(p.runId, p.taskId, ext);
+      const res = await fetch(`${base}?path=${encodeURIComponent(path)}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${await bearer()}`, 'Content-Type': contentType },
+      }).catch(() => { throw Object.assign(new Error('Network error'), { code: 'storage/unknown' }); });
+      if (res.status === 404 || res.status === 405) return { unsupported: true };
+      const text = await res.text().catch(() => '');
+      if (res.status !== 201) throw sessionError(res.status, text, res.headers.get('Upload-Offset'));
+      const id = (JSON.parse(text) as { id?: unknown }).id;
+      if (typeof id !== 'string' || !id) throw sessionError(500, text, null);
+      return { id };
+    },
+    async patch(id, offset, body, finalLength, onProgress, signal) {
+      const token = await bearer();
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        let stallTimer: ReturnType<typeof setTimeout> | undefined;
+        let stalled = false;
+        const clear = () => { if (stallTimer) clearTimeout(stallTimer); signal.removeEventListener('abort', onAbort); };
+        const armStall = () => {
+          if (stallTimer) clearTimeout(stallTimer);
+          stallTimer = setTimeout(() => { stalled = true; xhr.abort(); }, UPLOAD_STALL_MS);
+        };
+        const onAbort = () => { try { xhr.abort(); } catch { /* settled */ } };
+        signal.addEventListener('abort', onAbort);
+        xhr.open('PATCH', `${base}/${encodeURIComponent(id)}`);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.setRequestHeader('Content-Type', 'application/offset+octet-stream');
+        xhr.setRequestHeader('Upload-Offset', String(offset));
+        if (finalLength !== undefined) xhr.setRequestHeader('Upload-Length', String(finalLength));
+        xhr.upload.addEventListener('progress', (e) => { armStall(); onProgress(e.loaded); });
+        xhr.addEventListener('load', () => {
+          clear();
+          const head = xhr.getResponseHeader('Upload-Offset');
+          if (xhr.status === 204) { resolve({ offset: Number(head ?? offset + body.size) }); return; }
+          if (xhr.status === 200) {
+            try {
+              const u = (JSON.parse(xhr.responseText) as { url?: unknown }).url;
+              if (typeof u === 'string' && u) { resolve({ offset: finalLength ?? offset + body.size, url: u }); return; }
+            } catch { /* fall through */ }
+            reject(sessionError(500, xhr.responseText, null));
+            return;
+          }
+          reject(sessionError(xhr.status, xhr.responseText, head));
+        });
+        xhr.addEventListener('error', () => { clear(); reject(sessionError(0, '', null)); });
+        xhr.addEventListener('abort', () => {
+          clear();
+          reject(Object.assign(new Error(stalled ? 'upload stalled' : 'upload aborted'), { code: stalled ? 'storage/deadline-exceeded' : 'storage/canceled' }));
+        });
+        armStall();
+        xhr.send(body);
+      });
+    },
+    async head(id) {
+      const res = await fetch(`${base}/${encodeURIComponent(id)}`, {
+        method: 'HEAD', headers: { Authorization: `Bearer ${await bearer()}` }, cache: 'no-store',
+      }).catch(() => { throw Object.assign(new Error('Network error'), { code: 'storage/unknown' }); });
+      if (res.status !== 200) throw sessionError(res.status, '', null);
+      const n = Number(res.headers.get('Upload-Offset'));
+      if (!Number.isFinite(n) || n < 0) throw sessionError(500, '', null);
+      return n;
+    },
+    async remove(id) {
+      await fetch(`${base}/${encodeURIComponent(id)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${await bearer()}` },
+      }).catch(() => undefined);
+    },
+  };
+  return createStreamUpload(transport, {
+    sleep: sleepUntilVisible,
+    onProgress: (loaded, total) => {
+      setUploadProgress(uploadPercent(loaded, total));
+      noteUploadBytes(loaded, total);
+    },
+  });
+}
+
+/**
+ * Send the rest of a streamed clip and resolve with its url (video-upload-speed D4). Drives the
+ * same progress bar, ETA and uplink sample as a plain upload. A player abort (retake) drops the
+ * server copy and rejects with `upload/aborted`, exactly like the plain path.
+ */
+export async function finishVideoStream(stream: StreamUpload, clip: Blob, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) { stream.abort(); throw abortedError(); }
+  const gen = ++latestUploadGen;
+  const onAbort = () => stream.abort();
+  signal?.addEventListener('abort', onAbort);
+  setUploadRetrying(false);
+  setUploadProgress(0);
+  beginUploadBytes(clip.size);
+  try {
+    const url = await stream.finish(clip);
+    recordUplinkSample(clip.size);
+    return url;
+  } catch (e) {
+    if (signal?.aborted) throw abortedError();
+    throw e;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    if (gen === latestUploadGen) {
+      setUploadProgress(null);
+      setUploadBytes(null);
+    }
+  }
 }
 
 // The ONE upload entry point a mission uses (change: media-upload-reliability, D1/D4): TaskRunner

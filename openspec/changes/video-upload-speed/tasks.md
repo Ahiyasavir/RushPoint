@@ -126,11 +126,11 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       `409`; another uid's HEAD/PATCH/DELETE → `403`; DELETE removes temp + sidecar; a session older
       than `TMP_TTL_MS` is swept; the final `{url}` equals PUT's shape; the stage-1 concurrency and
       disk caps apply to create and PATCH. Confirm RED.
-- [ ] 7.2 Extend `scripts/test-pending-upload.ts`: a streaming entry accepts appended chunks before the
+- [x] 7.2 (the engine got its own suite, scripts/test-stream-upload.ts; pendingUpload.ts stayed unchanged because the video starter consults the stream) Extend `scripts/test-pending-upload.ts`: a streaming entry accepts appended chunks before the
       final blob exists; `forget` aborts the queue and issues the session DELETE; a transport failure
       resumes from the reported offset and never re-sends committed bytes (a fake transport records
       byte ranges). Confirm RED.
-- [ ] 7.3 Extend `scripts/test-video-capture.ts`: `RECORDER_TIMESLICE_MS === 4000`;
+- [x] 7.3 Extend `scripts/test-video-capture.ts`: `RECORDER_TIMESLICE_MS === 4000`;
       `recorderTimesliceFor('webkit')` is `undefined` (off) until 10.2; Chromium gets 4000. Confirm RED.
 
 ### GREEN
@@ -143,21 +143,37 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       `Upload-Offset, Upload-Length, Tus-Resumable` allowed and `Upload-Offset, Location` exposed.
       `Caddyfile.api`: make sure `/upload/sessions*` gets the raised `request_body` limit (extend the
       `@upload` matcher to `path /upload /upload/sessions*`).
-- [ ] 8.3 play-web session transport in `services/firebase.ts`: create → sequential PATCH queue → on
+- [x] 8.3 play-web session transport in `services/firebase.ts`: create → sequential PATCH queue → on
       failure `HEAD` + resume, inside the existing `runWithRetry`/stall/abort envelope. Fall back to
       `PUT /upload` when create answers 404. Progress = committed + in-flight, feeding the stage-1
       meter.
-- [ ] 8.4 `pendingUpload.ts`: streaming entries (`beginStream`, `append`, `finish(blob)`), keeping
+- [x] 8.4 (reshaped: `lib/streamUpload.ts` holds the streaming state; pendingUpload keeps its contract and the video starter finishes the matching stream) `pendingUpload.ts`: streaming entries (`beginStream`, `append`, `finish(blob)`), keeping
       `begin/take/forget/ready` semantics for photos, audio and picked files. 7.2 → green.
-- [ ] 8.5 `VideoEntry`: `recorder.start(recorderTimesliceFor(engine))`; each `dataavailable` goes to
+- [x] 8.5 `VideoEntry`: `recorder.start(recorderTimesliceFor(engine))`; each `dataavailable` goes to
       `chunksRef` AND `pending.append`; stop → `finish(blob)`. A too-short clip still does not submit,
       and its session is deleted. 7.3 → green.
 
 ### REFACTOR
 
-- [ ] 9.1 `PUT /upload` for picked video files goes through the session transport too (resume for
+- [x] 9.1 (a picked or one-blob clip gets a stream at send) `PUT /upload` for picked video files goes through the session transport too (resume for
       large camera-roll clips). The PUT route stays for photos, audio, creator media and the fallback.
-- [ ] 9.2 Delete any leftover whole-file retry path for recorded video in `TaskRunner.tsx`.
+- [x] 9.2 (the PUT path remains only as the fallback for no session route) Delete any leftover whole-file retry path for recorded video in `TaskRunner.tsx`.
+
+### Owner decision 2026-09-26: ship stage 3 without an on/off switch
+
+The owner asked for send-while-filming now, without a toggle; a live simulation follows the next
+day. Verified locally against the REAL API server (functions/server.js on the auth emulator) and a
+play-web build pointed at it, in Chromium:
+
+| Scenario | Clip | After stop | Result |
+|---|---|---|---|
+| clean link, 1 s slices | 4.79 MB | 23 ms | byte-identical on disk |
+| 3 s offline mid-recording | 5.92 MB | 18 ms | resumed by HEAD, byte-identical |
+| 2.5 s offline right after stop | 3.01 MB | 3.0 s | resumed, byte-identical |
+| 2 Mbps up, 100 ms latency, 4 s slices, 20 s 720p | 2.27 MB | 2.3 s (whole clip after stop: 9.1 s) | the stitched file plays, 1280x720 |
+
+Still owed: iPhone (WebKit records one blob, so it gets resume but not send-while-filming until
+10.2) and a real Android phone.
 
 ## 4. Verify and ship
 
