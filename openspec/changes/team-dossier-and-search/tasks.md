@@ -2,14 +2,17 @@
 
 ## 1. RED
 
-- [ ] 1.1 Vitest `teamDossier.test.ts` + `teamSearch.test.ts` against the not-yet-existing modules. Confirm RED.
-- [ ] 1.2 e2e ledger assertions (design, test strategy), including the sanitizer exclusion. Confirm RED.
+- [~] 1.1 Vitest `teamDossier.test.ts` (TODO) + `teamSearch.test.ts` (done) against the not-yet-existing modules. Confirm RED.
+- [x] 1.2 e2e ledger assertions (design, test strategy), including the sanitizer exclusion. Confirm RED.
 
 ## 2. GREEN
 
-- [ ] 2.1 `RunTeam.scoreLedger` type; append in `adjustTeamScore`, `requestTaskHint`, `skipTaskForTeam`,
+- [x] 2.1 `RunTeam.scoreLedger` type; append in `adjustTeamScore`, `requestTaskHint`, `skipTaskForTeam`,
       `skipStage`, the approval reversal, all inside their existing transactions, capped at 100. 1.2 → green.
-- [ ] 2.2 `lib/teamSearch.ts`; search box + filter chips + sort above the teams list. 1.1 (search) → green.
+- [x] 2.2 `lib/teamSearch.ts`; search box + filter chips + sort above the teams list. 1.1 (search) → green.
+      (Phone names / team code are matched when the row carries them; `listRunTeams` rows do
+      not yet, so today the box finds team and member names. Not checked in a browser yet:
+      the seeded demo run has no teams.)
 - [ ] 2.3 Keep full team docs in the console's teams listener; derive the existing projections from them.
 - [ ] 2.4 Lift the `teamLocations` stream so the live map and the team page share it.
 - [ ] 2.5 `lib/teamDossier.ts`. 1.1 → green.

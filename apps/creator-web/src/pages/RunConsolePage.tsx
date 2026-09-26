@@ -41,6 +41,7 @@ import { OverflowMenu } from '../components/OverflowMenu';
 // send-team-back: the "where to?" picker and what it may offer.
 import SendBackPicker, { type SendBackChoice } from '../components/SendBackPicker';
 import ConsoleTabs from '../components/ConsoleTabs';
+import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import StaffCodesPanel from '../components/StaffCodesPanel';
 import { defaultCodeCapabilities, type StaffCapability } from '@rushpoint/shared';
 import { sendBackTargets } from '../lib/sendBackTargets';
@@ -585,6 +586,25 @@ export default function RunConsolePage() {
   const [seenSummaries, setSeenSummaries] = useState<Partial<Record<SectionId, GroupSummary>>>({});
   const sectionSummariesRef = useRef<{ active: SectionId | null; summaries: Partial<Record<SectionId, GroupSummary>> }>({ active: null, summaries: {} });
   const sectionBaselineRef = useRef<Partial<Record<SectionId, GroupSummary>>>({});
+  // Team search (team-dossier-and-search D4). Hooks live HERE, above the page's
+  // early return. The box shows itself past 6 teams; `/` opens it at any size.
+  const [teamQuery, setTeamQuery] = useState('');
+  const [teamFilter, setTeamFilter] = useState<TeamFilter>('all');
+  const [teamSort, setTeamSort] = useState<TeamSort>('rank');
+  const [teamSearchOpen, setTeamSearchOpen] = useState(false);
+  const teamSearchRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== '/' || e.altKey || e.ctrlKey || e.metaKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      e.preventDefault();
+      setTeamSearchOpen(true);
+      window.setTimeout(() => teamSearchRef.current?.focus(), 0);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   useEffect(() => {
     if (!runId) return;
     try { setSectionPref(localStorage.getItem(sectionStateKey(runId))); }
@@ -1316,11 +1336,67 @@ export default function RunConsolePage() {
                 })()}
               </p>
             )}
+            {teams.length > 0 && (teams.length > 6 || teamSearchOpen || teamQuery || teamFilter !== 'all') && (
+              <div className="mb-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    ref={teamSearchRef}
+                    type="search"
+                    value={teamQuery}
+                    onChange={(e) => setTeamQuery(e.target.value)}
+                    placeholder={rc.teamSearchPlaceholder}
+                    aria-label={rc.teamSearchPlaceholder}
+                    dir="auto"
+                    className="flex-1 min-w-[12rem] min-h-[44px] rounded-lg border border-[--rp-border] bg-[--surface-0] px-3 text-sm text-[--ink-1]"
+                  />
+                  <select
+                    value={teamSort}
+                    onChange={(e) => setTeamSort(e.target.value as TeamSort)}
+                    aria-label={rc.teamSortLabel}
+                    className="min-h-[44px] rounded-lg border border-[--rp-border] bg-[--surface-0] px-2 text-sm text-[--ink-1]"
+                  >
+                    <option value="rank">{rc.teamSortRank}</option>
+                    <option value="name">{rc.teamSortName}</option>
+                    <option value="activity">{rc.teamSortActivity}</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label={rc.teamFilterLabel}>
+                  {(['all', 'attention', 'review', 'notStarted', 'finished'] as const).map((f) => (
+                    <button key={f} type="button" onClick={() => setTeamFilter(f)} aria-pressed={teamFilter === f}
+                      className={`min-h-[36px] rounded-full border px-3 text-[13px] font-semibold ${teamFilter === f
+                        ? 'border-rp-fire bg-rp-fire/10 text-ink-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
+                      {rc.teamFilter[f]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {teams.length === 0 ? (
               <PanelEmpty panel="teams" />
-            ) : (
+            ) : (() => {
+              const rankIndex = new Map((activeRun.leaderboard?.rankings ?? []).map((r, i) => [r.teamId, i + 1]));
+              const shownTeams = searchTeams(teams, {
+                query: teamQuery,
+                filter: teamFilter,
+                sort: teamSort,
+                needsAttention: (id) => { const lv = attentionById.get(id)?.level; return !!lv && lv !== 'ok'; },
+                rankOf: (id) => rankIndex.get(id) ?? null,
+              });
+              if (shownTeams.length === 0) {
+                return (
+                  <p role="status" className="text-sm text-[--ink-3] px-1">
+                    {rc.teamSearchNoMatch}{' '}
+                    <button type="button" className="underline text-ink-fire min-h-[44px]"
+                      onClick={() => { setTeamQuery(''); setTeamFilter('all'); }}>{rc.teamSearchClear}</button>
+                  </p>
+                );
+              }
+              return (
               <div className="space-y-2">
-                {teams.map((team) => (
+                {shownTeams.length !== teams.length && (
+                  <p className="text-[13px] text-[--ink-3] px-1">{rc.teamSearchCount({ shown: shownTeams.length, total: teams.length })}</p>
+                )}
+                {shownTeams.map((team) => (
                   <div key={team.id} className="flex flex-wrap items-center gap-3 p-2 rounded-lg bg-[--surface-2]">
                     <div className="flex-1 min-w-[10rem]">
                       <div dir="auto" className="text-sm text-[--ink-2]">{team.displayName}</div>
@@ -1447,7 +1523,8 @@ export default function RunConsolePage() {
                   </div>
                 ))}
               </div>
-            )}
+              );
+            })()}
           </PanelShell>
         );
 
