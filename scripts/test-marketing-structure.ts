@@ -51,9 +51,12 @@ const FOLDER = /^(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$/;
 type Video = { state: string; folder: string; nn: string; slug: string; dir: string };
 const videos: Video[] = [];
 {
+  // Only the declared states, never anything else. `drafts/` may be ABSENT: git
+  // does not track an empty directory, so a clean checkout (CI) never has one
+  // until a draft exists. `published/` must be there.
   const got = dirs(path.join(ROOT, 'videos'));
-  ok(got.join() === STATES.join(),
-    `videos/ holds exactly ${STATES.join(' and ')} (got ${got.join(', ') || 'nothing'})`);
+  ok(got.every((d) => STATES.includes(d)) && got.includes('published'),
+    `videos/ holds only ${STATES.join(' and ')}, with published present (got ${got.join(', ') || 'nothing'})`);
   for (const state of STATES) {
     for (const folder of dirs(path.join(ROOT, 'videos', state))) {
       const m = FOLDER.exec(folder);
@@ -80,10 +83,18 @@ const videos: Video[] = [];
 // ── 3. every delivered file carries the folder's name and a version ──────────
 // `source/` is raw input that arrived with whatever name it had, so it is out of
 // scope on purpose; the rule governs what WE produce.
+//
+// The mp4s themselves are gitignored (docs/marketing/.gitignore: *.mp4), so a
+// clean checkout - CI - has none at all. "Every video holds an mp4" is therefore
+// enforced only where renders exist on disk (any mp4 anywhere under videos/):
+// on the machine that makes them, a folder missing its delivery still fails; in
+// CI the naming rules below still judge whatever is present.
+const MP4 = (f: string) => f.toLowerCase().endsWith('.mp4');
+const rendersPresent = videos.some((v) => files(v.dir).some(MP4));
 {
   for (const v of videos) {
-    const mp4s = files(v.dir).filter((f) => f.toLowerCase().endsWith('.mp4'));
-    ok(mp4s.length > 0, `${v.folder} holds at least one mp4`);
+    const mp4s = files(v.dir).filter(MP4);
+    if (rendersPresent) ok(mp4s.length > 0, `${v.folder} holds at least one mp4`);
     // No backslash escapes anywhere in this pattern on purpose. It is built
     // inside a template literal, and a tool that writes the file can turn a
     // lone backslash into nothing at all; the check then matches nothing and
