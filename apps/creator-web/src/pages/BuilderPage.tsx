@@ -438,7 +438,9 @@ export default function BuilderPage() {
         // one repaired leaves the game DIRTY, so the ordinary autosave persists the
         // repair by itself. Reference-equal when there was nothing to repair, so a
         // healthy game is never marked dirty by merely being opened.
-        const repaired = repairGame(game);
+        // A locked shared-launch copy is never repaired or saved: the server refuses every edit to it
+        // (change: shared-launch-opens-console), so a "repair" would only produce a failing autosave.
+        const repaired = game.sharedLaunch?.locked === true ? game : repairGame(game);
         history.reset(repaired);
         savedSnapshot.current = serializeGame(game);
         setStatus(repaired === game ? 'saved' : 'unsaved');
@@ -1084,6 +1086,18 @@ export default function BuilderPage() {
     </Card>
   );
   if (!game) return <LoadingState messages={b.loadingGame} />;
+  // A launch copy from a share link that did not allow copying: it can be RUN, not edited
+  // (change: shared-launch-opens-console). Say so, instead of an editor whose every save fails.
+  if (game.sharedLaunch?.locked === true) {
+    return (
+      <Card className="max-w-lg mx-auto mt-10 p-6 text-center space-y-3">
+        <div className="text-3xl" aria-hidden="true" data-testid="builder-share-locked">🔒</div>
+        <p className="font-semibold text-[--ink-1]" dir="auto">{game.title}</p>
+        <p className="text-sm text-[--ink-2]">{t.sharedGame.launchLockedCopy}</p>
+        <Button onClick={() => nav('/live')}>{t.sharedGame.launchLockedToRuns}</Button>
+      </Card>
+    );
+  }
 
   // Hide the Analytics tab until the game has actually been run: pre-launch it can
   // only render an empty "no analytics yet" message, which reads as broken to a

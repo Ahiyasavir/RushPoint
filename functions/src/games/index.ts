@@ -74,7 +74,7 @@ import {
   // Benched missions (change: mission-card-actions) — never published.
   playableTasks,
 } from '@rushpoint/shared';
-import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
+import { assertGameNotDeleted, assertNotShareLocked, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
 // Read-only share links for an unpublished game (change: game-share-link).
 import {
   resolveShareTokenForCopy, bumpShareLinkCopyCount, deleteGameShareLinks,
@@ -91,7 +91,8 @@ import {
 // transactional writer, so a counter can never move without its score.
 import { bumpPublicSignals, scoreFor } from '../gallery/popularityStore';
 import { bumpTagStats } from '../gallery/tagStats';
-import { deleteRunsPhotos, deleteGameMedia, copyGameMedia } from '../storageUtil';
+import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
+import { rehostGameMedia } from './rehost';
 import { deleteDocsInChunks } from '../batchUtil';
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
@@ -185,62 +186,6 @@ function normalizeStagesMedia(
   return next;
 }
 
-/**
- * Copy a game's uploaded media into a new game's storage prefix and return the stages
- * with their urls re-pointed there (change: task-media-durability).
- *
- * The single door for every "this game becomes a new game" path — duplicate, translate,
- * and the first save of media uploaded before the game had an id. They all used to carry
- * the url and not the bytes, which silently coupled the new game's pictures to the old
- * game's lifetime.
- *
- * Total and best-effort: no media, nothing to copy, or a failed copy all return the
- * stages unchanged, so a storage hiccup degrades the copy's independence rather than
- * failing the duplication a creator asked for.
- */
-async function rehostGameMedia(
-  stages: Stage[] | undefined,
-  srcOwnerUid: string,
-  srcGameId: string,
-  destOwnerUid: string,
-  destGameId: string,
-): Promise<Stage[] | undefined> {
-  if (!Array.isArray(stages)) return stages;
-  // Only the urls that actually live in the SOURCE game's folder. This is what makes the
-  // same helper safe for the draft-migration call, which runs on every stages-carrying
-  // save: a game with no draft media matches nothing and returns before touching Storage.
-  const segments = encodedForms(`/games/${srcGameId}/`);
-  const urls = new Set<string>();
-  for (const stage of stages) {
-    for (const task of stage.tasks ?? []) {
-      for (const m of task.media ?? []) {
-        if (m?.kind === 'youtube' || typeof m?.url !== 'string') continue;
-        if (segments.some((seg) => m.url.includes(seg))) urls.add(m.url);
-      }
-    }
-  }
-  if (urls.size === 0) return stages;
-  try {
-    // Copy only the objects these urls name — a draft folder can hold media from other
-    // games in progress, and those must not be duplicated into this one.
-    const pathMapping = await copyGameMedia(
-      srcOwnerUid, srcGameId, destOwnerUid, destGameId,
-      (objectName) => encodedForms(objectName).some(
-        (form) => [...urls].some((u) => u.includes(form)),
-      ),
-    );
-    if (pathMapping.size === 0) return stages;
-    return rewriteStagesMedia(stages, buildMediaUrlMapping(urls, pathMapping)) as Stage[];
-  } catch (e) {
-    logBestEffort('game.media.rehost', { srcGameId, destGameId }, e);
-    return stages;
-  }
-}
-
-/** The forms an object path can take inside a stored url (raw / encodeURI / component). */
-function encodedForms(s: string): string[] {
-  return [...new Set([s, encodeURI(s), encodeURIComponent(s)])];
-}
 
 /**
  * The pseudo game id the Builder uploads under before a game has one
@@ -490,6 +435,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // A game in the trash is not editable (change: recoverable-game-deletion) —
   // otherwise a stale Builder tab could keep writing to a "deleted" game.
   assertGameNotDeleted(snap.data() as Game);
+  assertNotShareLocked(snap.data() as Game);
 
   const updates: Partial<Game> & { updatedAt: string } = { updatedAt: new Date().toISOString() };
   if (title !== undefined)              updates.title = stripUnsafeDisplayChars(title).trim();
@@ -951,6 +897,7 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
   // (change: recoverable-game-deletion) — a copy would resurrect content the
   // creator asked to delete, and would survive the purge of the original.
   assertGameNotDeleted(sourceGame);
+  assertNotShareLocked(sourceGame);
 
   // Enforce: can only copy public games from other creators — UNLESS a live
   // share link said otherwise. That is the whole point of the link: the owner
@@ -1031,6 +978,7 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
   // A trashed game can never be (re-)listed in the public gallery
   // (change: recoverable-game-deletion).
   assertGameNotDeleted(game);
+  assertNotShareLocked(game);
   const now = new Date().toISOString();
 
   // Instant play defaults ON at publish (change: gallery-missions-quick-play).
@@ -1264,7 +1212,10 @@ export const listGames = loggedCallable('listGames', async (_data, context) => {
   // `where('deletedAt','==',null)` does NOT match documents that lack the field,
   // so a server-side filter would require backfilling `deletedAt: null` onto
   // every existing game. Absence of the field stays the normal state.
-  const games = visibleGames(snap.docs.map((d) => d.data() as Game));
+  // A LOCKED shared-launch copy is someone else's game the caller may only run
+  // (change: shared-launch-opens-console): it is reached from the runs list, never the games list.
+  const games = visibleGames(snap.docs.map((d) => d.data() as Game))
+    .filter((g) => g.sharedLaunch?.locked !== true);
   return { games };
 });
 
@@ -1342,6 +1293,7 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
   // A trashed game cannot be translated into a fresh copy
   // (change: recoverable-game-deletion) — same reasoning as duplicateGame.
   assertGameNotDeleted(game);
+  assertNotShareLocked(game);
 
   const lang = targetLang.trim();
 
@@ -1421,6 +1373,7 @@ export const exportGameFile = loggedCallable('exportGameFile', async (data, cont
     throw new functions.https.HttpsError('permission-denied', 'Not your game');
   }
   assertGameNotDeleted(game);
+  assertNotShareLocked(game);
 
   return { file: serializeGameToFile(game) };
 });

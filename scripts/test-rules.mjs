@@ -114,6 +114,9 @@ async function main() {
     // (or disturb) the fixture the tombstone-forge assertions use.
     await setDoc(doc(db, `users/${OWNER}/games/TRASHED-GAME-2`),
       { title: 'Trashed 2', deletedAt: '2026-07-02T00:00:00.000Z', deletedBy: OWNER });
+    // shared-launch-opens-console: a launch copy from a share link that did NOT allow copying.
+    await setDoc(doc(db, `users/${OWNER}/games/LOCKED-COPY`),
+      { title: 'Locked', sharedLaunch: { locked: true, fromToken: 'abc123' } });
   });
 
   const owner = testEnv.authenticatedContext(OWNER).firestore();
@@ -164,6 +167,14 @@ async function main() {
       { title: 'G', deletedAt: '2026-07-22T00:00:00.000Z' })));
   await check('owner CANNOT clear a deletedAt tombstone (undelete by client write)',
     assertFails(setDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { title: 'Trashed' })));
+  // [shared-launch-opens-console] The lock on a launch copy is server-written; a client can neither
+  // edit a locked copy directly nor forge/strip the marker (the callables' lock would be moot).
+  await check('owner CANNOT write to a LOCKED shared-launch copy',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/LOCKED-COPY`), { title: 'Mine now' })));
+  await check('owner CANNOT create a game carrying sharedLaunch',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/FORGED-LAUNCH`), { title: 'F', sharedLaunch: { locked: false } })));
+  await check('owner CAN still read a locked copy (the Run Console needs it)',
+    assertSucceeds(getDoc(doc(owner, `users/${OWNER}/games/LOCKED-COPY`))));
   await check('owner CAN still write an ordinary (tombstone-free) game doc',
     assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'G' })));
   // [firestore-rules-coverage] Destroying a game is a FIVE-system act — the game

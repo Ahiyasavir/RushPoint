@@ -57,15 +57,12 @@ export const createGameShareLink = callable<
   { gameId: string; allowCopy?: boolean; revealAnswers?: boolean; allowLaunch?: boolean; expiresInDays?: number },
   { link: GameShareLink }
 >('createGameShareLink');
-// Start a run of a game you neither own nor copied, on a link that allows it. The
-// run lands in the OWNER's account; the caller gets staff access to operate it.
+// Start a run of someone else's game from a link that allows it (change:
+// shared-launch-opens-console): the caller gets their OWN copy with the run in it, so their Run
+// Console opens at /run/:gameId/:runId. Locked when the link does not allow copying.
 export const launchSharedRun = callable<
-  { token: string; name?: string },
-  {
-    runId: string;
-    accessCode: string;
-    staff: { ownerUid: string; gameId: string; runId: string; pin: string };
-  }
+  { token: string },
+  { gameId: string; runId: string; accessCode: string }
 >('launchSharedRun');
 export const listGameShareLinks = callable<
   { gameId: string },

@@ -15,7 +15,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { SharedGameView, SharedStageView, SharedTaskView } from '@rushpoint/shared';
-import { hasMappedMission, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
+import { hasMappedMission } from '@rushpoint/shared';
 import { Button, Spinner, Badge } from '../components/ui';
 import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
@@ -36,13 +36,6 @@ type LoadState =
       launchExhausted: boolean;
     }
   | { phase: 'gone'; reason: 'not-found' | 'revoked' | 'expired' };
-
-/** What `launchSharedRun` hands back: a live run, and the way to operate it. */
-interface LaunchedRun {
-  runId: string;
-  accessCode: string;
-  staff: { ownerUid: string; gameId: string; runId: string; pin: string };
-}
 
 /**
  * The server answers every dead link with `not-found` + a machine-readable reason
@@ -69,7 +62,6 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
 
-  const [launched, setLaunched] = useState<LaunchedRun | null>(null);
   // Which stage is being read. A game has 14 of them here; the rail is how you
   // get to stage 9 without scrolling past the other eight.
   const [openStage, setOpenStage] = useState(0);
@@ -118,8 +110,11 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
   const launch = useAsyncAction(async () => {
     if (!signedIn) { signInAndReturn(); return; }
     try {
+      // shared-launch-opens-console: straight into the launcher's own Run Console. It used to be a
+      // panel of codes and a staff PIN to copy, which the product owner called clumsy and unclear.
       const res = await launchSharedRun({ token });
-      setLaunched(res);
+      toast.success(g.launchedToast);
+      navigate(`/run/${res.gameId}/${res.runId}`);
     } catch (e) {
       const message = e instanceof Error ? e.message : '';
       toast.error(message.includes('share-link:launch-limit') ? g.launchLimit : g.launchError);
@@ -187,7 +182,6 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
           )}
         </div>
 
-        {launched && <LaunchedPanel launched={launched} />}
       </header>
 
       {/* ── The route ── rendered only when there is something to plot. */}
@@ -266,66 +260,6 @@ function StageSection({ stage, index, revealed }: {
         ))}
       </div>
     </section>
-  );
-}
-
-/**
- * What a run needs to actually happen, on one panel.
- *
- * A run nobody can operate is not a run: somebody has to start the teams, watch
- * the board and finish it, and the person who pressed the button here is not the
- * owner and cannot reach the owner's console. So the launch hands back a STAFF
- * session for that one run — the same PIN-scoped access a marshal gets — and this
- * panel is where they copy it before they lose it.
- */
-function LaunchedPanel({ launched }: { launched: LaunchedRun }) {
-  const g = useT().sharedGame;
-  const playUrl = import.meta.env.DEV
-    ? resolvePlayOrigin(window.location.origin)
-    : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
-  const joinLink = `${playUrl}/?code=${encodeURIComponent(launched.accessCode)}`;
-  const staffLink = `${playUrl}/?staff=${encodeURIComponent(
-    `${launched.staff.ownerUid}.${launched.staff.gameId}.${launched.staff.runId}`,
-  )}`;
-
-  return (
-    <div className="mt-5 rounded-xl border border-rp-go/30 bg-rp-go/5 p-4">
-      <h2 className="font-semibold mb-1">{g.launchedTitle}</h2>
-      <p className="text-xs text-[--ink-3] mb-3">{g.launchedBody}</p>
-      <CopyableValue label={g.accessCodeLabel} value={launched.accessCode} big />
-      <CopyableValue label={g.joinLinkLabel} value={joinLink} />
-      <CopyableValue label={g.staffLinkLabel} value={staffLink} />
-      <CopyableValue label={g.staffPinLabel} value={launched.staff.pin} big />
-      <p className="text-xs text-[--ink-3] mt-2">{g.staffHint}</p>
-    </div>
-  );
-}
-
-function CopyableValue({ label, value, big = false }: { label: string; value: string; big?: boolean }) {
-  const g = useT().sharedGame;
-  const [copied, setCopied] = useState(false);
-  async function copyIt() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* no clipboard permission — the value is selectable below */ }
-  }
-  return (
-    <div className="mb-2">
-      <div className="text-[11px] text-[--ink-3] mb-0.5">{label}</div>
-      <div className="flex items-center gap-2">
-        <code
-          className={`flex-1 min-w-0 break-all select-all bg-[--surface-2] rounded-lg px-2 py-1.5 ${big ? 'text-base font-bold tracking-wider' : 'text-xs'}`}
-          dir="ltr"
-        >
-          {value}
-        </code>
-        <Button variant="subtle" className="text-xs min-h-0 py-1.5 shrink-0" onClick={() => void copyIt()}>
-          {copied ? g.copiedValue : g.copyValue}
-        </Button>
-      </div>
-    </div>
   );
 }
 

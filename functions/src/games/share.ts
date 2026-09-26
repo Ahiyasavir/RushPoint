@@ -34,8 +34,8 @@ import { auditBestEffort } from '../obs/audit';
 import { enforceRateLimit } from '../rateLimitStore';
 import { deleteDocsInChunks } from '../batchUtil';
 import { launchRunCore } from '../runs/index';
-import { createRunStaffInvite } from '../runs/staffInvite';
-import { assertGameNotDeleted } from './lifecycle';
+import { rehostGameMedia } from './rehost';
+import { assertGameNotDeleted, assertNotShareLocked } from './lifecycle';
 import {
   FIRESTORE_PATHS,
   isValidShareToken,
@@ -45,7 +45,6 @@ import {
   shareLinkExpiryIso,
   sanitizeGameForShare,
   SHARE_TOKEN_BYTES,
-  STAFF_CAPABILITIES,
   type Game,
   type GameShareLink,
   type ShareLinkRefusal,
@@ -137,6 +136,8 @@ export const createGameShareLink = loggedCallable('createGameShareLink', async (
     allowLaunch?: boolean; expiresInDays?: number;
   };
   const game = await loadOwnGame(uid, gameId);
+  // A locked launch copy cannot be handed on: that would reopen the copy door its source closed.
+  assertNotShareLocked(game);
 
   // Bound the list rather than letting it grow forever: a creator who cannot see
   // their links cannot revoke them, and an unbounded list is unreadable.
@@ -353,50 +354,55 @@ export const getSharedGame = loggedCallable('getSharedGame', async (data, contex
 
 // ─── launchSharedRun ──────────────────────────────────────────────────────────
 //
-// The holder of a launch-enabled link STARTS A RUN of a game they do not own and
-// have not copied, and gets staff access to operate it.
+// The holder of a launch-enabled link STARTS A RUN of a game they do not own, and lands straight in
+// the Run Console for it (change: shared-launch-opens-console).
 //
-// Two things had to be true for this to be a real feature rather than a button:
+// The run used to land in the OWNER's account, with a staff PIN for the launcher. The console is
+// owner-only, so the launcher saw a panel of codes to copy into a thinner staff tool; the product
+// owner called it "very clumsy and unclear" and asked for the dashboard to open for whoever launches.
+// So the launcher now gets their OWN copy of the game (media re-hosted exactly like duplicateGame),
+// and the run is launched in it through launchRunCore, the same path, validation and billing
+// decision as any launch they make. The owner still sees the use on the link (launchCount).
 //
-//   1. It goes through `launchRunCore`, the same path the owner's own launch
-//      takes — same validation, same billing decision, same atomic run + access
-//      code write. A second launch path would be a second place for "free run"
-//      to be forgotten.
-//   2. The launcher gets a STAFF invite for that run. A run nobody can operate is
-//      not a run: somebody has to press start, watch the board and finish it, and
-//      the person who pressed the button is not the owner and cannot reach the
-//      owner's console. The existing staff PIN + `?staff=` link is exactly the
-//      scoped, run-limited access this needs — no new authorization concept.
-//
-// The run lands in the OWNER's account: it is their game, their standings, their
-// participants and (whenever payments are switched back on) their credit. That is
-// why `allowLaunch` is opt-in per link and never granted by omission, why the
-// count per link is bounded, and why this writes an audit record.
+// When the link does not allow copying, the copy is LOCKED: it can be run, not edited, copied,
+// exported, published or re-shared (assertNotShareLocked, and firestore.rules for direct writes),
+// and it stays out of the games list. Launching is opt-in per link, bounded per link, and audited.
 
 export const launchSharedRun = loggedCallable('launchSharedRun', async (data, context) => {
-  // An account is required, unlike the read: this WRITES, the audit trail needs a
-  // subject, and the staff invite has to belong to somebody.
+  // An account is required, unlike the read: this WRITES into the caller's account.
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'launchSharedRun');
 
-  const { token, name } = (data ?? {}) as { token?: string; name?: string };
+  const { token } = (data ?? {}) as { token?: string };
   const { link, ref } = await loadUsableLink(token, 'launch');
 
-  const { runId, accessCode } = await launchRunCore({
-    ownerUid: link.ownerUid,
-    gameId: link.gameId,
-  });
+  const sourceSnap = await db.doc(FIRESTORE_PATHS.game(link.ownerUid, link.gameId)).get();
+  if (!sourceSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const source = sourceSnap.data() as Game;
+  assertGameNotDeleted(source);
 
-  // Staff access for whoever launched it, scoped to THIS run only.
-  const staffName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 60) : 'Guest organizer';
-  const invite = await createRunStaffInvite({
-    ownerUid: link.ownerUid,
-    gameId: link.gameId,
-    runId,
-    name: staffName,
-    // The person who launched this run IS its organizer: every capability (staff-capabilities).
-    capabilities: [...STAFF_CAPABILITIES],
-  });
+  // The copy. The same exclusions as duplicateGame: never the owner's private webhook, never
+  // their marketplace opt-in, and the uploaded media re-hosted so the copy survives a purge of
+  // the source.
+  const now = new Date().toISOString();
+  const newRef = db.collection(FIRESTORE_PATHS.games(uid)).doc();
+  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, sharedLaunch: _sl, ...safeSource } = source;
+  const stages = await rehostGameMedia(safeSource.stages, link.ownerUid, link.gameId, uid, newRef.id);
+  const copy: Game = {
+    ...safeSource,
+    ...(stages ? { stages } : {}),
+    id: newRef.id,
+    ownerUid: uid,
+    visibility: 'private',
+    allowInstantPlay: false,
+    playCount: 0,
+    sharedLaunch: { locked: link.allowCopy !== true, fromToken: link.token.slice(0, 6), sourceTitle: String(source.title ?? '').slice(0, 120) },
+    createdAt: now,
+    updatedAt: now,
+  };
+  await newRef.set(copy);
+
+  const { runId, accessCode } = await launchRunCore({ ownerUid: uid, gameId: newRef.id });
 
   // Best-effort counter; a failed increment must not undo a run that exists.
   ref.update({
@@ -406,26 +412,13 @@ export const launchSharedRun = loggedCallable('launchSharedRun', async (data, co
   await auditBestEffort({
     operatorId: uid,
     actionType: AUDIT_SHARE_LINK_LAUNCH,
-    gameId: link.gameId,
+    gameId: newRef.id,
     runId,
     newValue: accessCode,
-    reason: `run launched by a share-link holder (token ${link.token.slice(0, 6)}…)`,
+    reason: `run launched from share link ${link.token.slice(0, 6)}… of game ${link.gameId}`,
   });
 
-  return {
-    runId,
-    accessCode,
-    // The two ids the staff console needs beside the PIN. This is the ONE place a
-    // share link discloses the owner uid, and it is unavoidable: a staff session
-    // is addressed by owner + game + run. It is disclosed only to a caller the
-    // owner explicitly authorized to run their game, never on the read path.
-    staff: {
-      ownerUid: link.ownerUid,
-      gameId: link.gameId,
-      runId,
-      pin: invite.pin,
-    },
-  };
+  return { gameId: newRef.id, runId, accessCode };
 });
 
 

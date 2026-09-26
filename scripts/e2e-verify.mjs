@@ -12525,39 +12525,49 @@ async function main() {
       (await linkVisitor.call('getSharedGame', { token: launchToken }))?.allowLaunch === true);
 
     const started = await launcher.call('launchSharedRun', { token: launchToken });
-    check('launchSharedRun returns a run and an access code',
-      !!started?.runId && typeof started?.accessCode === 'string' && started.accessCode.length > 0,
+    check('launchSharedRun returns a game, a run and an access code',
+      !!started?.gameId && !!started?.runId && typeof started?.accessCode === 'string' && started.accessCode.length > 0,
       JSON.stringify(started));
-    check('the launcher is given staff credentials for THAT run',
-      started?.staff?.runId === started?.runId && typeof started?.staff?.pin === 'string'
-        && started.staff.pin.length === 6,
-      JSON.stringify(started?.staff));
-    check('the staff credentials name the owner + game the run belongs to',
-      started?.staff?.ownerUid === creatorCred.user.uid && started?.staff?.gameId === gShare,
-      JSON.stringify(started?.staff));
-
-    // The run belongs to the OWNER, not to whoever pressed the button. If it
-    // landed anywhere else the owner could not see, staff or finalize it.
-    const ownerRuns = await creator.call('listLiveRuns', {});
-    check('the run lands in the OWNER account, visible in their live runs',
-      (ownerRuns?.runs ?? []).some((r) => r.runId === started?.runId),
-      JSON.stringify((ownerRuns?.runs ?? []).map((r) => r.runId)));
-
-    // The staff PIN is a real one: it signs in through the SAME callable a
-    // marshal uses, with no special case for share links.
-    const staffToken = await launcher.call('staffSignIn', {
-      ownerUid: started.staff.ownerUid,
-      gameId: started.staff.gameId,
-      runId: started.staff.runId,
-      pin: started.staff.pin,
-      name: 'Guest organizer',
-    });
-    // `customToken`, not `token`: staffSignIn mints a Firebase custom token the
-    // client then signs in with. Asserting the wrong field name here would have
-    // reported a working staff handoff as broken.
-    check('the staff PIN really opens a staff session for the run',
-      typeof staffToken?.customToken === 'string' && staffToken.customToken.length > 0,
-      JSON.stringify(staffToken).slice(0, 120));
+    // shared-launch-opens-console: the LAUNCHER gets their own copy and the real Run Console. No
+    // codes panel, no staff PIN to copy (the product owner: "they only see a panel of codes, very
+    // clumsy and unclear").
+    check('no staff PIN is minted any more (the launcher owns the copy)', started?.staff === undefined, JSON.stringify(started));
+    check('the run is in a NEW game, not the owner\'s', started?.gameId !== gShare, started?.gameId);
+    const launcherUid = launcher.auth.currentUser?.uid;
+    const launcherRuns = await launcher.call('listLiveRuns', {});
+    check('the run lands in the LAUNCHER account, so their own console can open it',
+      (launcherRuns?.runs ?? []).some((r) => r.runId === started?.runId && r.gameId === started?.gameId),
+      JSON.stringify((launcherRuns?.runs ?? []).map((r) => [r.gameId, r.runId])));
+    const ownerRunsAfter = await creator.call('listLiveRuns', {});
+    check('...and NOT in the owner account',
+      !(ownerRunsAfter?.runs ?? []).some((r) => r.runId === started?.runId));
+    const launchCopy = (await launcher.getDocAt(`users/${launcherUid}/games/${started?.gameId}`)).data;
+    check('the copy belongs to the launcher and carries the source tasks',
+      launchCopy?.ownerUid === launcherUid && Array.isArray(launchCopy?.stages) && launchCopy.stages.length > 0,
+      JSON.stringify({ owner: launchCopy?.ownerUid, stages: launchCopy?.stages?.length }));
+    check('a copy from a NO-COPY link is locked', launchCopy?.sharedLaunch?.locked === true, JSON.stringify(launchCopy?.sharedLaunch));
+    check('the lock does not reveal the whole token', typeof launchCopy?.sharedLaunch?.fromToken === 'string' && launchCopy.sharedLaunch.fromToken.length <= 8);
+    const launcherGames = await launcher.call('listGames', {});
+    check('a launch copy is not in the launcher\'s games list',
+      !((launcherGames?.games ?? []).some((g) => g.id === started?.gameId)), JSON.stringify((launcherGames?.games ?? []).map((g) => g.id)));
+    // Every door that would turn "may run it" into "may have it" is shut on a locked copy.
+    for (const [name, payload] of [
+      ['updateGame', { gameId: started?.gameId, title: 'mine now' }],
+      ['duplicateGame', { gameId: started?.gameId }],
+      ['exportGameFile', { gameId: started?.gameId }],
+      ['publishGame', { gameId: started?.gameId, visibility: 'public' }],
+      ['translateGame', { gameId: started?.gameId, targetLang: 'en' }],
+      ['createGameShareLink', { gameId: started?.gameId, allowCopy: true }],
+    ]) {
+      await expectError(`a locked launch copy refuses ${name}`,
+        launcher.call(name, payload), { codeIn: ['functions/failed-precondition'], match: /share-launch-locked/ });
+    }
+    // The launcher can still OPERATE it: finalize is an owner action on the copy's run.
+    const launcherPlayer = makeParty('shareLaunchOwnPlayer');
+    await signInAnonymously(launcherPlayer.auth);
+    await launcherPlayer.call('joinRun', { code: started.accessCode, displayName: 'Own team' });
+    const startedTeams = await launcher.call('startTeams', { gameId: started.gameId, runId: started.runId });
+    check('the launcher can start the teams from their console', (startedTeams?.launched ?? 0) >= 1, JSON.stringify(startedTeams));
 
     // Players can join the run that was started this way.
     const guestPlayer = makeParty('shareLaunchPlayer');

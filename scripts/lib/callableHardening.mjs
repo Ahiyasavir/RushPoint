@@ -144,10 +144,10 @@ export const PRIVILEGED_CALLABLES = {
     + 'when, and with which permissions" after the fact is a durable record — the link document '
     + 'itself is deletable by the same owner.',
   launchSharedRun:
-    'Creates a run, an access code and a staff invite inside an account other than the caller own, '
-    + 'on the strength of a link the owner handed out. The owner is not present when it happens '
-    + 'and it consumes whatever a launch costs them, so "who started this run on my game, when, '
-    + 'and through which link" has to stay answerable afterwards.',
+    'Copies a game the caller does not own into their account and starts a run of it, on the '
+    + 'strength of a link the owner handed out (change: shared-launch-opens-console). The owner is '
+    + 'not present when it happens and the link may refuse copying (the copy is then locked), so '
+    + '"who took a run of my game, when, and through which link" has to stay answerable afterwards.',
   updateGameShareLink:
     'Widens what a link somebody ALREADY HOLDS is allowed to do — up to and including '
     + 'letting them start runs in the owner account. The grant is invisible from the outside '

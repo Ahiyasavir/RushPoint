@@ -55,8 +55,14 @@ service cloud.firestore {
       //    is the deleteGame callable, which tombstones.
       match /games/{gameId} {
         allow read:   if isOwner(uid);
-        allow create: if isOwner(uid) && !hasTombstone(request.resource.data);
-        allow update: if isOwner(uid) && tombstoneUnchanged();
+        // `sharedLaunch` is SERVER-WRITTEN (change: shared-launch-opens-console): a client may not
+        // create a doc with it, and a LOCKED launch copy (a share link that did not allow copying)
+        // accepts no client write at all, or the lock would be one direct write away.
+        allow create: if isOwner(uid) && !hasTombstone(request.resource.data)
+                      && !request.resource.data.keys().hasAny(['sharedLaunch']);
+        allow update: if isOwner(uid) && tombstoneUnchanged()
+                      && resource.data.get('sharedLaunch', null) == null
+                      && !request.resource.data.keys().hasAny(['sharedLaunch']);
         allow delete: if false;
 
         // ── RUNS ─────────────────────────────────────────────────────────────

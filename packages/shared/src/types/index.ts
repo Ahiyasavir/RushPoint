@@ -62,6 +62,8 @@ export const FIRESTORE_PATHS = {
   // console's quick-actions bar here, under `consolePrefs`.
   user:       (uid: string) => `users/${uid}`,
 
+  games:      (ownerUid: string) => `users/${ownerUid}/games`,
+
   game:       (ownerUid: string, gameId: string) =>
     `users/${ownerUid}/games/${gameId}`,
 
@@ -718,6 +720,15 @@ export interface Game {
   // introduces, changes or removes these two fields. See gameLifecycle.ts.
   deletedAt?: string;
   deletedBy?: string;
+  /**
+   * A copy made by launching through someone else's share link (change:
+   * shared-launch-opens-console): the launcher owns it so their own Run Console opens. `locked`
+   * when the link did not allow copying: then it can be operated but not edited, copied,
+   * exported, published or re-shared (assertNotShareLocked), and it is hidden from the games list.
+   * `fromToken` is the first characters of the link token, for the audit trail. SERVER-WRITTEN
+   * ONLY (firestore.rules).
+   */
+  sharedLaunch?: { locked: boolean; fromToken: string; sourceTitle?: string };
   createdAt: string;
   updatedAt: string;
   // Admin-managed game templates (change: admin-manage-game-templates). A template
