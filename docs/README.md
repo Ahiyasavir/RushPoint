@@ -25,8 +25,10 @@ Index last verified **2026-09-08**.
 ## Marketing & store material
 | Path | What it is |
 |---|---|
-| [marketing/](marketing) | Hero + social videos, the Remotion source that renders them, music previews, and the poster/story build scripts (`poster/`). |
-| [marketing/video-plan.md](marketing/video-plan.md) | The plan the videos were cut from. |
+| [marketing/](marketing) | Everything marketing, and it now has **rules**: one folder per video under `videos/`, split into `published/` and `drafts/`, every file named `<NN>-<slug>-v<N>[-small].mp4`, every video README carrying the same five headings. Raw material in `footage/`, artwork in `graphics/`, the thinking in `playbooks/`. Read [marketing/README.md](marketing/README.md) before adding anything; `scripts/test-marketing-structure.ts` fails the build if the rules are broken. |
+| [marketing/playbooks/reel-playbook.md](marketing/playbooks/reel-playbook.md) | The measurement that shaped every reel: the 2026-09-19 promo did 3,900 views and **zero** registrations, and why. Read before writing a new reel. |
+| [marketing/playbooks/carousel-playbook.md](marketing/playbooks/carousel-playbook.md) | Instagram carousel playbook, hook/close copy, the research behind them, slide mechanics, rejected directions. Read before writing a new carousel. |
+| [marketing/playbooks/video-editing-setup.md](marketing/playbooks/video-editing-setup.md) | Bootstrap guide for the ffmpeg/MediaPipe/Whisper video-editing toolkit — what to install, plus 14 gotchas found cutting the 4am devlog reel. Hand this to a fresh agent or machine. |
 | [play-store/listing-copy.md](play-store/listing-copy.md) · [play-store/release-v2.md](play-store/release-v2.md) · [play-store/assets/](play-store/assets) | Play Store listing copy, release notes and graphics. See also root [PLAY_STORE.md](../PLAY_STORE.md). |
 | [site-templates-plan.md](site-templates-plan.md) | Pre-build plan (Hebrew) for the marketing site's template pages, 2026-09-02. |
 
@@ -42,6 +44,7 @@ Index last verified **2026-09-08**.
 |---|---|
 | [consistency-audit-2026-07-09.md](consistency-audit-2026-07-09.md) | 4-lane cross-surface sweep of score/status/time/counts. |
 | [playtest-2026-07-11-takeaways.md](playtest-2026-07-11-takeaways.md) | Family playtest findings; the P0 items became OpenSpec changes. |
+| [field-report-2026-09-25.md](field-report-2026-09-25.md) | Ahiya's field report (runs 2026-09-10 to 09-22), each item traced to a root cause (several reproduced in the app or confirmed in production), and the 12 OpenSpec changes it produced. |
 | [night-sim/](night-sim) | Two overnight simulation write-ups: full lifecycle and browser fidelity. |
 | [wave-a/](wave-a) … [wave-l/](wave-l) | The 2026 build waves, one folder per wave, one file per work item. Superseded by `openspec/changes/` once the OpenSpec flow started; kept for the reasoning. |
 

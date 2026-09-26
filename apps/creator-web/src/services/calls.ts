@@ -2,6 +2,7 @@
 import { callable, publicCallable } from './api';
 import type {
   Game,
+  StaffCapability,
   CreateGamePayload,
   UpdateGamePayload,
   PublicGame,
@@ -127,10 +128,15 @@ export const skipStage     = callable<{ gameId: string; runId: string; teamId: s
 // right now", resolved server-side. `requiredTaskCount` comes back so the console
 // can say when the skip lowered what that team must complete in the stage.
 export const skipTaskForTeam = callable<
-  { ownerUid?: string; gameId: string; runId: string; teamId: string; taskId?: string; reason?: string },
+  // `dryRun` (change: skip-keeps-the-stage): plan only, nothing written; the confirm shows it.
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; taskId?: string; reason?: string; dryRun?: boolean },
   {
-    ok: boolean; taskId: string; stageCompleted: boolean;
+    ok: boolean; taskId: string; stageCompleted?: boolean;
     requiredTaskCount: number; requirementLowered: boolean;
+    // Present on a dry run: the plan the confirm describes.
+    dryRun?: boolean; taskTitle?: string; stageCompletes?: boolean;
+    // What the skip opens (dry run) or opened (real skip).
+    dependentsOpened?: { id: string; title: string }[];
     // What the skip PAID (change: live-ops-feedback-loop). A single mission skip now
     // pays the same consolation skipStage pays, so the console can say so instead of
     // the organizer computing it by hand and paying it as a manual bonus.
@@ -138,6 +144,17 @@ export const skipTaskForTeam = callable<
     nextTaskId: string | null; nextReason: string | null;
   }
 >('skipTaskForTeam');
+// Send ONE team back to a skipped/completed mission or an earlier stage (change: send-team-back).
+// `dryRun` returns the plan the confirm shows, writing nothing.
+export type SendBackTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
+export const returnTeamTo = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; target: SendBackTarget; reason?: string; dryRun?: boolean },
+  {
+    ok: boolean; dryRun?: boolean; targetKind: 'task' | 'stage'; stageTitle: string; taskTitle: string;
+    reopened: { id: string; title: string }[]; relockedStages: string[]; pointsRemoved: number;
+    reactivatesTeam: boolean; assignedTaskId?: string | null; queued?: boolean; finished?: boolean;
+  }
+>('returnTeamTo');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
 export const refreshLeaderboard = callable<
   { ownerUid: string; gameId: string; runId: string; publish?: boolean; frozen?: boolean },
@@ -343,7 +360,10 @@ export const subscribePro    = callable<{ interval: 'month' | 'year' }, { checko
 export const claimReferral   = callable<{ referrerUid: string }, { ok: boolean; alreadyClaimed: boolean; bonusFreeRuns: number }>('claimReferral');
 
 // ── Staff / live-ops ──
-export const inviteStaff           = callable<{ ownerUid: string; gameId: string; runId: string; name: string; permissions: string[] }, { inviteId: string; pin: string }>('inviteStaff');
+// staff-capabilities: a code shared by several staff; `capabilities` absent = the game's default.
+export const inviteStaff           = callable<{ ownerUid: string; gameId: string; runId: string; name: string; capabilities?: StaffCapability[] }, { inviteId: string; pin: string; capabilities: StaffCapability[] }>('inviteStaff');
+export const updateStaffCode       = callable<{ ownerUid: string; gameId: string; runId: string; codeId: string; capabilities?: StaffCapability[]; disabled?: boolean; label?: string }, { ok: true }>('updateStaffCode');
+export const removeStaffMember     = callable<{ ownerUid: string; gameId: string; runId: string; staffUid?: string; codeId?: string }, { removed: number }>('removeStaffMember');
 export const pushAnnouncement      = callable<{ ownerUid: string; gameId: string; runId: string; message: string; messageHe?: string; teamId?: string }, { announcementId: string }>('pushAnnouncement');
 // Team ↔ HQ chat (change: team-hq-chat): HQ replies into one team's thread as from:'hq'.
 export const sendTeamChatMessage   = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; text: string; senderName?: string }, { messageId: string }>('sendTeamChatMessage');

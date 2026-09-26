@@ -238,6 +238,32 @@ async function main() {
   await check('staff of a DIFFERENT OWNER CANNOT read this run\'s alerts',
     assertFails(getDoc(doc(foreignStaff, `${runPath}/alerts/a1`))));
 
+  console.log('\n── Staff capabilities: own grant, own code, the live map needs `locations` ──');
+  // change: staff-capabilities. Rules only see token claims: `caps` and `codeId` are minted by
+  // staffSignIn / refreshStaffSession. A token from before that change has no `caps` and keeps the
+  // map (the callables' legacy rule); a token WITH caps and without `locations` does not.
+  const capsStaff = testEnv
+    .authenticatedContext('caps-staff', { staff: true, ownerUid: OWNER, gameId: GAME, runId: RUN, caps: ['chat', 'safety'], codeId: 'code-a' })
+    .firestore();
+  const mapStaff = testEnv
+    .authenticatedContext('map-staff', { staff: true, ownerUid: OWNER, gameId: GAME, runId: RUN, caps: ['locations'], codeId: 'code-a' })
+    .firestore();
+  await check('staff WITHOUT locations CANNOT read the live map',
+    assertFails(getDoc(doc(capsStaff, `${runPath}/teamLocations/${TEAM}`))));
+  await check('staff WITH locations CAN read the live map',
+    assertSucceeds(getDoc(doc(mapStaff, `${runPath}/teamLocations/${TEAM}`))));
+  await check('a pre-change staff token (no caps) keeps the live map',
+    assertSucceeds(getDoc(doc(staff, `${runPath}/teamLocations/${TEAM}`))));
+  await check('staff CAN read their OWN grant', assertSucceeds(getDoc(doc(capsStaff, `${runPath}/staffGrants/caps-staff`))));
+  await check('staff CANNOT read someone else\'s grant', assertFails(getDoc(doc(capsStaff, `${runPath}/staffGrants/map-staff`))));
+  await check('staff CAN read their OWN code', assertSucceeds(getDoc(doc(capsStaff, `${runPath}/staffInvites/code-a`))));
+  await check('staff CANNOT read another code (its PIN)', assertFails(getDoc(doc(capsStaff, `${runPath}/staffInvites/code-b`))));
+  await check('staff for another run CANNOT read a grant here', assertFails(getDoc(doc(wrongStaff, `${runPath}/staffGrants/staff2`))));
+  await check('a participant CANNOT read staff grants', assertFails(getDoc(doc(team, `${runPath}/staffGrants/caps-staff`))));
+  await check('the owner CAN read every grant (the codes panel)', assertSucceeds(getDoc(doc(owner, `${runPath}/staffGrants/caps-staff`))));
+  await check('nobody writes a grant from a client', assertFails(setDoc(doc(owner, `${runPath}/staffGrants/x`), { removed: false })));
+  await check('staff cannot un-remove themselves', assertFails(setDoc(doc(capsStaff, `${runPath}/staffGrants/caps-staff`), { removed: false })));
+
   console.log('\n── Team ↔ HQ chat: read surface mirrors the team doc; writes CF-only ──');
   const device = testEnv.authenticatedContext(DEVICE).firestore();
   const chatPath = `${runPath}/chat/${TEAM}`;

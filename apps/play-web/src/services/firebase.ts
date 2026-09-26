@@ -32,12 +32,15 @@ import {
 import {
   runWithRetry,
   withTimeout,
+  attemptBudgetMs,
+  interruptibleSleep,
   isRetryableStorageError,
   errorCode,
   uploadPercent,
   setUploadProgress,
   setUploadRetrying,
 } from '../lib/uploadResiliency';
+import { participantUploadPath, isFolderRefusal } from '../lib/uploadPath';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -186,8 +189,6 @@ export async function signInStaff(customToken: string) {
 const UPLOAD_ATTEMPTS = 3;
 /** No progress byte for this long ⇒ the attempt is dead; cancel and retry. */
 const UPLOAD_STALL_MS = 45_000;
-/** Absolute cap for a single attempt, however slowly it is progressing. */
-const UPLOAD_MAX_MS = 180_000;
 /** Cap on the post-upload getDownloadURL metadata fetch (the old un-timed leg). */
 const DOWNLOAD_URL_MS = 30_000;
 
@@ -241,6 +242,14 @@ function uploadViaVps(
         } catch {
           reject(Object.assign(new Error('Invalid server response'), { code: 'storage/internal-error' }));
         }
+      } else if (xhr.status === 403 && isFolderRefusal(xhr.responseText)) {
+        // OUR route refused the FOLDER (ownsUploadPath). Its own code, so the player is told
+        // "this phone may not send for the team" instead of a generic failure: after
+        // attached-phone-uploads this should never fire, which is exactly why it must be loud.
+        // Identified by the route's own JSON message, never by the status alone: Cloudflare
+        // also answers 403 (the Israel geo-block, bot protection) with an HTML page, and
+        // telling a player on a foreign eSIM "this phone can't send for the team" would be false.
+        reject(Object.assign(new Error('Upload folder refused'), { code: 'storage/not-your-folder' }));
       } else if (xhr.status === 401 || xhr.status === 403) {
         reject(Object.assign(new Error('Auth failed'), { code: 'storage/unauthorized' }));
       } else if (xhr.status >= 400 && xhr.status < 500 && xhr.status !== 408 && xhr.status !== 429) {
@@ -330,87 +339,143 @@ function uploadViaFirebaseStorage(
 // ── Resilient upload dispatcher ─────────────────────────────────────────────
 // Routes to VPS or Firebase Storage depending on whether VITE_API_ORIGIN is set.
 // Wraps either transport in the same retry/timeout/progress envelope.
+// The newest upload owns the progress store. A capture-time upload can be superseded by a retake
+// (change: media-upload-reliability), and the aborted one's cleanup must not blank the bar of the
+// upload that replaced it.
+let latestUploadGen = 0;
+
+// The player's own abort (a retake, a discarded capture). Deliberately NOT a retryable code:
+// retrying it would re-send a file nobody wants.
+function abortedError(): Error {
+  return Object.assign(new Error('upload aborted by the player'), { code: 'upload/aborted' });
+}
+
+// A retry backoff that ends early when the tab comes back to the foreground: iOS suspends
+// network work in a hidden tab, so the stall there was the phone, not the link (design D6).
+function sleepUntilVisible(ms: number): Promise<void> {
+  return interruptibleSleep(ms, (wake) => {
+    if (typeof document === 'undefined') return () => {};
+    const onVis = () => { if (document.visibilityState === 'visible') wake(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  });
+}
+
 async function uploadResilient(
   path: string,
   data: Blob | File,
   contentType: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   await ensureAuth();
+  const gen = ++latestUploadGen;
+  let abortCurrent: (() => void) | undefined;
+  const onAbort = () => abortCurrent?.();
+  signal?.addEventListener('abort', onAbort);
   try {
     return await runWithRetry(
       async () => {
+        if (signal?.aborted) throw abortedError();
         setUploadRetrying(false);
         setUploadProgress(0);
         let abortUpload: (() => void) | undefined;
         const upload = apiOrigin
           ? uploadViaVps(path, data, contentType, (abort) => { abortUpload = abort; })
           : uploadViaFirebaseStorage(path, data, contentType, (abort) => { abortUpload = abort; });
-        return await withTimeout(
-          upload, UPLOAD_MAX_MS, 'storage/deadline-exceeded',
-          () => abortUpload?.(),
-        );
+        abortCurrent = () => abortUpload?.();
+        try {
+          return await withTimeout(
+            // Size-derived: a slow-but-moving clip gets the time it needs; the stall timer kills a dead one.
+            upload, attemptBudgetMs(data.size), 'storage/deadline-exceeded',
+            () => abortUpload?.(),
+          );
+        } catch (e) {
+          // An abort surfaces from the transport as a deadline code; say what really happened.
+          if (signal?.aborted) throw abortedError();
+          throw e;
+        }
       },
       {
         attempts: UPLOAD_ATTEMPTS,
-        isRetryable: isRetryableStorageError,
-        onRetry: () => setUploadRetrying(true),
+        isRetryable: (e) => !signal?.aborted && isRetryableStorageError(e),
+        onRetry: () => { if (gen === latestUploadGen) setUploadRetrying(true); },
+        sleep: sleepUntilVisible,
       },
     );
   } finally {
-    setUploadRetrying(false);
-    setUploadProgress(null);
+    signal?.removeEventListener('abort', onAbort);
+    if (gen === latestUploadGen) {
+      setUploadRetrying(false);
+      setUploadProgress(null);
+    }
   }
 }
 
-// Upload a photo-mission image to Storage and return its download URL. Path is
-// scoped to the team's own folder (runs/{runId}/teams/{teamId}/…) so storage
-// rules can confine writes to the authenticated participant.
+// The folder is THIS DEVICE's own uid, never the team id (change: attached-phone-uploads).
+// All three server gates key on the caller: the VPS route's ownsUploadPath, submitStationPhoto's
+// requireStorageUrl and storage.rules. Building the path from the team id worked only on the
+// founding phone (uid === teamId) and refused every upload from an attached phone holding control.
+// Derived here, after ensureAuth, so no call site can hand in the wrong id again.
+async function myUploadPath(runId: string, taskId: string, ext: string): Promise<string> {
+  await ensureAuth();
+  const me = auth.currentUser?.uid;
+  if (!me) throw Object.assign(new Error('Not authenticated'), { code: 'storage/unauthenticated' });
+  return participantUploadPath({ runId, uid: me, taskId, ext, nowMs: Date.now() });
+}
+
+// Upload a photo-mission image and return its download URL.
 export async function uploadTaskPhoto(
   // Camera captures are compressed to JPEG before upload (change:
   // fix-photo-camera-capture), so this accepts the resulting Blob too.
   file: File | Blob,
-  p: { runId: string; teamId: string; taskId: string },
+  p: { runId: string; taskId: string; signal?: AbortSignal },
 ): Promise<string> {
-  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.jpg`;
-  return uploadResilient(path, file, 'image/jpeg');
+  const path = await myUploadPath(p.runId, p.taskId, 'jpg');
+  return uploadResilient(path, file, 'image/jpeg', p.signal);
 }
 
-// Upload an audio-mission clip (audio-tasks). Shares the SAME path scheme as
-// photos (runs/{runId}/teams/{teamId}/…) so storage rules confine writes to the
-// authenticated participant; uploads with the NORMALIZED content-type so the
-// widened storage.rules content-type match (audio/webm|mp4|mpeg|ogg) succeeds.
-// Returns { url, contentType } — the caller passes the type to submitStationPhoto.
+// Upload an audio-mission clip (audio-tasks), with the NORMALIZED content-type so the
+// storage.rules / upload-route content-type allowlist (audio/webm|mp4|mpeg|ogg…) matches.
+// Returns { url, contentType }: the caller passes the type to submitStationPhoto.
 export async function uploadTaskAudio(
   blob: Blob,
-  p: { runId: string; teamId: string; taskId: string; contentType: string },
+  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal },
 ): Promise<{ url: string; contentType: string }> {
   const contentType = normalizeContentType(p.contentType || blob.type || 'audio/webm');
   const ext = contentType === 'audio/mp4' ? 'm4a'
     : contentType === 'audio/mpeg' ? 'mp3'
     : contentType === 'audio/ogg' ? 'ogg'
     : 'webm';
-  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.${ext}`;
-  return { url: await uploadResilient(path, blob, contentType), contentType };
+  const path = await myUploadPath(p.runId, p.taskId, ext);
+  return { url: await uploadResilient(path, blob, contentType, p.signal), contentType };
 }
 
 // Upload a video-mission clip (video-submission-task). Identical in shape to
-// uploadTaskAudio — same path scheme, same normalization — so the IDOR scoping and
-// the server's content-type gate behave the same for all three capture kinds.
-// The upload route applies a larger cap for these content-types
+// uploadTaskAudio. The upload route applies a larger cap for these content-types
 // (MAX_PARTICIPANT_VIDEO_BYTES); photo/audio keep the tighter one.
 export async function uploadTaskVideo(
   blob: Blob | File,
-  p: { runId: string; teamId: string; taskId: string; contentType: string },
+  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal },
 ): Promise<{ url: string; contentType: string }> {
   const contentType = normalizeContentType(p.contentType || blob.type || 'video/webm');
   const ext = contentType === 'video/mp4' ? 'mp4'
     : contentType === 'video/quicktime' ? 'mov'
     : 'webm';
-  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.${ext}`;
-  return { url: await uploadResilient(path, blob, contentType), contentType };
+  const path = await myUploadPath(p.runId, p.taskId, ext);
+  return { url: await uploadResilient(path, blob, contentType, p.signal), contentType };
+}
+
+// The ONE upload entry point a mission uses (change: media-upload-reliability, D1/D4): TaskRunner
+// feeds it to createPendingUploads so every kind starts at capture and send only awaits it.
+export type TaskMediaKind = 'photo' | 'audio' | 'video';
+export async function uploadTaskMedia(
+  kind: TaskMediaKind,
+  blob: Blob | File,
+  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal },
+): Promise<{ url: string; contentType: string }> {
+  if (kind === 'photo') return { url: await uploadTaskPhoto(blob, p), contentType: 'image/jpeg' };
+  if (kind === 'audio') return uploadTaskAudio(blob, p);
+  return uploadTaskVideo(blob, p);
 }
 
 // Under a ~20-player run over an ngrok tunnel, a momentary backend contention or

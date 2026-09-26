@@ -14,6 +14,7 @@ import { lastFixStore, lastFixKey } from './lastFixStore';
 // unset means this is inert and the Firestore path below runs exactly as before.
 import { trackStore } from './trackStore';
 import * as admin from 'firebase-admin';
+import { chunk, MAX_BATCH_OPS } from './batchUtil';
 import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 // The recorded answer sheet (change: post-run-player-report) — every submission,
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
@@ -23,6 +24,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
 import { planApprovalReversal } from '@rushpoint/shared';
+import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
 import { storageOriginOpts } from './storageOriginOpts';
@@ -111,14 +113,15 @@ export {
 // team and keeps them in the same stage (change: skip-single-task).
 // setTeamHold parks/resumes ONE team (its clock stops and it cannot advance);
 // forceAssignTask sends ONE team to a SPECIFIC task in its current stage
-// (change: staff-console-field-ops).
+// (change: staff-console-field-ops). returnTeamTo sends ONE team BACK to a skipped or
+// completed mission, or to an earlier stage (change: send-team-back).
 // listMyRuns + getRunPlayerReport are the run-history and post-run per-player
 // report surfaces (change: post-run-player-report) — the only way back into a run
 // that has already ENDED, since every other post-run callable is keyed by an
 // access code that only the live console holds.
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, skipTaskForTeam, finalizeRun,
-  setTeamHold, forceAssignTask,
+  setTeamHold, forceAssignTask, returnTeamTo, getRunOutline,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks, revealTaskAnswer,
@@ -145,7 +148,7 @@ export { onRunFinalized } from './runs/index';
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────
 
-import { requireAuth, assertStaffOrOwner, assertAdmin } from './auth';
+import { requireAuth, assertStaffCan, assertAdmin } from './auth';
 
 // Live-ops actions (announce, flash, ack SOS, review photo, adjust score) are
 // performed by EITHER the game owner running their own console OR a staff member
@@ -166,6 +169,7 @@ import { requireAuth, assertStaffOrOwner, assertAdmin } from './auth';
 import {
   writeAuditLog, auditBestEffort,
   AUDIT_SUBMISSION_APPROVED, AUDIT_SUBMISSION_REJECTED, AUDIT_SUBMISSION_APPROVAL_REVERSED,
+  AUDIT_STAFF_CODE_UPDATED, AUDIT_STAFF_REMOVED,
 } from './obs/audit';
 
 
@@ -209,12 +213,14 @@ async function mirrorToChat(
 
 export const inviteStaff = loggedCallable('inviteStaff', async (data, context) => {
   const uid = requireAuth(context);
-  const { ownerUid, gameId, runId, name, permissions } = data as {
+  const { ownerUid, gameId, runId, name, capabilities } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     name: string;
-    permissions: string[];
+    // What people on this code may do (change: staff-capabilities). Absent = the game's
+    // `staffDefaults`, and absent there = everything, which is what every code did before.
+    capabilities?: unknown;
   };
 
   // No emulator bypass — anyone who can mint a PIN owns the run's staff surface.
@@ -222,10 +228,20 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
     throw new functions.https.HttpsError('permission-denied', 'Only the game owner can invite staff');
   }
   const cleanName = validate(() => requireString(name, 'name', MAX_MESSAGE_LEN));
+  let caps: StaffCapability[];
+  if (capabilities === undefined || capabilities === null) {
+    const gameSnap = await db.doc(FIRESTORE_PATHS.game(ownerUid, gameId)).get();
+    caps = defaultCodeCapabilities((gameSnap.data() as Game | undefined)?.staffDefaults);
+  } else {
+    const clean = normalizeStaffCapabilities(capabilities);
+    if (!clean) throw new functions.https.HttpsError('invalid-argument', 'Unknown staff capability');
+    caps = clean;
+  }
 
   // One writer for the invite document, shared with launchSharedRun — see
   // runs/staffInvite.ts. WHO may mint one is decided above; this only writes it.
-  return createRunStaffInvite({ ownerUid, gameId, runId, name: cleanName, permissions });
+  const result = await createRunStaffInvite({ ownerUid, gameId, runId, name: cleanName, capabilities: caps });
+  return { ...result, capabilities: caps };
 });
 
 
@@ -297,7 +313,23 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     throw new functions.https.HttpsError('not-found', 'Invalid or already-used PIN');
   }
 
-  const invite = inviteSnap.docs[0].data() as { id: string; name: string; permissions: string[] };
+  const invite = inviteSnap.docs[0].data() as {
+    id: string; name: string; permissions?: string[];
+    capabilities?: unknown; multiUse?: boolean; disabled?: boolean; version?: number;
+  };
+  // A disabled code stops NEW sign-ins (change: staff-capabilities); the people already on it keep
+  // working until removed. The PIN was right, so this is not a brute-force attempt: no counter.
+  if (invite.disabled === true) {
+    throw new functions.https.HttpsError('failed-precondition', 'This staff code is closed to new sign ins');
+  }
+  const grantRef = db.doc(FIRESTORE_PATHS.staffGrant(ownerUid, gameId, runId, uid));
+  const priorGrant = await grantRef.get();
+  if (priorGrant.exists && (priorGrant.data() as { removed?: boolean }).removed === true) {
+    // The organizer removed this person. Rejoining with the same identity is refused; a leaked
+    // code is closed by disabling it, which this person cannot get around either.
+    throw new functions.https.HttpsError('permission-denied', 'Removed from this run staff', { reason: STAFF_REFUSAL_REASON.removed });
+  }
+  const multiUse = invite.multiUse === true;
 
   // Single-use consume MUST be atomic: the where('used','==',false) query above is
   // NON-transactional, so N concurrent callers with the same PIN all read used==false
@@ -305,7 +337,8 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   // inside a transaction and let exactly one caller flip used:true; the losers see
   // used==true and get the same not-found the query-miss path returns.
   const inviteRef = inviteSnap.docs[0].ref;
-  await db.runTransaction(async (tx) => {
+  // A multi-use code is never consumed: several marshals share it (change: staff-capabilities).
+  if (!multiUse) await db.runTransaction(async (tx) => {
     const fresh = await tx.get(inviteRef);
     const d = fresh.data() as { used?: boolean } | undefined;
     if (!fresh.exists || d?.used === true) {
@@ -321,6 +354,20 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   // Success (transaction winner only) → reset this caller's failure counter.
   await attemptsRef.set({ count: 0, lastFailedAtMs: 0, updatedAt: new Date().toISOString() }, { merge: true });
 
+  // The person record (change: staff-capabilities): which code they joined with, so the gate can
+  // resolve their capabilities LIVE and the organizer can remove just them. Written for legacy
+  // single-use invites too, so removal works for them; a legacy code (no capabilities) is full.
+  const staffName = (typeof name === 'string' && name.trim() ? name.trim() : invite.name).slice(0, 60);
+  const joinedAt = new Date().toISOString();
+  await grantRef.set(
+    priorGrant.exists
+      ? { codeId: invite.id, name: staffName }
+      : { codeId: invite.id, name: staffName, removed: false, joinedAt },
+    { merge: true },
+  );
+  const access = resolveStaffAccess({ grant: { codeId: invite.id, removed: false }, code: invite });
+  const caps = [...access.capabilities];
+
   let customToken: string;
   try {
     customToken = await admin.auth().createCustomToken(context.auth!.uid, {
@@ -332,8 +379,11 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
       // `ownerUid/gameId/runId` and the single-use PIN, all invite-derived above.
       // Falls back to the invite name when the staffer types nothing. Trimmed and
       // length-capped so a hostile value can't bloat the token or the audit rows.
-      staffName: (typeof name === 'string' && name.trim() ? name.trim() : invite.name).slice(0, 60),
-      permissions: invite.permissions,
+      staffName,
+      // Rules can only see claims: `caps` gates the `teamLocations` read, `codeId` lets the staff
+      // console read its own code. Callables never trust these; they resolve live (assertStaffCan).
+      caps,
+      codeId: invite.id,
       ownerUid,
       gameId,
       runId,
@@ -343,7 +393,162 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     throw new functions.https.HttpsError('internal', 'Could not complete staff sign-in. Please try again.');
   }
 
-  return { customToken, name: invite.name, permissions: invite.permissions };
+  return { customToken, name: invite.name, capabilities: caps, codeId: invite.id };
+});
+
+
+// ─── Staff codes: edit, remove a person, refresh a session (change: staff-capabilities) ──
+
+function staffCodeRef(ownerUid: string, gameId: string, runId: string, codeId: string) {
+  return db.doc(FIRESTORE_PATHS.staffInvite(ownerUid, gameId, runId, codeId));
+}
+
+function requireRunIds(data: unknown): { ownerUid: string; gameId: string; runId: string } {
+  const d = (data ?? {}) as { ownerUid?: unknown; gameId?: unknown; runId?: unknown };
+  const ownerUid = validate(() => requireString(d.ownerUid, 'ownerUid', 128));
+  const gameId = validate(() => requireString(d.gameId, 'gameId', 128));
+  const runId = validate(() => requireString(d.runId, 'runId', 128));
+  return { ownerUid, gameId, runId };
+}
+
+function assertOwnerOrAdmin(context: functions.https.CallableContext, ownerUid: string): string {
+  const uid = requireAuth(context);
+  if (uid !== ownerUid && !context.auth?.token.admin) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the game owner can manage staff');
+  }
+  return uid;
+}
+
+/**
+ * Edit a code during the run: what its people may do, its label, or disable it. Takes effect on
+ * the NEXT staff action (the gate resolves live); `version` is bumped so an open staff console
+ * refreshes its session for the rule-gated reads (the live map). Disabling stops new sign-ins
+ * only: the marshals already standing at stations keep working until removed.
+ */
+export const updateStaffCode = loggedCallable('updateStaffCode', async (data, context) => {
+  const { ownerUid, gameId, runId } = requireRunIds(data);
+  const uid = assertOwnerOrAdmin(context, ownerUid);
+  await enforceRateLimit(uid, 'updateStaffCode');
+  const d = data as { codeId?: unknown; capabilities?: unknown; disabled?: unknown; label?: unknown };
+  const codeId = validate(() => requireString(d.codeId, 'codeId', 128));
+  const patch: Record<string, unknown> = {};
+  if (d.capabilities !== undefined) {
+    const caps = normalizeStaffCapabilities(d.capabilities);
+    if (!caps) throw new functions.https.HttpsError('invalid-argument', 'Unknown staff capability');
+    patch.capabilities = caps;
+  }
+  if (d.disabled !== undefined) {
+    if (typeof d.disabled !== 'boolean') throw new functions.https.HttpsError('invalid-argument', 'disabled must be a boolean');
+    patch.disabled = d.disabled;
+  }
+  if (d.label !== undefined) {
+    patch.label = validate(() => requireString(d.label, 'label', 60));
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'Nothing to change');
+  }
+  const ref = staffCodeRef(ownerUid, gameId, runId, codeId);
+  const before = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Staff code not found');
+    const cur = snap.data() as { capabilities?: unknown; disabled?: boolean; label?: string; version?: number };
+    tx.update(ref, { ...patch, version: (typeof cur.version === 'number' ? cur.version : 1) + 1, updatedAt: new Date().toISOString() });
+    return cur;
+  });
+  await writeAuditLog({
+    ownerUid, gameId, runId,
+    operatorId: uid,
+    actionType: AUDIT_STAFF_CODE_UPDATED,
+    previousValue: JSON.stringify({ capabilities: before.capabilities ?? 'full', disabled: before.disabled ?? false }),
+    newValue: JSON.stringify(patch),
+    codeId,
+  });
+  return { ok: true };
+});
+
+/**
+ * Remove ONE person from the run's staff, or everyone on one code (`codeId` without `staffUid`).
+ * The gate refuses them on their next action; their refresh tokens are revoked so a console left
+ * open also loses its Firestore reads when the ID token expires (at most an hour).
+ */
+export const removeStaffMember = loggedCallable('removeStaffMember', async (data, context) => {
+  const { ownerUid, gameId, runId } = requireRunIds(data);
+  const uid = assertOwnerOrAdmin(context, ownerUid);
+  await enforceRateLimit(uid, 'removeStaffMember');
+  const d = data as { staffUid?: unknown; codeId?: unknown };
+  const grants = db.collection(FIRESTORE_PATHS.staffGrantsCol(ownerUid, gameId, runId));
+  let targets: string[];
+  if (d.staffUid !== undefined) {
+    const staffUid = validate(() => requireString(d.staffUid, 'staffUid', 128));
+    const snap = await grants.doc(staffUid).get();
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Staff member not found');
+    targets = [staffUid];
+  } else if (d.codeId !== undefined) {
+    const codeId = validate(() => requireString(d.codeId, 'codeId', 128));
+    const snap = await grants.where('codeId', '==', codeId).get();
+    targets = snap.docs.filter((x) => (x.data() as { removed?: boolean }).removed !== true).map((x) => x.id);
+  } else {
+    throw new functions.https.HttpsError('invalid-argument', 'staffUid or codeId required');
+  }
+  const removedAt = new Date().toISOString();
+  for (const group of chunk(targets, MAX_BATCH_OPS)) {
+    const batch = db.batch();
+    for (const id of group) batch.set(grants.doc(id), { removed: true, removedAt, removedBy: uid }, { merge: true });
+    await batch.commit();
+  }
+  for (const id of targets) {
+    // Staff sign in ON TOP of the phone's anonymous identity, so on a phone that also PLAYS in this
+    // run (an organizer testing on their own phone) revoking would sign that team out. The grant's
+    // `removed` flag already refuses every staff action; the revoke only shortens a console's
+    // Firestore reads, which is not worth losing a team over.
+    const playsHere = (await db.doc(FIRESTORE_PATHS.team(ownerUid, gameId, runId, id)).get()).exists
+      || !(await db.collection(FIRESTORE_PATHS.teamsCol(ownerUid, gameId, runId))
+        .where('deviceUids', 'array-contains', id).limit(1).get()).empty;
+    if (playsHere) continue;
+    try { await admin.auth().revokeRefreshTokens(id); }
+    catch (e) { functions.logger.warn('removeStaffMember.revoke failed', { runId, staffUid: id, err: String(e) }); }
+  }
+  await writeAuditLog({
+    ownerUid, gameId, runId,
+    operatorId: uid,
+    actionType: AUDIT_STAFF_REMOVED,
+    previousValue: '',
+    newValue: targets.join(','),
+    codeId: typeof d.codeId === 'string' ? d.codeId : '',
+  });
+  return { removed: targets.length };
+});
+
+/**
+ * Re-mint the caller's staff token with the capabilities their code has NOW. Firestore rules can
+ * only see token claims, so after an organizer edits a code the staff console calls this to bring
+ * its live-map access in line. Callables never needed it: they resolve live.
+ */
+export const refreshStaffSession = loggedCallable('refreshStaffSession', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'refreshStaffSession');
+  const { ownerUid, gameId, runId } = requireRunIds(data);
+  const t = context.auth!.token;
+  if (!(t.staff && t.ownerUid === ownerUid && t.gameId === gameId && t.runId === runId)) {
+    throw new functions.https.HttpsError('permission-denied', 'Staff access for this run required');
+  }
+  const grantSnap = await db.doc(FIRESTORE_PATHS.staffGrant(ownerUid, gameId, runId, uid)).get();
+  const grant = grantSnap.exists ? (grantSnap.data() as { codeId?: string; removed?: boolean; name?: string }) : null;
+  const codeSnap = grant?.codeId ? await staffCodeRef(ownerUid, gameId, runId, grant.codeId).get() : null;
+  const access = resolveStaffAccess({
+    grant,
+    code: codeSnap && codeSnap.exists ? (codeSnap.data() as { capabilities?: unknown; disabled?: unknown }) : null,
+  });
+  if (!access.allowed) throw new functions.https.HttpsError('permission-denied', 'Removed from this run staff', { reason: STAFF_REFUSAL_REASON.removed });
+  const caps = [...access.capabilities];
+  const customToken = await admin.auth().createCustomToken(uid, {
+    staff: true,
+    staffName: typeof t.staffName === 'string' ? t.staffName : (grant?.name ?? ''),
+    caps,
+    codeId: grant?.codeId ?? (typeof t.codeId === 'string' ? t.codeId : ''),
+    ownerUid, gameId, runId,
+  });
+  return { customToken, capabilities: caps };
 });
 
 
@@ -588,7 +793,7 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
 
   // ── Resolve sender role ──────────────────────────────────────────────────────
   // HQ path — owner / platform admin / run-scoped staff. Detect via a non-throwing
-  // probe, then enforce with assertStaffOrOwner (the claims check IS the authz; the
+  // probe, then enforce with assertStaffCan (the capability check IS the authz; the
   // senderName label is display-only). Everyone else is a participant.
   const token = context.auth!.token as { admin?: boolean; staff?: boolean; ownerUid?: string; runId?: string };
   const isHq = uid === ownerUid
@@ -601,7 +806,7 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
   let deviceUids: string[] | undefined;
 
   if (isHq) {
-    assertStaffOrOwner(context, ownerUid, runId);
+    await assertStaffCan(context, ownerUid, runId, 'chat');
     if (rawTeamId === undefined || rawTeamId === '') {
       throw new functions.https.HttpsError('invalid-argument', 'teamId required');
     }
@@ -695,7 +900,7 @@ export const sendStaffChannelMessage = loggedCallable('sendStaffChannelMessage',
   }
   // Authorization FIRST — before any read, so an unauthorized caller learns nothing
   // about whether the run exists.
-  assertStaffOrOwner(context, ownerUid, runId);
+  await assertStaffCan(context, ownerUid, runId, 'staffChannel');
 
   const text = sanitizeChatText((data as { text?: unknown }).text);
   if (text === null) {
@@ -748,7 +953,7 @@ export const sendStaffChannelMessage = loggedCallable('sendStaffChannelMessage',
 // ─── acknowledgeAlert ─────────────────────────────────────────────────────────
 
 export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'safety');
   const { ownerUid, gameId, runId, alertId } = data as {
     ownerUid: string;
     gameId: string;
@@ -782,7 +987,7 @@ export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, 
 // the safety signal.
 
 export const clearTeamOutOfBounds = loggedCallable('clearTeamOutOfBounds', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'safety');
   const { ownerUid, gameId, runId, teamId, reason } = data as {
     ownerUid: string;
     gameId: string;
@@ -944,7 +1149,7 @@ async function sweepStaleLiveOps(ownerUid: string, gameId: string, runId: string
 // ─── pushAnnouncement ─────────────────────────────────────────────────────────
 
 export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'broadcast');
   const { ownerUid, gameId, runId, message, messageHe, teamId } = data as {
     ownerUid: string;
     gameId: string;
@@ -1008,7 +1213,7 @@ export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, 
 // ─── deactivateAnnouncement ───────────────────────────────────────────────────
 
 export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'broadcast');
   const { ownerUid, gameId, runId, announcementId } = data as {
     ownerUid: string;
     gameId: string;
@@ -1027,7 +1232,7 @@ export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', a
 // ─── pushFlashMission ─────────────────────────────────────────────────────────
 
 export const pushFlashMission = loggedCallable('pushFlashMission', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'broadcast');
   const {
     ownerUid, gameId, runId,
     title, titleHe, description, descriptionHe,
@@ -1140,7 +1345,7 @@ async function assertRunMemberOrStaff(
     const { teamId } = await resolveCallerTeam(uid, ctx);
     return teamId;
   } catch {
-    assertStaffOrOwner(context, ctx.ownerUid, ctx.runId);
+    await assertStaffCan(context, ctx.ownerUid, ctx.runId, 'broadcast');
     return undefined;
   }
 }
@@ -1254,7 +1459,7 @@ export const reportFeedItem = loggedCallable('reportFeedItem', async (data, cont
 // reverses an auto-hide (or a staff hide) and disarms future auto-hiding for
 // this item via `reportsCleared` — authz stays identical for both directions.
 export const hideFeedItem = loggedCallable('hideFeedItem', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'feed');
   const { ownerUid, gameId, runId, itemId, restore } = data as {
     ownerUid: string;
     gameId: string;
@@ -1437,10 +1642,16 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     contentType?: string;
   };
 
-  // Shared team devices: resolve the caller's team + require the controller role.
+  // Shared team devices (team-phones-simple D2): ANY attached phone may send media, not only the
+  // one answering for the team. A photo is evidence, not a guess, so two phones sending is at worst
+  // two candidates for the organizer (the latest pending one wins). Graded answers stay on one phone:
+  // two phones guessing at once would race the same attempt counter and lockout. resolveCallerTeam
+  // still refuses a phone that is not attached to the team at all.
   const { teamId: resolvedTeamId, team } = await resolveCallerTeam(
-    uid, { ownerUid, gameId, runId }, { requireController: true },
+    uid, { ownerUid, gameId, runId }, { requireController: false },
   );
+  const senderDevice = (team.devices ?? []).find((d) => d.uid === uid);
+  const submittedBy = { uid, name: String(senderDevice?.name ?? (uid === team.id ? team.displayName : '') ?? '').slice(0, 60) };
   // Staff hold (staff-console-field-ops) — a parked team cannot bank a submission.
   assertTeamNotHeld(team);
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
@@ -1580,6 +1791,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
           // audio-tasks: server-derived from the task (never client-claimed) so
           // review UIs know whether to render an <img> or an <audio> player.
           mediaKind: kind,
+          // Which phone sent it (team-phones-simple D2), from the team's own device list.
+          submittedBy,
         },
       },
     },
@@ -1646,7 +1859,7 @@ function findTaskRecordScore(
 }
 
 export const reviewStationSubmission = loggedCallable('reviewStationSubmission', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'review');
   const { ownerUid, gameId, runId, teamId, taskId, approved, note } = data as {
     ownerUid: string;
     gameId: string;
@@ -1838,7 +2051,7 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
 // ─── adjustTeamScore ──────────────────────────────────────────────────────────
 
 export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'score');
   const { ownerUid, gameId, runId, teamId, delta, reason } = data as {
     ownerUid: string;
     gameId: string;
@@ -1949,7 +2162,7 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
 // filters only, never by the completion path, so a team standing at the station
 // finishes and scores it (D2). The response reports how many teams that is.
 export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'tasks');
   const { ownerUid, gameId, runId, taskId, status, reason, force } = data as {
     ownerUid: string;
     gameId: string;

@@ -45,6 +45,7 @@ import {
   shareLinkExpiryIso,
   sanitizeGameForShare,
   SHARE_TOKEN_BYTES,
+  STAFF_CAPABILITIES,
   type Game,
   type GameShareLink,
   type ShareLinkRefusal,
@@ -393,6 +394,8 @@ export const launchSharedRun = loggedCallable('launchSharedRun', async (data, co
     gameId: link.gameId,
     runId,
     name: staffName,
+    // The person who launched this run IS its organizer: every capability (staff-capabilities).
+    capabilities: [...STAFF_CAPABILITIES],
   });
 
   // Best-effort counter; a failed increment must not undo a run that exists.

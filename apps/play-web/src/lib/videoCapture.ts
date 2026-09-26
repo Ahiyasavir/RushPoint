@@ -65,6 +65,92 @@ export function predictedClipBytes(seconds: number): number {
   return (VIDEO_BITS_PER_SECOND + AUDIO_BITS_PER_SECOND) * seconds / 8;
 }
 
+// ─── Weak-link profile (change: media-upload-reliability, D9) ────────────────
+//
+// Every byte recorded crosses the field connection before the mission counts, and on 3G the
+// upload IS the wait. When the browser says the link is weak (or the player asked it to save
+// data), ask for 960x540 at 1.0 Mbps: a third fewer bytes than the default. `ideal` only, the
+// same rule as above. Total: iOS has no `navigator.connection`, and anything unrecognised means
+// the default profile, never a refusal.
+export interface ConnectionHint {
+  saveData?: unknown;
+  effectiveType?: unknown;
+}
+
+export interface CaptureProfile {
+  video: {
+    facingMode: { ideal: 'environment' | 'user' };
+    width: { ideal: number };
+    height: { ideal: number };
+    frameRate: { ideal: number };
+  };
+  videoBitsPerSecond: number;
+  audioBitsPerSecond: number;
+  light: boolean;
+}
+
+const WEAK_EFFECTIVE_TYPES = new Set(['slow-2g', '2g', '3g']);
+export const LIGHT_VIDEO_BITS_PER_SECOND = 1_000_000;
+
+export function captureProfileFor(connection: ConnectionHint | null | undefined): CaptureProfile {
+  const weak = !!connection && (
+    connection.saveData === true
+    || (typeof connection.effectiveType === 'string' && WEAK_EFFECTIVE_TYPES.has(connection.effectiveType))
+  );
+  if (!weak) {
+    return {
+      video: { ...CAPTURE_VIDEO_CONSTRAINTS },
+      videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+      audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+      light: false,
+    };
+  }
+  return {
+    video: { ...CAPTURE_VIDEO_CONSTRAINTS, width: { ideal: 960 }, height: { ideal: 540 } },
+    videoBitsPerSecond: LIGHT_VIDEO_BITS_PER_SECOND,
+    audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+    light: true,
+  };
+}
+
+// ─── A camera that never answers (change: media-upload-reliability, D5) ──────
+//
+// Some Android WebViews leave `getUserMedia` pending forever: no stream, no error. The widget
+// sat on "opening the camera" with its fallback (the native camera input) unreachable. Race it
+// against a deadline; on timeout reject with `camera/timeout` so the caller shows the fallback,
+// and if the stream turns up LATER, stop it so the camera light does not stay on behind the
+// player's back.
+export const CAMERA_OPEN_DEADLINE_MS = 12_000;
+
+export function withCameraDeadline<T>(
+  opening: Promise<T>,
+  ms: number,
+  stopLate: (stream: T) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let expired = false;
+    const timer = setTimeout(() => {
+      expired = true;
+      reject(Object.assign(new Error('camera did not open'), { code: 'camera/timeout' }));
+    }, ms);
+    opening.then(
+      (stream) => {
+        if (expired) {
+          try { stopLate(stream); } catch { /* best effort */ }
+          return;
+        }
+        clearTimeout(timer);
+        resolve(stream);
+      },
+      (err) => {
+        if (expired) return;
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 // Extension → content type, used ONLY when a picked File carries an empty `type`
 // (some Android pickers). Every value must be one the server accepts, or the
 // fallback becomes a dead end with extra steps: the upload succeeds and the

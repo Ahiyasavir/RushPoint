@@ -3,7 +3,7 @@
 //
 // WHY THE REMAP MATTERS. Games live at `users/{ownerUid}/games/{gameId}`, and the
 // emulator minted different UIDs than production for the same person — e.g.
-// spendora.tracker@gmail.com is Ub8dt0H1… in the emulator but wTYDwnEZ… in the real
+// admin.rushpoint@gmail.com is Ub8dt0H1… in the emulator but wTYDwnEZ… in the real
 // project. Copying a game across verbatim would file it under a UID that nobody can
 // sign in as, so the creator would never see it. Every ownerUid — the document PATH,
 // the game's own `ownerUid` field, and the denormalised copies on
@@ -33,7 +33,7 @@ if (!BUNDLE) {
 // those ids are literal strings, not generated UIDs, so they mean the same thing
 // in both places.
 const OWNER_REMAP = {
-  // spendora.tracker@gmail.com — the human creator.
+  // admin.rushpoint@gmail.com — the human creator.
   Ub8dt0H1cMwjAbXcyqTSJavdYapu: 'wTYDwnEZP6MhGyaGINbumaYqKem1',
 };
 
@@ -52,7 +52,7 @@ const IMPORT_GAMES = new Set([
 const PROFILE_OVERRIDES = {
   wTYDwnEZP6MhGyaGINbumaYqKem1: {
     uid: 'wTYDwnEZP6MhGyaGINbumaYqKem1',
-    email: 'spendora.tracker@gmail.com',
+    email: 'admin.rushpoint@gmail.com',
     displayName: 'אחיה סביר',
   },
 };

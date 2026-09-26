@@ -21,7 +21,7 @@ import { planTestDriveAutoJoin } from '../lib/testDriveAutoJoin';
 // the same links (a player who finishes without ever re-reading Join still needs
 // a route to the privacy policy).
 
-export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, onDemo }: {
+export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, onJoined, onStaff, onDemo }: {
   /**
    * The access code carried by the link, already resolved by lib/playRoute.ts.
    * The URL is parsed in exactly ONE place now: a screen re-reading
@@ -36,6 +36,11 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
    * participant's registration.
    */
   autoJoin?: boolean;
+  /**
+   * The team's device code from an "add a phone" link (change: team-phones-simple, D1). The
+   * screen opens in attach mode, pre-filled, and says "join team <name>" with one field.
+   */
+  initialDeviceCode?: string;
   onJoined: (s: Session) => void;
   onStaff?: () => void;
   /**
@@ -57,8 +62,8 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
   const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
   // Shared team devices: team-mode games offer "my team is already in" — this
   // phone attaches to an existing team via its device join code.
-  const [joinMode, setJoinMode] = useState<'create' | 'attach'>('create');
-  const [teamCode, setTeamCode] = useState('');
+  const [joinMode, setJoinMode] = useState<'create' | 'attach'>(initialDeviceCode ? 'attach' : 'create');
+  const [teamCode, setTeamCode] = useState(initialDeviceCode ?? '');
   const [memberName, setMemberName] = useState('');
   // Auto-focus the code field and animate/focus a newly-added member row.
   const codeRef = useRef<HTMLInputElement>(null);
@@ -142,9 +147,14 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
     unlockAudio(); // first user gesture — satisfy the iOS/Safari autoplay policy
     setErr('');
     try {
-      const i = await getJoinInfo({ code: normalizeJoinCodeInput(code) });
+      const i = await getJoinInfo({
+        code: normalizeJoinCodeInput(code),
+        ...(initialDeviceCode ? { deviceCode: initialDeviceCode } : {}),
+      });
       if (i.runStatus === 'finished') { setErr(t.join.finished); return; }
       setInfo(i);
+      // A device code that matches no team: keep the ordinary attach form, pre-filled, and say why.
+      if (initialDeviceCode && i.deviceTeam === null) setErr(t.devices.linkTeamNotFound);
     } catch (e) {
       setErr(joinError(e));
     }
@@ -580,15 +590,25 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
         <>
           <div className="space-y-4 flex-1">
             <Card className="p-5">
-              <p className="text-sm text-zinc-400 mb-4 leading-relaxed">{t.devices.attachExplain}</p>
-              <Input
-                value={teamCode}
-                dir="ltr"
-                onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
-                placeholder={t.devices.teamCodePlaceholder}
-                className="text-center font-mono text-xl tracking-[0.4em] mb-3"
-                maxLength={6}
-              />
+              {info?.deviceTeam ? (
+                // Arrived by the team's own link: the code is already known and correct, so
+                // the only thing left to ask is this phone's name.
+                <p dir="auto" className="text-base font-semibold text-zinc-100 mb-4 leading-relaxed" data-testid="join-team-by-link">
+                  {t.devices.joinTeamByLink({ team: info.deviceTeam.displayName })}
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-zinc-400 mb-4 leading-relaxed">{t.devices.attachExplain}</p>
+                  <Input
+                    value={teamCode}
+                    dir="ltr"
+                    onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
+                    placeholder={t.devices.teamCodePlaceholder}
+                    className="text-center font-mono text-xl tracking-[0.4em] mb-3"
+                    maxLength={6}
+                  />
+                </>
+              )}
               <Input
                 value={memberName}
                 dir="auto"

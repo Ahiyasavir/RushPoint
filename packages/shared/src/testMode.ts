@@ -82,6 +82,10 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
       copy(out, r, 'taskId');
       copy(out, r, 'taskIndex');
       copy(out, r, 'status');
+      // skip-keeps-the-stage: WHY a record is skipped. Not a secret (an operational fact about the
+      // team's own progress), and the locked-mission list needs it: a mission opened by an
+      // organizer's skip must stop reading "locked" on the player's phone.
+      copy(out, r, 'skipCause');
       copy(out, r, 'startedAt');
       copy(out, r, 'completedAt');
       copy(out, r, 'actualMinutes');

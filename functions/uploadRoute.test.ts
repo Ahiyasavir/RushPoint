@@ -25,6 +25,8 @@ const {
   streamToFileWithLimit,
   sweepStaleTempUploads,
   createUploadHandler,
+  uploadFailureResponse,
+  uploadLogRecord,
 } = require('./uploadRoute.js');
 
 const UID = 'team-uid-1';
@@ -360,5 +362,55 @@ describe('temp-file sweep', () => {
 
   it('is a no-op when no temp dir exists', async () => {
     await expect(sweepStaleTempUploads(uploadDir)).resolves.toBe(0);
+  });
+});
+
+// ── media-upload-reliability ──────────────────────────────────────────────────
+// A server-side STALL used to answer 400 INVALID_ARGUMENT, which the phone treats as a PERMANENT
+// refusal (only 408/429/5xx are retried), so a phone that paused sending for 45 s (screen locked,
+// app switched) was told "upload failed" and never retried. And nothing recorded how uploads
+// perform in the field: "how long do uploads take?" had no answer in production.
+describe('failure statuses (media-upload-reliability)', () => {
+  it('a stall is 408, which the client retries', () => {
+    expect(uploadFailureResponse('stalled').status).toBe(408);
+  });
+  it('an io error is 500, also retried', () => {
+    expect(uploadFailureResponse('io').status).toBe(500);
+  });
+  it('too-large stays a 400 (a real refusal, never retried)', () => {
+    expect(uploadFailureResponse('too-large').status).toBe(400);
+  });
+  it('an unknown reason is a 500, never a permanent 400', () => {
+    expect(uploadFailureResponse('weird' as never).status).toBe(500);
+  });
+});
+
+describe('upload telemetry (media-upload-reliability)', () => {
+  it('records kind, bytes, duration, outcome and run, and NO uid or filename', () => {
+    const rec = uploadLogRecord({ contentType: 'video/webm', bytes: 1234, ms: 5678, outcome: 'ok', uploadPath: `runs/run9/teams/${UID}/t-1.webm` });
+    expect(rec).toEqual({ msg: 'upload', kind: 'video', bytes: 1234, ms: 5678, outcome: 'ok', runId: 'run9' });
+    expect(JSON.stringify(rec)).not.toContain(UID);
+    expect(JSON.stringify(rec)).not.toContain('t-1.webm');
+  });
+  it('classifies photo and audio, and a creator upload', () => {
+    expect(uploadLogRecord({ contentType: 'image/jpeg', bytes: 1, ms: 1, outcome: 'ok', uploadPath: 'runs/r/teams/x/a.jpg' }).kind).toBe('photo');
+    expect(uploadLogRecord({ contentType: 'audio/webm', bytes: 1, ms: 1, outcome: 'ok', uploadPath: 'runs/r/teams/x/a.webm' }).kind).toBe('audio');
+    const c = uploadLogRecord({ contentType: 'image/png', bytes: 1, ms: 1, outcome: 'ok', uploadPath: 'gameMedia/u/games/g/a.png' });
+    expect(c.kind).toBe('creator');
+    expect(c.runId).toBeNull();
+  });
+  it('the handler logs one record for a successful upload', async () => {
+    const lines: unknown[] = [];
+    const a = express();
+    a.put('/upload', createUploadHandler({
+      verifyIdToken: async () => ({ uid: UID }), uploadDir, resolveOrigin: () => 'https://api.example.test',
+      onResponse: () => {}, log: (r: unknown) => lines.push(r),
+    }));
+    const res = await request(a).put(`/upload?path=${encodeURIComponent(okPath)}`)
+      .set('Authorization', 'Bearer ok').set('Content-Type', 'image/jpeg').send(Buffer.from([1, 2, 3]));
+    expect(res.status).toBe(200);
+    expect(lines).toHaveLength(1);
+    expect((lines[0] as { outcome: string; bytes: number }).outcome).toBe('ok');
+    expect((lines[0] as { outcome: string; bytes: number }).bytes).toBe(3);
   });
 });

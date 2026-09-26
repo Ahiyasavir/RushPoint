@@ -68,8 +68,10 @@ check('storage.rules carries the same video cap',
 // This is the assertion that fails if someone raises VIDEO_DURATION_LIMITS.ceiling
 // without re-deriving the byte cap — the exact drift that would ship an upload path
 // refusing missions the Builder happily authored.
+// The pin now comes from the capture profile (change: media-upload-reliability, D9); the default
+// profile IS VIDEO_BITS_PER_SECOND and the light one is lower (scripts/test-video-capture.ts).
 check('the recorder pins its bitrate rather than taking the browser default',
-  /videoBitsPerSecond:\s*VIDEO_BITS_PER_SECOND/.test(taskRunner));
+  /videoBitsPerSecond:\s*profileRef\.current\.videoBitsPerSecond/.test(taskRunner));
 
 const capBytes = (serverMb ?? 0) * 1024 * 1024;
 const worstCase = ((2_000_000 + 96_000) * VIDEO_DURATION_LIMITS.ceilingSeconds) / 8;

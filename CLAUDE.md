@@ -1105,6 +1105,20 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   under time pressure. The dialog has a real `title` slot now and each action a verb
   (`rc.confirmCta`); `scripts/test-confirm-cta.ts` fails if an action gains `confirm: true` without
   gaining one.
+- **A permission that is written and never read is not a permission.** Staff invites carried a
+  `permissions` array from day one; no gate ever consulted it, so every staff PIN could add points,
+  skip missions and read teams' survey answers. The organizer found out by asking for the feature.
+  Since change `staff-capabilities`, every callable that admits staff calls
+  `assertStaffCan(context, ownerUid, runId, '<capability>')` (`functions/src/auth.ts`), which resolves
+  the person's grant and code LIVE, and the capability is declared once in
+  `STAFF_CAPABILITY_BY_CALLABLE` (`packages/shared/src/staffCapabilities.ts`).
+  `scripts/test-callable-hardening.ts` (C6) fails on a bare `assertStaffOrOwner` in a callable, on a
+  gate whose capability disagrees with the table, and on a stale table entry. **A new staff-reachable
+  callable ⇒ add it to the table and gate it with `assertStaffCan`; an inline `token.staff` check is
+  the same hole again.** Two traps closed with it: a refusal carries its reason in the HttpsError
+  `details` (`staffRefusal`), never the message, because `permission-denied` otherwise reads as an
+  expired session and sends a marshal to a PIN screen that cannot help; and an invite minted before
+  the change has NO `capabilities` field, which means FULL, so a run live at deploy time keeps its staff.
 - **A safety callable with two entry points will drift, and the silent one is the dangerous one.**
   `triggerSOS` is called from PlayScreen's SOS button (which always alerted on failure) and from
   TaskRunner's "I'm stuck" affordance, whose catch read `/* let the player tap again; nothing

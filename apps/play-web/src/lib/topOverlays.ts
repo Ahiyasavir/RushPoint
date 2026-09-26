@@ -19,6 +19,9 @@ export const TOP_OVERLAY_ORDER = {
   offline: 10,
   /** Online, but the poll is failing. Subordinate to `offline`, which supersedes it. */
   reconnecting: 20,
+  /** This phone just gained or lost the answering role (change: team-phones-simple, D4). Above
+   *  a celebration: the phone that lost the role must see "take it back" before anything else. */
+  handover: 25,
   /** Transient celebration. Never outranks a problem. */
   powerUp: 30,
   /** Outcome of a share the player just asked for (change: share-ladder-unification).

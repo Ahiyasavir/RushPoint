@@ -45,6 +45,7 @@ import {
   CALLABLE_FLOOR,
   WRAPPER_MODULE,
 } from './lib/callableHardening.mjs';
+import { STAFF_CAPABILITY_BY_CALLABLE } from '../packages/shared/src/staffCapabilities';
 
 let passed = 0;
 let failed = 0;
@@ -306,6 +307,32 @@ ok(callables.length >= CALLABLE_FLOOR,
     .filter(([, reason]) => typeof reason !== 'string' || reason.trim().length < 10)
     .map(([n]) => n);
   ok(unreasoned.length === 0, `C5: every exemption carries a written reason — ${unreasoned.join(', ')}`);
+}
+
+// C6 — staff capabilities (change: staff-capabilities). A staff token used to pass every staff
+// callable, because the invite's `permissions` were never read. Now every callable that admits
+// staff names ONE capability through `assertStaffCan`, and it must be the one declared in the
+// shared table the console and the staff app also read. A bare `assertStaffOrOwner` in a callable
+// is how an ungated staff door comes back, so it fails here.
+{
+  const bare: string[] = [];
+  const wrong: string[] = [];
+  const gated = new Map<string, Set<string>>();
+  for (const c of callables) {
+    if (/\bassertStaffOrOwner\s*\(/.test(c.body)) bare.push(`${c.rel}:${c.line} ${c.name}`);
+    const caps = [...c.body.matchAll(/\bassertStaffCan\s*\([\s\S]*?'(\w+)'\s*,?\s*\)/g)].map((m) => m[1]);
+    if (caps.length === 0) continue;
+    gated.set(c.name, new Set(caps));
+    const declared = STAFF_CAPABILITY_BY_CALLABLE[c.name];
+    if (!declared || caps.some((cap) => cap !== declared)) {
+      wrong.push(`${c.name} uses ${caps.join('/')} but the table says ${declared ?? 'nothing'}`);
+    }
+  }
+  ok(bare.length === 0, `C6: no callable admits staff without naming a capability — bare: ${bare.join(', ')}`);
+  ok(wrong.length === 0, `C6: every staff gate matches STAFF_CAPABILITY_BY_CALLABLE — ${wrong.join('; ')}`);
+  const stale = Object.keys(STAFF_CAPABILITY_BY_CALLABLE).filter((n) => !gated.has(n));
+  ok(stale.length === 0, `C6: every table entry is a callable that really gates on it — stale: ${stale.join(', ')}`);
+  ok(gated.size >= 16, `C6 anti-vacuity: found ${gated.size} staff-gated callables, expected >= 16`);
 }
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} callable hardening: ${passed} passed, ${failed} failed`);

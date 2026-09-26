@@ -1,3 +1,4 @@
+import type { StaffCapability } from '../staffCapabilities';
 import type { MediaKind } from '../mediaKinds';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -71,6 +72,13 @@ export const FIRESTORE_PATHS = {
 
   staffInvite: (ownerUid: string, gameId: string, runId: string, inviteId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites/${inviteId}`,
+
+  // One document per staff PERSON on a run (change: staff-capabilities): which code they joined
+  // with, and whether the organizer removed them. Written only by callables.
+  staffGrant: (ownerUid: string, gameId: string, runId: string, staffUid: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/staffGrants/${staffUid}`,
+  staffGrantsCol: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/staffGrants`,
 
   publicGame:  (gameId: string) => `publicGames/${gameId}`,
   publicTask:  (taskId: string) => `publicTasks/${taskId}`,
@@ -645,6 +653,10 @@ export interface Game {
   // the Builder. Equivalent to setting `smart.autoApprove` on every media mission,
   // without touching a single task.
   autoApproveAllMedia?: boolean;
+  // What a new staff code may do when the organizer does not choose (change: staff-capabilities).
+  // Absent = everything, which is what every game had before. Read when a code is MINTED, never
+  // afterwards, so editing the template never changes a code already handed out.
+  staffDefaults?: { capabilities: StaffCapability[] };
   // Every declared member must be on their own phone before the team plays
   // (change: every-member-plays). OFF by default and read as a LITERAL `true`: this
   // holds a team out of a game they turned up to play.
@@ -976,9 +988,30 @@ export interface StaffInvite {
   ownerUid: string;
   pin: string;
   displayName?: string;
+  /** Dead since staff-capabilities (never enforced); kept for invites minted before it. */
   permissions: StaffPermission[];
   usedAt?: string;
   createdAt: string;
+  // ── staff-capabilities: a CODE shared by several people ──
+  /** What people on this code may do. Absent on a pre-change invite, which means full. */
+  capabilities?: StaffCapability[];
+  /** The organizer's own name for the code ("north gate", "judges"). */
+  label?: string;
+  /** True for every code minted since staff-capabilities; absent = legacy single-use invite. */
+  multiUse?: boolean;
+  /** Stops NEW sign-ins; people already on the code keep working until removed. */
+  disabled?: boolean;
+  /** Bumped on every edit, so a staff console knows to refresh its session. */
+  version?: number;
+}
+
+// Stored at: users/{ownerUid}/games/{gameId}/runs/{runId}/staffGrants/{staffUid}
+export interface StaffGrant {
+  codeId: string;
+  name: string;
+  removed: boolean;
+  joinedAt: string;
+  removedAt?: string;
 }
 
 
@@ -1031,10 +1064,26 @@ export interface RehearsalReveal {
   order?: string[];
 }
 
+/**
+ * WHY a task record is `skipped` (change: skip-keeps-the-stage). Only `operator`, a single mission
+ * skipped by an organizer or staff (skipTaskForTeam), satisfies the unlock gates of the missions
+ * behind it; every other cause keeps today's meaning. A record with no cause (written before this
+ * field existed) reads as NOT satisfying. The rule itself lives in gating.ts `satisfiesGate`.
+ */
+export type SkipCause =
+  | 'operator'        // skipTaskForTeam: remove ONE obstacle for ONE team
+  | 'operatorStage'   // skipStage: the organizer ended the stage
+  | 'exclusive'       // the team chose another alternative of an exclusive group
+  | 'expired'         // the task's time window closed while the team held it
+  | 'unreachable'     // retired: gated behind a task this team can never satisfy
+  | 'stageSatisfied'; // leftover: the stage's requirement was already met
+
 export interface RunTaskRecord {
   taskId: string;
   taskIndex: number;  // index into Stage.tasks for multi-task stages
   status: TaskStatus;
+  /** Set on every `skipped` record written from skip-keeps-the-stage on. */
+  skipCause?: SkipCause;
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;
@@ -1151,6 +1200,12 @@ export interface RunTeam {
   status: TeamStatus;
   stages: RunStageRecord[];
   score: number;
+  /**
+   * Every operator-made score change, with its reason (changes: send-team-back,
+   * team-dossier-and-search). Organizer-facing only: never allow-listed to participants.
+   * Written with appendScoreLedger (packages/shared/src/scoreLedger.ts), bounded, whole-array.
+   */
+  scoreLedger?: import('../scoreLedger').ScoreLedgerEntry[];
   // Sign convention: bonusPenalty is SUBTRACTED from the final score. A BONUS is a
   // NEGATIVE penalty (a decrement); a fine is a positive penalty. adjustTeamScore
   // (np = p - delta), zone-capture bonuses, and power-up bonuses all follow this.
@@ -1684,6 +1739,8 @@ export interface UpdateGamePayload {
   // Both default false when absent, so every existing game is untouched.
   autoStartLateJoiners?: boolean;
   autoApproveAllMedia?: boolean;
+  // staff-capabilities: what a new staff code may do.
+  staffDefaults?: { capabilities: StaffCapability[] };
   // Every declared member on their own phone (change: every-member-plays). Default
   // false when absent.
   requireAllMembersOnline?: boolean;

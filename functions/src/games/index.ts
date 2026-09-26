@@ -66,6 +66,8 @@ import {
   validateConsentFlag,
   // הקמה מהירה / Quick Setup (change: quick-setup-wizard).
   normalizeWizardSteps,
+  normalizeStaffCapabilities,
+  type StaffCapability,
   extractQuickSetupSteps,
   pruneWizardSteps,
   // Benched missions (change: mission-card-actions) — never published.
@@ -430,6 +432,19 @@ function resyncPublicGameSummary(gameId: string, merged: Game, updatedAt: string
   }).catch((e) => logBestEffort('publicGames.resync', { gameId }, e));
 }
 
+/**
+ * `Game.staffDefaults` from a client or a file (change: staff-capabilities). Refused LOUDLY when
+ * malformed or naming an unknown capability: silently dropping it would store "absent", which
+ * means EVERYTHING, i.e. a typo would hand staff the power the organizer tried to withhold.
+ */
+function validateStaffDefaults(value: unknown): { capabilities: StaffCapability[] } {
+  const caps = value && typeof value === 'object'
+    ? normalizeStaffCapabilities((value as { capabilities?: unknown }).capabilities)
+    : null;
+  if (!caps) throw new functions.https.HttpsError('invalid-argument', 'staffDefaults must list known staff capabilities');
+  return { capabilities: caps };
+}
+
 export const updateGame = loggedCallable('updateGame', async (data, context) => {
   const uid = requireAuth(context);
   const {
@@ -441,6 +456,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     autoStartLateJoiners, autoApproveAllMedia, requireAllMembersOnline,
     instructions, pinnedFirst, wizardSteps,
   } = data as UpdateGamePayload;
+  const { staffDefaults } = data as { staffDefaults?: unknown };
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
   // raw payload with a narrow cast rather than the UpdateGamePayload destructure
   // — the shared payload type does not carry the field yet (see
@@ -549,6 +565,8 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // must never be read as the creator having asked for that.
   if (autoStartLateJoiners !== undefined) updates.autoStartLateJoiners = autoStartLateJoiners === true;
   if (autoApproveAllMedia !== undefined)  updates.autoApproveAllMedia = autoApproveAllMedia === true;
+  // change: staff-capabilities. Read when a staff code is MINTED, never afterwards.
+  if (staffDefaults !== undefined) updates.staffDefaults = validateStaffDefaults(staffDefaults);
   // change: every-member-plays. STRICT boolean for the same reason as above: this one
   // holds a team out of a game they turned up to play.
   if (requireAllMembersOnline !== undefined) updates.requireAllMembersOnline = requireAllMembersOnline === true;
@@ -1499,6 +1517,10 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     ? normalizeWizardSteps(parsed.wizardSteps)
     : (extracted?.wizardSteps ?? []);
 
+  // staff-capabilities: validated like updateGame (a file is still client-supplied bytes).
+  const rawStaffDefaults = (parsed as { staffDefaults?: unknown }).staffDefaults;
+  const importedStaffDefaults = rawStaffDefaults === undefined ? undefined : validateStaffDefaults(rawStaffDefaults);
+
   if (target) {
     // Replace = every authored field the file format carries. A field the file does
     // NOT carry is DELETED, not left behind: "load this file into this game" must
@@ -1536,6 +1558,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     setOrClear('requiresGuardianConsent', parsed.requiresGuardianConsent);
     setOrClear('safeZone', importedZone.value);
     setOrClear('wizardSteps', (importedSteps ?? []).length > 0 ? importedSteps : undefined);
+    setOrClear('staffDefaults', importedStaffDefaults);
 
     await db.doc(gamePath(uid, target.id)).update(updates);
     if (target.visibility === 'public') {
@@ -1576,6 +1599,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // the spread above would otherwise carry any extra key straight onto a field the
   // safety path reads.
   if (importedZone.value) game.safeZone = importedZone.value; else delete game.safeZone;
+  if (importedStaffDefaults) game.staffDefaults = importedStaffDefaults; else delete game.staffDefaults;
 
   // ONE write. Deliberately not createGame + updateGame (two writes, which can
   // strand an empty game if the second fails) — and deliberately a fresh document

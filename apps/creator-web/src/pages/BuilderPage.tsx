@@ -16,6 +16,8 @@ import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWeb
 // Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
+import { defaultCodeCapabilities } from '@rushpoint/shared';
+import { CapabilityChecklist } from '../components/StaffCodesPanel';
 import { resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, MeasuringStrategy,
@@ -1963,6 +1965,18 @@ function StepDetails({ game, patch, qsAnchor }: {
             onChange={(e) => patch({ autoApproveAllMedia: e.target.checked })} />
           {b.autoApproveAllMediaLabel}
         </label>
+
+        {/* Staff permissions default (change: staff-capabilities). What a new staff code may do;
+            each code can still be changed on the run screen during the game. Absent = everything,
+            so an untouched game behaves exactly as before. */}
+        <details className="rounded-lg border border-[--rp-border] px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium text-[--ink-1] min-h-[44px] flex items-center">{b.staffDefaultsTitle}</summary>
+          <p className="text-xs text-[--ink-3] mt-1 mb-2">{b.staffDefaultsHint}</p>
+          <CapabilityChecklist
+            value={defaultCodeCapabilities(game.staffDefaults)}
+            onChange={(next) => patch({ staffDefaults: { capabilities: next } })}
+          />
+        </details>
 
         {/* Everyone on their own phone (change: every-member-plays): default OFF.
             Fails open on an unknown headcount - a game that never collects member

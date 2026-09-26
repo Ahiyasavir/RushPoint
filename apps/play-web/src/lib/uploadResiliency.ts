@@ -71,6 +71,45 @@ export async function runWithRetry<T>(fn: (attempt: number) => Promise<T>, opts:
   throw lastErr;
 }
 
+// ── Per-attempt budget (change: media-upload-reliability, D2) ───────────────
+// The absolute cap on ONE attempt used to be a flat 180 s, which killed a healthy 12 MB clip on a
+// 3G link while it was still moving, then re-sent the whole thing (five copies of one clip in
+// 50 s in the 2026-09-25 logs). The no-progress stall detector is the real "dead" signal; this cap
+// only has to be generous enough that a slow-but-moving upload finishes: size at a ~100 kbps
+// floor plus a minute, never under the old 180 s, never over 15 minutes.
+const ATTEMPT_BUDGET_FLOOR_MS = 180_000;
+const ATTEMPT_BUDGET_SLACK_MS = 60_000;
+const FLOOR_BYTES_PER_SECOND = 12_288;
+export const ATTEMPT_BUDGET_CAP_MS = 15 * 60_000;
+
+export function attemptBudgetMs(bytes: number): number {
+  if (!Number.isFinite(bytes) || bytes <= 0) return ATTEMPT_BUDGET_FLOOR_MS;
+  const derived = Math.round((bytes / FLOOR_BYTES_PER_SECOND) * 1000) + ATTEMPT_BUDGET_SLACK_MS;
+  return Math.min(ATTEMPT_BUDGET_CAP_MS, Math.max(ATTEMPT_BUDGET_FLOOR_MS, derived));
+}
+
+// ── A backoff the player can cut short (change: media-upload-reliability, D6) ─
+// iOS suspends network work in a backgrounded tab, so a transfer "stalls" while the player
+// checks WhatsApp. When they come back, the retry should go now rather than after the rest of a
+// backoff that was sized for a flaky link. `subscribe` registers the wake signal and returns its
+// own unsubscribe; the sleep ends on whichever comes first.
+export function interruptibleSleep(ms: number, subscribe: (wake: () => void) => () => void): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let done = false;
+    let unsubscribe: () => void = () => {};
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { unsubscribe(); } catch { /* best effort */ }
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    try { unsubscribe = subscribe(finish); } catch { /* no wake signal: a plain sleep */ }
+    if (done) { try { unsubscribe(); } catch { /* best effort */ } }
+  });
+}
+
 // ── Timeout race ────────────────────────────────────────────────────────────
 // Rejects with a coded error (so the caller can classify it as retryable) and
 // invokes `onTimeout` exactly once so a resumable upload task can be cancelled

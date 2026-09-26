@@ -39,6 +39,13 @@ check('the two tones are visually distinct', taskMessageClass('error') !== taskM
 check('permission-denied is an expired session',
   classifyStaffError({ code: 'permission-denied' }).key === 'sessionExpired'
   && classifyStaffError({ code: 'permission-denied' }).sessionExpired === true);
+// staff-capabilities: a code that lacks the permission is NOT an expired session. Sending a marshal
+// back to the PIN screen for it changes nothing: the same code is refused again.
+check('a missing staff capability is notAllowed, not an expired session',
+  classifyStaffError({ code: 'functions/permission-denied', details: { reason: 'staff-capability-missing' } }).key === 'notAllowed'
+  && classifyStaffError({ code: 'functions/permission-denied', details: { reason: 'staff-capability-missing' } }).sessionExpired === false);
+check('a removed staff member is told so, not asked to sign in again',
+  classifyStaffError({ code: 'permission-denied', details: { reason: 'staff-removed' } }).key === 'removedTitle');
 check('unauthenticated is an expired session',
   classifyStaffError({ code: 'unauthenticated' }).sessionExpired === true);
 check('the functions/ prefix is stripped',

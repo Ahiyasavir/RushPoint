@@ -12,8 +12,17 @@ interface DialogRequest {
   message: string;
   confirmLabel?: string;
   danger?: boolean;
+  /**
+   * A phone call offered INSIDE the dialog (change: sos-points-to-101). Rendered as a real
+   * `tel:` link, not a button: the OS handles it even if this app's JS is stuck, and it does
+   * not close the dialog, so a player can call 101 and still send the organizer alert.
+   */
+  callAction?: CallAction;
   resolve: (value: boolean) => void;
 }
+
+export interface CallAction { href: string; label: string }
+type DialogOpts = { confirmLabel?: string; danger?: boolean; callAction?: CallAction };
 
 let counter = 0;
 // FIFO queue so a second dialog opened while one is showing doesn't overwrite
@@ -22,7 +31,7 @@ let counter = 0;
 const queue: DialogRequest[] = [];
 let show: ((req: DialogRequest | null) => void) | null = null;
 
-function push(kind: DialogKind, message: string, opts?: { confirmLabel?: string; danger?: boolean }) {
+function push(kind: DialogKind, message: string, opts?: DialogOpts) {
   return new Promise<boolean>((resolve) => {
     const req: DialogRequest = { id: ++counter, kind, message, resolve, ...opts };
     if (!show) { resolve(kind !== 'confirm'); return; }
@@ -32,8 +41,9 @@ function push(kind: DialogKind, message: string, opts?: { confirmLabel?: string;
 }
 
 export const dialog = {
-  alert: (message: string) => push('alert', message).then(() => undefined),
-  confirm: (message: string, opts?: { confirmLabel?: string; danger?: boolean }) =>
+  alert: (message: string, opts?: Pick<DialogOpts, 'callAction'>) =>
+    push('alert', message, opts).then(() => undefined),
+  confirm: (message: string, opts?: DialogOpts) =>
     push('confirm', message, opts),
 };
 
@@ -106,6 +116,15 @@ export function DialogHost() {
         className="w-full max-w-md p-6 space-y-5"
       >
         <p id={labelId} className="text-base text-zinc-100 whitespace-pre-line text-center">{req.message}</p>
+        {req.callAction && (
+          <a
+            href={req.callAction.href}
+            className="flex w-full min-h-[52px] items-center justify-center gap-2 rounded-2xl border-[3px] border-ink-alert bg-white px-5 text-base font-extrabold text-ink-alert active:scale-[0.98] transition-transform"
+            data-testid="dialog-call-action"
+          >
+            {req.callAction.label}
+          </a>
+        )}
         <div className="space-y-2.5">
           <Button ref={confirmRef} variant={req.danger ? 'danger' : 'primary'} onClick={() => close(true)}>
             {req.confirmLabel ?? (req.kind === 'alert' ? t.common.ok : t.common.confirm)}

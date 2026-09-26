@@ -120,6 +120,10 @@ export const EXPORTED_GAME_KEYS = [
   // authored field. It points at stage/task ids, which import preserves verbatim,
   // so the pointers survive the round trip without a remap.
   'wizardSteps',
+  // What a new staff code may do (change: staff-capabilities). An authored organizer choice ("my
+  // marshals never add points"), so it round trips; a file that dropped it would quietly restore
+  // a game whose staff can do everything.
+  'staffDefaults',
 ] as const satisfies readonly (keyof Game)[];
 
 /**
@@ -408,6 +412,7 @@ const GAME_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   manualLeaderboardReveal: 'boolean',
   testMode: 'boolean',
   wizardSteps: 'objectList',
+  staffDefaults: 'object',
 };
 
 /** Every wrongly-typed PRESENT field of `bag`, as `label: field must be …`. */

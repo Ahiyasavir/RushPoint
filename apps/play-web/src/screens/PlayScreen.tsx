@@ -1,6 +1,9 @@
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
+import { emergencyTelHref, gateSatisfiedTaskIds, senderQuiet } from '@rushpoint/shared';
+import { claimController } from '../services/calls';
+import { haptic } from '../lib/haptics';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { shouldSendPing } from '../lib/pingGate';
 import { db, ensureAuth, uid } from '../services/firebase';
@@ -112,6 +115,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // mistake that crashed TaskRunner in production (CLAUDE.md, rules-of-hooks).
   // `session.teamId` is stable for the life of this screen.
   const [viewingTab, setViewingTab] = useState<DrawerTabId | null>(null);
+  // Something on the mission card asked for a drawer tab (change: submission-status-truth:
+  // "message the organizer" on the waiting card). A nonce so the same tab can be asked twice.
+  const [drawerRequest, setDrawerRequest] = useState<{ tab: DrawerTabId; nonce: number } | null>(null);
   const { unreadCount: chatUnread } = useTeamChat(session, session.teamId ?? uid() ?? '', viewingTab === 'chat');
   // Shared team devices: only the CONTROLLING phone pings the live map, so the
   // team's pin follows whoever is actually playing instead of flickering.
@@ -412,6 +418,39 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return () => window.clearTimeout(id);
   }, [beat]);
 
+  // Hand-over without a dialog (change: team-phones-simple, D4). The role is derived live from the
+  // team doc, so a flip shows up on every phone's next snapshot. The phone that LOST it gets a 10 s
+  // "X is sending now · take it back" (undo protects against a mistaken tap without taxing every
+  // intentional one); the phone that GAINED it gets a short "you're sending now" and a haptic.
+  const liveIsController = state ? (state.team.controllerUid ?? state.team.id) === uid() : null;
+  const prevIsController = useRef<boolean | null>(null);
+  const [handover, setHandover] = useState<{ kind: 'lost' | 'gained'; name: string } | null>(null);
+  useEffect(() => {
+    if (liveIsController === null) return;
+    const prev = prevIsController.current;
+    prevIsController.current = liveIsController;
+    if (prev === null || prev === liveIsController || !state) return;
+    if (liveIsController) {
+      haptic('success');
+      setHandover({ kind: 'gained', name: '' });
+    } else {
+      const to = state.team.controllerUid ?? state.team.id;
+      setHandover({ kind: 'lost', name: state.team.devices?.find((d) => d.uid === to)?.name ?? '' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveIsController]);
+  useEffect(() => {
+    if (!handover) return;
+    const id = window.setTimeout(() => setHandover(null), handover.kind === 'lost' ? 10_000 : 4_000);
+    return () => window.clearTimeout(id);
+  }, [handover]);
+  async function takeOver() {
+    haptic('tap');
+    setHandover(null);
+    try { await claimController(session); await refresh(); }
+    catch { await dialog.alert(t.devices.actionFailed); }
+  }
+
   async function leave() {
     // A finished run has nothing left to lose, so skip the "are you sure" prompt
     // (this is the demo-finish exit path via FinalScreen). Mid-run still confirms.
@@ -420,7 +459,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }
 
   async function sos() {
-    if (!(await dialog.confirm(t.play.sosConfirm, { confirmLabel: t.play.sosSend, danger: true }))) return;
+    // Emergency services FIRST (change: sos-points-to-101). This alert reaches the ORGANIZER, who
+    // may be far away; an injury or a real danger needs 101, so every dialog of this flow offers
+    // the call, and none of them promises that help is on the way.
+    const call101 = { href: emergencyTelHref(), label: t.play.sosCall101 };
+    if (!(await dialog.confirm(t.play.sosConfirm, { confirmLabel: t.play.sosSend, danger: true, callAction: call101 }))) return;
     // Resolve a best-effort location first, THEN actually send — and only confirm
     // "sent" once triggerSOS resolves. Reporting success before the call (or
     // ignoring its failure) on a SAFETY feature could leave a team in trouble
@@ -436,9 +479,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     try {
       await triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, ...(coords ?? {}) });
       feedback('alert');
-      await dialog.alert(t.play.sosSent);
+      await dialog.alert(t.play.sosSent, { callAction: call101 });
     } catch {
-      await dialog.alert(t.play.sosFailed);
+      await dialog.alert(t.play.sosFailed, { callAction: call101 });
     }
   }
 
@@ -685,6 +728,17 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
+      {handover && (
+        <TopOverlay kind="handover">
+          <div role="status" aria-live="polite" data-testid="handover-toast"
+            className="max-w-[calc(100%-2rem)] rounded-full bg-zinc-800/90 text-zinc-100 text-sm font-semibold px-4 py-2 shadow-lg flex items-center gap-3">
+            <span dir="auto">{handover.kind === 'gained' ? t.devices.nowSending : t.devices.lostSending({ name: handover.name || t.devices.deviceFallbackName })}</span>
+            {handover.kind === 'lost' && (
+              <button className="min-h-[44px] px-2 text-ink-fire font-bold" onClick={() => void takeOver()}>{t.devices.takeBack}</button>
+            )}
+          </div>
+        </TopOverlay>
+      )}
       <ShareNoteToast note={shareNote} />
       {/* ONE compact strip (change: play-card-simplification). Identity, score,
           progress, streak and every utility used to be EIGHT stacked full-width
@@ -733,7 +787,22 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <div className="mb-4">
         {activeStage ? (
           <>
-            <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} readOnly={!isController} />
+            {!isController && senderQuiet({ presence: state.devicePresence, controllerUid: team.controllerUid ?? team.id }) && (
+              // The answering phone stopped asking for the state minutes ago while this one is
+              // active (team-phones-simple D5): it is probably dead, flat or in a bag.
+              <div dir="auto" className="mb-3 rounded-2xl border border-accent/40 bg-accent/10 p-3 flex items-center gap-3" role="status" data-testid="sender-quiet">
+                <p className="flex-1 text-sm text-zinc-200">{t.devices.senderQuiet({ name: controllerName })}</p>
+                <Button className="shrink-0 !w-auto px-4" onClick={() => void takeOver()}>{t.devices.sendFromMyPhone}</Button>
+              </div>
+            )}
+            <TaskRunner
+              session={session} state={state} stage={activeStage} onChanged={refresh}
+              role={isController ? 'sender' : 'viewer'} senderName={controllerName}
+              onTakeOver={() => void takeOver()}
+              onOpenChat={drawerPlan.tabs.some((tab) => tab.id === 'chat')
+                ? () => setDrawerRequest({ tab: 'chat', nonce: Date.now() })
+                : undefined}
+            />
             <LockedTasksList stage={activeStage} state={state} />
           </>
         ) : state.nextStageReleaseAt && state.nextStageReleaseAt > Date.now() ? (
@@ -761,14 +830,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           A tab exists only when its feature is actually in play, so folding them
           together did not resurrect the empty sections that used to self-hide. */}
       <div className="mt-1 -mx-1 px-1">
-        {!isController && (
-          <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
-            👀 {t.devices.viewingBanner({ name: controllerName })}
-          </div>
-        )}
         <MoreDrawer
           plan={drawerPlan}
           onActiveTabChange={setViewingTab}
+          openRequest={drawerRequest}
           renderTab={(id) => {
             if (id === 'board') {
               return state.run.leaderboard
@@ -1020,8 +1085,10 @@ function useTeamChat(ctx: Session, teamId: string, viewing: boolean) {
 //
 // Closed by default: during a race the mission is the screen, and everything in
 // here is something you go looking for. The badge is what keeps that honest.
-function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
+function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest }: {
   plan: ReturnType<typeof planMoreDrawer>;
+  /** Open the drawer on this tab and bring it into view. A new nonce re-opens. */
+  openRequest?: { tab: DrawerTabId; nonce: number } | null;
   renderTab: (id: DrawerTabId) => ReactNode;
   /**
    * Fires with the tab actually ON SCREEN (drawer open + that tab active), or
@@ -1035,6 +1102,13 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<DrawerTabId | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!openRequest) return;
+    setPicked(openRequest.tab);
+    setOpen(true);
+    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [openRequest]);
 
   const label: Record<DrawerTabId, string> = {
     board: t.more.board, feed: t.more.feed, chat: t.more.chat,
@@ -1054,7 +1128,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
   if (plan.empty) return null;
 
   return (
-    <div className="mt-1">
+    <div className="mt-1" ref={rootRef}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -1249,10 +1323,10 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
 // but do not "fix" it by re-shipping locked tasks to the client.
 function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTeamState }) {
   const { t } = useT();
-  const completedIds = state.team.stages
-    .flatMap((s) => s.tasks)
-    .filter((rec) => rec.status === 'completed')
-    .map((rec) => rec.taskId);
+  // skip-keeps-the-stage: the SAME satisfied-id rule the server gates with (completed +
+  // operator-skipped), so a mission an organizer opened by skipping its prerequisite is not
+  // shown as locked, and its "after X" line does not name the skipped mission.
+  const completedIds = gateSatisfiedTaskIds(state.team.stages);
   const locked = stage.tasks
     .filter((rec) => rec.status === 'unassigned')
     .map((rec) => state.activeStageTasks.find((c) => c.id === rec.taskId))

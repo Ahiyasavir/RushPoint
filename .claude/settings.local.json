@@ -41,7 +41,9 @@
       "Bash(openspec instructions *)",
       "Bash(ssh -o StrictHostKeyChecking=accept-new root@31.70.107.184 \"docker ps --format '{{.Names}}\\\\t{{.Image}}\\\\t{{.Status}}'\")",
       "Bash(mkdir -p \"/c/Users/savir/Projects/Rushpoint/docs/marketing/devlog-hachvav-retro\" 2>/dev/null; ls \"/c/Users/savir/Projects/Rushpoint/docs/marketing\" 2>/dev/null | head -20)",
-      "Bash(python3 -c \"print\\('ok'\\)\")"
+      "Bash(python3 -c \"print\\('ok'\\)\")",
+      "Bash(ffmpeg -version)",
+      "Bash(python -c \"import cv2, mediapipe, moviepy, librosa, soundfile, pydub, noisereduce, webrtcvad, scenedetect, rembg, ffmpeg, bidi, arabic_reshaper, fontTools, faster_whisper; print\\('all present'\\)\")"
     ]
   }
 }

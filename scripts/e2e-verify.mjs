@@ -1083,6 +1083,89 @@ async function main() {
   }
   check('submitStationPhoto still rejects ANOTHER team folder on an emulator URL', emuOtherTeamRejected);
 
+  // [attached-phone-uploads] An ATTACHED phone that holds control must be able to send media.
+  // The client used to upload into the TEAM folder (runs/{run}/teams/{teamId}/…), which every
+  // server gate refuses for a device whose uid is not the team id. These assertions pin the
+  // server contract the fixed client relies on: the device's OWN folder uploads and submits,
+  // the team folder is refused for it.
+  {
+    await player.call('transferController', {
+      ownerUid: creatorCred.user.uid, gameId, runId, toUid: device2Cred.user.uid,
+    });
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    let teamFolderRefused = false;
+    try {
+      await device2.uploadBytesAt(`runs/${runId}/teams/${playerCred.user.uid}/d2-wrong.jpg`, jpeg, 'image/jpeg');
+    } catch { teamFolderRefused = true; }
+    check('an attached phone cannot upload into the TEAM folder (the server half of the bug)', teamFolderRefused);
+    let ownFolderUploaded = false;
+    try {
+      await device2.uploadBytesAt(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`, jpeg, 'image/jpeg');
+      ownFolderUploaded = true;
+    } catch (e) { console.error('      own-folder upload failed:', e?.code ?? e); }
+    check('an attached phone uploads into its OWN folder', ownFolderUploaded);
+    let d2Submit = null;
+    try {
+      d2Submit = await device2.call('submitStationPhoto', {
+        ownerUid: creatorCred.user.uid, gameId, runId,
+        teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+        photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`),
+      });
+    } catch (e) { d2Submit = { error: e?.code ?? String(e) }; }
+    check('an attached phone holding control submits a photo from its own folder',
+      d2Submit?.submitted === true, JSON.stringify(d2Submit));
+    await player.call('claimController', { ownerUid: creatorCred.user.uid, gameId, runId });
+
+    // [team-phones-simple D2] media from ANY attached phone, answers from one. A photo is
+    // evidence, not a guess: a viewing phone may send it, and the record says who did.
+    let viewerSubmit = null;
+    try {
+      viewerSubmit = await device2.call('submitStationPhoto', {
+        ownerUid: creatorCred.user.uid, gameId, runId,
+        teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+        photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`),
+      });
+    } catch (e) { viewerSubmit = { error: e?.code ?? String(e), message: e?.message }; }
+    check('a VIEWING attached phone may send a photo for its team', viewerSubmit?.submitted === true, JSON.stringify(viewerSubmit));
+    const afterViewer = await player.call('getMyTeamState', { code: accessCode });
+    const byWho = afterViewer?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.submittedBy;
+    check('the submission records which phone sent it (and its name)',
+      byWho?.uid === device2Cred.user.uid && byWho?.name === 'Second Phone', JSON.stringify(byWho));
+    let viewerCode = null;
+    try {
+      await device2.call('verifyStationCode', {
+        ownerUid: creatorCred.user.uid, gameId, runId, teamId: playerCred.user.uid, taskId: CODE_TASK_ID, code: 'WHATEVER',
+      });
+    } catch (e) { viewerCode = e?.message ?? ''; }
+    check('a viewing phone still cannot ANSWER (answers stay on one phone)', /not-controller/.test(viewerCode ?? ''), viewerCode);
+    let strangerSubmit = null;
+    try {
+      await stranger.call('submitStationPhoto', {
+        ownerUid: creatorCred.user.uid, gameId, runId,
+        teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+        photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`),
+      });
+    } catch (e) { strangerSubmit = e?.code; }
+    check('a phone NOT attached to the team cannot send its media', typeof strangerSubmit === 'string' && strangerSubmit !== '',
+      String(strangerSubmit));
+    // [team-phones-simple D5] presence: both phones are known to the server, from memory only.
+    await device2.call('getMyTeamState', { code: accessCode });
+    const presence = (await player.call('getMyTeamState', { code: accessCode }))?.devicePresence ?? [];
+    const presentUids = presence.map((p) => p.uid).sort();
+    check('getMyTeamState reports when each phone was last seen',
+      presentUids.includes(playerCred.user.uid) && presentUids.includes(device2Cred.user.uid)
+      && presence.every((p) => typeof p.lastSeenSec === 'number' && p.lastSeenSec >= 0 && p.lastSeenSec < 60),
+      JSON.stringify(presence));
+    // [team-phones-simple D1] the join screen can name the team from its device code, and nothing else.
+    const named = await stranger.call('getJoinInfo', { code: accessCode, deviceCode: teamCode.toLowerCase() });
+    check('getJoinInfo with a device code names the team', named?.deviceTeam?.displayName === 'The Test Lions',
+      JSON.stringify(named?.deviceTeam));
+    check('and carries nothing else about it', Object.keys(named?.deviceTeam ?? {}).join(',') === 'displayName',
+      Object.keys(named?.deviceTeam ?? {}).join(','));
+    const unnamed = await stranger.call('getJoinInfo', { code: accessCode, deviceCode: 'ZZZZZZ' });
+    check('a wrong device code names nobody (and is not an error)', unnamed?.deviceTeam === null, JSON.stringify(unnamed?.deviceTeam));
+  }
+
   const photoSubmit = await player.call('submitStationPhoto', {
     ownerUid: creatorCred.user.uid, gameId, runId,
     teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
@@ -2952,6 +3035,17 @@ async function main() {
     const rejSub = rejTeam.data?.taskSubmissions?.['rq-rej'];
     check('queue reject: status flips to rejected and keeps the review note',
       rejSub?.status === 'rejected' && rejSub?.reviewNote === 'Too dark, try again', JSON.stringify(rejSub));
+    // [submission-status-truth] The PLAYER's screen is built from this record (waiting card,
+    // rejection card, "sent at"). Pin that the participant payload really carries every field it
+    // reads, so a sanitizer that one day drops one breaks here instead of silently on a phone.
+    {
+      const mine = await rqP.call('getMyTeamState', { code: rqCode });
+      const s = mine?.team?.taskSubmissions?.['rq-rej'];
+      check('participant payload carries the rejection, its note, the sent time and the media url',
+        s?.status === 'rejected' && s?.reviewNote === 'Too dark, try again'
+          && typeof s?.submittedAt === 'string' && s?.photoUrl === rqUrl('r1.jpg'),
+        JSON.stringify(s));
+    }
     check('queue reject: rejection awards NO points',
       (rejTeam.data?.score ?? 0) === scoreBeforeReject, `${rejTeam.data?.score} vs ${scoreBeforeReject}`);
     const rejFeed = await rqP.getColAt(rqFeedCol);
@@ -7554,6 +7648,10 @@ async function main() {
       ['participant', pl, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['stranger', str, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['other-run staff', staffB, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      // send-team-back: reopening a mission or stage moves ONE team's score and route.
+      ['participant', pl, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
+      ['stranger', str, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
+      ['other-run staff', staffB, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
       // post-run-player-report: getRunPlayerReport returns team-level identity
       // TOGETHER with what each player submitted and the game's answer keys —
       // everything getRunAnalytics is careful to keep out of an anonymous
@@ -9151,8 +9249,14 @@ async function main() {
       ] }],
     });
     const { runId: rc } = await creator.call('launchRun', { gameId: gc });
-    const { pin } = await creator.call('inviteStaff', {
-      ownerUid: OWNER, gameId: gc, runId: rc, name: 'Solo Marshal', permissions: ['review_photos'],
+    // staff-capabilities made every NEW code multi-use (several marshals share one PIN), so the
+    // single-use guarantee now belongs to invites minted BEFORE that change, which still exist in
+    // runs that were live at deploy time. Written directly, in exactly the legacy shape.
+    const legacyRef = adminSdk.firestore().collection(`users/${OWNER}/games/${gc}/runs/${rc}/staffInvites`).doc();
+    const pin = '482913';
+    await legacyRef.set({
+      id: legacyRef.id, ownerUid: OWNER, gameId: gc, runId: rc, name: 'Solo Marshal',
+      permissions: ['review_photos'], pin, used: false, createdAt: new Date().toISOString(),
     });
 
     // Fire N concurrent staffSignIn calls from distinct identities with the same PIN.
@@ -9172,6 +9276,25 @@ async function main() {
     check('the rest are rejected (single-use enforced)',
       results.filter((r) => r.status === 'rejected').length === N - 1,
       `rejected=${results.filter((r) => r.status === 'rejected').length}`);
+
+    // And the opposite, on purpose: a code minted today is SHARED, and concurrent sign-ins with it
+    // all succeed, each with its own person record.
+    const shared = await creator.call('inviteStaff', { ownerUid: OWNER, gameId: gc, runId: rc, name: 'Shared gate' });
+    const crowd = [];
+    for (let i = 0; i < 4; i++) {
+      const pty = makeParty(`sharedRacer${i}`);
+      await signInAnonymously(pty.auth);
+      crowd.push(pty);
+    }
+    const sharedResults = await Promise.allSettled(
+      crowd.map((pty) => pty.call('staffSignIn', { ownerUid: OWNER, gameId: gc, runId: rc, pin: shared.pin })),
+    );
+    check('a new multi-use code admits every concurrent sign-in',
+      sharedResults.every((r) => r.status === 'fulfilled' && r.value?.customToken),
+      sharedResults.map((r) => r.status).join(','));
+    const grants = await adminSdk.firestore().collection(`users/${OWNER}/games/${gc}/runs/${rc}/staffGrants`)
+      .where('codeId', '==', shared.inviteId).get();
+    check('each person on a shared code gets their own grant', grants.size === 4, String(grants.size));
   });
 
   // ═══ startTeams scales with team count (perf: run-perf-scale, Task 10) ═══════
@@ -11242,6 +11365,185 @@ async function main() {
       JSON.stringify({ stageCompleted: entry?.stageCompleted, requirementLowered: entry?.requirementLowered }));
   });
 
+  // skip-keeps-the-stage: production run oNaUvNrCWRia4Y1b9xOO (2026-09-22). ONE operator skip of
+  // the head of a chained stage was logged `stageCompleted: true` and the team lost the whole
+  // stage, because the missions gated behind the skipped one were retired as unreachable. This is
+  // that exact chain: A, then B (after A), then C (after A and B).
+  await scenario('skip keeps a chained stage (operator skip opens the next link)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: cg } = await creator.call('createGame', { title: 'Chained Skip', mode: 'individual' });
+    const stop = (id, title, after) => ({
+      id, title, type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+      difficulty: 2, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 3,
+      ...(after ? { unlockAfterTaskIds: after } : {}),
+    });
+    await creator.call('updateGame', {
+      gameId: cg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'ch-s1', order: 0, title: 'The chain', tasks: [
+          stop('ch-a', 'Head', null), stop('ch-b', 'Middle', ['ch-a']), stop('ch-c', 'Tail', ['ch-b', 'ch-a']),
+        ] },
+        { id: 'ch-s2', order: 1, title: 'After', isFinal: true, tasks: [stop('ch-z', 'Next stage', null)] },
+      ],
+    });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const C = { ownerUid: OWNER, gameId: cg, runId: cr };
+    const cp = makeParty('chainPlayer');
+    await signInAnonymously(cp.auth);
+    await cp.call('joinRun', { code: cc, displayName: 'Chainers' });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+    const cpUid = cp.auth.currentUser.uid;
+    const teamPath = `users/${OWNER}/games/${cg}/runs/${cr}/teams/${cpUid}`;
+
+    const held = (await cp.call('getMyTeamState', { code: cc }))?.team?.activeTaskId ?? null;
+    check('chain: routing hands out the head first (the only unlocked link)', held === 'ch-a', String(held));
+
+    // The dry run: the plan, and nothing written.
+    const before = JSON.stringify((await creator.getDocAt(teamPath)).data ?? {});
+    const dry = await creator.call('skipTaskForTeam', { ...C, teamId: cpUid, dryRun: true });
+    const after = JSON.stringify((await creator.getDocAt(teamPath)).data ?? {});
+    check('chain dry run: reports that the stage continues', dry?.dryRun === true && dry?.stageCompletes === false, JSON.stringify(dry));
+    check('chain dry run: names exactly the link it opens',
+      JSON.stringify((dry?.dependentsOpened ?? []).map((d) => d.id)) === '["ch-b"]', JSON.stringify(dry?.dependentsOpened));
+    check('chain dry run: writes NOTHING to the team', before === after);
+
+    // The real skip.
+    const res = await creator.call('skipTaskForTeam', { ...C, teamId: cpUid, reason: 'head stop closed' });
+    check('chain: the skip did NOT complete the stage (the 2026-09-22 bug)', res?.stageCompleted === false, JSON.stringify(res));
+    check('chain: the response names the link it opened',
+      JSON.stringify((res?.dependentsOpened ?? []).map((d) => d.id)) === '["ch-b"]', JSON.stringify(res?.dependentsOpened));
+    check('chain: the team is routed to the next link', res?.nextTaskId === 'ch-b', JSON.stringify({ next: res?.nextTaskId, why: res?.nextReason }));
+    const team = (await creator.getDocAt(teamPath)).data ?? {};
+    const s1 = (team.stages ?? []).find((s) => s.stageId === 'ch-s1') ?? {};
+    const rec = (id) => (s1.tasks ?? []).find((t) => t.taskId === id);
+    check('chain: the head is recorded as an OPERATOR skip',
+      rec('ch-a')?.status === 'skipped' && rec('ch-a')?.skipCause === 'operator', JSON.stringify(rec('ch-a')));
+    check('chain: the tail is still playable, not retired',
+      rec('ch-c')?.status === 'unassigned', JSON.stringify(rec('ch-c')));
+    check('chain: stage 1 is still active and stage 2 still locked',
+      s1.status === 'active' && (team.stages ?? []).find((s) => s.stageId === 'ch-s2')?.status === 'locked',
+      JSON.stringify((team.stages ?? []).map((s) => [s.stageId, s.status])));
+
+    // The player's own view agrees: the skip cause arrives, and nothing opened reads as locked.
+    const mine = await cp.call('getMyTeamState', { code: cc });
+    const mineHead = (mine?.team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((t) => t.taskId === 'ch-a');
+    check('chain: the participant payload carries the skip cause', mineHead?.skipCause === 'operator', JSON.stringify(mineHead));
+    check('chain: the opened link is not reported as locked',
+      !(mine?.lockedTaskIds ?? []).includes('ch-b'), JSON.stringify(mine?.lockedTaskIds));
+  });
+
+  // send-team-back: "I have no button at all to send a team back" (Ahiya, 2026-09-25). Nothing
+  // could reopen a skipped/completed mission or an earlier stage. This covers the callable the
+  // console's new button drives: a single mission, a whole stage (the 2026-09-22 recovery case),
+  // the dry run, the score and the station slots, and the refusals.
+  await scenario('send team back (reopen a mission, reopen a stage)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: bg } = await creator.call('createGame', { title: 'Send Back', mode: 'individual' });
+    const stop = (id, title) => ({
+      id, title, type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+      difficulty: 2, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 3,
+    });
+    await creator.call('updateGame', {
+      gameId: bg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'sb-s1', order: 0, title: 'First', tasks: [stop('sb-a', 'Alpha'), stop('sb-b', 'Bravo')] },
+        { id: 'sb-s2', order: 1, title: 'Second', isFinal: true, tasks: [stop('sb-x', 'Xray'), stop('sb-y', 'Yankee')] },
+      ],
+    });
+    const { runId: br, accessCode: bc } = await creator.call('launchRun', { gameId: bg });
+    const B = { ownerUid: OWNER, gameId: bg, runId: br };
+    const bp = makeParty('sendBackPlayer');
+    await signInAnonymously(bp.auth);
+    await bp.call('joinRun', { code: bc, displayName: 'Boomerangs' });
+    await creator.call('startTeams', { gameId: bg, runId: br });
+    const bpUid = bp.auth.currentUser.uid;
+    const teamPath = `users/${OWNER}/games/${bg}/runs/${br}/teams/${bpUid}`;
+    const runDoc = `users/${OWNER}/games/${bg}/runs/${br}`;
+    const team = async () => (await creator.getDocAt(teamPath)).data ?? {};
+    const rec = (t, id) => (t.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === id);
+
+    // Skip the mission they hold, so there is something to send them back to.
+    const first = (await bp.call('getMyTeamState', { code: bc }))?.team?.activeTaskId;
+    const other = first === 'sb-a' ? 'sb-b' : 'sb-a';
+    await creator.call('skipTaskForTeam', { ...B, teamId: bpUid });
+    const afterSkip = await team();
+    check('send-back setup: the skipped mission paid its consolation', (afterSkip.score ?? 0) === 40, String(afterSkip.score));
+    check('send-back setup: the team moved on to the other mission', afterSkip.activeTaskId === other, String(afterSkip.activeTaskId));
+
+    // Dry run: the plan, nothing written.
+    const before = JSON.stringify(afterSkip);
+    const dry = await creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'task', taskId: first }, dryRun: true });
+    check('send-back dry run: names the reopened mission and the points it removes',
+      dry?.dryRun === true && dry?.pointsRemoved === 40 && JSON.stringify((dry?.reopened ?? []).map((r) => r.id)) === JSON.stringify([first]),
+      JSON.stringify(dry));
+    check('send-back dry run: writes NOTHING', JSON.stringify(await team()) === before);
+
+    // The real return to ONE mission.
+    const res = await creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'task', taskId: first }, reason: 'wrong team skipped' });
+    const t1 = await team();
+    check('send-back: the team is on the mission it was sent back to', res?.assignedTaskId === first && t1.activeTaskId === first,
+      JSON.stringify({ res: res?.assignedTaskId, doc: t1.activeTaskId }));
+    check('send-back: the reopened mission is assigned and no longer skipped',
+      rec(t1, first)?.status === 'assigned' && rec(t1, first)?.skipCause === undefined, JSON.stringify(rec(t1, first)));
+    check('send-back: the mission they were holding went back to unassigned', rec(t1, other)?.status === 'unassigned', JSON.stringify(rec(t1, other)));
+    check('send-back: the consolation was taken back (40 → 0)', (t1.score ?? 0) === 0, String(t1.score));
+    check('send-back: the score ledger records the reversal with its reason',
+      (t1.scoreLedger ?? []).some((l) => l.kind === 'reversal' && l.delta === -40 && l.reason === 'wrong team skipped'),
+      JSON.stringify(t1.scoreLedger));
+    const counts = (await creator.getDocAt(runDoc)).data?.taskCounts ?? {};
+    check('send-back: the station slot moved with the team (held 1, released 0, never negative)',
+      (counts[first] ?? 0) === 1 && (counts[other] ?? 0) === 0 && Object.values(counts).every((n) => (n ?? 0) >= 0),
+      JSON.stringify(counts));
+    const notices = await bp.getColAt(`users/${OWNER}/games/${bg}/runs/${br}/announcements`).catch(() => []);
+    check('send-back: the team is told where it was sent',
+      notices.some((n) => n.kind === 'returned' && n.teamId === bpUid), JSON.stringify(notices.map((n) => [n.kind, n.teamId])));
+
+    // The 2026-09-22 recovery: a whole stage lost, then returned to.
+    await creator.call('skipStage', { gameId: bg, runId: br, teamId: bpUid });
+    const t2 = await team();
+    check('send-back setup: stage 1 skipped, stage 2 active',
+      t2.stages?.[0]?.status === 'completed' && t2.stages?.[1]?.status === 'active', JSON.stringify((t2.stages ?? []).map((s) => s.status)));
+    const back = await creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s1' } });
+    const t3 = await team();
+    check('send-back to a stage: stage 1 active again, stage 2 waits',
+      t3.stages?.[0]?.status === 'active' && t3.stages?.[1]?.status === 'locked', JSON.stringify((t3.stages ?? []).map((s) => s.status)));
+    check('send-back to a stage: both missions of stage 1 are playable again',
+      ['sb-a', 'sb-b'].every((id) => ['unassigned', 'assigned'].includes(rec(t3, id)?.status)),
+      JSON.stringify(['sb-a', 'sb-b'].map((id) => rec(t3, id)?.status)));
+    check('send-back to a stage: the stage-skip awards were taken back', (t3.score ?? 0) === 0 && back?.pointsRemoved > 0,
+      JSON.stringify({ score: t3.score, removed: back?.pointsRemoved }));
+    const routed = await bp.call('requestNextTask', { ...B });
+    check('send-back to a stage: routing hands out a mission of stage 1',
+      ['sb-a', 'sb-b'].includes(routed?.taskId ?? (await team()).activeTaskId), JSON.stringify(routed));
+
+    // getRunOutline (send-team-back): the staff app has no read of the game document, so it could
+    // only show raw mission ids. The outline carries NAMES and nothing secret.
+    {
+      const outline = await creator.call('getRunOutline', { ...B });
+      const s1 = (outline?.stages ?? []).find((st) => st.id === 'sb-s1');
+      check('outline: stages and missions come back with their names',
+        s1?.title === 'First' && JSON.stringify((s1?.tasks ?? []).map((tk) => tk.title)) === '["Alpha","Bravo"]', JSON.stringify(outline));
+      const raw = JSON.stringify(outline);
+      check('outline: carries no answer key, hint or secret code',
+        !/"answers"|"numericAnswer"|"secretCode"|"hint"|"coordinates"/.test(raw), raw.slice(0, 200));
+      await expectError('outline: a participant is refused',
+        bp.call('getRunOutline', { ...B }), { codeIn: ['functions/permission-denied'] });
+    }
+
+    // Refusals.
+    await expectError('send-back: a stage the team has not reached is refused',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s2' } }), { codeIn: ['functions/failed-precondition'] });
+    await expectError('send-back: a mission still unplayed is refused',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'task', taskId: 'sb-x' } }), { codeIn: ['functions/failed-precondition'] });
+    await expectError('send-back: an empty target is refused',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid }), { codeIn: ['functions/invalid-argument'] });
+    await expectError('send-back: a participant cannot send their own team back',
+      bp.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s1' } }), { codeIn: ['functions/permission-denied'] });
+    await creator.call('finalizeRun', { gameId: bg, runId: br });
+    await expectError('send-back: a finalized run is frozen',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s1' } }), { codeIn: ['functions/failed-precondition'] });
+  });
+
   // staff-console-field-ops: setTeamHold (pause/resume a team's race clock) and
   // forceAssignTask (send ONE team to a specific mission instead of waiting on
   // routing). Denials live in the authz matrix above; this is the ALLOWED path.
@@ -11424,6 +11726,163 @@ async function main() {
     await creator.call('finalizeRun', { gameId: gReal, runId: rReal });
     check('re-finalizing leaves the email claim set exactly once (no double-send)',
       (await claimOf(gReal, rReal)) === true);
+  });
+
+  // ═══ Staff capabilities (change: staff-capabilities) ════════════════════════
+  // The reported gap: an invite's `permissions` were never read, so any staff PIN could add points.
+  // Now: a game default, multi-use codes each with its own capabilities, live edits, removal of one
+  // person, disabling a code for NEW sign-ins only, and the legacy paths kept working.
+  await scenario('staff capabilities (game default · shared codes · live edit · remove · disable · legacy)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const aDb = adminSdk.firestore();
+    const { gameId: g } = await creator.call('createGame', { title: 'Staff caps', mode: 'individual' });
+    await expectError('updateGame refuses an unknown staff capability (a typo must not widen anything)',
+      creator.call('updateGame', { gameId: g, staffDefaults: { capabilities: ['chat', 'godmode'] } }),
+      { codeIn: ['functions/invalid-argument'] });
+    await creator.call('updateGame', {
+      gameId: g,
+      scoringPreset: 'fixed_points_speed',
+      staffDefaults: { capabilities: ['chat', 'hold'] },
+      stages: [{
+        id: 'sc-s1', order: 0, title: 'Only', isFinal: true,
+        tasks: [
+          { id: 'sc-t1', title: 'Check in', type: 'self_report', triggerMode: 'instant', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+          { id: 'sc-t2', title: 'Second', type: 'self_report', triggerMode: 'instant', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ],
+      }],
+    });
+    const stored = (await aDb.doc(`users/${OWNER}/games/${g}`).get()).data();
+    check('the game stores its staff default', JSON.stringify(stored?.staffDefaults?.capabilities) === JSON.stringify(['hold', 'chat']),
+      JSON.stringify(stored?.staffDefaults));
+    const { runId: r, accessCode: code } = await creator.call('launchRun', { gameId: g });
+    const CTX = { ownerUid: OWNER, gameId: g, runId: r };
+    const player = makeParty('capsPlayer');
+    await signInAnonymously(player.auth);
+    await player.call('joinRun', { code, displayName: 'CapsTeam' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    const teamId = player.auth.currentUser.uid;
+
+    // A code with no explicit capabilities inherits the game default: no score.
+    const marshals = await creator.call('inviteStaff', { ...CTX, name: 'North gate' });
+    check('a new code inherits the game default (no score)',
+      Array.isArray(marshals?.capabilities) && !marshals.capabilities.includes('score') && marshals.capabilities.includes('chat'),
+      JSON.stringify(marshals?.capabilities));
+
+    // TWO people join with the SAME code (multi-use).
+    const signIn = async (label, pin, name) => {
+      const p = makeParty(label);
+      await signInAnonymously(p.auth);
+      const tok = await p.call('staffSignIn', { ...CTX, pin, name });
+      await signInWithCustomToken(p.auth, tok.customToken);
+      return { p, tok, uid: p.auth.currentUser.uid };
+    };
+    const s1 = await signIn('capsStaff1', marshals.pin, 'Dana');
+    const s2 = await signIn('capsStaff2', marshals.pin, 'Noa');
+    check('a staff code is multi-use: two people signed in with one PIN', !!s1.tok.customToken && !!s2.tok.customToken);
+    check('sign-in reports what the code may do', !s1.tok.capabilities.includes('score') && s1.tok.capabilities.includes('safety'),
+      JSON.stringify(s1.tok.capabilities));
+
+    // The reported case: no points without `score`, with a structured reason (not message text).
+    for (const s of [s1, s2]) {
+      const e = await expectError(`staff without score cannot add points (${s.tok.name ?? s.uid.slice(0, 4)})`,
+        s.p.call('adjustTeamScore', { ...CTX, teamId, delta: 5, reason: 'nope' }),
+        { codeIn: ['functions/permission-denied'] });
+      check('the refusal carries the capability reason in details',
+        e?.details?.reason === 'staff-capability-missing' && e?.details?.capability === 'score', JSON.stringify(e?.details));
+    }
+    // Always-granted still works.
+    const ch = await s1.p.call('sendStaffChannelMessage', { ...CTX, text: 'at the gate' });
+    check('the staff channel is always allowed', !!ch);
+    const outline = await s1.p.call('getRunOutline', CTX);
+    check('mission names are always allowed', Array.isArray(outline?.stages));
+    // A granted capability works.
+    await s1.p.call('setTeamHold', { ...CTX, teamId, held: true, reason: 'caps probe' });
+    await s1.p.call('setTeamHold', { ...CTX, teamId, held: false });
+    check('a granted capability (hold) works', true);
+
+    // Live edit: add score → both may now adjust, with no new PIN.
+    await creator.call('updateStaffCode', { ...CTX, codeId: marshals.inviteId, capabilities: ['chat', 'hold', 'score'] });
+    const adj1 = await s1.p.call('adjustTeamScore', { ...CTX, teamId, delta: 5, reason: 'granted live' });
+    const adj2 = await s2.p.call('adjustTeamScore', { ...CTX, teamId, delta: -5, reason: 'granted live' });
+    check('after the organizer adds score, both people on the code can adjust (no new PIN)', !!adj1 && !!adj2);
+    const codeDoc = (await aDb.doc(`users/${OWNER}/games/${g}/runs/${r}/staffInvites/${marshals.inviteId}`).get()).data();
+    check('an edit bumps the code version (the staff console refreshes on it)', codeDoc?.version === 2, String(codeDoc?.version));
+    const refreshed = await s1.p.call('refreshStaffSession', CTX);
+    check('refreshStaffSession re-mints with the current capabilities',
+      !!refreshed?.customToken && refreshed.capabilities.includes('score'), JSON.stringify(refreshed?.capabilities));
+
+    // A second code with ONLY review.
+    const judges = await creator.call('inviteStaff', { ...CTX, name: 'Judges', capabilities: ['review'] });
+    check('a code with explicit capabilities keeps them', JSON.stringify(judges?.capabilities) === JSON.stringify(['review']),
+      JSON.stringify(judges?.capabilities));
+    check('two codes of one run never share a PIN', judges.pin !== marshals.pin);
+    const j1 = await signIn('capsJudge', judges.pin, 'Avi');
+    await expectError('a review-only code cannot route (skip a mission)',
+      j1.p.call('skipTaskForTeam', { ...CTX, teamId }), { codeIn: ['functions/permission-denied'] });
+    const surveys = await j1.p.call('getRunSurveyResults', CTX);
+    check('a review code may read survey results', Array.isArray(surveys?.results));
+    await expectError('a marshal code without review cannot read survey results (teams\' own answers)',
+      s1.p.call('getRunSurveyResults', CTX), { codeIn: ['functions/permission-denied'] });
+
+    // Remove ONE person: they are refused; the other on the same code is not.
+    const removed = await creator.call('removeStaffMember', { ...CTX, staffUid: s1.uid });
+    check('removeStaffMember removes exactly one person', removed?.removed === 1, JSON.stringify(removed));
+    const eRm = await expectError('a removed person cannot act any more',
+      s1.p.call('adjustTeamScore', { ...CTX, teamId, delta: 5, reason: 'after removal' }),
+      { codeIn: ['functions/permission-denied'] });
+    check('the removal refusal says removed', eRm?.details?.reason === 'staff-removed', JSON.stringify(eRm?.details));
+    await expectError('a removed person cannot even acknowledge safety alerts',
+      s1.p.call('clearTeamOutOfBounds', { ...CTX, teamId }), { codeIn: ['functions/permission-denied'] });
+    const still = await s2.p.call('adjustTeamScore', { ...CTX, teamId, delta: 1, reason: 'still in' });
+    check('the other person on the same code keeps working', !!still);
+    // Rejoining with the same identity is refused.
+    await expectError('sign-in refuses a removed identity',
+      s1.p.call('staffSignIn', { ...CTX, pin: marshals.pin }), { codeIn: ['functions/permission-denied'] });
+
+    // Disable the code: NEW sign-ins refused, people already in keep working.
+    await creator.call('updateStaffCode', { ...CTX, codeId: marshals.inviteId, disabled: true });
+    const late = makeParty('capsLate');
+    await signInAnonymously(late.auth);
+    await expectError('a disabled code refuses a new sign-in',
+      late.call('staffSignIn', { ...CTX, pin: marshals.pin }), { codeIn: ['functions/failed-precondition'] });
+    const afterDisable = await s2.p.call('adjustTeamScore', { ...CTX, teamId, delta: 1, reason: 'disabled keeps me' });
+    check('a disabled code keeps the people already in', !!afterDisable);
+
+    // Only the owner manages codes.
+    await expectError('a staff member cannot edit codes',
+      s2.p.call('updateStaffCode', { ...CTX, codeId: marshals.inviteId, capabilities: ['score'] }),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('a participant cannot remove staff',
+      player.call('removeStaffMember', { ...CTX, staffUid: s2.uid }), { codeIn: ['functions/permission-denied'] });
+    await expectError('refreshStaffSession refuses a non-staff caller',
+      player.call('refreshStaffSession', CTX), { codeIn: ['functions/permission-denied'] });
+
+    // Remove everyone on a code.
+    const all = await creator.call('removeStaffMember', { ...CTX, codeId: judges.inviteId });
+    check('removing everyone on a code removes its people', all?.removed === 1, JSON.stringify(all));
+    await expectError('and they are refused',
+      j1.p.call('getRunSurveyResults', CTX), { codeIn: ['functions/permission-denied'] });
+
+    // Rules: a staff member reads their own grant, not someone else's.
+    const own = await s2.p.getDocAt(`users/${OWNER}/games/${g}/runs/${r}/staffGrants/${s2.uid}`).catch((e) => ({ err: e.code }));
+    check('rules: staff read their own grant', own?.exists === true && own?.data?.codeId === marshals.inviteId, JSON.stringify(own));
+    const other = await s2.p.getDocAt(`users/${OWNER}/games/${g}/runs/${r}/staffGrants/${s1.uid}`).catch((e) => ({ err: e.code }));
+    check('rules: staff cannot read another person\'s grant', !!other?.err, JSON.stringify(other));
+
+    // Legacy: an invite minted before this change (no capabilities, single-use) still works fully,
+    // and is still single-use.
+    const legacyRef = aDb.collection(`users/${OWNER}/games/${g}/runs/${r}/staffInvites`).doc();
+    await legacyRef.set({ id: legacyRef.id, ownerUid: OWNER, gameId: g, runId: r, name: 'Old invite',
+      permissions: ['review_photos'], pin: '654321', used: false, createdAt: new Date().toISOString() });
+    const lg = await signIn('capsLegacy', '654321', 'Old');
+    const lgAdj = await lg.p.call('adjustTeamScore', { ...CTX, teamId, delta: 1, reason: 'legacy is full' });
+    check('a pre-change invite (no capabilities) is full', !!lgAdj);
+    const lg2 = makeParty('capsLegacy2');
+    await signInAnonymously(lg2.auth);
+    await expectError('a pre-change invite is still single-use',
+      lg2.call('staffSignIn', { ...CTX, pin: '654321' }), { codeIn: ['functions/not-found'] });
   });
 
   // ═══ Callable coverage guard ════════════════════════════════════════════════

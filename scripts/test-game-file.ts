@@ -459,6 +459,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     // it is EXPORTED: a file that dropped it would restore a game whose setup
     // instructions are simply gone, with nothing to say what the template wanted.
     wizardSteps: true,
+    // staff-capabilities: an authored organizer choice, EXPORTED.
+    staffDefaults: true,
   };
 
   const classify = (

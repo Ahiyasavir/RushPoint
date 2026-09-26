@@ -35,10 +35,11 @@ const MAX_PARTICIPANT_BYTES = 10 * 1024 * 1024;  // 10MB
 //
 // SIZING: this must cover the worst clip the PLATFORM allows, which is one at
 // VIDEO_DURATION_LIMITS.ceilingSeconds (60s) — not one at the default 40s max. The
-// participant recorder pins its own bitrate (see VIDEO_BITS_PER_SECOND in
-// play-web's TaskRunner) at 2 Mbps video + 96 kbps audio, so a ceiling-length clip
-// is ~15.7MB and 20MB leaves ~27% headroom for container overhead and bitrate
-// overshoot. Raising the ceiling without re-deriving this number ships an upload
+// participant recorder pins its own bitrate (VIDEO_BITS_PER_SECOND in
+// play-web's lib/videoCapture.ts) at 1.5 Mbps video + 96 kbps audio, so a ceiling-length
+// clip is ~12MB and 20MB leaves ~65% headroom for container overhead and the bitrate
+// overshoot some Android encoders show. On a weak link the recorder drops to 1.0 Mbps
+// (captureProfileFor), which only makes the clip smaller. Raising the ceiling without re-deriving this number ships an upload
 // path that refuses missions the Builder happily authored.
 const MAX_PARTICIPANT_VIDEO_BYTES = 20 * 1024 * 1024;  // 20MB
 const MAX_CREATOR_BYTES = 50 * 1024 * 1024;      // 50MB
@@ -222,9 +223,48 @@ async function sweepStaleTempUploads(uploadDir, now = Date.now(), ttlMs = TMP_TT
 //   uploadDir                                — root of the served upload tree
 //   resolveOrigin(req)                       — returns the origin for the {url} reply
 //   onResponse(req, res)                     — hook to set CORS headers before replying
-function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse }) {
+// media-upload-reliability: what a stream FAILURE answers. A server-side stall used to answer
+// 400 INVALID_ARGUMENT, which the phone treats as a PERMANENT refusal (it retries only 408, 429 and
+// 5xx), so a phone that paused sending for 45 s (screen locked, app switched) was told "upload
+// failed" and never retried. Only an oversized body is a real refusal; anything else is retryable.
+function uploadFailureResponse(reason) {
+  if (reason === 'too-large') {
+    return { status: 400, body: { error: { status: 'INVALID_ARGUMENT', message: 'File too large' } } };
+  }
+  if (reason === 'stalled') {
+    return { status: 408, body: { error: { status: 'DEADLINE_EXCEEDED', message: 'Upload stalled' } } };
+  }
+  return { status: 500, body: { error: { status: 'INTERNAL', message: 'Upload failed' } } };
+}
+
+// media-upload-reliability: one structured record per upload, so "how long do uploads take in the
+// field, and how often do they fail?" finally has an answer in production. The run id is parsed
+// from the path; the uploader's uid and the file name are deliberately NOT recorded.
+function uploadLogRecord({ contentType, bytes, ms, outcome, uploadPath }) {
+  const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+  const parts = typeof uploadPath === 'string' ? uploadPath.split('/') : [];
+  const isRun = parts[0] === 'runs' && typeof parts[1] === 'string' && parts[1] !== '';
+  const kind = !isRun ? 'creator'
+    : type.startsWith('video/') ? 'video'
+      : type.startsWith('audio/') ? 'audio'
+        : 'photo';
+  return {
+    msg: 'upload',
+    kind,
+    bytes: Number.isFinite(bytes) ? bytes : 0,
+    ms: Number.isFinite(ms) ? Math.round(ms) : 0,
+    outcome,
+    runId: isRun ? parts[1] : null,
+  };
+}
+
+function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse, log }) {
+  const emit = (record) => {
+    try { (log || ((r) => console.log(JSON.stringify(r))))(record); } catch { /* telemetry never fails an upload */ }
+  };
   return async function uploadHandler(req, res) {
     let tempPath;
+    const startedAt = Date.now();
     try {
       // 1. Auth — header only, no body bytes consumed yet.
       const authHeader = req.headers.authorization || '';
@@ -309,10 +349,12 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
             error: { status: 'INVALID_ARGUMENT', message: `File too large (max ${maxBytes / 1024 / 1024}MB)` },
           });
         }
-        // Client vanished / stalled / io error — the socket is usually already
-        // gone, so only answer if we still can.
+        emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes: 0, ms: Date.now() - startedAt, outcome: (e && e.reason) || 'io', uploadPath }));
+        // Client vanished / stalled / io error — the socket is usually already gone, so only answer
+        // if we still can, and answer RETRYABLY (uploadFailureResponse): a stall is 408, not 400.
         if (res.headersSent || res.writableEnded) return undefined;
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Upload failed' } });
+        const failure = uploadFailureResponse(e && e.reason);
+        return res.status(failure.status).json(failure.body);
       }
 
       if (bytes === 0) {
@@ -327,6 +369,7 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
       tempPath = undefined;
 
       const url = `${resolveOrigin(req)}/uploads/${encodeURI(uploadPath)}`;
+      emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes, ms: Date.now() - startedAt, outcome: 'ok', uploadPath }));
       onResponse?.(req, res);
       return res.json({ url });
     } catch (e) {
@@ -354,4 +397,6 @@ module.exports = {
   streamToFileWithLimit,
   sweepStaleTempUploads,
   createUploadHandler,
+  uploadFailureResponse,
+  uploadLogRecord,
 };

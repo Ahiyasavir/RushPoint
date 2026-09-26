@@ -13,6 +13,8 @@
  */
 import { randomInt } from 'node:crypto';
 
+import type { StaffCapability } from '@rushpoint/shared';
+
 import { db } from '../firebase';
 
 /** Cryptographic 6-digit staff PIN. */
@@ -25,27 +27,49 @@ export interface StaffInviteResult {
   pin: string;
 }
 
+/**
+ * Mint a staff CODE for one run (change: staff-capabilities). Since that change a code is
+ * multi-use: several marshals join with the same PIN, and each gets their own person record
+ * (`staffGrants/{uid}`) that the organizer can remove. `capabilities` is what people on this code
+ * may do; the caller decides it (the game default, the organizer's checklist, or full for the
+ * person who launched a shared run). `version` is bumped on every edit so an open staff console
+ * knows to refresh its session.
+ *
+ * The PIN is unique among this run's codes: two codes sharing a PIN would make sign-in land on
+ * whichever the query returned first, handing someone the wrong permissions.
+ */
 export async function createRunStaffInvite(
-  { ownerUid, gameId, runId, name, permissions }: {
+  { ownerUid, gameId, runId, name, capabilities }: {
     ownerUid: string;
     gameId: string;
     runId: string;
     name: string;
-    permissions?: string[];
+    capabilities: StaffCapability[];
   },
 ): Promise<StaffInviteResult> {
-  const pin = generateStaffPin();
+  const col = db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`);
+  let pin = generateStaffPin();
+  for (let i = 0; i < 5; i++) {
+    const clash = await col.where('pin', '==', pin).limit(1).get();
+    if (clash.empty) break;
+    pin = generateStaffPin();
+  }
   const now = new Date().toISOString();
-  const ref = db
-    .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
-    .doc();
+  const ref = col.doc();
 
   await ref.set({
     id: ref.id,
     ownerUid, gameId, runId,
     name,
-    permissions: permissions ?? [],
+    label: name,
+    // Kept (empty) for readers that predate staff-capabilities; nothing reads it for authz.
+    permissions: [],
+    capabilities,
+    multiUse: true,
+    disabled: false,
+    version: 1,
     pin,
+    // The sign-in query filters on `used == false`; a multi-use code is never marked used.
     used: false,
     createdAt: now,
   });

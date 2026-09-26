@@ -47,33 +47,42 @@ ok('and read under the task id', /capturedRef\.current\.get\(task\.id\)/.test(bo
 ok('PhotoEntry still carries its per-task key', /<PhotoEntry[\s\S]{0,160}key=\{task\.id\}/.test(body));
 
 console.log('\n— a landed upload is never thrown away —');
-ok('a cached upload URL is reused instead of re-uploading',
-  /const cached = capturedRef\.current\.get\(task!\.id\)/.test(body)
-  && /cached\?\.url\s*\n?\s*\?\?\s*await uploadTaskPhoto/.test(body.replace(/\r/g, '')));
-ok('a fresh upload is remembered before the submit that may fail',
-  /if \(!cached\?\.url\) capturedRef\.current\.set\(task!\.id, \{ file, url \}\)/.test(body));
+// The landed upload is held by the capture-time upload store (change: media-upload-reliability):
+// send TAKES it, so a failed submit re-sends nothing and a second send reuses the same bytes.
+ok('the photo send takes the capture-time upload instead of uploading again',
+  /await pending\.take\(taskId, file, 'image\/jpeg'\)/.test(body));
+ok('the photo upload starts when the capture exists',
+  /pending\.begin\(task\.id, f, 'image\/jpeg'\)/.test(body));
 // Order matters: clearing before the submit resolves would drop the photo on failure,
 // which is the original bug wearing a new hat.
 const submitAt = body.indexOf('await submitStationPhoto(');
-const clearAt = body.indexOf('capturedRef.current.delete(task!.id)');
-ok('the photo is forgotten only AFTER the submit succeeds',
+// After success the capture is KEPT without its upload url (change: submission-status-truth): if
+// the organizer rejects it, the player sees what they sent and a new send uploads afresh, and a
+// rejected file is never re-submitted from a stale cached url.
+const clearAt = body.indexOf('pending.forget(taskId)', submitAt);
+ok('the cached upload url is dropped only AFTER the submit succeeds',
   submitAt >= 0 && clearAt > submitAt, `submit@${submitAt} clear@${clearAt}`);
 
 
 console.log('');
-console.log('- one successful submit disables the control until routing moves on -');
+console.log('- one successful submit cannot be sent again until routing moves on -');
 // Live run 2026-09-17: "after I pressed send on the video it DID submit, but it still
-// let me submit it again, and that wastes memory." `end()` clears `busy` the moment the
-// callable resolves, while the mission stays on screen until routing hands back the
-// next one - a live control with the clip still loaded. That press re-uploaded 4.6MB.
-ok('a per-task sent latch exists', /const \[sentFor, setSentFor\] = useState<string \| null>\(null\)/.test(body));
-ok('it is folded into the ONE gate every entry control already reads',
-  /const frozen = busy \|\| readOnly \|\| \(task \? sentFor === task\.id : false\)/.test(body));
+// let me submit it again, and that wastes memory." That window was first closed with a
+// `sentFor` latch folded into `frozen`; the latch also froze a REJECTED mission and kept
+// a fake upload bar on screen for the whole review wait (reproduced 2026-09-25), so
+// change submission-status-truth replaced it. The intent is unchanged and pinned here:
+// the just-sent submission is remembered per task, it drives the screen until the team
+// snapshot carries the server record, and it is cleared when the mission changes.
+ok('a per-task record of what was just sent exists', /const \[justSent, setJustSent\] = useState</.test(body));
+ok('it feeds the submission record the screen reads',
+  /pickSubmissionRecord\([\s\S]{0,200}justSent && justSent\.taskId === task\.id \? justSent : null/.test(body));
+ok('while a submission stands the capture controls are replaced by the waiting card',
+  /submissionStands\(phase\)/.test(body) && /showWaitingCard \?/.test(body));
 ok('it is cleared when the mission changes, so the next one starts ready',
-  /setSentFor\(null\); \}, \[assignedRec\?\.taskId\]\)/.test(body));
+  /setJustSent\(null\);[\s\S]{0,160}\}, \[assignedRec\?\.taskId\]\)/.test(body));
 // photo, audio and video all go through it - one drifting is how this class recurs.
-const latches = (body.match(/setSentFor\(task!\.id\)/g) ?? []).length;
-ok(`every media path latches :: ${latches} of 3`, latches === 3, String(latches));
+const latches = (body.match(/setJustSent\(\{ taskId: task!\.id/g) ?? []).length;
+ok(`every media path records what it sent :: ${latches} of 3`, latches === 3, String(latches));
 
 console.log('');
 if (failures > 0) {

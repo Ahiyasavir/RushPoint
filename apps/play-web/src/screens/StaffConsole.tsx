@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { db, signInStaff, uid } from '../services/firebase';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
+import { useStaffAccess } from '../hooks/useStaffAccess';
 // Live photo feed moderation (live-photo-feed): lazy, loads on first open.
 // lazyWithRetry so a stale-shell chunk 404 self-heals after a redeploy (wave-g #2).
 const FeedPanel = lazyWithRetry('feed', () => import('../components/FeedPanel'));
@@ -16,6 +17,8 @@ import {
   forceAssignTask,
   clearTeamOutOfBounds,
   skipTaskForTeam,
+  // send-team-back
+  returnTeamTo, getRunOutline, type SendBackTarget,
   sendStaffChannelMessage,
 } from '../services/calls';
 import {
@@ -26,6 +29,10 @@ import {
 import {
   OTHER_REASON, reasonsForDelta, resolveReason, parseAdjustAmount, type ScoreReasonId,
   newPendingKeys, submissionKey,
+  // skip-keeps-the-stage: the confirm states the server's own dry run.
+  skipPreviewLines, type SkipPreviewLine,
+  // send-team-back: the same targets the organizer's console offers.
+  sendBackTargets,
 } from '@rushpoint/shared';
 import { filterTeamsByName } from '../lib/staffTeamFilter';
 import type { StaffCtx } from '../lib/playRoute';
@@ -81,7 +88,12 @@ interface TeamRow {
   activeTaskId?: string | null;
   /** Task ids still open in this team's ACTIVE stage — the force-assign menu. */
   assignableTaskIds?: string[];
+  /** The team's stage records, for the send-back panel (change: send-team-back). */
+  stages?: unknown;
 }
+
+/** Stage and mission names for the run (getRunOutline), since staff cannot read the game. */
+type RunOutline = { stages: { id: string; title: string; tasks: { id: string; title: string }[] }[] };
 
 export default function StaffConsole({ ctx, onExit }: { ctx: StaffCtx | null; onExit: () => void }) {
   const [staff, setStaff] = useState<StaffSession | null>(() => loadStaffSession());
@@ -102,6 +114,23 @@ export default function StaffConsole({ ctx, onExit }: { ctx: StaffCtx | null; on
 // photographed and forwarded, and it must grant nothing on its own. Server-side
 // auth is untouched — staffSignIn still verifies the PIN against this run's
 // staffInvites and mints the ownerUid/gameId/runId-scoped custom token.
+// The staff confirm's wording for a skip preview (change: skip-keeps-the-stage). One line per fact,
+// in the order skipPreviewLines decided, so this console and the organizer's cannot drift.
+function staffSkipPreviewText(lines: SkipPreviewLine[], t: ReturnType<typeof useT>['t']): string {
+  const p = t.staff.skipPreview;
+  return lines.map((l) => {
+    switch (l.key) {
+      case 'skips': return p.skips({ title: l.title });
+      case 'opens': return p.opens({ titles: l.titles.join(', ') });
+      case 'endsStage': return p.endsStage;
+      case 'staysInStage': return p.staysInStage;
+      case 'requirementLowered': return p.requirementLowered({ n: l.required });
+      case 'consolation': return p.consolation({ n: l.points });
+    }
+  }).join(NEWLINE);
+}
+const NEWLINE = String.fromCharCode(10);
+
 function StaffSignIn({
   ctx,
   onSignedIn,
@@ -139,7 +168,8 @@ function StaffSignIn({
         // from the `staffName` token claim — carrying this to the server needs a
         // staffSignIn payload field (see docs/wave-e/staff-qr-onboarding-plan.md).
         name: name.trim() || res.name,
-        permissions: res.permissions,
+        capabilities: res.capabilities,
+        codeId: res.codeId,
       };
       saveStaffSession(session);
       onSignedIn(session);
@@ -148,7 +178,9 @@ function StaffSignIn({
       const code = (e && typeof e === 'object' && 'code' in e
         ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
       setErr(
-        code === 'not-found' ? t.staff.signInInvalidPin
+        code === 'failed-precondition' ? t.staff.signInCodeClosed
+        : code === 'permission-denied' ? t.staff.signInRemoved
+        : code === 'not-found' ? t.staff.signInInvalidPin
         : code === 'resource-exhausted' ? t.staff.signInLocked
         : code === 'invalid-argument' ? t.staff.signInBadDetails
         : t.staff.signInFailed,
@@ -207,6 +239,25 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const { t } = useT();
   const { ownerUid, gameId, runId } = staff;
   const ctx = useMemo(() => ({ ownerUid, gameId, runId }), [ownerUid, gameId, runId]);
+  // What this person's code allows RIGHT NOW (staff-capabilities): listens to their own grant and
+  // code, refreshes the session when the organizer edits the code, and notices a removal.
+  const access = useStaffAccess(staff);
+  const can = access.can;
+  // send-team-back: mission NAMES for this run, fetched once. Without them the force-assign and
+  // send-back menus could only show raw mission ids. A failure keeps the ids as the fallback.
+  const [outline, setOutline] = useState<RunOutline | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getRunOutline(ctx).then((o) => { if (alive) setOutline(o); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [ctx]);
+  const titleOf = useCallback((taskId: string): string => {
+    for (const s of outline?.stages ?? []) {
+      const tk = s.tasks.find((x) => x.id === taskId);
+      if (tk?.title) return tk.title;
+    }
+    return taskId.slice(0, 18);
+  }, [outline]);
 
   const [pending, setPending] = useState<PendingSubmission[]>([]);
   // Baselined to null so the FIRST snapshot never cues, however many items are
@@ -272,6 +323,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           outOfBounds: td.outOfBounds === true,
           activeTaskId: td.activeTaskId ?? null,
           assignableTaskIds,
+          stages: td.stages,
         });
         const subs = td.taskSubmissions ?? {};
         for (const [taskId, sub] of Object.entries(subs)) {
@@ -390,7 +442,8 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     | { kind: 'hold'; held: boolean; reason?: string }
     | { kind: 'clearOob' }
     | { kind: 'skipTask' }
-    | { kind: 'forceAssign'; taskId: string; override: boolean };
+    | { kind: 'forceAssign'; taskId: string; override: boolean }
+    | { kind: 'sendBack'; target: SendBackTarget; title: string };
 
   async function runTeamOp(team: TeamRow, op: TeamOp) {
     try {
@@ -399,8 +452,35 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       } else if (op.kind === 'clearOob') {
         await clearTeamOutOfBounds({ ...ctx, teamId: team.id });
       } else if (op.kind === 'skipTask') {
-        if (!(await dialog.confirm(t.staff.skipTaskConfirm))) return;
+        // skip-keeps-the-stage: say what THIS skip does (server dry run, nothing written), and fall
+        // back to the plain question if the preview cannot be had.
+        let lines: SkipPreviewLine[] | null = null;
+        try { lines = skipPreviewLines(await skipTaskForTeam({ ...ctx, teamId: team.id, dryRun: true })); }
+        catch (e) {
+          // Between missions there is nothing to skip: say so instead of confirming a failure.
+          if (/not on a mission right now/i.test(String((e as Error)?.message ?? ''))) {
+            await dialog.alert(t.staff.skipNoMission);
+            return;
+          }
+          lines = null;
+        }
+        const message = lines ? staffSkipPreviewText(lines, t) : t.staff.skipTaskConfirm;
+        if (!(await dialog.confirm(message))) return;
         await skipTaskForTeam({ ...ctx, teamId: team.id });
+      } else if (op.kind === 'sendBack') {
+        // send-team-back: the server's own preview, then the plain confirm, then the real call.
+        let message = op.target.kind === 'task' ? t.staff.sendBackToTask({ title: op.title }) : t.staff.sendBackToStage({ stage: op.title });
+        try {
+          const dry = await returnTeamTo({ ...ctx, teamId: team.id, target: op.target, dryRun: true });
+          const lines = [message];
+          if ((dry.pointsRemoved ?? 0) > 0) lines.push(t.staff.sendBackPoints({ n: dry.pointsRemoved }));
+          if ((dry.relockedStages ?? []).length > 0) lines.push(t.staff.sendBackRelocks({ stages: dry.relockedStages.join(', ') }));
+          message = lines.join(String.fromCharCode(10));
+        } catch { /* keep the plain sentence */ }
+        // The button names the action (the confirm-button-says-what-it-does rule), never a bare "OK".
+        if (!(await dialog.confirm(message, { confirmLabel: t.staff.sendBack }))) return;
+        await returnTeamTo({ ...ctx, teamId: team.id, target: op.target, reason: 'staff send back' });
+        setAdjustAck((a) => ({ ...a, [team.id]: t.staff.sendBackDone }));
       } else {
         await forceAssignTask({
           ...ctx, teamId: team.id, taskId: op.taskId, override: op.override,
@@ -454,7 +534,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       )}
 
       {/* ── SOS alerts ── */}
-      <section className="mb-6">
+      {can('safety') && <section className="mb-6">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
           🆘 {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
         </h2>
@@ -487,10 +567,20 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               </div>
             </Card>
           ))}
-      </section>
+      </section>}
+
+      {access.removed && (
+        <Card className="p-4 mb-4 border border-danger/40" data-testid="staff-removed">
+          <p className="text-sm text-danger font-semibold">{t.staff.removedTitle}</p>
+          <p className="text-xs text-zinc-400 mt-1">{t.staff.removedBody}</p>
+          <button className="mt-3 min-h-[44px] px-4 rounded-lg bg-app-raised border border-glass-border text-sm font-semibold text-zinc-200" onClick={onSignOut}>
+            {t.staff.removedExit}
+          </button>
+        </Card>
+      )}
 
       {/* ── Photo review ── */}
-      <section className="mb-6 flex-1">
+      {can('review') && <section className="mb-6 flex-1">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
           📷 {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
         </h2>
@@ -511,7 +601,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
             return (
               <Card key={key} className="p-3 mb-2">
                 <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
-                <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} {s.taskId.slice(0, 10)}</div>
+                <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} <span dir="auto">{titleOf(s.taskId)}</span></div>
                 {hasUrl && isAudio
                   ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
                   : hasUrl && isVideo
@@ -538,7 +628,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               </Card>
             );
           })}
-      </section>
+      </section>}
 
       {/* ── Teams: scores + every per-team field action ──────────────────────
           One row per team carrying everything a marshal can do to that team, so
@@ -569,30 +659,34 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               team={tm}
               ack={adjustAck[tm.id]}
               busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
+              can={{ score: can('score'), hold: can('hold'), route: can('route') }}
               onAdjust={(delta, reason) => void adjustAction.run(tm, delta, reason)}
               onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
               onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
               onSkipTask={() => void opsAction.run(tm, { kind: 'skipTask' })}
               onForceAssign={(taskId, override) =>
                 void opsAction.run(tm, { kind: 'forceAssign', taskId, override })}
+              onSendBack={(target, title) => void opsAction.run(tm, { kind: 'sendBack', target, title })}
+              titleOf={titleOf}
+              outlineStages={outline?.stages ?? []}
             />
           ))}
       </section>
 
       {/* ── Live map of every team's last known position ── */}
-      <StaffTeamMapSection ctx={ctx} teams={teams} />
+      {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} />}
 
       {/* ── Staff ↔ admin channel ── */}
-      <StaffAdminChannelSection ctx={ctx} senderName={staff.name} />
+      {can('staffChannel') && <StaffAdminChannelSection ctx={ctx} senderName={staff.name} />}
 
       {/* ── Team ↔ HQ chat threads ── */}
-      <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} />
+      {can('chat') && <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} />}
 
       {/* ── Live photo feed moderation ── */}
-      <StaffFeedSection ctx={ctx} />
+      {can('feed') && <StaffFeedSection ctx={ctx} />}
 
       {/* ── Announcement composer ── */}
-      <AnnouncementComposer ctx={ctx} />
+      {can('broadcast') && <AnnouncementComposer ctx={ctx} />}
     </div>
   );
 }
@@ -609,19 +703,27 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 // force-assign, skip) only after a deliberate tap on "more". A marshal awards
 // points dozens of times a run and holds a team maybe twice.
 function TeamOpsCard({
-  team, ack, busy, onAdjust, onHold, onClearOob, onSkipTask, onForceAssign,
+  team, ack, busy, can, onAdjust, onHold, onClearOob, onSkipTask, onForceAssign, onSendBack, titleOf, outlineStages,
 }: {
   team: TeamRow;
   ack?: string;
   busy: boolean;
+  /** What this staff member's code allows (staff-capabilities). A control that is not allowed is
+   *  not rendered at all: a disabled button explains nothing. */
+  can: { score: boolean; hold: boolean; route: boolean };
   onAdjust: (delta: number, reason?: string) => void;
   onHold: (held: boolean, reason?: string) => void;
   onClearOob: () => void;
   onSkipTask: () => void;
   onForceAssign: (taskId: string, override: boolean) => void;
+  // send-team-back
+  onSendBack: (target: SendBackTarget, title: string) => void;
+  titleOf: (taskId: string) => string;
+  outlineStages: { id: string; title: string; tasks: { id: string; title: string }[] }[];
 }) {
   const { t } = useT();
-  const [openPanel, setOpenPanel] = useState<null | 'amount' | 'assign' | 'hold'>(null);
+  const [openPanel, setOpenPanel] = useState<null | 'amount' | 'assign' | 'hold' | 'sendBack'>(null);
+  const backTargets = sendBackTargets(team.stages as never, outlineStages);
   const [amountDraft, setAmountDraft] = useState('');
   const [reasonId, setReasonId] = useState<ScoreReasonId | null>(null);
   const [reasonText, setReasonText] = useState('');
@@ -683,7 +785,7 @@ function TeamOpsCard({
         {/* Two groups with a wide separator: -5 and +5 used to sit ~4px
             apart, so the deduct and the award were one thumb-width from
             each other on a control with no undo. */}
-        <div className="flex items-center gap-4 shrink-0">
+        {can.score && <div className="flex items-center gap-4 shrink-0">
           {[[-10, -5], [5, 10]].map((group) => (
             <div key={group[0]} className="flex items-center gap-2">
               {group.map((d) => (
@@ -699,21 +801,21 @@ function TeamOpsCard({
               ))}
             </div>
           ))}
-        </div>
+        </div>}
       </div>
 
       {/* ── Secondary actions ── */}
       <div className="flex flex-wrap items-center gap-2 mt-2.5">
-        <button
+        {can.score && <button
           className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
           disabled={busy}
           onClick={() => setOpenPanel((p) => (p === 'amount' ? null : 'amount'))}
         >
           {t.staff.customAmount}
-        </button>
+        </button>}
         {/* Hold is the one action that changes whether the team can play at all,
             so it is styled as the standout and never hidden behind another tap. */}
-        <button
+        {can.hold && <button
           className={`min-h-[44px] px-3 rounded-lg text-xs font-semibold border disabled:opacity-40 ${
             team.held
               ? 'bg-accent text-black border-accent'
@@ -731,7 +833,7 @@ function TeamOpsCard({
           }}
         >
           {team.held ? t.staff.resumeTeam : t.staff.holdTeam}
-        </button>
+        </button>}
         {team.outOfBounds && (
           <button
             className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-danger/50 text-danger disabled:opacity-40"
@@ -741,7 +843,7 @@ function TeamOpsCard({
             {t.staff.clearOutOfBounds}
           </button>
         )}
-        {(team.assignableTaskIds?.length ?? 0) > 0 && (
+        {can.route && (team.assignableTaskIds?.length ?? 0) > 0 && (
           <button
             className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
             disabled={busy}
@@ -750,7 +852,7 @@ function TeamOpsCard({
             {t.staff.forceAssign}
           </button>
         )}
-        {team.activeTaskId && (
+        {can.route && team.activeTaskId && (
           <button
             className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-400 disabled:opacity-40"
             disabled={busy}
@@ -759,6 +861,15 @@ function TeamOpsCard({
             {t.staff.skipTask}
           </button>
         )}
+        {/* send-team-back: always offered; the panel says so when there is nowhere to go yet. */}
+        {can.route && <button
+          className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
+          disabled={busy}
+          onClick={() => setOpenPanel((p) => (p === 'sendBack' ? null : 'sendBack'))}
+          data-testid="staff-send-back"
+        >
+          {t.staff.sendBack}
+        </button>}
       </div>
 
       {/* ── Custom amount + reason ──────────────────────────────────────────
@@ -870,6 +981,46 @@ function TeamOpsCard({
           button per mission rather than a global toggle — a toggle left on from
           the previous team is exactly how an authored rule gets broken by
           accident. */}
+      {/* send-team-back: the same targets the organizer's console offers (sendBackTargets), inline
+          like every other panel here (a phone keyboard reflows the page under a modal). */}
+      {openPanel === 'sendBack' && (
+        <div className="mt-2.5 pt-2.5 border-t border-glass-border">
+          <div className="text-[13px] text-zinc-500 mb-1.5">{t.staff.sendBackPick}</div>
+          {backTargets.every((s) => !s.stageSelectable && s.missions.every((m) => !m.selectable)) ? (
+            <p className="text-zinc-500 text-xs">{t.staff.sendBackNothing}</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {backTargets.map((s) => (
+                <div key={s.stageId} className="flex flex-col gap-1.5">
+                  {s.stageSelectable && (
+                    <button
+                      className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-100 text-start disabled:opacity-40"
+                      disabled={busy}
+                      onClick={() => { onSendBack({ kind: 'stage', stageId: s.stageId }, s.title); setOpenPanel(null); }}
+                    >
+                      <span dir="auto">{t.staff.sendBackWholeStage({ stage: s.title })}</span>
+                    </button>
+                  )}
+                  {s.missions.filter((m) => m.selectable).map((m) => (
+                    <button
+                      key={m.taskId}
+                      className="min-h-[44px] ms-3 px-3 rounded-lg text-xs font-medium bg-app-raised border border-glass-border text-zinc-200 flex items-center justify-between gap-2 disabled:opacity-40"
+                      disabled={busy}
+                      onClick={() => { onSendBack({ kind: 'task', taskId: m.taskId }, m.title === m.taskId ? titleOf(m.taskId) : m.title); setOpenPanel(null); }}
+                    >
+                      <span dir="auto" className="truncate">{m.title === m.taskId ? titleOf(m.taskId) : m.title}</span>
+                      <span className="shrink-0 text-[13px] text-zinc-500">
+                        {m.status === 'done' ? t.staff.sendBackStatusDone : t.staff.sendBackStatusSkipped}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {openPanel === 'assign' && (
         <div className="mt-2.5 pt-2.5 border-t border-glass-border">
           <div className="text-[13px] text-zinc-500 mb-1.5">{t.staff.forceAssignPick}</div>
@@ -884,7 +1035,7 @@ function TeamOpsCard({
                     disabled={busy}
                     onClick={() => { onForceAssign(taskId, false); setOpenPanel(null); }}
                   >
-                    {taskId.slice(0, 18)}
+                    {titleOf(taskId)}
                   </button>
                   <button
                     className="shrink-0 min-h-[44px] px-2.5 rounded-lg text-[13px] font-semibold bg-transparent border border-danger/50 text-danger disabled:opacity-40"

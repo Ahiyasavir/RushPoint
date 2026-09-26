@@ -19,7 +19,7 @@ import QRCode from 'qrcode';
 
 import { SITE_ORIGIN } from '../apps/marketing/src/utils/i18n.ts';
 
-const OUT = join(import.meta.dirname, '..', 'docs', 'marketing', 'live-qr');
+const OUT = join(import.meta.dirname, '..', 'docs', 'marketing', 'graphics', 'live-qr');
 
 /**
  * Both languages get their own code. The page is bilingual and the band on the
@@ -76,7 +76,7 @@ async function main() {
     written.push(`${name}.txt`);
   }
 
-  console.log(`QR codes written to docs/marketing/live-qr:\n  ${written.join('\n  ')}`);
+  console.log(`QR codes written to docs/marketing/graphics/live-qr:\n  ${written.join('\n  ')}`);
   for (const { name, url } of TARGETS) console.log(`\n${name} encodes exactly: ${url}`);
 }
 

@@ -116,7 +116,7 @@ is unchanged.
 
 **Setup the user must do (cannot be automated — entering an API key is the user's action):** add
 `RESEND_API_KEY=…` (from resend.com, free tier) to `functions/.env`; optionally
-`RUN_SUMMARY_EMAIL_TO=spendora.tracker@gmail.com` and `RUN_SUMMARY_EMAIL_FROM=…`. Then every finalized
+`RUN_SUMMARY_EMAIL_TO=admin.rushpoint@gmail.com` and `RUN_SUMMARY_EMAIL_FROM=…`. Then every finalized
 run emails the summary. Document this in DEPLOY.md / the change proposal.
 
 ## Gates (all green before done)

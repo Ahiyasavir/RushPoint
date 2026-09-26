@@ -1180,7 +1180,7 @@ describe('teamRowActions — a row that fits a phone', () => {
         const all = [...inline, ...overflow];
         expect(new Set(all).size, JSON.stringify(team)).toBe(all.length);
         expect([...all].sort()).toEqual(
-          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'skipStage', 'skipTask'].sort(),
+          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'sendBack', 'skipStage', 'skipTask'].sort(),
         );
       }
     }
@@ -1207,6 +1207,20 @@ describe('teamRowActions — a row that fits a phone', () => {
     expect(teamRowActions({}, ok).inline).toEqual([]);
   });
 
+  // send-team-back: Ahiya, 2026-09-25: "I have no button at all to send a team back, make sure
+  // there is one." Every row offers it; it is cautionary (confirmed, previewed), never destructive.
+  it('offers "send back" on every team row', () => {
+    for (const team of [{}, { outOfBounds: true }]) {
+      for (const attention of [ok, stuck]) {
+        const { inline, overflow } = teamRowActions(team, attention);
+        expect([...inline, ...overflow]).toContain('sendBack');
+      }
+    }
+    expect(classifyRunAction('sendBack')).toBe('cautionary');
+    expect(runActionNeedsConfirm('sendBack')).toBe(true);
+    expect(runActionConsequence('sendBack').audience).toBe('oneTeam');
+  });
+
   it('is total over a malformed row', () => {
     expect(() => teamRowActions(undefined as never, undefined as never)).not.toThrow();
     expect(teamRowActions(undefined as never, undefined as never).overflow.length).toBeGreaterThan(0);
@@ -1219,7 +1233,7 @@ describe('teamRowActions — a row that fits a phone', () => {
     const stuckRow = teamRowActions({}, stuck);
     expect(stuckRow.inline).toEqual(['skipTask']);
     expect(stuckRow.overflow).not.toContain('skipTask');
-    expect(stuckRow.overflow).toEqual(['skipStage', 'adjustTeamScore']);
+    expect(stuckRow.overflow).toEqual(['skipStage', 'sendBack', 'adjustTeamScore']);
   });
 
   it('promotes nothing for a calm or merely watched team', () => {

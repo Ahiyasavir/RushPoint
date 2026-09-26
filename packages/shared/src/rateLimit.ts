@@ -143,6 +143,12 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // writes an audit row, but high enough for a marshal working a queue of teams.
   setTeamHold: { max: 30, windowMs: MIN },
   forceAssignTask: { max: 30, windowMs: MIN },
+  // send-team-back: the same field-ops shape and budget as forceAssignTask.
+  returnTeamTo: { max: 30, windowMs: MIN },
+  // staff-capabilities: organizer edits + a staff console refreshing after an edit.
+  updateStaffCode: { max: 60, windowMs: MIN },
+  removeStaffMember: { max: 30, windowMs: MIN },
+  refreshStaffSession: { max: 20, windowMs: MIN },
   requestGuardianConsent: { max: 10, windowMs: MIN }, // writes a doc per call — bound token spam
   submitRunFeedback: { max: 3, windowMs: MIN }, // one real response per run; retries have headroom
   reactToFeedItem: { max: 60, windowMs: MIN }, // taps on the live photo feed (live-photo-feed)

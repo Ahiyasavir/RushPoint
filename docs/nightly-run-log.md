@@ -90,7 +90,7 @@ code issue; console-error reads succeeded.)
 - Gates: typecheck · test 83/83 · lint · creator:build · play:build · i18n:check ALL GREEN.
 - Emulator: e2e 41/41 scenarios (0 failures) · rules all pass · 8-team simulate invariants green (counters → 0).
 - Uncommitted on `topographic-maps` (not committed — per standing guidance, awaiting user's go-ahead).
-- ACTION FOR USER: to enable the run-summary email, add `RESEND_API_KEY` (+ optional `RUN_SUMMARY_EMAIL_TO=spendora.tracker@gmail.com`) to `functions/.env` (see DEPLOY.md §7b). Without it, finalize is a safe logged no-op.
+- ACTION FOR USER: to enable the run-summary email, add `RESEND_API_KEY` (+ optional `RUN_SUMMARY_EMAIL_TO=admin.rushpoint@gmail.com`) to `functions/.env` (see DEPLOY.md §7b). Without it, finalize is a safe logged no-op.
 
 ### Next
 - Finish P1-5/6/7, run one combined emulator gauntlet (e2e + rules + 8-team simulate), then the nightly hardening sweep (edge-case bug search, cleanup, UI/UX consistency).

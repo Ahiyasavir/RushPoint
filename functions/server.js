@@ -286,9 +286,15 @@ sweepStaleTempUploads(UPLOAD_DIR)
 
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '0.0.0.0';
-app.listen(port, host, () => {
+const server = app.listen(port, host, () => {
   // eslint-disable-next-line no-console
   console.log(`RushPoint API listening on ${host}:${port} — ${mounted.length} callables mounted`);
 });
+// Node 20 ends ANY request after 300 s (server.requestTimeout), however healthy. A 12MB clip on a
+// weak field link can take longer than that while still moving, and the phone then re-sends the
+// whole file (change: media-upload-reliability, D2). The client caps one attempt at 15 minutes
+// (attemptBudgetMs), so the server allows 16. A DEAD connection is still cut after 45 s of no
+// bytes by uploadRoute.js's own stall timer; headersTimeout keeps its default.
+server.requestTimeout = 16 * 60_000;
 
 module.exports = { app };

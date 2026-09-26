@@ -98,6 +98,17 @@ export const PRIVILEGED_CALLABLES = {
     'Staff override that stops ONE identified team from advancing at all and pauses its race '
     + 'clock. Both directions change that team\'s standing (held time is excluded from scoring), '
     + 'so "who parked this team, when, and why" must stay answerable after the event.',
+  updateStaffCode:
+    'Changes what every person on one staff code may do during a live run (score, route, review...), '
+    + 'or closes the code to new sign-ins. "Who gave the marshals the power to add points, and when" '
+    + 'must stay answerable after the event (staff-capabilities).',
+  removeStaffMember:
+    'Removes one person, or everyone on a code, from a live run\'s staff and revokes their session. '
+    + 'The trail is how an organizer later tells who was locked out and by whom (staff-capabilities).',
+  returnTeamTo:
+    'Sends ONE identified team back to a skipped or completed mission, or to an earlier stage: '
+    + 'it reopens records, removes the points they carried and can re-lock later stages. The trail '
+    + 'is how an organizer later tells a deliberate rewind from a scoring anomaly (send-team-back).',
   forceAssignTask:
     'Staff override that sends ONE identified team to a SPECIFIC mission, displacing whatever it '
     + 'was on. The override variant additionally bypasses an unlock / scheduled-release / expiry '
@@ -152,7 +163,7 @@ export const PRIVILEGED_CALLABLES = {
 
 // ── Markers ──────────────────────────────────────────────────────────────────
 
-const AUTH_MARKERS = /\b(requireAuth|assertAdmin|assertStaffOrOwner|assertOwner|assertRunStaff|assertController)\s*\(/;
+const AUTH_MARKERS = /\b(requireAuth|assertAdmin|assertStaffOrOwner|assertStaffCan|assertOwner|assertRunStaff|assertController)\s*\(/;
 // The older inline idiom, still used verbatim in ~20 call sites; equivalent to
 // requireAuth and must count as conformant, not as a gap to be churned.
 const INLINE_AUTH = /if\s*\(\s*!\s*context\.auth\s*\)[\s\S]{0,200}?['"]unauthenticated['"]/;

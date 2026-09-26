@@ -19,6 +19,9 @@ import {
   MAX_PARTICIPANT_VIDEO_BYTES,
   predictedClipBytes,
   CLIP_SHORT_FRACTION,
+  CAMERA_OPEN_DEADLINE_MS,
+  withCameraDeadline,
+  captureProfileFor,
 } from '../apps/play-web/src/lib/videoCapture';
 import { VIDEO_DURATION_LIMITS } from '../packages/shared/src/videoDuration';
 
@@ -210,5 +213,61 @@ check('recordedClipVerdict never throws', recThrew === false);
   check('no minimum accepts a one second clip', recordedClipVerdict(1, 0) === 'ok');
 }
 
-console.log(`\n${failures === 0 ? 'ALL VIDEO-CAPTURE TESTS PASSED' : failures + ' FAILED'}`);
-process.exit(failures === 0 ? 0 : 1);
+// ── Camera deadline + weak-link profile (change: media-upload-reliability, D5/D9) ──
+// A getUserMedia that never answers left the player on "opening the camera" forever, with the
+// fallback (the native camera input) unreachable because the widget was still "opening".
+check('CAMERA_OPEN_DEADLINE_MS exists and is under 15 s',
+  typeof CAMERA_OPEN_DEADLINE_MS === 'number' && CAMERA_OPEN_DEADLINE_MS > 0 && CAMERA_OPEN_DEADLINE_MS < 15_000,
+  String(CAMERA_OPEN_DEADLINE_MS));
+
+// A default profile on an unknown connection (iOS has no navigator.connection at all).
+{
+  const d = captureProfileFor(undefined);
+  check('no connection API means the default profile', !d.light && d.videoBitsPerSecond === VIDEO_BITS_PER_SECOND, JSON.stringify(d));
+  check('the default profile keeps the 720p constraints', d.video.width.ideal === 1280 && d.video.height.ideal === 720);
+  check('4g means default', !captureProfileFor({ effectiveType: '4g' }).light);
+  check('garbage connection means default', !captureProfileFor({ effectiveType: 42 as unknown as string }).light);
+  for (const effectiveType of ['slow-2g', '2g', '3g']) {
+    const p = captureProfileFor({ effectiveType });
+    check(`${effectiveType} means the light profile`, p.light && p.videoBitsPerSecond === 1_000_000
+      && p.video.width.ideal === 960 && p.video.height.ideal === 540, JSON.stringify(p));
+  }
+  check('saveData means the light profile', captureProfileFor({ saveData: true, effectiveType: '4g' }).light);
+  const light = captureProfileFor({ effectiveType: '3g' });
+  check('the light profile never uses exact constraints', !JSON.stringify(light.video).includes('exact'));
+  check('the light profile keeps the rear camera', light.video.facingMode.ideal === 'environment');
+  const bytes = (light.videoBitsPerSecond + light.audioBitsPerSecond) * VIDEO_DURATION_LIMITS.ceilingSeconds / 8;
+  check('a ceiling-length light clip fits under the upload cap', bytes < MAX_PARTICIPANT_VIDEO_BYTES, String(bytes));
+}
+
+async function deadlineCases(): Promise<void> {
+  type FakeStream = { stopped: boolean };
+  // Answers in time: the stream comes back, nothing is stopped.
+  {
+    const s: FakeStream = { stopped: false };
+    const got = await withCameraDeadline(Promise.resolve(s), 50, (x) => { x.stopped = true; });
+    check('an answer in time returns the stream', got === s && !s.stopped);
+  }
+  // Never answers in time: rejects with camera/timeout; the LATE stream is stopped when it lands.
+  {
+    const s: FakeStream = { stopped: false };
+    let code = '';
+    const late = new Promise<FakeStream>((r) => setTimeout(() => r(s), 60));
+    try { await withCameraDeadline(late, 10, (x) => { x.stopped = true; }); }
+    catch (e) { code = String((e as { code?: string }).code); }
+    check('a camera that never answers rejects with camera/timeout', code === 'camera/timeout', code);
+    await new Promise((r) => setTimeout(r, 80));
+    check('a stream arriving after the deadline is stopped (the light goes off)', s.stopped);
+  }
+  // A real refusal before the deadline keeps its own error.
+  {
+    let name = '';
+    const refused = Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
+    try { await withCameraDeadline(refused, 50, () => {}); } catch (e) { name = (e as Error).name; }
+    check('a refusal before the deadline keeps its own error', name === 'NotAllowedError', name);
+  }
+}
+void deadlineCases().then(() => {
+  console.log(`\n${failures === 0 ? 'ALL VIDEO-CAPTURE TESTS PASSED' : failures + ' FAILED'}`);
+  process.exit(failures === 0 ? 0 : 1);
+});

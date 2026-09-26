@@ -21,7 +21,7 @@
 
 import * as functions from 'firebase-functions';
 import { loggedCallable } from '../obs/log';
-import { db, storage } from '../firebase';
+import { db } from '../firebase';
 import {
   RUN_DATA_RETENTION_DAYS,
   GAME_TRASH_RETENTION_DAYS, isPurgeDue, type Game,
@@ -32,7 +32,7 @@ import { deleteDocsInChunks } from '../batchUtil';
 // The movement track also lives on the VPS disk when configured; retention must reach it too
 // or the 90-day promise would hold in Firestore and quietly fail on disk (change: vps-track-storage).
 import { trackStore } from '../trackStore';
-import { runPhotoPrefix } from '../storagePaths';
+import { deleteRunUploads, hasLocalUploadStore } from '../storageUtil';
 // Pure, total, fail-closed prune eligibility (change: run-retention-completeness).
 import {
   evaluateRunPrune, parseRunPath, ABANDONABLE_RUN_STATUSES, type RunRetentionFacts,
@@ -165,15 +165,13 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   consentCleared += await deleteDocsInChunks(tokSnap.docs.map((d) => d.ref));
 
   // 3) Delete uploaded photo objects under this run's Storage prefix.
-  let storagePurged = false;
-  try {
-    // Pure, unit-tested prefix derivation (change: storage-rules-hardening): a
-    // blank runId here would widen to `runs/` and purge every run in the bucket.
-    await storage.bucket().deleteFiles({ prefix: runPhotoPrefix(runId) });
-    storagePurged = true;
-  } catch (e) {
-    functions.logger.warn(`pruneRunPII: storage purge failed for run ${runId}`, e);
-  }
+  // BOTH stores (change: run-media-disk-retention). This used to call only the bucket, which does
+  // not exist on the VPS where every photo, audio clip and video actually lives: the call threw,
+  // the run was stamped pruned below, and its media stayed on disk forever. The prefix is still
+  // derived by the unit-tested `runPhotoPrefix` inside the helper, so a blank id cannot widen.
+  const purge = await deleteRunUploads(runId);
+  const storagePurged = purge.bucket || (hasLocalUploadStore() && purge.disk);
+  if (!storagePurged) functions.logger.warn(`pruneRunPII: no upload store was cleared for run ${runId}`);
 
   // 4) Stamp the run so the scheduled sweep skips it next time. `answerLogPrunedAt`
   //    is stamped too: this prune is a superset of the 30-day answer sweep, so the

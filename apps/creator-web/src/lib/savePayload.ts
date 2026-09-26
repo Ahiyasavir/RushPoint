@@ -61,6 +61,9 @@ export const BUILDER_EDITABLE_FIELDS = [
   'autoApproveAllMedia',
   // change: every-member-plays.
   'requireAllMembersOnline',
+  // change: staff-capabilities. What a new staff code may do. Never cleared: "everything" is
+  // saved as the full list, so an unset field and a cleared one cannot mean different things.
+  'staffDefaults',
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Undefined means
   // off (default) = finalizeRun auto publishes, the prior behaviour.
   'manualLeaderboardReveal',

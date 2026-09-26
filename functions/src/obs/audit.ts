@@ -101,6 +101,11 @@ export const AUDIT_TEAM_HELD          = 'team_held';
 export const AUDIT_TEAM_RESUMED       = 'team_resumed';
 export const AUDIT_TASK_FORCE_ASSIGNED = 'task_force_assigned';
 export const AUDIT_TASK_FORCE_ASSIGNED_OVERRIDE = 'task_force_assigned_override';
+// send-team-back: an operator reopened a mission or a stage for one team.
+export const AUDIT_TEAM_RETURNED = 'team_returned';
+// change: staff-capabilities
+export const AUDIT_STAFF_CODE_UPDATED = 'staff_code_updated';
+export const AUDIT_STAFF_REMOVED = 'staff_removed';
 
 export const AUDIT_RUN_PII_PRUNED      = 'run_pii_pruned';
 export const AUDIT_RUN_PII_SWEEP       = 'run_pii_sweep';

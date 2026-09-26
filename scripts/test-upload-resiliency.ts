@@ -12,6 +12,9 @@ import {
   setUploadProgress,
   getUploadProgress,
   subscribeUploadProgress,
+  attemptBudgetMs,
+  ATTEMPT_BUDGET_CAP_MS,
+  interruptibleSleep,
 } from '../apps/play-web/src/lib/uploadResiliency';
 
 let failures = 0;
@@ -133,6 +136,43 @@ await (async () => {
   check('unsubscribe stops delivery', seen[seen.length - 1] === 90, JSON.stringify(seen));
   check('store cleared', getUploadProgress() === null);
 })();
+// ── 7. per-attempt budget (change: media-upload-reliability, D2) ────────────
+// Kill STALLS, not slowness: a big clip on a weak link that keeps moving must get the time it
+// needs; only the 45 s no-progress detector declares an attempt dead.
+{
+  const MB = 1024 * 1024;
+  check('0 bytes gets the 180 s floor', attemptBudgetMs(0) === 180_000, String(attemptBudgetMs(0)));
+  check('1 MB gets the 180 s floor', attemptBudgetMs(1 * MB) === 180_000, String(attemptBudgetMs(1 * MB)));
+  const six = attemptBudgetMs(6 * MB);
+  // 6 MB / 12 KB/s = 512 s + 60 s = 572 s: above the floor, below the cap.
+  check('6 MB scales with size', six === 572_000, String(six));
+  check('6 MB is above the old flat 180 s cap', six > 180_000, String(six));
+  // 12 MB would need 1084 s at the floor rate: held at the cap.
+  check('12 MB is held at the cap', attemptBudgetMs(12 * MB) === ATTEMPT_BUDGET_CAP_MS, String(attemptBudgetMs(12 * MB)));
+  check('the cap is 15 minutes', ATTEMPT_BUDGET_CAP_MS === 15 * 60_000, String(ATTEMPT_BUDGET_CAP_MS));
+  check('100 MB is held at the cap', attemptBudgetMs(100 * MB) === ATTEMPT_BUDGET_CAP_MS, String(attemptBudgetMs(100 * MB)));
+  check('a malformed size falls back to the floor', attemptBudgetMs(Number.NaN) === 180_000 && attemptBudgetMs(-5) === 180_000);
+}
+// ── 8. a backoff the player can cut short (change: media-upload-reliability, D6) ─
+// iOS pauses network work in a backgrounded tab. When the player comes back, the retry should go
+// NOW, not after the rest of a backoff that was sized for a flaky link, not a suspended one.
+await (async () => {
+  let wakeCb: (() => void) | null = null;
+  let unsubscribed = false;
+  const t0 = Date.now();
+  const p = interruptibleSleep(5_000, (cb) => { wakeCb = cb; return () => { unsubscribed = true; }; });
+  setTimeout(() => wakeCb?.(), 10);
+  await p;
+  check('a wake cuts the backoff short', Date.now() - t0 < 1_000, String(Date.now() - t0));
+  check('the wake listener is removed afterwards', unsubscribed);
+  const t1 = Date.now();
+  await interruptibleSleep(20, () => () => {});
+  check('without a wake it still ends on time', Date.now() - t1 >= 15 && Date.now() - t1 < 1_000, String(Date.now() - t1));
+})();
+
+// ── 9. a player abort is final ──────────────────────────────────────────────
+check('a player abort is never retried', !isRetryableStorageError({ code: 'upload/aborted' }));
+
 }
 
 void main().then(() => {

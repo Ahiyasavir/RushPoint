@@ -153,8 +153,13 @@ service cloud.firestore {
           // where every team is, which is the same data the owner's desktop map has
           // always shown. Scoped by isStaffForRun, so a staff token still only ever
           // reaches the ONE run it was minted for. Writes stay CF-only (updateLocation).
+          // staff-capabilities: a staff token carries `caps`, and a code without `locations` does
+          // not see the live map. A token minted before that change has no `caps` and keeps the
+          // read, matching the callables' legacy rule.
           match /teamLocations/{docId} {
-            allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
+            allow read:  if isOwner(uid)
+                          || (isStaffForRun(uid, gameId, runId)
+                              && (!('caps' in request.auth.token) || 'locations' in request.auth.token.caps));
             allow write: if false;
           }
           // Retained GPS track for the post-run movement heatmap (movement-heatmap).
@@ -189,8 +194,18 @@ service cloud.firestore {
             allow read:  if isOwner(uid);
             allow write: if false;
           }
+          // A staff member may read their OWN code (staff-capabilities): the console listens to it
+          // to notice an edit. It holds the PIN, which that person already typed.
           match /staffInvites/{docId} {
-            allow read:  if isOwner(uid);
+            allow read:  if isOwner(uid)
+                          || (isStaffForRun(uid, gameId, runId) && request.auth.token.codeId == docId);
+            allow write: if false;
+          }
+          // One document per staff PERSON (staff-capabilities): which code, removed or not.
+          // The organizer's console reads them all; a staff member reads only their own.
+          match /staffGrants/{staffUid} {
+            allow read:  if isOwner(uid)
+                          || (isStaffForRun(uid, gameId, runId) && request.auth.uid == staffUid);
             allow write: if false;
           }
         }

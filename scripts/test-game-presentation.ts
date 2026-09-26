@@ -64,6 +64,8 @@ const fullGame = {
   autoStartLateJoiners: true,
   autoApproveAllMedia: true,
   requireAllMembersOnline: true,
+  // staff-capabilities: what a new staff code may do.
+  staffDefaults: { capabilities: ['chat', 'review'] },
   manualLeaderboardReveal: true,
   testMode: true,
   instructions: { title: 'How to play', body: 'Walk.', bodyHe: 'ללכת.' },

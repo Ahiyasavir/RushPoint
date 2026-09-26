@@ -4,13 +4,13 @@ import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } fr
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   updateGame,
-  inviteStaff, skipStage, skipTaskForTeam, adjustTeamScore, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
+  skipStage, skipTaskForTeam, returnTeamTo, adjustTeamScore, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
   sendTeamChatMessage, sendStaffChannelMessage, reviewStationSubmission, setRunTaskStatus,
@@ -38,6 +38,11 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
 import { OverflowMenu } from '../components/OverflowMenu';
+// send-team-back: the "where to?" picker and what it may offer.
+import SendBackPicker, { type SendBackChoice } from '../components/SendBackPicker';
+import StaffCodesPanel from '../components/StaffCodesPanel';
+import { defaultCodeCapabilities, type StaffCapability } from '@rushpoint/shared';
+import { sendBackTargets } from '../lib/sendBackTargets';
 import RichTooltip from '../components/RichTooltip';
 // Progressive disclosure (change: run-console-progressive-disclosure): the
 // console's layout, action severity, share links and human labels are pure
@@ -148,6 +153,19 @@ export default function RunConsolePage() {
   const [teams, setTeams] = useState<RunTeamRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [staffPin, setStaffPin] = useState<string | null>(null);
+  const [staffPanelWanted, setStaffPanelWanted] = useState(false);
+  // Whether this run already has staff codes (staff-capabilities). Without it an organizer who
+  // reloads mid-event could not see or edit the codes already handed out: the panel only
+  // appeared after pressing "invite staff" in the same session. ONE document, so one read.
+  const [hasStaffCodes, setHasStaffCodes] = useState(false);
+  useEffect(() => {
+    if (!ownerUid || !gameId || !runId) return undefined;
+    return onSnapshot(
+      query(collection(db, `${FIRESTORE_PATHS.run(ownerUid, gameId, runId)}/staffInvites`), limit(1)),
+      (snap) => setHasStaffCodes(!snap.empty),
+      () => undefined,
+    );
+  }, [ownerUid, gameId, runId]);
   const [alerts, setAlerts] = useState<{ id: string; teamId: string; type: string; message: string; lat: number | null; lng: number | null; createdAt: string }[]>([]);
   // Live-stream resilience (change: run-console-live-stream-resilience). The teams
   // poll and the alerts listener are the console's live picture; when either
@@ -370,6 +388,10 @@ export default function RunConsolePage() {
   // collapsed group renders no children, so a panel that never mounted could
   // never report its own count. One place owns the numbers; the panels render.
   const [teamDocs, setTeamDocs] = useState<SubmissionTeamDoc[]>([]);
+  // send-team-back: each team's stage records, from the SAME listener (the full documents already
+  // arrive; this used to keep only the name and the submissions).
+  const [teamStages, setTeamStages] = useState<Map<string, unknown>>(new Map());
+  const [sendBackFor, setSendBackFor] = useState<RunTeamRow | null>(null);
   // A read failure must NOT look like "no pending photos": at a live event a
   // manager would silently miss submissions. The listener auto retries, so this
   // clears itself on the next good snapshot.
@@ -384,6 +406,7 @@ export default function RunConsolePage() {
         const data = d.data() as { displayName?: string; taskSubmissions?: Record<string, RawSubmission> };
         return { id: d.id, displayName: data.displayName, taskSubmissions: data.taskSubmissions };
       }));
+      setTeamStages(new Map(snap.docs.map((d) => [d.id, (d.data() as { stages?: unknown }).stages])));
     }, (err) => {
       console.warn('[RunConsole] submissions listener error', err);
       setPhotoLoadError(true);
@@ -521,6 +544,10 @@ export default function RunConsolePage() {
   // location-picker-game-anchor). Collected in the read that already walks every
   // task for taskTitles above — no extra Firestore read.
   const [gameAnchors, setGameAnchors] = useState<readonly LatLng[]>([]);
+  // send-team-back: stage and mission titles for the "send back" picker, from the SAME read.
+  const [gameStagesLite, setGameStagesLite] = useState<{ id: string; title: string; tasks: { id: string; title: string }[] }[]>([]);
+  // staff-capabilities: what a new staff code starts with (the game's default; absent = everything).
+  const [staffDefaultCaps, setStaffDefaultCaps] = useState<StaffCapability[]>(() => defaultCodeCapabilities(undefined));
   useEffect(() => {
     if (!gameId) return;
     let alive = true;
@@ -529,6 +556,7 @@ export default function RunConsolePage() {
         if (!alive) return;
         setGameTitle(game.title ?? '');
         setAutoStartLate(game.autoStartLateJoiners === true);
+        setStaffDefaultCaps(defaultCodeCapabilities(game.staffDefaults));
         const map = new Map<string, string>();
         const anchors: LatLng[] = [];
         for (const stage of game.stages ?? []) {
@@ -539,6 +567,9 @@ export default function RunConsolePage() {
         }
         setTaskTitles(map);
         setGameAnchors(anchors);
+        setGameStagesLite((game.stages ?? []).map((s) => ({
+          id: s.id, title: s.title ?? '', tasks: (s.tasks ?? []).map((tk) => ({ id: tk.id, title: tk.title ?? '' })),
+        })));
       })
       .catch(() => undefined);
     return () => { alive = false; };
@@ -717,15 +748,11 @@ export default function RunConsolePage() {
   async function invite() {
     // A click gesture — also unlock audio for the SOS cue.
     unlockAudio();
-    const name = await dialog.prompt(t.runConsole.staffNamePrompt);
-    if (!name) return;
-    try {
-      const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
-      setStaffPin(pin);
-      // The PIN + staff link render inside the share section, so navigate there:
-      // a host must never have to hunt for what they just created.
-      openSection('shareAndScreens');
-    } catch { await dialog.alert(t.runConsole.staffInviteFailed); }
+    // staff-capabilities: a code now carries a label and its own permissions, so it is created in
+    // the staff codes panel (name + checklist pre-filled from the game default) rather than from a
+    // bare name prompt that silently granted everything. Open it, with the new-code form showing.
+    setStaffPanelWanted(true);
+    openSection('shareAndScreens');
   }
   async function refreshStandings(publish?: boolean) {
     // Turning the board ON is a PUBLIC act: one click and every player, plus
@@ -873,7 +900,7 @@ export default function RunConsolePage() {
     unreadChatThreads,
     hotZoneActive: !!run.hotZone && hotZoneMultiplier(run.hotZone, run.hotZone.center, Date.now()) > 1,
     hasLeaderboard: (run.leaderboard?.rankings.length ?? 0) > 0,
-    hasStaffPin: !!staffPin,
+    hasStaffPin: !!staffPin || staffPanelWanted || hasStaffCodes,
     surveyResultCount: surveyResults === null ? null : surveyResults.length,
     // A rail entry that reports nothing is a rail entry nobody opens
     // (change: run-console-clarity).
@@ -1091,12 +1118,72 @@ export default function RunConsolePage() {
   // stop the team still had. No taskId is sent: the server resolves the mission the
   // team is holding right now, which is what the operator is looking at.
   async function skipTeamTask(team: RunTeamRow) {
-    if (!(await confirmAction('skipTask'))) return;
+    // skip-keeps-the-stage: ask the server what THIS skip will do (a dry run: nothing written) and
+    // say it in the confirm. The fixed sentence it replaces promised "the team stays in the stage"
+    // while the server ended the stage (production run 2026-09-22). A failed preview falls back to
+    // that generic confirm: a preview must never block the action it describes.
+    let lines: SkipPreviewLine[] | null = null;
     try {
-      await skipTaskForTeam({ ...ctx, teamId: team.id, reason: 'staff skip' });
+      lines = skipPreviewLines(await skipTaskForTeam({ ...ctx, teamId: team.id, dryRun: true }));
+    } catch (e) {
+      // The one refusal worth stating up front: between missions there is nothing to skip, and
+      // asking "are you sure?" first would only lead to a failure after the operator said yes.
+      if (/not on a mission right now/i.test(String((e as Error)?.message ?? ''))) {
+        await dialog.alert(rc.skipNoMission({ team: team.displayName }));
+        return;
+      }
+      lines = null;
+    }
+    const confirmed = lines
+      ? await dialog.confirm(renderSkipPreview(lines), rc.confirmCta.skipTask, false, { title: rc.confirmTitle })
+      : await confirmAction('skipTask');
+    if (!confirmed) return;
+    try {
+      const res = await skipTaskForTeam({ ...ctx, teamId: team.id, reason: 'staff skip' });
       await loadTeams();
-      toast.success(rc.skipTaskDone({ team: team.displayName }));
+      const opened = (res.dependentsOpened ?? []).map((d) => d.title).filter(Boolean);
+      toast.success(opened.length > 0
+        ? rc.skipOpenedDone({ team: team.displayName, titles: opened.join(', ') })
+        : rc.skipTaskDone({ team: team.displayName }));
     } catch { await dialog.alert(rc.skipTaskFailed); }
+  }
+  // send-team-back: the picker hands back a target; the server's dry run says what it will do; the
+  // organizer confirms; the real call runs. A failed preview falls back to the generic consequence.
+  async function sendTeamBack(team: RunTeamRow, choice: SendBackChoice) {
+    setSendBackFor(null);
+    const target = choice.kind === 'task' ? { kind: 'task' as const, taskId: choice.taskId } : { kind: 'stage' as const, stageId: choice.stageId };
+    let message = rc.consequence.sendBack;
+    try {
+      const dry = await returnTeamTo({ ...ctx, teamId: team.id, target, dryRun: true });
+      const pv = rc.sendBackPreview;
+      const lines = [
+        choice.kind === 'task' ? pv.toTask({ title: dry.taskTitle || choice.title }) : pv.toStage({ stage: dry.stageTitle || choice.title }),
+      ];
+      const reopened = (dry.reopened ?? []).map((r) => r.title).filter(Boolean);
+      if (choice.kind === 'stage' && reopened.length > 0) lines.push(pv.reopens({ titles: reopened.join(', ') }));
+      if ((dry.pointsRemoved ?? 0) > 0) lines.push(pv.points({ n: dry.pointsRemoved }));
+      if ((dry.relockedStages ?? []).length > 0) lines.push(pv.relocks({ stages: dry.relockedStages.join(', ') }));
+      if (dry.reactivatesTeam) lines.push(pv.reactivates);
+      message = lines.join('\n');
+    } catch { /* keep the generic consequence */ }
+    if (!(await dialog.confirm(message, rc.confirmCta.sendBack, false, { title: rc.confirmTitle }))) return;
+    try {
+      const res = await returnTeamTo({ ...ctx, teamId: team.id, target, reason: 'console send back' });
+      await loadTeams();
+      toast.success(res.queued ? rc.sendBackQueued({ team: team.displayName }) : rc.sendBackDone({ team: team.displayName }));
+    } catch { await dialog.alert(rc.sendBackFailed); }
+  }
+  function renderSkipPreview(lines: SkipPreviewLine[]): string {
+    return lines.map((l) => {
+      switch (l.key) {
+        case 'skips': return rc.skipPreview.skips({ title: l.title });
+        case 'opens': return rc.skipPreview.opens({ titles: l.titles.join(', ') });
+        case 'endsStage': return rc.skipPreview.endsStage;
+        case 'staysInStage': return rc.skipPreview.staysInStage;
+        case 'requirementLowered': return rc.skipPreview.requirementLowered({ n: l.required });
+        case 'consolation': return rc.skipPreview.consolation({ n: l.points });
+      }
+    }).join('\n');
   }
 
   function renderPanel(panel: PanelId) {
@@ -1292,13 +1379,19 @@ export default function RunConsolePage() {
                             run: () => void skipTeamStage(team),
                             disabled: false,
                           },
+                          sendBack: {
+                            label: rc.sendBack,
+                            aria: rc.sendBackAria({ team: team.displayName }),
+                            run: () => setSendBackFor(team),
+                            disabled: false,
+                          },
                           adjustTeamScore: {
                             label: rc.adjustScore,
                             aria: rc.adjustScoreAria({ team: team.displayName }),
                             run: () => void adjustScore(team),
                             disabled: false,
                           },
-                        }[id as 'clearTeamOutOfBounds' | 'skipTask' | 'skipStage' | 'adjustTeamScore'];
+                        }[id as 'clearTeamOutOfBounds' | 'skipTask' | 'skipStage' | 'sendBack' | 'adjustTeamScore'];
                         return (
                           <Button
                             key={id}
@@ -1462,11 +1555,20 @@ export default function RunConsolePage() {
             // run (change: post-review-fixes B). Same flag the publish toggle above
             // renders from, and the same one ensureBoardPublished already no-ops on.
             published={!!activeRun.leaderboard?.published}
-            hasStaffPin={!!staffPin}
+            hasStaffPin={!!staffPin || staffPanelWanted || hasStaffCodes}
             onShareBoard={ensureBoardPublished}
           />
         );
-      case 'staffInvite': return <StaffInviteCard ctx={ctx} pin={staffPin!} />;
+      case 'staffInvite': return (
+        <StaffInviteCard ctx={ctx}>
+          <StaffCodesPanel
+            ctx={ctx}
+            defaultCapabilities={staffDefaultCaps}
+            startCreating={staffPanelWanted && !staffPin}
+            onCreated={(pin) => setStaffPin(pin)}
+          />
+        </StaffInviteCard>
+      );
 
       case 'runSummary': return (
         <RunSummaryPanel
@@ -1659,6 +1761,15 @@ export default function RunConsolePage() {
         </div>
       )}
 
+      {sendBackFor && (
+        <SendBackPicker
+          teamName={sendBackFor.displayName}
+          stages={sendBackTargets(teamStages.get(sendBackFor.id) as never, gameStagesLite)}
+          onPick={(choice) => void sendTeamBack(sendBackFor, choice)}
+          onClose={() => setSendBackFor(null)}
+        />
+      )}
+
       {/* ── End of run ─────────────────────────────────────────────────────────
           Deliberately out of the routine control bar: this ends the game for
           every team, and it used to sit one mis-click from "Refresh standings". */}
@@ -1806,7 +1917,7 @@ function JoinShare({ accessCode }: { accessCode: string }) {
 // with the run context pre-filled (StaffSignIn reads it from the single ?staff param). The PIN is
 // deliberately NOT in the link (it's a secret + play-web doesn't read it from the
 // URL) — staff read it off this card and type it once.
-function StaffInviteCard({ ctx, pin }: { ctx: { ownerUid: string; gameId: string; runId: string }; pin: string }) {
+function StaffInviteCard({ ctx, children }: { ctx: { ownerUid: string; gameId: string; runId: string }; children?: ReactNode }) {
   const t = useT();
   // ONE param, and deliberately no `game=` key: the public promo route reads `game`
   // too, so the old multi-param shape re-resolved to GamePromoScreen (which offers
@@ -1828,15 +1939,14 @@ function StaffInviteCard({ ctx, pin }: { ctx: { ownerUid: string; gameId: string
       <div className="text-sm flex flex-wrap items-center gap-4">
         {qr && <img src={qr} alt={t.runConsole.staffLinkQrAlt} className="rounded-lg bg-white p-1.5 w-28 h-28 shrink-0" />}
         <div className="flex-1 min-w-[12rem] space-y-1.5">
-          <div>
-            {t.runConsole.staffPinLabel} <span className="font-mono text-ink-fire text-lg tracking-widest">{pin}</span>
-          </div>
+          {/* Each code's PIN is shown on its own row below (staff-capabilities). */}
           <button className="text-xs text-ink-fire hover:underline" onClick={copy}>
             {copied ? t.runConsole.linkCopied : t.runConsole.staffLinkCopy}
           </button>
           <div className="text-[--ink-3] text-xs leading-relaxed">{t.runConsole.staffLinkNote}</div>
         </div>
       </div>
+      <div className="mt-4">{children}</div>
     </PanelShell>
   );
 }

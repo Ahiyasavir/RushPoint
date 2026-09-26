@@ -40,7 +40,7 @@ Entering an API key is the user's action (cannot be automated). Add to `function
 
 ```
 RESEND_API_KEY=re_xxx                              # from resend.com (free tier); enables delivery
-RUN_SUMMARY_EMAIL_TO=spendora.tracker@gmail.com    # optional — override recipient (else owner's users/{uid}.email)
+RUN_SUMMARY_EMAIL_TO=admin.rushpoint@gmail.com    # optional — override recipient (else owner's users/{uid}.email)
 RUN_SUMMARY_EMAIL_FROM=onboarding@resend.dev        # optional — sender (default onboarding@resend.dev sandbox)
 RUN_SUMMARY_EMAIL_ENABLED=false                     # optional — set to hard-disable (default ON)
 ```

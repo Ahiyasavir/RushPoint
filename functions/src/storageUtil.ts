@@ -38,19 +38,45 @@ async function deleteLocalUploadPrefix(prefix: string): Promise<void> {
   await fs.promises.rm(target, { recursive: true, force: true });
 }
 
-// Remove every uploaded object for one run.
-export async function deleteRunPhotos(runId: string): Promise<void> {
-  const prefix = runPhotoPrefix(runId);
+// Remove every uploaded object for one run, from BOTH stores, and say which one was cleared
+// (change: run-media-disk-retention). Production has no bucket: the media is on the VPS disk, so
+// a retention path that only called the bucket threw, stamped the run pruned and kept the media
+// forever. `disk` is true when the disk leg ran cleanly (or there is no disk store to clear).
+export async function deleteRunUploads(runId: string): Promise<{ bucket: boolean; disk: boolean }> {
+  let prefix: string;
+  try {
+    // Throws on a blank or slash-bearing id, which would otherwise widen to `runs/`.
+    prefix = runPhotoPrefix(runId);
+  } catch (e) {
+    functions.logger.warn('deleteRunUploads: refused run id', { runId, e });
+    return { bucket: false, disk: false };
+  }
+  let bucket = false;
+  let disk = false;
   try {
     await storage.bucket().deleteFiles({ prefix });
+    bucket = true;
   } catch (e) {
-    functions.logger.warn(`deleteRunPhotos: bucket delete failed for run ${runId}`, e);
+    // Expected on the VPS (no bucket), so debug rather than warn would hide a real bucket outage.
+    functions.logger.warn(`deleteRunUploads: bucket delete failed for run ${runId}`, e);
   }
   try {
     await deleteLocalUploadPrefix(prefix);
+    disk = true;
   } catch (e) {
-    functions.logger.warn(`deleteRunPhotos: local delete failed for run ${runId}`, e);
+    functions.logger.warn(`deleteRunUploads: local delete failed for run ${runId}`, e);
   }
+  return { bucket, disk };
+}
+
+/** Whether uploads are stored on this server's disk (the self-hosted VPS). */
+export function hasLocalUploadStore(): boolean {
+  return !!UPLOAD_DIR;
+}
+
+// Remove every uploaded object for one run (best effort; game purge and account deletion).
+export async function deleteRunPhotos(runId: string): Promise<void> {
+  await deleteRunUploads(runId);
 }
 
 // Remove uploaded objects for many runs (sequential keeps memory + API load low).

@@ -30,6 +30,7 @@ export * from './answerAttempts';
 // post-run-player-report). Bounded, owner-only by construction (never added to
 // sanitizeTeamForParticipant's allow-list), destroyed after 30 days.
 export * from './answerLog';
+export * from './emergency';
 // What a wrong answer costs (change: wrong-answer-cost) — escalating, capped,
 // preset-aware. Shared by the charge, the participant display and the Builder.
 export * from './wrongAnswerPenalty';
@@ -99,6 +100,10 @@ export * from './hiddenTask';
 // Skipping ONE mission for ONE team (change: skip-single-task) — the decision that
 // keeps the skip inside the stage and keeps the stage winnable afterwards.
 export * from './taskSkip';
+export * from './skipPreview';
+export * from './teamRewind';
+export * from './scoreLedger';
+export * from './sendBackTargets';
 // Live-ops feedback (change: live-ops-feedback-loop) — "is a team waiting on me
 // right now?" for the review queue, and the one vocabulary a manual score
 // adjustment records itself with.
@@ -171,3 +176,7 @@ export * from './sharedGameView';
 // cross-origin, so only the server's Content-Disposition can do it
 // (change: download-actually-downloads).
 export * from './mediaDownloadUrl';
+// Who on a run's staff may do what: game default, code, person (change: staff-capabilities).
+export * from './staffCapabilities';
+// Has the team's sending phone gone quiet? (change: team-phones-simple)
+export * from './senderQuiet';

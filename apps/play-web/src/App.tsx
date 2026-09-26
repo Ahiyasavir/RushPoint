@@ -302,6 +302,7 @@ function AppInner() {
         )
         : <JoinScreen
             initialCode={route.kind === 'join' ? route.code : null}
+            initialDeviceCode={route.kind === 'join' ? route.deviceCode : undefined}
             autoJoin={route.kind === 'join' && route.autoJoin === true}
             onJoined={setSession}
             onStaff={() => setStaffMode(true)}

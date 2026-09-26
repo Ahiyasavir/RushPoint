@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay, RehearsalReveal } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay, RehearsalReveal, DevicePresence } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -34,8 +34,11 @@ export interface JoinInfo {
   // Accurate GPS requirement derived from task trigger modes (change:
   // fix-live-launch-demo-text). Optional until the server populates it.
   requirement?: GameRequirement;
+  // "Add a phone" (team-phones-simple): present only when the link carried a device code.
+  // The team's display name, or null when the code matches no team. Nothing else about it.
+  deviceTeam?: { displayName: string } | null;
 }
-export const getJoinInfo = callable<{ code: string }, JoinInfo>('getJoinInfo');
+export const getJoinInfo = callable<{ code: string; deviceCode?: string }, JoinInfo>('getJoinInfo');
 
 // Challenge-a-friend teaser: server-checked, non-scoring answer. Returns only
 // whether the answer is correct — the key never reaches the client.
@@ -152,6 +155,9 @@ export interface StageNarrative {
 
 export interface MyTeamState {
   team: RunTeam;
+  // Seconds since each of this team's phones last asked for the state (team-phones-simple D5).
+  // Server memory only: absent after a restart, which the quiet verdict reads as "not quiet".
+  devicePresence?: DevicePresence[];
   // Why this team has not been started, or null when nothing is holding it
   // (change: held-team-visibility). A REASON only: no guardian name, contact or
   // token. Optional on the wire so a console/app talking to a backend that
@@ -407,8 +413,15 @@ export const staffSignIn = callable<
   // `name` is the staffer's self-declared display name (attribution only — the
   // server treats it as untrusted and it grants nothing). Omitted ⇒ the invite's name.
   { ownerUid: string; gameId: string; runId: string; pin: string; name?: string },
-  { customToken: string; name: string; permissions: string[] }
+  { customToken: string; name: string; capabilities: string[]; codeId: string }
 >('staffSignIn');
+
+// Re-mint this staff member's token with their code's CURRENT capabilities (staff-capabilities).
+// Called when the organizer edits the code, so rule-gated reads (the live map) follow the edit.
+export const refreshStaffSession = callable<
+  { ownerUid: string; gameId: string; runId: string },
+  { customToken: string; capabilities: string[] }
+>('refreshStaffSession');
 
 // ── Staff console actions ──
 export const reviewStationSubmission = callable<
@@ -452,6 +465,24 @@ export const forceAssignTask = callable<
   { ok: boolean; taskId: string; displacedTaskId: string | null; override: boolean }
 >('forceAssignTask');
 
+// Send ONE team back to a skipped/completed mission or an earlier stage (change: send-team-back).
+export type SendBackTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
+export const returnTeamTo = callable<
+  Ctx & { teamId: string; target: SendBackTarget; reason?: string; dryRun?: boolean },
+  {
+    ok: boolean; dryRun?: boolean; targetKind: 'task' | 'stage'; stageTitle: string; taskTitle: string;
+    reopened: { id: string; title: string }[]; relockedStages: string[]; pointsRemoved: number;
+    reactivatesTeam: boolean; assignedTaskId?: string | null; queued?: boolean; finished?: boolean;
+  }
+>('returnTeamTo');
+
+// Stage and mission NAMES for this run (change: send-team-back). Staff cannot read the game
+// document, so without this every mission appeared as a raw id.
+export const getRunOutline = callable<
+  Ctx,
+  { stages: { id: string; title: string; tasks: { id: string; title: string }[] }[] }
+>('getRunOutline');
+
 // Release a team from the safety-zone latch — previously reachable only from the
 // desktop run console, which meant a marshal had to find a laptop to unstick a team.
 export const clearTeamOutOfBounds = callable<
@@ -462,11 +493,14 @@ export const clearTeamOutOfBounds = callable<
 // Skip ONE mission for ONE team, keeping them in the same stage. Same callable the
 // desktop console uses; `taskId` omitted means "whatever they're holding now".
 export const skipTaskForTeam = callable<
-  Ctx & { teamId: string; taskId?: string; reason?: string },
+  // `dryRun` (change: skip-keeps-the-stage): plan only, nothing written; the confirm shows it.
+  Ctx & { teamId: string; taskId?: string; reason?: string; dryRun?: boolean },
   {
-    ok: boolean; taskId: string; stageCompleted: boolean;
+    ok: boolean; taskId: string; stageCompleted?: boolean;
     requiredTaskCount: number; requirementLowered: boolean;
-    nextTaskId: string | null; nextReason: string | null;
+    dryRun?: boolean; taskTitle?: string; stageCompletes?: boolean; consolation?: number;
+    dependentsOpened?: { id: string; title: string }[];
+    nextTaskId?: string | null; nextReason?: string | null;
   }
 >('skipTaskForTeam');
 
