@@ -58,6 +58,10 @@ export const COLLECTIONS = {
 } as const;
 
 export const FIRESTORE_PATHS = {
+  // A creator's own profile doc (owner-writable). quick-dial-and-actions keeps the
+  // console's quick-actions bar here, under `consolePrefs`.
+  user:       (uid: string) => `users/${uid}`,
+
   game:       (ownerUid: string, gameId: string) =>
     `users/${ownerUid}/games/${gameId}`,
 

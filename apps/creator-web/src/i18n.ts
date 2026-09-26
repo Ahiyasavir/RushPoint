@@ -1361,6 +1361,14 @@ const HE = {
     teamSearchClear: 'ניקוי החיפוש',
     // team-dossier-and-search D3: everything about one team.
     openTeamAria: ({ team }: { team: string }) => `פתיחת כל הפרטים של ${team}`,
+    quickActions: {
+      icon: { broadcast: '📣', startTeams: '🏁', refreshStandings: '🔄', photoQueue: '📷', adjustScore: '➕', findTeam: '🔎', callContact: '📞' },
+      label: { broadcast: 'הודעה לכולם', startTeams: 'זינוק לכולם', refreshStandings: 'רענון דירוג', photoQueue: 'תמונות לבדיקה', adjustScore: 'ניקוד לקבוצה', findTeam: 'מציאת קבוצה', callContact: 'חיוג למטה' },
+      customise: 'בחירת קיצורים',
+      customiseHelp: ({ max }: { max: number }) => `בחרו עד ${max} פעולות שיופיעו תמיד בראש המסך. הבחירה נשמרת בחשבון שלכם.`,
+      done: 'סיום',
+      pickTeam: 'לאיזו קבוצה?',
+    },
     // quick-dial-and-actions: the run's phone numbers.
     contacts: {
       title: 'טלפונים לחיוג מהיר',
@@ -4220,6 +4228,14 @@ const EN: typeof HE = {
     teamSearchClear: 'Clear search',
     // team-dossier-and-search D3: everything about one team.
     openTeamAria: ({ team }: { team: string }) => `Open everything about ${team}`,
+    quickActions: {
+      icon: { broadcast: '📣', startTeams: '🏁', refreshStandings: '🔄', photoQueue: '📷', adjustScore: '➕', findTeam: '🔎', callContact: '📞' },
+      label: { broadcast: 'Message everyone', startTeams: 'Start all teams', refreshStandings: 'Refresh standings', photoQueue: 'Photos to review', adjustScore: 'Points for a team', findTeam: 'Find a team', callContact: 'Call HQ' },
+      customise: 'Choose shortcuts',
+      customiseHelp: ({ max }: { max: number }) => `Pick up to ${max} actions to keep at the top of the screen. Your choice is saved to your account.`,
+      done: 'Done',
+      pickTeam: 'Which team?',
+    },
     // quick-dial-and-actions: the run's phone numbers.
     contacts: {
       title: 'Quick dial numbers',

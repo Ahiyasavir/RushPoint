@@ -5,19 +5,24 @@ Depends on: `team-dossier-and-search` (team page), `staff-capabilities` (`contac
 
 ## 1. RED
 
-- [ ] 1.1 `scripts/test-phone-link.ts`, `scripts/test-quick-actions.ts`. Confirm RED.
-- [ ] 1.2 e2e for `setRunContacts` and contacts delivery (design, test strategy). Confirm RED.
+- [x] 1.1 `scripts/test-phone-link.ts`, `scripts/test-quick-actions.ts`. Confirm RED.
+- [x] 1.2 e2e for `setRunContacts` and contacts delivery (design, test strategy). Confirm RED.
 
 ## 2. GREEN
 
-- [ ] 2.1 `phoneLink.ts`, `quickActions.ts`, `Run.contacts` type. 1.1 → green.
-- [ ] 2.2 `setRunContacts` callable + export + `PRIVILEGED_CALLABLES` + rate limit + wrappers; contacts in
+- [x] 2.1 `phoneLink.ts`, `quickActions.ts`, `Run.contacts` type. 1.1 → green.
+- [x] 2.2 `setRunContacts` callable + export + `PRIVILEGED_CALLABLES` + rate limit + wrappers; contacts in
       `getMyTeamState` and the staff bootstrap. 1.2 → green.
-- [ ] 2.3 Console contacts editor (in "share and screens" or the run header menu).
-- [ ] 2.4 Player: "call the organizer" in the SOS sheet and the mission help menu.
-- [ ] 2.5 Team page + staff app: call/WhatsApp for team phone fields; `contactTeams` capability.
-- [ ] 2.6 Quick-actions bar + customiser (console), saved to `users/{uid}.consolePrefs`; staff bar in localStorage.
-- [ ] 2.7 i18n he/en, both apps.
+- [x] 2.3 Console contacts editor (in "share and screens" or the run header menu).
+- [x] 2.4 Player: "call the organizer" in the SOS sheet and the mission help menu.
+      (Built as a call button beside SOS in the play header + the numbers on the waiting screen.)
+- [~] 2.5 Team page + staff app: call/WhatsApp for team phone fields; `contactTeams` capability.
+      (Team page: done. Staff app buttons, staff-visible contacts in the staff bootstrap and the
+      `contactTeams` capability: NOT done.)
+- [~] 2.6 Quick-actions bar + customiser (console), saved to `users/{uid}.consolePrefs`; staff bar in localStorage.
+      (Console bar + customiser: done, persisted and checked across a reload. No drag-to-reorder:
+      order is the order chosen. Staff bar: NOT done.)
+- [x] 2.7 i18n he/en, both apps.
 
 ## 3. REFACTOR
 
@@ -26,5 +31,7 @@ Depends on: `team-dossier-and-search` (team page), `staff-capabilities` (`contac
 
 ## 4. Verify
 
-- [ ] 4.1 Preview flows; a real phone taps a `tel:` and a WhatsApp link.
+- [~] 4.1 Preview flows; a real phone taps a `tel:` and a WhatsApp link.
+      (Preview: contacts editor, the player's call link, the bar and the team picker checked.
+      A real phone tapping the links: still owed.)
 - [ ] 4.2 `npm run verify`, `npm run e2e` green, exit codes to a file.

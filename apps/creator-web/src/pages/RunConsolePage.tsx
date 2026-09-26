@@ -21,7 +21,7 @@ import {
 import {
   buildSubmissionQueues, submissionKey, isRenderableMedia,
   newPendingKeys, pendingLateJoiners,
-  OTHER_REASON, reasonsForDelta, resolveReason, isScoreReasonId, type ScoreReasonId,
+  OTHER_REASON, reasonsForDelta, resolveReason, isScoreReasonId, toTelHref, type ScoreReasonId,
   type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
 } from '@rushpoint/shared';
 // Review triage (change: photo-review-throughput): wait time, "who is actually
@@ -45,6 +45,7 @@ import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import { buildTeamDossier } from '../lib/teamDossier';
 import TeamPage from '../components/TeamPage';
 import RunContactsEditor from '../components/RunContactsEditor';
+import QuickActionsBar from '../components/QuickActionsBar';
 import StaffCodesPanel from '../components/StaffCodesPanel';
 import { defaultCodeCapabilities, type StaffCapability } from '@rushpoint/shared';
 import { sendBackTargets } from '../lib/sendBackTargets';
@@ -1831,6 +1832,40 @@ export default function RunConsolePage() {
             </button>
           ))}
         </nav>
+      )}
+
+      {/* ── QUICK ACTIONS (change: quick-dial-and-actions) ───────────────────────
+          The organizer's own shortcuts. Every id maps to a handler the console
+          already has; nothing here is new behaviour, only a shorter way to it. */}
+      {!finished && (
+        <QuickActionsBar
+          uid={user?.uid ?? null}
+          teams={teams}
+          handlers={{
+            available: (id) => {
+              if (id === 'callContact') return !!(activeRun.contacts ?? []).find((c) => toTelHref(c.phone));
+              if (id === 'broadcast') return sections.some((sec) => sec.id === 'gameMechanics');
+              if (id === 'photoQueue') return sections.some((sec) => sec.id === 'moderation');
+              return true;
+            },
+            run: (id) => {
+              if (id === 'broadcast') openSection('gameMechanics');
+              else if (id === 'photoQueue') openSection('moderation');
+              else if (id === 'startTeams') void startAll();
+              else if (id === 'refreshStandings') void refreshStandings();
+              else if (id === 'callContact') {
+                const href = toTelHref((activeRun.contacts ?? []).find((c) => toTelHref(c.phone))?.phone);
+                if (href) window.location.href = href;
+              }
+            },
+            runWithTeam: (id, teamId) => {
+              const row = teams.find((tm) => tm.id === teamId);
+              if (!row) return;
+              if (id === 'adjustScore') void adjustScore(row);
+              else if (id === 'findTeam') openTeamPage(teamId);
+            },
+          }}
+        />
       )}
 
       {/* ── SECTIONS NAVIGATION (change: run-console-tabs-up-front) ───────────────
