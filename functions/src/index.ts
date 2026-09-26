@@ -23,7 +23,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // Undoing an approval and taking the points back with it (change:
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
-import { planApprovalReversal, appendScoreLedger, validateRunContacts } from '@rushpoint/shared';
+import { planApprovalReversal, appendScoreLedger, validateRunContacts, matchAnswerOutcome, type AnswerOutcome } from '@rushpoint/shared';
 import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
@@ -1568,6 +1568,9 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
         releaseAfterMinutes?: number;
         expiresAfterMinutes?: number;
         smart?: { secretCode?: string; attemptLimit?: number };
+        type?: string;
+        answerOutcomes?: AnswerOutcome[];
+        unmatchedPoints?: number | null;
       }[];
     }[];
   };
@@ -1614,7 +1617,15 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
 
   const expectedCode = stationTask.smart?.secretCode;
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
-  if (!expectedCode || expectedCode.trim().toLowerCase() !== code.trim().toLowerCase()) {
+  // answer-scored-question: a station with SEVERAL codes, each worth its own points
+  // (the operator decides which code to hand out). One code keeps today's exact
+  // comparison, so no live station is silently re-graded.
+  const hasOutcomes = Array.isArray(stationTask.answerOutcomes) && stationTask.answerOutcomes.length > 0;
+  const outcome = hasOutcomes ? matchAnswerOutcome({ ...stationTask, type: 'smart_station' }, code) : null;
+  const codeOk = hasOutcomes
+    ? !!outcome && 'outcomeId' in outcome
+    : !!expectedCode && expectedCode.trim().toLowerCase() === code.trim().toLowerCase();
+  if (!codeOk) {
     // Hint auto escalation (change: hint-auto-escalation): a wrong station code
     // is a wrong ATTEMPT — record it (real nested map, never a dotted key in
     // .set({merge})) before rejecting, so a struggling team's free-hint
@@ -1655,12 +1666,16 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
     ownerUid, gameId, runId, resolvedTeamId, taskId, now,
     // post-run-player-report: the accepted code rides the completion transaction
     // that already rewrites this stage — no extra read, no extra transaction.
-    { answerLog: buildAnswerLogEntry({ kind: 'station_code', answer: code, correct: true, at: now }) },
+    {
+      answerLog: buildAnswerLogEntry({ kind: 'station_code', answer: code, correct: true, at: now }),
+      ...(outcome && 'outcomeId' in outcome ? { awardOverride: outcome.points, outcomeId: outcome.outcomeId } : {}),
+    },
   );
+  const outcomeMessage = outcome && 'outcomeId' in outcome ? outcome.message : undefined;
   if (!completed) return { verified: true, already: true, nextTaskId: null };
   // WO Fix 1: the held station slot is released atomically inside completeTaskForTeam.
   const next = await assignNextInActiveStage(ownerUid, gameId, runId, resolvedTeamId, { lat: 0, lng: 0 }, now);
-  return { verified: true, nextTaskId: next.taskId ?? null };
+  return { verified: true, nextTaskId: next.taskId ?? null, ...(outcomeMessage ? { message: outcomeMessage } : {}) };
 });
 
 

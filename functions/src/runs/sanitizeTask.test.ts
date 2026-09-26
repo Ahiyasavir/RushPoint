@@ -156,6 +156,40 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect((out.smart as Record<string, unknown> | undefined)?.preferredCamera).toBe('front');
   });
 
+  // answer-scored-question D4: the accepted texts and their points are the answer
+  // key. The player gets only the button labels.
+  test('answerOutcomes never reach the player; labels become choices', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'quiz',
+        answerOutcomes: [
+          { id: 'a', label: 'ירושלים', accepts: ['ירושלים', 'jerusalem'], points: 50 },
+          { id: 'b', label: 'תל אביב', points: 20 },
+        ],
+        unmatchedPoints: 5,
+        revealOutcomePoints: false,
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    expect(out.answerOutcomes).toBeUndefined();
+    expect(out.unmatchedPoints).toBeUndefined();
+    expect(out.revealOutcomePoints).toBeUndefined();
+    expect(out.choices).toEqual(['ירושלים', 'תל אביב']);
+    expect(JSON.stringify(out)).not.toContain('jerusalem');
+  });
+
+  test('a station with several codes ships no codes and no choices', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'smart_station',
+        smart: { enabled: true, verificationType: 'code_verification' },
+        answerOutcomes: [{ id: 'z', label: 'זעתר', points: 50 }, { id: 'm', label: 'מרווה', points: 100 }],
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    expect(out.answerOutcomes).toBeUndefined();
+    expect(out.choices).toBeUndefined();
+    expect(JSON.stringify(out)).not.toContain('מרווה');
+  });
+
   // task-media-attachments: general media is participant-visible (no secret) and
   // must survive the sanitizer intact so the TaskRunner can render it.
   test('task media (image + youtube) passes through to the participant unchanged', () => {

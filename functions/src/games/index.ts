@@ -33,6 +33,7 @@ import {
   validateUnlockGraph,
   requiredTaskCountProblem,
   videoDurationProblem,
+  answerOutcomesProblem,
   validateAvailabilityWindow,
   validateOrderItems,
   validateSurveyChoices,
@@ -299,7 +300,7 @@ function sanitizeStagesText(stages: Stage[] | undefined, gameTags?: string[]): S
  * items), survey-choice rules (2–8 non-empty options) and stage winnability (a
  * `requiredTaskCount` above what the stage's exclusive groups can ever yield).
  */
-function stagesProblems(stages: Stage[] | undefined): string[] {
+function stagesProblems(stages: Stage[] | undefined, scoringPreset?: string): string[] {
   const problems: string[] = [];
   // AUTHORING phase (change: builder-draft-save-tolerance): this helper serves the
   // two SAVE doors (updateGame + importGameFile), so an answer key that is not filled
@@ -348,6 +349,11 @@ function stagesProblems(stages: Stage[] | undefined): string[] {
         const durationError = videoDurationProblem(task.smart.videoMinSeconds, task.smart.videoMaxSeconds);
         if (durationError) problems.push(`Task "${task.title || task.id}": ${durationError}`);
       }
+      // answer-scored-question: overlaps, counts, points, exclusivity, and the
+      // time_only rule (no points exist there) when the preset is known. Refused at
+      // save, where the creator can still fix it.
+      const outcomesError = answerOutcomesProblem(task, scoringPreset);
+      if (outcomesError) problems.push(`Task "${task.title || task.id}": points by answer: ${outcomesError}`);
       // camera-switch: 'front' or absent. null is the transport's "cleared", so it is
       // accepted like absent (the cleared-optional-field trap).
       const cam = (task.smart as { preferredCamera?: unknown } | undefined)?.preferredCamera;
@@ -498,7 +504,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     // release is an empty availability window and can never be played.
     // Save-time validation, shared verbatim with importGameFile (stagesProblems
     // above) so the Builder save path and the file-restore path can never drift.
-    const problems = stagesProblems(stages);
+    const problems = stagesProblems(stages, scoringPreset);
     if (problems.length > 0) {
       throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
     }
@@ -1434,7 +1440,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // Layer 3 — the SAME semantic guards updateGame runs, from the same helper, so
   // an imported game can never be accepted on terms an authored one would not be.
   const stages = (parsed.stages ?? []) as Stage[];
-  const problems = stagesProblems(stages);
+  const problems = stagesProblems(stages, (parsed as { scoringPreset?: string }).scoringPreset);
   if (problems.length > 0) {
     throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
   }

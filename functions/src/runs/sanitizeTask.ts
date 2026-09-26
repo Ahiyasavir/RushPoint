@@ -92,7 +92,16 @@ export function sanitizeTaskForParticipant(
   // passed through: a survey has no right answer, so the options are not a secret —
   // the participant needs them to render the choice buttons. Listed in the e2e
   // ALLOWED_TASK_KEYS allowlist.
-  const { smart, hint, answers, numericAnswer, steps, orderItems, ...rest } = task;
+  // answer-scored-question: answerOutcomes (accepted texts/codes and their points) and
+  // unmatchedPoints are the answer key; revealOutcomePoints is authoring config.
+  const { smart, hint, answers, numericAnswer, steps, orderItems, answerOutcomes, unmatchedPoints: _unmatched, revealOutcomePoints: _reveal, ...rest } = task;
+  void _unmatched; void _reveal;
+  // A question graded by answer renders its outcome LABELS as buttons. A station's
+  // codes are handed out by the operator, so a station ships none.
+  const outcomeChoices = task.type === 'quiz' && Array.isArray(answerOutcomes) && answerOutcomes.length > 0
+    && answerOutcomes.every((o) => typeof o?.label === 'string' && o.label.trim())
+    ? answerOutcomes.map((o) => (o.label as string).trim())
+    : undefined;
 
   // Ordering quiz: with a seed, emit a deterministic per-team shuffle (stable
   // across reloads/polls, so it can't be diffed to recover the order); without
@@ -117,6 +126,7 @@ export function sanitizeTaskForParticipant(
 
   return {
     ...rest,
+    ...(outcomeChoices ? { choices: outcomeChoices } : {}),
     ...(shuffledOrderItems ? { orderItems: shuffledOrderItems } : {}),
     ...(hidden ? { locationHidden: true as const } : {}),
     hasHint: !!hint && hint.trim().length > 0,

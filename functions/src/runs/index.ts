@@ -104,7 +104,7 @@ import {
   gateSatisfiedTaskIds,
   // send-team-back: the pure rewind plan and the organizer-facing score ledger.
   planTeamRewind,
-  appendScoreLedger, contactsFor,
+  appendScoreLedger, contactsFor, answerOutcomesProblem, matchAnswerOutcome,
   resolveExclusions,
   isHintFree,
   // Wrong-answer cost (change: wrong-answer-cost): escalating, capped, preset-aware.
@@ -349,6 +349,12 @@ export async function launchRunCore(
     for (const task of stage.tasks ?? []) {
       const err = taskCompletabilityError(task);
       if (err) throw new functions.https.HttpsError('failed-precondition', err);
+      // answer-scored-question: re-checked against the preset the run will SCORE with
+      // (a time_only game has no points, so an outcome worth points is refused).
+      const outcomesErr = answerOutcomesProblem(task, game.scoringPreset);
+      if (outcomesErr) {
+        throw new functions.https.HttpsError('failed-precondition', `Task "${task.title || task.id}": points by answer: ${outcomesErr}`);
+      }
     }
   }
 
@@ -1057,6 +1063,12 @@ export async function completeTaskForTeam(
     // arrival-needs-a-usable-fix: the team was let through on a fix that could not
     // prove it, because the grace window had passed. Organizer-facing only.
     arrivalUnverified?: boolean;
+    // answer-scored-question D3: the matched outcome's points REPLACE the mission's
+    // base award (fixed_points_speed and smart_weighted; time_only has no points).
+    // Stamped on the record with the outcome id, so live and final standings stay a
+    // function of the stored team document.
+    awardOverride?: number;
+    outcomeId?: string;
   },
 ): Promise<{ completed: boolean; heldSlot: boolean }> {
   // Returns { completed, heldSlot }. `completed` is TRUE only when this call
@@ -1247,13 +1259,15 @@ export async function completeTaskForTeam(
     // exists to enable. `wasCorrect === false` is the only case that zeroes; a
     // task with no recorded verdict (a field check-in, a photo) scores normally.
     const gradedWrong = extras?.wasCorrect === false;
+    const override = extras?.awardOverride;
+    const hasOverride = typeof override === 'number' && Number.isInteger(override) && override >= 0;
     if (gameTask && !gradedWrong) {
       switch (game.scoringPreset) {
         case 'time_only':
           earnedScore = 0;
           break;
         case 'fixed_points_speed':
-          earnedScore = taskScoreFixed(gameTask);
+          earnedScore = hasOverride ? override : taskScoreFixed(gameTask);
           break;
         case 'smart_weighted':
           // pause-clock-tasks: a paused task is scored ON ESTIMATE (x = 1), so its
@@ -1263,7 +1277,8 @@ export async function completeTaskForTeam(
           // real span would keep punishing deliberation, which is the bug. This
           // matches skipAward('smart_weighted'), which already awards the
           // on-estimate score, so a skipped paused task and a completed one agree.
-          earnedScore = taskScoreSmart(
+          // answer-scored-question: points by answer are FIXED; speed does not change them.
+          earnedScore = hasOverride ? override : taskScoreSmart(
             gameTask.difficulty,
             gameTask.pausesTimer ? gameTask.estimatedMinutes : actualMinutes,
             gameTask.estimatedMinutes,
@@ -1376,6 +1391,7 @@ export async function completeTaskForTeam(
     }
 
     taskRec.earnedScore = earnedScore;
+    if (typeof extras?.outcomeId === 'string' && extras.outcomeId) taskRec.outcomeId = extras.outcomeId;
     // scoreBreakdown composes hot-zone (first) then the ×2 power-up (both fields set
     // when both applied) so the audit trail shows the full derivation.
     taskRec.scoreBreakdown = {
@@ -5679,14 +5695,23 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // The answer is still GRADED and still SCORED: the creator's console, analytics,
   // leaderboard and recap are untouched. Only the verdict's visibility and its
   // consequences change.
+  // answer-scored-question: points by answer. The matched outcome decides BOTH
+  // whether the answer counts and what it is worth; no outcome = a wrong answer
+  // (unless the creator set "anything else earns N").
+  const outcomeTask = Array.isArray(task.answerOutcomes) && task.answerOutcomes.length > 0;
+  const outcome = outcomeTask ? matchAnswerOutcome(task, String(answer)) : null;
+  const outcomeExtras = outcome && 'outcomeId' in outcome ? { awardOverride: outcome.points, outcomeId: outcome.outcomeId } : {};
   if (sealsScoreFromParticipant(game)) {
-    const correctSealed = ordering
-      ? matchesOrderedAnswer(task.orderItems as string[], orderedAnswer)
-      : matchesTaskAnswer(task, String(answer));
+    const correctSealed = outcomeTask
+      ? !!outcome && 'outcomeId' in outcome
+      : ordering
+        ? matchesOrderedAnswer(task.orderItems as string[], orderedAnswer)
+        : matchesTaskAnswer(task, String(answer));
     const nowSealed = new Date().toISOString();
     const { completed } = await completeTaskForTeam(
       ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, nowSealed,
       {
+        ...outcomeExtras,
         submittedAnswer: boundStoredAnswer(ordering ? JSON.stringify(orderedAnswer) : answer),
         wasCorrect: correctSealed,
         // post-run-player-report: the same submission also joins the recorded
@@ -5799,9 +5824,11 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     }
   }
 
-  const correct = ordering
-    ? matchesOrderedAnswer(task.orderItems as string[], orderedAnswer)
-    : matchesTaskAnswer(task, String(answer));
+  const correct = outcomeTask
+    ? !!outcome && 'outcomeId' in outcome
+    : ordering
+      ? matchesOrderedAnswer(task.orderItems as string[], orderedAnswer)
+      : matchesTaskAnswer(task, String(answer));
   if (!correct) {
     // Record the wrong attempt under a real nested map (not a dotted key).
     // Tracked when ANY consumer needs it: the attempt-limit cap (row 42), hint
@@ -5929,6 +5956,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   const { completed } = await completeTaskForTeam(
     ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now,
     {
+      ...outcomeExtras,
       answerLog: buildAnswerLogEntry({
         kind: ordering ? 'ordering' : 'answer',
         answer: ordering ? JSON.stringify(orderedAnswer) : answer,
@@ -5937,11 +5965,12 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       }),
     },
   );
+  const outcomeMessage = outcome && 'outcomeId' in outcome ? outcome.message : undefined;
   if (!completed) return { correct: true, nextTaskId: null };
   // WO Fix 1: slot release is atomic inside completeTaskForTeam.
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
-  return { correct: true, nextTaskId: next.taskId ?? null };
+  return { correct: true, nextTaskId: next.taskId ?? null, ...(outcomeMessage ? { message: outcomeMessage } : {}) };
 });
 
 // ─── submitSequenceStep (sequence tasks — one ordered step at a time) ──────────

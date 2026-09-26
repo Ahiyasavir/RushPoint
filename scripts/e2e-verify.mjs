@@ -12934,6 +12934,113 @@ async function main() {
     check('a player cannot set the run contacts', denied);
   }); // scenario: run contacts
 
+  await scenario('points by answer (station codes and questions)', async () => {
+    // answer-scored-question. The field example first: the operator at a station
+    // hands out a code, "זעתר" earns 50 and "מרווה" earns 100. The mission's own
+    // pointValue is 30, so an award of 30 would mean the outcome was ignored.
+    const OWNER = creatorCred.user.uid;
+    const { gameId: og } = await creator.call('createGame', { title: 'Points By Answer', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: og, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'ob-s', order: 0, title: 'Codes', isFinal: true, tasks: [
+        { id: 'ob-st', title: 'Spice stall', type: 'smart_station', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'code_verification' },
+          answerOutcomes: [
+            { id: 'zaatar', label: 'זעתר', accepts: ['זעתר'], points: 50 },
+            { id: 'marva', label: 'מרווה', accepts: ['מרווה'], points: 100, message: 'הקוד הכי טוב!' },
+          ] },
+      ] }],
+    });
+    const { runId: or1, accessCode: oc1 } = await creator.call('launchRun', { gameId: og });
+    const players = {};
+    for (const name of ['A', 'B', 'C', 'D']) {
+      const p = makeParty(`outcome${name}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: oc1, displayName: `Team ${name}` });
+      players[name] = p;
+    }
+    await creator.call('startTeams', { gameId: og, runId: or1 });
+    const OC = { ownerUid: OWNER, gameId: og, runId: or1, taskId: 'ob-st' };
+    const earned = async (p) => {
+      const t = (await creator.getDocAt(`users/${OWNER}/games/${og}/runs/${or1}/teams/${p.auth.currentUser.uid}`)).data ?? {};
+      return (t.stages ?? [])[0]?.tasks?.find((x) => x.taskId === 'ob-st') ?? {};
+    };
+
+    const a = await players.A.call('verifyStationCode', { ...OC, code: 'זעתר' });
+    check('station outcome: "זעתר" is accepted', a?.verified === true, JSON.stringify(a));
+    const recA = await earned(players.A);
+    check('station outcome: "זעתר" earned 50, not the mission\'s 30', recA.earnedScore === 50 && recA.outcomeId === 'zaatar', JSON.stringify(recA));
+
+    const b = await players.B.call('verifyStationCode', { ...OC, code: 'מרווה' });
+    const recB = await earned(players.B);
+    check('station outcome: "מרווה" earned 100', recB.earnedScore === 100 && recB.outcomeId === 'marva', JSON.stringify(recB));
+    check('station outcome: the outcome message reaches the team', b?.message === 'הקוד הכי טוב!', JSON.stringify(b));
+
+    await players.C.call('verifyStationCode', { ...OC, code: ' זַעְתָּר ' });
+    check('station outcome: niqqud and padding still earn 50', (await earned(players.C)).earnedScore === 50);
+
+    let wrong = '';
+    try { await players.D.call('verifyStationCode', { ...OC, code: 'נענע' }); } catch (e) { wrong = `${e.code} ${e.message}`; }
+    check('station outcome: an unknown code is "Incorrect code"', /failed-precondition/.test(wrong) && /Incorrect code/.test(wrong), wrong);
+    check('station outcome: the wrong code completed nothing', (await earned(players.D)).status !== 'completed');
+
+    const stA = await players.A.call('getMyTeamState', { code: oc1 });
+    check('station outcome: the player payload never carries the codes or their points',
+      !JSON.stringify(stA).includes('מרווה') && !JSON.stringify(stA).includes('answerOutcomes'), 'payload leaked outcomes');
+
+    // The award is rolled up onto the stage total the rankings read (a stored
+    // number, so live and final standings cannot re-derive it differently). Not an
+    // ordering claim: the ranking also normalises time, so a faster 50 can beat a 100.
+    {
+      const tB = (await creator.getDocAt(`users/${OWNER}/games/${og}/runs/${or1}/teams/${players.B.auth.currentUser.uid}`)).data ?? {};
+      check('station outcome: the stage total carries the outcome award', (tB.stages ?? [])[0]?.earnedScore === 100, JSON.stringify((tB.stages ?? [])[0]?.earnedScore));
+    }
+
+    // ── A question graded by answer ─────────────────────────────────────────
+    const { gameId: qg } = await creator.call('createGame', { title: 'Question By Answer', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: qg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'oq-s', order: 0, title: 'Q', isFinal: true, tasks: [
+        { id: 'oq-q', title: 'Best capital', type: 'quiz', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+          answerOutcomes: [
+            { id: 'jlm', label: 'ירושלים', points: 50 },
+            { id: 'tlv', label: 'תל אביב', points: 20 },
+          ] },
+      ] }],
+    });
+    const { runId: or2, accessCode: oc2 } = await creator.call('launchRun', { gameId: qg });
+    const qp = makeParty('outcomeQuiz');
+    await signInAnonymously(qp.auth);
+    await qp.call('joinRun', { code: oc2, displayName: 'Quiz team' });
+    await creator.call('startTeams', { gameId: qg, runId: or2 });
+    const QC = { ownerUid: OWNER, gameId: qg, runId: or2 };
+    await qp.call('requestNextTask', QC);
+    const qs = await qp.call('getMyTeamState', { code: oc2 });
+    const qTask = qs?.activeStageTasks?.find((x) => x.id === 'oq-q');
+    check('question outcome: the buttons are the outcome labels', JSON.stringify(qTask?.choices) === JSON.stringify(['ירושלים', 'תל אביב']), JSON.stringify(qTask?.choices));
+    check('question outcome: no points or accepts reach the player', !JSON.stringify(qTask ?? {}).includes('points') && !JSON.stringify(qTask ?? {}).includes('answerOutcomes'), JSON.stringify(qTask));
+    const miss = await qp.call('submitTaskAnswer', { ...QC, taskId: 'oq-q', answer: 'חיפה' }).catch((e) => ({ err: String(e.code) }));
+    check('question outcome: an answer matching no outcome counts as wrong', miss?.correct === false, JSON.stringify(miss));
+    const qa = await qp.call('submitTaskAnswer', { ...QC, taskId: 'oq-q', answer: 'תל אביב' });
+    check('question outcome: "תל אביב" is accepted', qa?.correct === true, JSON.stringify(qa));
+    const qTeam = (await creator.getDocAt(`users/${OWNER}/games/${qg}/runs/${or2}/teams/${qp.auth.currentUser.uid}`)).data ?? {};
+    const qRec = (qTeam.stages ?? [])[0]?.tasks?.find((x) => x.taskId === 'oq-q') ?? {};
+    check('question outcome: "תל אביב" earned 20 (its outcome), not 30', qRec.earnedScore === 20 && qRec.outcomeId === 'tlv', JSON.stringify(qRec));
+
+    // ── Validation where the creator can fix it ──────────────────────────────
+    let overlapRefused = false;
+    try {
+      await creator.call('updateGame', { gameId: qg, stages: [{ id: 'oq-s', order: 0, title: 'Q', isFinal: true, tasks: [
+        { id: 'oq-q', title: 'Best capital', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+          difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+          answerOutcomes: [{ id: 'a', accepts: ['x'], points: 5 }, { id: 'b', accepts: [' X '], points: 1 }] },
+      ] }] });
+    } catch (e) { overlapRefused = e.code === 'functions/invalid-argument'; }
+    check('question outcome: updateGame refuses the same answer in two outcomes', overlapRefused);
+  }); // scenario: points by answer
+
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();
     check('coverage: introspected the deployed callable set', deployed.length > 0, `${deployed.length} callables`);

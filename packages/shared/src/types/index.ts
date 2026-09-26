@@ -442,6 +442,14 @@ export interface Task {
   // numeric: correct when |entered − numericAnswer| ≤ numericTolerance (default 0).
   numericAnswer?: number;
   numericTolerance?: number;
+  // answer-scored-question: points by answer (quiz/numeric) or by station code
+  // (smart_station, replacing smart.secretCode). SERVER-SECRET: the participant
+  // sanitizer emits button labels only. See packages/shared/src/answerOutcomes.ts.
+  answerOutcomes?: import('../answerOutcomes').AnswerOutcome[];
+  /** Absent/null: an answer matching no outcome counts as wrong. */
+  unmatchedPoints?: number | null;
+  /** Show each button's points to the players. */
+  revealOutcomePoints?: boolean;
   // geofence: auto-checks-in when the participant is within this radius of
   //           `coordinates` (default 50m). Server validates the GPS distance.
   geofenceRadiusMeters?: number;
@@ -1121,6 +1129,8 @@ export interface RunTaskRecord {
   // Absent on every pre-change record and on any run started before this shipped —
   // read via a template fallback, never as 0.
   expectedDurationMinutesAtCompletion?: number;
+  /** answer-scored-question: which answer outcome the team hit (organizer-facing). */
+  outcomeId?: string;
   earnedScore?: number;
   scoreBreakdown?: TaskScoreBreakdown;
   // Smart station

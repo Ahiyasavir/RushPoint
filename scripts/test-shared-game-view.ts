@@ -229,6 +229,10 @@ const WITHHELD_TASK_FIELDS: Record<string, string> = {
   steps: 'projected, but prompt-only: the step answer is an answer key',
   hintAutoRevealMinutes: 'a live-run hint-escalation threshold; nothing to review on a template',
   hintAutoRevealAttempts: 'a live-run hint-escalation threshold; nothing to review on a template',
+  // answer-scored-question: accepted texts/codes and their points ARE the answer key.
+  answerOutcomes: 'answer key (accepted answers/codes and their points) — never shared',
+  unmatchedPoints: 'part of the answer key (what an unmatched answer earns)',
+  revealOutcomePoints: 'a play-time display switch for the points on answer buttons',
 };
 
 const missing = taskFields.filter((f) => {

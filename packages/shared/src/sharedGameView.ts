@@ -35,6 +35,8 @@ export const SECRET_SHARE_FIELD_NAMES = [
   'smart',
   'adminNotes',
   'orderItems',
+  // answer-scored-question: accepted answers/codes and their points.
+  'answerOutcomes',
   'integrationWebhookUrl',
   'ownerUid',
 ] as const;
