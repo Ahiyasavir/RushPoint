@@ -1,0 +1,24 @@
+{
+  "name": "rushpoint-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts HeroCut out/rushpoint-hero.mp4 --concurrency=4",
+    "render:social": "remotion render src/index.ts SocialCut out/rushpoint-social.mp4 --concurrency=4",
+    "still": "remotion still src/index.ts HeroCut out/frame.png"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.290",
+    "@remotion/google-fonts": "4.0.290",
+    "@remotion/shapes": "4.0.290",
+    "@remotion/transitions": "4.0.290",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.290"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.0"
+  }
+}
