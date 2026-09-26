@@ -138,6 +138,13 @@ const finite = (e: UploadEta) => [e.lowSeconds, e.highSeconds, e.midSeconds].eve
   check('about 90 seconds', b.kind === 'about' && b.seconds === 90, JSON.stringify(b));
   const c = etaLabel(at(60, 200));
   check('a wide band -> range', c.kind === 'range' && c.lowMinutes === 1 && c.highMinutes === 4, JSON.stringify(c));
+  // Found in the browser: a 2.6 MB clip on the default prior is 7 to 48 s, and "1 to 2 minutes"
+  // overstated it by 2x. A wide band that ends within 2 minutes reads "about N", leaning to the
+  // slow side (between the middle and the top of the band), never a minutes range.
+  const shortWide = etaLabel({ state: 'estimating', lowSeconds: 7.6, midSeconds: 19, highSeconds: 48, basis: 'default' });
+  check('a short but wide band is "about 30 seconds", not "1 to 2 minutes"', shortWide.kind === 'about' && shortWide.seconds === 30, JSON.stringify(shortWide));
+  const medWide = etaLabel({ state: 'estimating', lowSeconds: 20, midSeconds: 50, highSeconds: 110, basis: 'default' });
+  check('a band ending under 2 minutes is still "about"', medWide.kind === 'about' && medWide.seconds === 90, JSON.stringify(medWide));
   const prev: EtaLabel = { kind: 'about', seconds: 30 };
   const up = etaLabel(at(33, 45), prev);
   check('a small upward drift keeps the old bucket (the number does not creep)', up.kind === 'about' && up.seconds === 30, JSON.stringify(up));

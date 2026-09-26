@@ -1572,7 +1572,8 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
             }}
             onStreamStart={(type) => startStream(task.id, type)}
             onStreamChunk={(chunk) => streamsRef.current.get(task.id)?.append(chunk)}
-            onStreamDiscard={() => dropStream(task.id)} />
+            onStreamDiscard={() => dropStream(task.id)}
+            isUploaded={(clip) => pending.ready(task.id, clip)} />
         ) : (
           <PhotoEntry
             key={task.id}
@@ -2896,7 +2897,7 @@ function readVideoDuration(url: string): Promise<number | undefined> {
   });
 }
 
-function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStreamStart, onStreamChunk, onStreamDiscard }: {
+function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStreamStart, onStreamChunk, onStreamDiscard, isUploaded }: {
   smart: { videoMinSeconds?: number; videoMaxSeconds?: number; preferredCamera?: 'front' } | undefined;
   /** Keys the player's remembered camera choice to this run (camera-switch D4). */
   runId?: string;
@@ -2911,6 +2912,8 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
   onStreamStart?: (contentType: string) => void;
   onStreamChunk?: (chunk: Blob) => void;
   onStreamDiscard?: () => void;
+  /** Has this clip already finished uploading (sent while filming)? Then there is nothing to estimate. */
+  isUploaded?: (clip: Blob) => boolean;
 }) {
   const { t } = useT();
   const { minSeconds, maxSeconds } = useMemo(() => resolveVideoDuration(smart), [smart]);
@@ -3517,7 +3520,9 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
             {working ? t.task.working : t.task.submitVideo}
           </Button>
         </div>
-        <SendEstimate bytes={blob.size} />
+        {isUploaded?.(blob)
+          ? <p className="text-xs text-zinc-400" data-testid="video-already-up">{t.task.videoAlreadyUp}</p>
+          : <SendEstimate bytes={blob.size} />}
         <UploadProgress />
       </div>
     );

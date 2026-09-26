@@ -40,6 +40,7 @@ export const ETA_CAP_SECONDS = 900;
 export const STALL_SHOW_MS = 5000;
 export const ALMOST_DONE_FRACTION = 0.97;
 export const UPWARD_MOVE_FACTOR = 1.3;
+export const SHORT_BAND_MAX_SECONDS = 120;
 export const ABOUT_BUCKETS = [15, 30, 45, 60, 90, 120, 180, 300] as const;
 export const UPLINK_STORAGE_KEY = 'rp-uplink';
 
@@ -215,8 +216,12 @@ export function etaLabel(eta: UploadEta, previous?: EtaLabel | null): EtaLabel {
   const high = num(eta.highSeconds) ? Math.max(low, eta.highSeconds) : low;
   let next: EtaLabel;
   const mean = low > 0 ? Math.sqrt(low * high) : high;
+  const mid = num(eta.midSeconds) && eta.midSeconds > 0 ? Math.min(Math.max(eta.midSeconds, low), high) : mean;
   if (high < 10) next = { kind: 'seconds' };
   else if (low > 0 && high / low <= 2 && mean <= ABOUT_BUCKETS[ABOUT_BUCKETS.length - 1] * 1.2) next = { kind: 'about', seconds: snap(mean) };
+  // A wide band that still ends within 2 minutes: minutes would overstate it (found in the browser,
+  // 7 to 48 s read "1 to 2 minutes"). Say "about N", leaning slow: between the middle and the top.
+  else if (high <= SHORT_BAND_MAX_SECONDS) next = { kind: 'about', seconds: snap(Math.sqrt(mid * high)) };
   else {
     const lowMinutes = Math.max(1, Math.floor(low / 60));
     next = { kind: 'range', lowMinutes, highMinutes: Math.max(lowMinutes + 1, Math.ceil(high / 60)) };
