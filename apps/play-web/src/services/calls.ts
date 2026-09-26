@@ -167,7 +167,7 @@ export interface MyTeamState {
   // token. Optional on the wire so a console/app talking to a backend that
   // predates it degrades to "nothing known", never to a fabricated hold.
   holdReason?: 'guardian_consent' | null;
-  run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
+  run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null; autoApproveAllMedia?: boolean };
   // `testMode` (change: test-mode-hidden-scoring): render the sealed chrome — no
   // score header, no right/wrong feedback, no board, a neutral finish. Optional on
   // the wire so a bundle talking to a backend that predates it degrades to a normal
@@ -320,9 +320,11 @@ export const submitStationPhoto = callable<
   // audio-tasks: contentType is optional (photo clients may omit it) and is
   // validated server-side against the task's captureKind.
   // video-upload-speed D7: posterUrl + mediaDurationSec are OMITTED when absent, never null.
-  Ctx & { teamId: string; taskId: string; photoUrl: string; contentType?: string; posterUrl?: string; mediaDurationSec?: number },
+  // background-media-upload D1: `mediaDeferred` with NO photoUrl asks the server to approve first;
+  // `deferred: true` in the reply means it did and the file follows via attachSubmissionMedia.
+  Ctx & { teamId: string; taskId: string; photoUrl?: string; mediaDeferred?: boolean; contentType?: string; posterUrl?: string; mediaDurationSec?: number },
   // lengthHold: an auto-approved clip outside the mission's length range waits for the organizers.
-  { submitted: boolean; autoApproved: boolean; lengthHold?: 'short' | 'long' | 'unknown' }
+  { submitted: boolean; autoApproved: boolean; deferred?: boolean; lengthHold?: 'short' | 'long' | 'unknown' }
 >('submitStationPhoto');
 
 // Not idempotent — creates a fresh auto-id alert doc each call, so a retry after
@@ -517,3 +519,10 @@ export const sendStaffChannelMessage = callable<
   Ctx & { text: string; senderName?: string },
   { messageId: string }
 >('sendStaffChannelMessage');
+
+// background-media-upload D2: the file for a submission that was approved before it existed.
+// Idempotent on the server (a repeat answers `already`), so the transport retry is safe.
+export const attachSubmissionMedia = callable<
+  Ctx & { taskId: string; photoUrl: string; contentType: string; posterUrl?: string },
+  { attached: boolean; already?: boolean }
+>('attachSubmissionMedia');

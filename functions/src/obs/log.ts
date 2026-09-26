@@ -165,6 +165,7 @@ export const HOT_PATH_MAX_INSTANCES: Record<string, number> = {
   getMyTeamState: 10,
   verifyStationCode: 10,
   submitStationPhoto: 10,
+  attachSubmissionMedia: 10,
   // Continuous background GPS pings from every device at once.
   updateLocation: 10,
   // Thundering herd: a whole event scans the join code within the same minute.

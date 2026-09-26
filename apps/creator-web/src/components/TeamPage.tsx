@@ -160,7 +160,9 @@ export default function TeamPage({
               <div className="grid grid-cols-2 gap-2">
                 {d.media.map((m) => (
                   <div key={m.taskId} className="rounded-lg bg-[--surface-2] p-2">
-                    {m.kind === 'video'
+                    {m.uploading
+                      ? <div className="w-full aspect-square rounded bg-[--surface-1] flex items-center justify-center p-2 text-center text-[12px] text-[--ink-2]" dir="auto">{t.runConsole.mediaGalleryUploading}</div>
+                      : m.kind === 'video'
                       ? <ClipTile src={m.url} posterUrl={m.posterUrl} durationSec={m.durationSec} className="w-full rounded bg-black" />
                       : m.kind === 'audio'
                         ? <audio src={m.url} controls className="w-full" />

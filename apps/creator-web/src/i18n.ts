@@ -1079,6 +1079,8 @@ const HE = {
     mediaGalleryStatusApproved: 'אושר',
     mediaGalleryStatusRejected: 'נדחה',
     mediaGalleryNoMedia: 'אין מדיה',
+    // background-media-upload: approved, the file is still on its way from the team's phone.
+    mediaGalleryUploading: '⏳ אושר, הקובץ עדיין עולה מהטלפון של הקבוצה',
     mediaGalleryAlt: 'הגשה',
     mediaGalleryVideoAria: 'סרטון שהוגש',
     clipLength: ({ time }: { time: string }) => `אורך הסרטון ${time}`,
@@ -3977,6 +3979,7 @@ const EN: typeof HE = {
     mediaGalleryStatusApproved: 'Approved',
     mediaGalleryStatusRejected: 'Rejected',
     mediaGalleryNoMedia: 'No media',
+    mediaGalleryUploading: '⏳ Approved, the file is still uploading from the team\'s phone',
     mediaGalleryAlt: 'submission',
     mediaGalleryVideoAria: 'submitted video',
     clipLength: ({ time }: { time: string }) => `Clip length ${time}`,

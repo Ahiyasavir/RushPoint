@@ -72,7 +72,7 @@ describe('buildTeamDossier', () => {
   it('every submitted media item, with who sent it', () => {
     expect(d.media).toEqual([{
       taskId: 'c', title: 'צילום קבוצתי', url: 'https://firebasestorage.googleapis.com/v0/b/x/o/c.jpg',
-      kind: 'photo', status: 'approved', submittedAt: '2026-09-26T10:14:00Z', senderName: 'יוסי', posterUrl: '', durationSec: null,
+      kind: 'photo', status: 'approved', submittedAt: '2026-09-26T10:14:00Z', senderName: 'יוסי', posterUrl: '', durationSec: null, uploading: false,
     }]);
   });
 
@@ -84,6 +84,16 @@ describe('buildTeamDossier', () => {
 
   it('copies named fields OUT: an unknown field never reaches the screen', () => {
     expect(JSON.stringify(d)).not.toContain('never shown');
+  });
+});
+
+describe('buildTeamDossier: approved media still on its way (background-media-upload)', () => {
+  it('a submission without a file yet is listed as uploading, not dropped', () => {
+    const d = buildTeamDossier(input({ id: 't1', displayName: 'X', taskSubmissions: {
+      v: { status: 'approved', mediaKind: 'video', mediaPending: true, submittedAt: '2026-09-26T10:00:00Z' },
+      w: { status: 'approved', mediaKind: 'photo', submittedAt: '2026-09-26T10:01:00Z' },
+    } }))!;
+    expect(d.media.map((m) => [m.taskId, m.uploading, m.url])).toEqual([['v', true, '']]);
   });
 });
 

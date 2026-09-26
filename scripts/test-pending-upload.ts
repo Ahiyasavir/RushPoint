@@ -144,6 +144,26 @@ async function main(): Promise<void> {
     check('a forgotten capture is not "ready" even if its upload lands', !pending.ready('t1', a));
   }
 
+  // background-media-upload D3: handOff gives the in-flight upload away WITHOUT aborting it.
+  {
+    const { calls, pending } = harness();
+    const a = new Blob(['a']);
+    pending.begin('t1', a, 'image/jpeg');
+    const handed = pending.handOff('t1', a, 'image/jpeg');
+    check('handOff returns the upload already in flight (no second transfer)', calls.length === 1);
+    check('handOff does not abort the transfer', !calls[0].signal.aborted);
+    check('after handOff the task holds nothing', !pending.inFlight('t1'));
+    pending.forget('t1');
+    check('a later forget cannot abort the handed-off transfer', !calls[0].signal.aborted);
+    calls[0].resolve('url-a');
+    check('the new owner receives the result', (await handed) === 'url-a');
+    const b = new Blob(['b']);
+    const fresh = pending.handOff('t2', b, 'image/jpeg');
+    check('handOff with nothing in flight starts one', calls.length === 2);
+    calls[1].resolve('url-b');
+    check('and hands that one over too', (await fresh) === 'url-b' && !pending.inFlight('t2'));
+  }
+
   // ── Source guard (task 1.4) ─────────────────────────────────────────────────
   const src = readFileSync(join(__dirname, '..', 'apps', 'play-web', 'src', 'components', 'TaskRunner.tsx'), 'utf8');
   const direct = src.match(/uploadTask(Photo|Audio|Video)\b/g) ?? [];

@@ -364,7 +364,7 @@ function abortedError(): Error {
 
 // A retry backoff that ends early when the tab comes back to the foreground: iOS suspends
 // network work in a hidden tab, so the stall there was the phone, not the link (design D6).
-function sleepUntilVisible(ms: number): Promise<void> {
+export function sleepUntilVisible(ms: number): Promise<void> {
   return interruptibleSleep(ms, (wake) => {
     if (typeof document === 'undefined') return () => {};
     const onVis = () => { if (document.visibilityState === 'visible') wake(); };
@@ -471,10 +471,10 @@ export async function uploadTaskPhoto(
   // Camera captures are compressed to JPEG before upload (change:
   // fix-photo-camera-capture), so this accepts the resulting Blob too.
   file: File | Blob,
-  p: { runId: string; taskId: string; signal?: AbortSignal },
+  p: { runId: string; taskId: string; signal?: AbortSignal; quiet?: boolean },
 ): Promise<string> {
   const path = await myUploadPath(p.runId, p.taskId, 'jpg');
-  return uploadResilient(path, file, 'image/jpeg', p.signal);
+  return uploadResilient(path, file, 'image/jpeg', p.signal, { quiet: p.quiet });
 }
 
 // Upload an audio-mission clip (audio-tasks), with the NORMALIZED content-type so the
@@ -482,7 +482,7 @@ export async function uploadTaskPhoto(
 // Returns { url, contentType }: the caller passes the type to submitStationPhoto.
 export async function uploadTaskAudio(
   blob: Blob,
-  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal },
+  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal; quiet?: boolean },
 ): Promise<{ url: string; contentType: string }> {
   const contentType = normalizeContentType(p.contentType || blob.type || 'audio/webm');
   const ext = contentType === 'audio/mp4' ? 'm4a'
@@ -490,7 +490,7 @@ export async function uploadTaskAudio(
     : contentType === 'audio/ogg' ? 'ogg'
     : 'webm';
   const path = await myUploadPath(p.runId, p.taskId, ext);
-  return { url: await uploadResilient(path, blob, contentType, p.signal), contentType };
+  return { url: await uploadResilient(path, blob, contentType, p.signal, { quiet: p.quiet }), contentType };
 }
 
 // Upload a video-mission clip (video-submission-task). Identical in shape to
@@ -498,14 +498,14 @@ export async function uploadTaskAudio(
 // (MAX_PARTICIPANT_VIDEO_BYTES); photo/audio keep the tighter one.
 export async function uploadTaskVideo(
   blob: Blob | File,
-  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal },
+  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal; quiet?: boolean },
 ): Promise<{ url: string; contentType: string }> {
   const contentType = normalizeContentType(p.contentType || blob.type || 'video/webm');
   const ext = contentType === 'video/mp4' ? 'mp4'
     : contentType === 'video/quicktime' ? 'mov'
     : 'webm';
   const path = await myUploadPath(p.runId, p.taskId, ext);
-  return { url: await uploadResilient(path, blob, contentType, p.signal), contentType };
+  return { url: await uploadResilient(path, blob, contentType, p.signal, { quiet: p.quiet }), contentType };
 }
 
 // A video's poster frame (video-upload-speed D7): a small JPEG in the same mission folder, sent
@@ -664,7 +664,9 @@ export type TaskMediaKind = 'photo' | 'audio' | 'video';
 export async function uploadTaskMedia(
   kind: TaskMediaKind,
   blob: Blob | File,
-  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal },
+  // quiet: a background upload (background-media-upload) must not drive the progress bar of the
+  // mission the team has since moved on to.
+  p: { runId: string; taskId: string; contentType: string; signal?: AbortSignal; quiet?: boolean },
 ): Promise<{ url: string; contentType: string }> {
   if (kind === 'photo') return { url: await uploadTaskPhoto(blob, p), contentType: 'image/jpeg' };
   if (kind === 'audio') return uploadTaskAudio(blob, p);

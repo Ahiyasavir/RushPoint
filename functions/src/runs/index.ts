@@ -6457,6 +6457,9 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       // live "🔥 Hot Zone" banner + countdown. Coordinates are the zone centre
       // (already public to anyone in the run); answer keys are unaffected.
       hotZone: run.hotZone ?? null,
+      // background-media-upload: lets the phone try approve-first on a run that approves every
+      // media mission. Not a secret; the server still makes the decision.
+      autoApproveAllMedia: run.autoApproveAllMedia === true,
     },
     // Scheduled-release countdown to the next timed stage drop (ms epoch or null).
     nextStageReleaseAt,

@@ -243,6 +243,12 @@ const HE = {
     videoTooLongForAuto: ({ sec }: { sec: number }) => `הסרטון עובר את ${sec} השניות, אז הוא לא יאושר אוטומטית: הוא יישלח למארגנים לבדיקה. אפשר לצלם שוב.`,
     videoLengthUnknownForAuto: 'לא הצלחנו למדוד את אורך הסרטון, אז הוא יישלח למארגנים לבדיקה במקום אישור אוטומטי.',
     videoHeldForLength: 'הסרטון לא עמד באורך שנדרש, אז הוא נשלח למארגנים לבדיקה.',
+    // background-media-upload: approved first, the file is still on its way.
+    bgUploading: (p: { count: number }) => p.count === 1
+      ? 'שולחים ברקע את מה שצילמתם. השאירו את האפליקציה פתוחה.'
+      : `שולחים ברקע ${p.count} קבצים. השאירו את האפליקציה פתוחה.`,
+    bgFailed: 'לא הצלחנו לשלוח ברקע את אחד הקבצים. המשימה כבר אושרה, ואפשר לכתוב למארגנים.',
+    bgDismiss: 'סגירה',
     etaSeconds: 'עוד כמה שניות',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 30 ? 'עוד בערך חצי דקה'
@@ -1119,6 +1125,11 @@ const EN: typeof HE = {
     videoTooLongForAuto: ({ sec }: { sec: number }) => `The clip is over ${sec} seconds, so it will not be approved automatically: the organizers will review it. You can film it again.`,
     videoLengthUnknownForAuto: 'We could not measure the clip\'s length, so the organizers will review it instead of an automatic approval.',
     videoHeldForLength: 'The clip was not the required length, so it went to the organizers for review.',
+    bgUploading: (p: { count: number }) => p.count === 1
+      ? 'Sending your capture in the background. Keep the app open.'
+      : `Sending ${p.count} files in the background. Keep the app open.`,
+    bgFailed: 'One file could not be sent in the background. The mission is already approved, and you can message the organizers.',
+    bgDismiss: 'Dismiss',
     etaSeconds: 'a few seconds left',
     etaAbout: ({ seconds }: { seconds: number }) =>
       seconds === 60 ? 'about a minute left'

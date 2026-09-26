@@ -35,6 +35,8 @@ export interface DossierMedia {
   /** video-upload-speed D7: '' when there is none. */
   posterUrl: string;
   durationSec: number | null;
+  /** background-media-upload: approved, the file is still on its way (url is ''). */
+  uploading: boolean;
 }
 export interface DossierLedgerLine {
   at: string;
@@ -152,7 +154,8 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
     for (const [taskId, sub] of Object.entries(t.taskSubmissions)) {
       if (!isObj(sub)) continue;
       const url = str(sub.photoUrl) ?? '';
-      if (!isRenderableMedia(url)) continue;
+      const uploading = sub.mediaPending === true && !isRenderableMedia(url);
+      if (!isRenderableMedia(url) && !uploading) continue;
       const kind = sub.mediaKind === 'audio' ? 'audio' : sub.mediaKind === 'video' ? 'video' : 'photo';
       const st = sub.status === 'approved' || sub.status === 'rejected' ? sub.status : 'pending';
       media.push({
@@ -161,6 +164,7 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
         senderName: submissionSenderName({ displayName: str(t.displayName) }, sub as never),
         posterUrl: kind === 'video' && isRenderableMedia(str(sub.posterUrl) ?? '') ? (str(sub.posterUrl) as string) : '',
         durationSec: typeof sub.mediaDurationSec === 'number' && Number.isFinite(sub.mediaDurationSec) && sub.mediaDurationSec > 0 ? sub.mediaDurationSec : null,
+        uploading,
       });
     }
     media.sort((a, b) => (ms(b.submittedAt) ?? 0) - (ms(a.submittedAt) ?? 0));

@@ -92,5 +92,16 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
   ok(Array.isArray(buildRunMediaGallery([null, undefined, { id: 't1' }])), 'malformed team entries do not throw');
 }
 
+// ── background-media-upload: an approved submission whose file is still on its way ──
+{
+  const rows = buildRunMediaGallery([team('t1', {
+    up: sub({ photoUrl: undefined, status: 'approved', mediaKind: 'video', mediaPending: true }),
+    gone: sub({ photoUrl: undefined, status: 'approved' }),
+  })]);
+  ok(rows.length === 1 && rows[0].taskId === 'up' && rows[0].mediaPending === true, `a still uploading row is shown (and a file-less, not uploading one is not), got ${JSON.stringify(rows)}`);
+  const plain = buildRunMediaGallery([team('t2', { a: sub() })]);
+  ok(plain[0]?.mediaPending === false, 'an ordinary row is not uploading');
+}
+
 console.log(`\nrun-media-gallery: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

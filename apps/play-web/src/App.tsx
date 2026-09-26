@@ -3,6 +3,7 @@ import { ensureAuth } from './services/firebase';
 import { clearSession, loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
 import ConnectionBanner from './components/ConnectionBanner';
+import BackgroundUploads from './components/BackgroundUploads';
 import { DialogHost } from './components/dialog';
 import { Spinner } from './components/Spinner';
 import { LoadingView } from './components/LoadingView';
@@ -294,6 +295,8 @@ function AppInner() {
   return (
     <>
       <ConnectionBanner />
+      {/* background-media-upload: approved media still uploading, from any screen of the run. */}
+      {session && <BackgroundUploads />}
       {bottom === 'play' && session
         ? (
           <Suspense fallback={routeFallback}>

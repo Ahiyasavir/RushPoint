@@ -24,6 +24,9 @@ export const TOP_OVERLAY_ORDER = {
   handover: 25,
   /** Transient celebration. Never outranks a problem. */
   powerUp: 30,
+  /** Approved media still uploading in the background (change: background-media-upload). A
+   *  quiet note, not a problem: below a celebration's moment, above a share acknowledgement. */
+  backgroundUpload: 35,
   /** Outcome of a share the player just asked for (change: share-ladder-unification).
    *  Least severe of all: it acknowledges an action the player initiated a second
    *  ago and already knows about, so it yields to every other overlay. */

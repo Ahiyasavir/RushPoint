@@ -1700,13 +1700,17 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
 export const submitStationPhoto = loggedCallable('submitStationPhoto', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'submitStationPhoto');
-  const { ownerUid, gameId, runId, teamId, taskId, photoUrl, contentType, posterUrl: rawPosterUrl, mediaDurationSec: rawDuration } = data as {
+  const { ownerUid, gameId, runId, teamId, taskId, photoUrl: rawPhotoUrl, contentType, posterUrl: rawPosterUrl, mediaDurationSec: rawDuration, mediaDeferred: rawDeferred } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     teamId: string;
     taskId: string;
-    photoUrl: string;
+    photoUrl?: string;
+    // background-media-upload D1: approve now, the file follows through attachSubmissionMedia.
+    // Honoured only when the submission would be auto-approved anyway; otherwise nothing is
+    // written and the phone uploads first.
+    mediaDeferred?: boolean | null;
     // video-upload-speed D7: a poster frame + the clip's length, both optional. null (an older
     // client, or the callable transport's undefined) is ABSENT, never a refusal.
     posterUrl?: string | null;
@@ -1742,10 +1746,12 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // the Functions emulator and is absent in deployed functions, so production keeps
   // the exact old accept-set. The runs/{runId}/teams/{uid}/ prefix (the IDOR guard)
   // is enforced in both modes. See docs/wave-c/photo-upload-fix.md.
-  validate(() => requireStorageUrl(photoUrl, runId, uid, storageOriginOpts()));
+  const deferred = rawDeferred === true;
+  if (!deferred) validate(() => requireStorageUrl(rawPhotoUrl, runId, uid, storageOriginOpts()));
+  const photoUrl: string = deferred ? '' : String(rawPhotoUrl);
   // The poster obeys the SAME folder rule as the media: this run, this phone's own folder.
   const posterUrl = typeof rawPosterUrl === 'string' && rawPosterUrl.trim() ? rawPosterUrl.trim() : undefined;
-  if (posterUrl) validate(() => requireStorageUrl(posterUrl, runId, uid, storageOriginOpts()));
+  if (posterUrl && !deferred) validate(() => requireStorageUrl(posterUrl, runId, uid, storageOriginOpts()));
   // A display hint: out of range is dropped, never refused.
   const mediaDurationSec = mediaDurationForRecord(rawDuration);
 
@@ -1873,6 +1879,14 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
     return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), already: true };
   }
+  // background-media-upload D1: a deferral the server would not auto-approve writes NOTHING. The
+  // phone then uploads and submits the ordinary way, so the review path never sees a fileless row.
+  if (deferred && !autoApprove) {
+    return { submitted: false, deferred: false, autoApproved: false, autoApproveSource: approvalSource(), ...(lengthHold ? { lengthHold } : {}) };
+  }
+  // Whether the live feed would receive this item. Decided once, here, from the same snapshot; a
+  // deferred submission stores it as `feedPending` and the feed item is written on attach.
+  const feedEligible = feedEnabled && (kind === 'photo' || kind === 'video') && shouldFeedTask(feedTask);
 
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
@@ -1880,7 +1894,10 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     {
       taskSubmissions: {
         [taskId]: {
-          photoUrl: photoUrl.trim(),
+          // A deferred submission has no file yet; `mediaPending` says so until attach.
+          photoUrl: deferred ? admin.firestore.FieldValue.delete() : photoUrl.trim(),
+          mediaPending: deferred ? true : admin.firestore.FieldValue.delete(),
+          feedPending: deferred && feedEligible ? true : admin.firestore.FieldValue.delete(),
           submittedAt: now,
           status: autoApprove ? 'approved' : 'pending',
           // audio-tasks: server-derived from the task (never client-claimed) so
@@ -1890,7 +1907,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
           submittedBy,
           // video-upload-speed D7. Only for a video: a photo IS its own poster. A resubmission
           // without a poster must not keep the previous clip's frame, so the key is deleted.
-          posterUrl: kind === 'video' && posterUrl ? posterUrl : admin.firestore.FieldValue.delete(),
+          posterUrl: kind === 'video' && posterUrl && !deferred ? posterUrl : admin.firestore.FieldValue.delete(),
           mediaDurationSec: kind !== 'photo' && mediaDurationSec !== undefined ? mediaDurationSec : admin.firestore.FieldValue.delete(),
         },
       },
@@ -1920,7 +1937,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely — its
     // photo (taken AT the secret spot) would leak the location to teams still
     // hunting it, defeating the wave-D hidden-task gating.
-    if (completed && feedEnabled && (kind === 'photo' || kind === 'video') && shouldFeedTask(feedTask)) {
+    if (completed && feedEligible && !deferred) {
       await writeFeedItem(ownerUid, gameId, runId, {
         taskId,
         taskTitle,
@@ -1934,7 +1951,82 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     }
   }
 
-  return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), ...(alreadyCompleted ? { already: true } : {}), ...(lengthHold ? { lengthHold } : {}) };
+  return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), ...(deferred ? { deferred: true } : {}), ...(alreadyCompleted ? { already: true } : {}), ...(lengthHold ? { lengthHold } : {}) };
+});
+
+/**
+ * The file for a DEFERRED submission (change: background-media-upload, D2). Only the phone that
+ * sent the submission may attach, because only it holds the file and the folder rule already ties
+ * the url to the caller. Idempotent: once the file is attached a repeat moves nothing, so a retry
+ * after a lost reply is safe. The feed item is written here, exactly once, when the submission
+ * asked for one and is still approved.
+ */
+export const attachSubmissionMedia = loggedCallable('attachSubmissionMedia', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'attachSubmissionMedia');
+  const { ownerUid, gameId, runId, taskId, photoUrl, contentType, posterUrl: rawPosterUrl } = data as {
+    ownerUid: string; gameId: string; runId: string; taskId: string;
+    photoUrl: string; contentType?: string | null; posterUrl?: string | null;
+  };
+  validate(() => requireStorageUrl(photoUrl, runId, uid, storageOriginOpts()));
+  const posterUrl = typeof rawPosterUrl === 'string' && rawPosterUrl.trim() ? rawPosterUrl.trim() : undefined;
+  if (posterUrl) validate(() => requireStorageUrl(posterUrl, runId, uid, storageOriginOpts()));
+  if (typeof taskId !== 'string' || !taskId) {
+    throw new functions.https.HttpsError('invalid-argument', 'taskId is required');
+  }
+  const { teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: false });
+  type Sub = { status?: string; mediaKind?: MediaKind; mediaPending?: boolean; feedPending?: boolean; photoUrl?: string; submittedBy?: { uid?: string }; mediaDurationSec?: number };
+  const known = (team as { taskSubmissions?: Record<string, Sub> }).taskSubmissions?.[taskId];
+  if (!known) throw new functions.https.HttpsError('not-found', 'No submission for this mission');
+  if (known.submittedBy?.uid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Another phone sent this submission');
+  }
+  const kind: MediaKind = known.mediaKind === 'audio' || known.mediaKind === 'video' ? known.mediaKind : 'photo';
+  validate(() => {
+    if (!isAllowedSubmissionContentType(kind, contentType ?? undefined)) {
+      throw new functions.https.HttpsError('invalid-argument', `Content-type does not match the submission (${kind})`);
+    }
+  });
+
+  const teamRef = db.doc(`${FIRESTORE_PATHS.run(ownerUid, gameId, runId)}/teams/${teamId}`);
+  const cleanUrl = photoUrl.trim();
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    const sub = (snap.data() as { taskSubmissions?: Record<string, Sub> } | undefined)?.taskSubmissions?.[taskId];
+    if (!sub) throw new functions.https.HttpsError('not-found', 'No submission for this mission');
+    if (sub.mediaPending !== true) return { attached: false as const, feed: false, sub };
+    tx.update(teamRef, {
+      [`taskSubmissions.${taskId}.photoUrl`]: cleanUrl,
+      [`taskSubmissions.${taskId}.mediaPending`]: admin.firestore.FieldValue.delete(),
+      [`taskSubmissions.${taskId}.feedPending`]: admin.firestore.FieldValue.delete(),
+      ...(kind === 'video' && posterUrl ? { [`taskSubmissions.${taskId}.posterUrl`]: posterUrl } : {}),
+    });
+    return { attached: true as const, feed: sub.feedPending === true && sub.status === 'approved', sub };
+  });
+  if (!result.attached) return { attached: false, already: true };
+
+  if (result.feed) {
+    let taskTitle = '';
+    const game = await cachedGetDoc<{ stages?: { tasks?: { id: string; title?: string }[] }[] }>(
+      db, docCachePolicy, `users/${ownerUid}/games/${gameId}`,
+    );
+    for (const stage of game.data?.stages ?? []) {
+      const task = (stage.tasks ?? []).find((t) => t.id === taskId);
+      if (task) { taskTitle = task.title ?? ''; break; }
+    }
+    const mediaDurationSec = result.sub.mediaDurationSec;
+    await writeFeedItem(ownerUid, gameId, runId, {
+      taskId,
+      taskTitle,
+      teamId,
+      teamName: team.displayName ?? '',
+      photoUrl: cleanUrl,
+      mediaKind: kind,
+      ...(kind === 'video' && posterUrl ? { posterUrl } : {}),
+      ...(kind !== 'photo' && typeof mediaDurationSec === 'number' ? { mediaDurationSec } : {}),
+    });
+  }
+  return { attached: true };
 });
 
 

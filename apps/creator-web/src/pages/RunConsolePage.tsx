@@ -3177,6 +3177,8 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
     setDownloading(true);
     try {
       for (const row of rows) {
+        // A row still uploading has no file to save yet (background-media-upload).
+        if (!isRenderableMedia(row.photoUrl)) continue;
         // This was the ONE call site that already did it correctly (attach → click
         // → remove); it is now the shared helper, so the correctness travels.
         // `?download=1` is what actually saves it: the `download` attribute inside
@@ -3193,7 +3195,9 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
 
   function Media({ row }: { row: SubmissionRow }) {
     if (!isRenderableMedia(row.photoUrl)) {
-      return <div className="text-[13px] text-[--ink-3]">{rc.mediaGalleryNoMedia}</div>;
+      return row.mediaPending
+        ? <div className="h-32 rounded-md bg-[--surface-2] flex items-center justify-center p-2 text-center text-[13px] text-[--ink-2]" dir="auto" data-testid="media-uploading">{rc.mediaGalleryUploading}</div>
+        : <div className="text-[13px] text-[--ink-3]">{rc.mediaGalleryNoMedia}</div>;
     }
     if (row.mediaKind === 'audio') {
       return <audio controls preload="none" src={row.photoUrl} className="w-full" />;
@@ -3207,18 +3211,20 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
     return <img src={row.photoUrl} alt={rc.mediaGalleryAlt} loading="lazy" className="w-full h-32 object-cover rounded-md" />;
   }
 
+  // Only files that exist can be downloaded; a row still uploading is shown but not counted here.
+  const readyCount = rows.filter((r) => isRenderableMedia(r.photoUrl)).length;
   return (
     <PanelShell
       panel="mediaGallery"
       badge={rows.length > 0 ? <Badge>{rc.mediaGalleryCount({ n: rows.length })}</Badge> : undefined}
-      actions={rows.length > 0 ? (
+      actions={readyCount > 0 ? (
         <Button
           variant="subtle"
           className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
           disabled={downloading}
           onClick={() => void downloadAll()}
         >
-          {rc.mediaGalleryDownloadAll({ n: rows.length })}
+          {rc.mediaGalleryDownloadAll({ n: readyCount })}
         </Button>
       ) : undefined}
     >

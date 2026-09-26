@@ -25,6 +25,12 @@ export interface PendingUploads<R> {
   begin(taskId: string, blob: Blob, contentType: string): void;
   /** Send: the upload for this capture, reusing one in flight or landed, else a fresh one. */
   take(taskId: string, blob: Blob, contentType: string): Promise<R>;
+  /**
+   * Give this capture's upload to a new owner (background-media-upload D3): the promise in flight
+   * (or a fresh one), and the entry is forgotten WITHOUT aborting, so a later retake or discard of
+   * this task cannot cancel a transfer the background queue now owns.
+   */
+  handOff(taskId: string, blob: Blob, contentType: string): Promise<R>;
   /** Retake, discard or a finished send: abort and drop whatever this task holds. */
   forget(taskId: string): void;
   /** A transfer is running for this task right now. */
@@ -79,6 +85,13 @@ export function createPendingUploads<R>(start: UploadStarter<R>, onChange: () =>
       if (cur && cur.blob === blob && cur.contentType === contentType) return cur.promise;
       drop(taskId);
       return launch(taskId, blob, contentType).promise;
+    },
+    handOff(taskId, blob, contentType) {
+      const cur = entries.get(taskId);
+      const entry = cur && cur.blob === blob && cur.contentType === contentType ? cur : (drop(taskId), launch(taskId, blob, contentType));
+      entries.delete(taskId);
+      announce();
+      return entry.promise;
     },
     forget(taskId) {
       if (!entries.has(taskId)) return;

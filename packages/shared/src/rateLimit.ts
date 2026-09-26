@@ -65,6 +65,8 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   submitSequenceStep: { max: 40, windowMs: MIN },
   verifyStationCode: { max: 30, windowMs: MIN },
   submitStationPhoto: { max: 20, windowMs: MIN },
+  // background-media-upload: one per deferred submission, plus a retry after a lost reply.
+  attachSubmissionMedia: { max: 20, windowMs: MIN },
   completeTask: { max: 60, windowMs: MIN },
   requestTaskHint: { max: 20, windowMs: MIN },
   // Rehearsal answer reveal (change: test-drive-rehearsal-control). Only ever

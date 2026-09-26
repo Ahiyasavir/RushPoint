@@ -26,6 +26,8 @@ import MissionExtras from './MissionExtras';
 import { uploadTaskMedia, uploadTaskPoster, createVideoStream, finishVideoStream, uid } from '../services/firebase';
 import type { StreamUpload } from '../lib/streamUpload';
 import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
+import type { BgKind } from '../lib/backgroundMedia';
+import { backgroundMedia } from '../services/backgroundMedia';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
   canSwitchCamera, initialFacing, planCameraSwitch, readCameraChoice, shouldMirror, writeCameraChoice,
@@ -994,6 +996,44 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     } finally { end(); }
   }
 
+  // Approve first, upload in the background (change: background-media-upload). When the mission, or
+  // the whole run, approves media automatically, nobody needs to see the file before the team goes
+  // on: the server approves on the spot (`mediaDeferred`), the team is routed on, and the upload
+  // already in flight is handed to the background queue, which attaches the file when it lands.
+  // The server makes the call: when it would NOT approve (a clip outside its length range, or the
+  // switch changed), it writes nothing and this returns the reply so the caller uploads first.
+  // Returns true when the submission is done.
+  async function sendDeferred(
+    kind: BgKind, blob: Blob, contentType: string, lengthSeconds?: number,
+  ): Promise<{ done: true } | { done: false; lengthHold?: 'short' | 'long' | 'unknown' }> {
+    const tk = task!;
+    if (tk.smart?.autoApprove !== true && state.run.autoApproveAllMedia !== true) return { done: false };
+    const taskId = tk.id;
+    setMediaStage({ taskId, stage: 'saving', failed: null });
+    const duration = typeof lengthSeconds === 'number' && Number.isFinite(lengthSeconds) && lengthSeconds > 0 ? lengthSeconds : undefined;
+    const res = await submitStationPhoto({
+      ...ctx, teamId: state.team.id, taskId, mediaDeferred: true, contentType,
+      ...(duration !== undefined ? { mediaDurationSec: duration } : {}),
+    });
+    if (!res.deferred) return { done: false, lengthHold: res.lengthHold };
+    // The capture-time upload keeps going; the queue owns it now. A clip's poster rides along and
+    // never holds the clip (it resolves to undefined on any failure).
+    const upload = pending.handOff(taskId, blob, contentType);
+    const poster = kind === 'video' ? posterFor(taskId, blob) : Promise.resolve(undefined);
+    const firstTry = Promise.all([upload, poster]).then(([up, posterUrl]) => ({ ...up, ...(posterUrl ? { posterUrl } : {}) }));
+    if (kind === 'video') posterRef.current = null;
+    await backgroundMedia.enqueue({
+      id: `${taskId}-${Date.now()}`, ctx, taskId, kind, contentType, blob,
+      ...(duration !== undefined ? { durationSec: duration } : {}), createdAt: Date.now(),
+    }, firstTry);
+    if (kind === 'photo') capturedRef.current.delete(taskId);
+    setJustSent({ taskId, status: 'approved', submittedAt: new Date().toISOString(), photoUrl: '' });
+    setMediaStage({ taskId, stage: 'idle', failed: null });
+    setReplacingFor(null);
+    onChanged();
+    return { done: true };
+  }
+
   // Camera capture → compressed upload → submit (change: fix-photo-camera-capture).
   // No pasted-URL path any more, so the "own team folder" storage-path rejection
   // can't be reached by a normal player; the guard maps any residual storage-path
@@ -1004,6 +1044,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     clearMsg();
     const taskId = task!.id;
     try {
+      if ((await sendDeferred('photo', file, 'image/jpeg')).done) return;
       // The upload began when the photo was taken (pendingUpload). If it already landed, or
       // the SUBMIT failed last time, the bytes are on the server and are reused, never re-sent.
       if (!pending.ready(taskId, file)) setMediaStage({ taskId, stage: 'uploading', failed: null });
@@ -1033,6 +1074,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     clearMsg();
     const taskId = task!.id;
     try {
+      if ((await sendDeferred('audio', blob, contentType)).done) return;
       if (!pending.ready(taskId, blob)) setMediaStage({ taskId, stage: 'uploading', failed: null });
       const up = await pending.take(taskId, blob, contentType);
       setMediaStage({ taskId, stage: 'saving', failed: null });
@@ -1057,6 +1099,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     clearMsg();
     const taskId = task!.id;
     try {
+      if ((await sendDeferred('video', blob, contentType, lengthSeconds)).done) return;
       if (!pending.ready(taskId, blob)) setMediaStage({ taskId, stage: 'uploading', failed: null });
       const poster = posterFor(taskId, blob);
       const up = await pending.take(taskId, blob, contentType);

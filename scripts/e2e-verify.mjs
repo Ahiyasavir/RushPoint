@@ -3364,6 +3364,106 @@ async function main() {
     check('clip-length: a clip inside the range IS auto-approved', ok?.autoApproved === true && ok?.lengthHold === undefined, JSON.stringify(ok));
   }); // scenario: auto-approve respects the clip length range
 
+  // Owner (2026-09-26): an auto-approved photo or video is approved FIRST and uploads in the
+  // background while the team moves on (change: background-media-upload). The phone submits with
+  // `mediaDeferred` and no file; the server approves only when it would have approved anyway, and
+  // the phone attaches the file later with `attachSubmissionMedia`.
+  await scenario('deferred media: approve first, attach the file later', async () => {
+    const OWNER = creatorCred.user.uid;
+    const url = (rid, uid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rid}/teams/${uid}/${name}`)}?alt=media`;
+    const mediaTask = (id, kind, autoApprove) => ({
+      id, title: `Media ${id}`, type: 'photo', locationless: true, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 9,
+      smart: { enabled: true, verificationType: 'photo_upload', captureKind: kind, autoApprove,
+        ...(kind === 'video' ? { videoMinSeconds: 5, videoMaxSeconds: 30 } : {}) },
+    });
+    const { gameId: dg } = await creator.call('createGame', { title: 'Deferred Media Game', mode: 'team' });
+    await creator.call('updateGame', { gameId: dg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'dm-s', order: 0, title: 'Media', tasks: [
+        mediaTask('dm-photo', 'photo', true), mediaTask('dm-video', 'video', true),
+        mediaTask('dm-long', 'video', true), mediaTask('dm-review', 'photo', false),
+      ] },
+      { id: 'dm-end', order: 1, title: 'End', isFinal: true, tasks: [{
+        id: 'dm-last', title: 'Last', type: 'self_report', locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+      }] },
+    ] });
+    const { runId: dr, accessCode: dc } = await creator.call('launchRun', { gameId: dg });
+    const dp = makeParty('deferredPlayer');
+    const dUid = (await signInAnonymously(dp.auth)).user.uid;
+    await dp.call('joinRun', { code: dc, displayName: 'Deferred' });
+    await creator.call('startTeams', { gameId: dg, runId: dr });
+    const DC = { ownerUid: OWNER, gameId: dg, runId: dr };
+    const teamPath = `users/${OWNER}/games/${dg}/runs/${dr}/teams/${dUid}`;
+    const feedCol = `users/${OWNER}/games/${dg}/runs/${dr}/feedItems`;
+    const codeOf = async (fn) => { try { await fn(); return 'ok'; } catch (e) { return e.code; } };
+
+    const st0 = await dp.call('getMyTeamState', { code: dc });
+    check('deferred: the phone is told whether the run approves every media mission', st0?.run?.autoApproveAllMedia === false, JSON.stringify(st0?.run));
+
+    // 1) An auto-approved photo: approved and routed on with no file yet, no feed item yet.
+    const p = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-photo', mediaDeferred: true, contentType: 'image/jpeg' });
+    check('deferred: an auto-approved photo is approved with no file', p?.autoApproved === true && p?.deferred === true, JSON.stringify(p));
+    let team = (await creator.getDocAt(teamPath)).data ?? {};
+    const pRec = team.stages?.flatMap((s) => s.tasks ?? []).find((t) => t.taskId === 'dm-photo');
+    const pSub = team.taskSubmissions?.['dm-photo'];
+    check('deferred: the task is completed and scored at once', pRec?.status === 'completed' && (team.score ?? 0) > 0, JSON.stringify(pRec));
+    check('deferred: the submission is approved and marked as still uploading',
+      pSub?.status === 'approved' && pSub?.mediaPending === true && !pSub?.photoUrl && pSub?.mediaKind === 'photo' && pSub?.submittedBy?.uid === dUid, JSON.stringify(pSub));
+    check('deferred: no feed item before the file exists', !(await creator.getColAt(feedCol)).some((d) => d.taskId === 'dm-photo'));
+
+    // 2) Attach: refused for another folder, a wrong content type and another team.
+    check('attach: a url in another folder is refused',
+      await codeOf(() => dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, 'someoneElse', 'x.jpg'), contentType: 'image/jpeg' })) === 'functions/invalid-argument');
+    check('attach: a content type that does not match the mission is refused',
+      await codeOf(() => dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, dUid, 'x.webm'), contentType: 'video/webm' })) === 'functions/invalid-argument');
+    const other = makeParty('deferredOther');
+    const oUid = (await signInAnonymously(other.auth)).user.uid;
+    await other.call('joinRun', { code: dc, displayName: 'Other Team' });
+    check('attach: another team has no such submission',
+      await codeOf(() => other.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, oUid, 'x.jpg'), contentType: 'image/jpeg' })) === 'functions/not-found');
+    // A second phone of the SAME team may not attach the first phone's submission.
+    const teamCode = (await dp.call('getMyTeamState', { code: dc }))?.team?.deviceJoinCode;
+    const d2 = makeParty('deferredSecondPhone');
+    const d2Uid = (await signInAnonymously(d2.auth)).user.uid;
+    await d2.call('joinTeamAsDevice', { code: dc, teamCode, memberName: 'Second' });
+    check('attach: another phone of the same team is refused',
+      await codeOf(() => d2.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, d2Uid, 'x.jpg'), contentType: 'image/jpeg' })) === 'functions/permission-denied');
+
+    const att = await dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, dUid, 'p.jpg'), contentType: 'image/jpeg' });
+    check('attach: the sending phone attaches its file', att?.attached === true, JSON.stringify(att));
+    team = (await creator.getDocAt(teamPath)).data ?? {};
+    const pSub2 = team.taskSubmissions?.['dm-photo'];
+    check('attach: the submission now holds the file and is no longer pending',
+      pSub2?.photoUrl === url(dr, dUid, 'p.jpg') && pSub2?.mediaPending === undefined && pSub2?.feedPending === undefined && pSub2?.status === 'approved', JSON.stringify(pSub2));
+    const again = await dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, dUid, 'p2.jpg'), contentType: 'image/jpeg' });
+    const feed1 = await creator.getColAt(feedCol);
+    check('attach: the feed item is posted once, with the file', feed1.filter((d) => d.taskId === 'dm-photo').length === 1
+      && feed1.find((d) => d.taskId === 'dm-photo')?.photoUrl === url(dr, dUid, 'p.jpg'), JSON.stringify(feed1));
+    check('attach: a repeat is a no-op that moves nothing', again?.attached === false && again?.already === true
+      && (await creator.getDocAt(teamPath)).data?.taskSubmissions?.['dm-photo']?.photoUrl === url(dr, dUid, 'p.jpg'), JSON.stringify(again));
+
+    // 3) A clip inside the range: deferred, and the poster + length ride along.
+    const v = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-video', mediaDeferred: true, contentType: 'video/webm', mediaDurationSec: 12 });
+    check('deferred: a clip inside the length range is approved with no file', v?.autoApproved === true && v?.deferred === true, JSON.stringify(v));
+    await dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-video', photoUrl: url(dr, dUid, 'v.webm'), contentType: 'video/webm', posterUrl: url(dr, dUid, 'v.jpg') });
+    const vSub = (await creator.getDocAt(teamPath)).data?.taskSubmissions?.['dm-video'];
+    const vItem = (await creator.getColAt(feedCol)).find((d) => d.taskId === 'dm-video');
+    check('attach: a clip keeps its poster and length, in the submission and the feed',
+      vSub?.photoUrl === url(dr, dUid, 'v.webm') && vSub?.posterUrl === url(dr, dUid, 'v.jpg') && vSub?.mediaDurationSec === 12
+      && vItem?.posterUrl === url(dr, dUid, 'v.jpg') && vItem?.mediaKind === 'video', JSON.stringify({ vSub, vItem }));
+
+    // 4) Not approved automatically ⇒ nothing is written and the phone uploads first.
+    const long = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-long', mediaDeferred: true, contentType: 'video/webm', mediaDurationSec: 60 });
+    const review = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-review', mediaDeferred: true, contentType: 'image/jpeg' });
+    team = (await creator.getDocAt(teamPath)).data ?? {};
+    check('deferred: a clip outside the range is not deferred, and says why', long?.deferred === false && long?.submitted === false && long?.lengthHold === 'long', JSON.stringify(long));
+    check('deferred: a mission that needs review is not deferred', review?.deferred === false && review?.submitted === false, JSON.stringify(review));
+    check('deferred: a refused deferral writes nothing',
+      team.taskSubmissions?.['dm-long'] === undefined && team.taskSubmissions?.['dm-review'] === undefined, JSON.stringify(team.taskSubmissions));
+    check('attach: nothing to attach to for a mission that was never deferred',
+      await codeOf(() => dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-review', photoUrl: url(dr, dUid, 'r.jpg'), contentType: 'image/jpeg' })) === 'functions/not-found');
+  }); // scenario: deferred media
+
   await scenario('task types: quiz · numeric · geofence · sequence · trigger modes', async () => {
 
   // ── 14. New task types: quiz · numeric · geofence · sequence ────────────────

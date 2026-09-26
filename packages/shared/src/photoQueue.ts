@@ -39,6 +39,8 @@ export interface RawSubmission {
   reviewNote?: string;
   /** Which attached phone sent it (team-phones-simple D2). Server-stamped. */
   submittedBy?: { uid?: unknown; name?: unknown } | null;
+  /** background-media-upload: approved before its file existed; the file is still on its way. */
+  mediaPending?: boolean;
 }
 
 /** The shape a team doc needs to have for the queue (a structural subset of Team). */
@@ -61,6 +63,8 @@ export interface SubmissionRow {
   posterUrl: string;
   /** null when unknown. */
   mediaDurationSec: number | null;
+  /** background-media-upload: approved, and the file is still uploading from the team's phone. */
+  mediaPending: boolean;
   status: SubmissionStatus;
   reviewedAt: string;
   reviewNote: string;
@@ -164,6 +168,7 @@ function toRow(team: SubmissionTeamDoc, taskId: string, sub: RawSubmission): Sub
     mediaKind: sub.mediaKind === 'audio' ? 'audio' : sub.mediaKind === 'video' ? 'video' : 'photo',
     posterUrl: typeof sub.posterUrl === 'string' ? sub.posterUrl : '',
     mediaDurationSec: typeof sub.mediaDurationSec === 'number' && Number.isFinite(sub.mediaDurationSec) && sub.mediaDurationSec > 0 ? sub.mediaDurationSec : null,
+    mediaPending: sub.mediaPending === true,
     status: normalizeStatus(sub.status),
     reviewedAt: typeof sub.reviewedAt === 'string' ? sub.reviewedAt : '',
     reviewNote: typeof sub.reviewNote === 'string' ? sub.reviewNote : '',
