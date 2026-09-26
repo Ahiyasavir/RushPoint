@@ -23,7 +23,7 @@ import {
 // which secondary actions belong behind the overflow.
 import { selectMissionNotice, type MissionNotice } from '../lib/missionNotice';
 import MissionExtras from './MissionExtras';
-import { uploadTaskMedia, uid } from '../services/firebase';
+import { uploadTaskMedia, uploadTaskPoster, uid } from '../services/firebase';
 import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
@@ -55,6 +55,7 @@ import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import { Working } from './Working';
+import { capturePosterFrame, posterTaskId } from '../lib/posterFrame';
 import { estimateUploadEta, etaLabel, readUplinkSample, uplinkPrior, type EtaLabel } from '../lib/uploadEta';
 import { currentPrior, localStorageOrNull, useUploadEta } from '../hooks/useUploadEta';
 import { LoadingView } from './LoadingView';
@@ -529,6 +530,27 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   }
   const pending = pendingRef.current;
 
+  // A video's poster frame (video-upload-speed D7), started the moment the clip exists so it rides
+  // along with the capture-time upload. One per task; a retake replaces it. Resolves to a URL or
+  // undefined, never rejects.
+  const posterRef = useRef<{ taskId: string; blob: Blob; promise: Promise<string | undefined> } | null>(null);
+  function posterFor(taskId: string, blob: Blob): Promise<string | undefined> {
+    const cur = posterRef.current;
+    if (cur && cur.taskId === taskId && cur.blob === blob) return cur.promise;
+    const runId = sessionRef.current.runId;
+    const promise = (async () => {
+      try {
+        const frame = await capturePosterFrame(blob);
+        if (!frame) return undefined;
+        return await uploadTaskPoster(frame, { runId, taskId: posterTaskId(taskId) });
+      } catch {
+        return undefined;
+      }
+    })();
+    posterRef.current = { taskId, blob, promise };
+    return promise;
+  }
+
   const verdict = submissionVerdict(state.team, task?.id);
   const attachedDevices = Math.max(1, new Set(state.team.deviceUids ?? [state.team.id]).size);
   const contributorsNeeded = effectiveContributorRequirement(
@@ -989,18 +1011,26 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   }
 
   // video-submission-task: a recorded clip rides the SAME pipeline as photo/audio.
-  async function video(blob: Blob | File, contentType: string) {
+  async function video(blob: Blob | File, contentType: string, lengthSeconds?: number) {
     if (blockedOffline()) return;
     if (!begin()) return;
     clearMsg();
     const taskId = task!.id;
     try {
       if (!pending.ready(taskId, blob)) setMediaStage({ taskId, stage: 'uploading', failed: null });
+      const poster = posterFor(taskId, blob);
       const up = await pending.take(taskId, blob, contentType);
       setMediaStage({ taskId, stage: 'saving', failed: null });
+      // The poster had the whole clip upload to finish; it gets at most POSTER_WAIT_MS more and is
+      // otherwise simply left out (video-upload-speed D7: a poster never delays a submission).
+      const posterUrl = await Promise.race([poster, new Promise<undefined>((r) => setTimeout(() => r(undefined), POSTER_WAIT_MS))]);
       const res = await submitStationPhoto({
         ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
+        // Omitted, never null, when absent (the undefined-to-null transport rule).
+        ...(posterUrl ? { posterUrl } : {}),
+        ...(typeof lengthSeconds === 'number' && Number.isFinite(lengthSeconds) && lengthSeconds > 0 ? { mediaDurationSec: lengthSeconds } : {}),
       });
+      posterRef.current = null;
       pending.forget(taskId);
       setJustSent({ taskId: task!.id, status: res.autoApproved ? 'approved' : 'pending', submittedAt: new Date().toISOString(), photoUrl: up.url });
       setMediaStage({ taskId, stage: 'idle', failed: null });
@@ -1498,7 +1528,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
             onCaptured={(b, type) => { if (b) pending.begin(task.id, b, type); else pending.forget(task.id); }} />
         ) : task.smart?.captureKind === 'video' ? (
           <VideoEntry key={task.id} smart={task.smart} runId={session.runId} busy={frozen} working={busy} onSubmit={video}
-            onCaptured={(b, type) => { if (b) pending.begin(task.id, b, type); else pending.forget(task.id); }} />
+            onCaptured={(b, type) => {
+              if (b) { pending.begin(task.id, b, type); void posterFor(task.id, b); } else { pending.forget(task.id); posterRef.current = null; }
+            }} />
         ) : (
           <PhotoEntry
             key={task.id}
@@ -2165,6 +2197,9 @@ const MAX_RAW_PHOTO_BYTES = 40 * 1024 * 1024; // 40 MB
 // the fact the bar must follow (change: submission-status-truth). It used to render on the
 // entry's `busy`, i.e. on `frozen`, which a post-submit latch and the viewer gate held true
 // long after the last byte, so the screen said "starting upload" through a whole review wait.
+// How long a submission waits for its poster once the clip itself is up (video-upload-speed D7).
+const POSTER_WAIT_MS = 1500;
+
 function useUploadStore(): { pct: number | null; retrying: boolean } {
   const [pct, setPct] = useState<number | null>(getUploadProgress());
   const [retrying, setRetrying] = useState(getUploadRetrying());
@@ -2826,7 +2861,8 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
   busy: boolean;
   /** Something is really in flight (not merely a disabled viewer). Drives the "working" label. */
   working: boolean;
-  onSubmit: (blob: Blob | File, contentType: string) => void;
+  /** `lengthSeconds` (video-upload-speed D7): the recorder's own count, or a picked file's readable duration. */
+  onSubmit: (blob: Blob | File, contentType: string, lengthSeconds?: number) => void;
   /** The clip now in review (null once discarded or too short to send): starts its upload. */
   onCaptured?: (blob: Blob | File | null, contentType: string) => void;
 }) {
@@ -2848,6 +2884,9 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
   const [remaining, setRemaining] = useState(maxSeconds);
   const [elapsed, setElapsed] = useState(0);
   const [clipSeconds, setClipSeconds] = useState<number | undefined>(undefined);
+  // The length sent with the clip for the organizer's badge. Separate from clipSeconds, which a
+  // picked clip deliberately leaves unset so it is never re-judged in review.
+  const [lengthSeconds, setLengthSeconds] = useState<number | undefined>(undefined);
   const [blob, setBlob] = useState<Blob | File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [err, setErr] = useState('');
@@ -2930,6 +2969,7 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
       return;
     }
     setClipSeconds(seconds);
+    setLengthSeconds(seconds);
     // 'short' is not an error - it is sendable, and saying so in the alert colour
     // would read as a refusal. Only a far miss blocks.
     setErr(recordedClipVerdict(seconds, minSeconds) === 'too-short'
@@ -3228,6 +3268,7 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
     // A picked clip is never re-judged in review — pickedClipVerdict already made
     // the (fail-open) call on the only duration this path can see.
     setClipSeconds(undefined);
+    setLengthSeconds(typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : undefined);
     setBlob(file);
     setPreview(url);
     setMode('review');
@@ -3411,7 +3452,7 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
           ) : (
             <Button variant="ghost" disabled={busy || opening} onClick={() => void openCamera()}>{t.task.reRecord}</Button>
           )}
-          <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current)}>
+          <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current, lengthSeconds)}>
             {working ? t.task.working : t.task.submitVideo}
           </Button>
         </div>

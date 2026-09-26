@@ -4,6 +4,7 @@ import { useT } from './LanguageContext';
 import { Badge, Button } from './ui';
 import type { TeamDossier } from '../lib/teamDossier';
 import { toTelHref, toWhatsAppHref } from '@rushpoint/shared';
+import ClipTile from './ClipTile';
 
 // The team page (change: team-dossier-and-search, D3/D5).
 //
@@ -122,7 +123,7 @@ export default function TeamPage({
                 {d.media.map((m) => (
                   <div key={m.taskId} className="rounded-lg bg-[--surface-2] p-2">
                     {m.kind === 'video'
-                      ? <video src={m.url} controls playsInline preload="metadata" className="w-full rounded" />
+                      ? <ClipTile src={m.url} posterUrl={m.posterUrl} durationSec={m.durationSec} className="w-full rounded bg-black" />
                       : m.kind === 'audio'
                         ? <audio src={m.url} controls className="w-full" />
                         : <img src={m.url} alt={tp.mediaAlt({ task: m.title })} loading="lazy" className="w-full aspect-square object-cover rounded" />}

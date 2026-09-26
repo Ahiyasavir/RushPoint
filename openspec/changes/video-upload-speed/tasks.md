@@ -82,7 +82,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 
 ### RED
 
-- [ ] 4.1 New `scripts/test-poster-path.ts`: `posterUploadPath(videoPath)` replaces the extension with
+- [x] 4.1 (reshaped: the poster uploads as `<taskId>-poster` through the same per-phone folder helper, so the pure test is `scripts/test-poster-frame.ts` for sizing + the id) New `scripts/test-poster-path.ts`: `posterUploadPath(videoPath)` replaces the extension with
       `.poster.jpg`, stays in the same `runs/{run}/teams/{uid}/` folder, and is total on odd input.
       Confirm RED.
 - [x] 4.2 `scripts/e2e-verify.mjs`, video-submission scenario: a valid `posterUrl` + `mediaDurationSec`
@@ -90,7 +90,7 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       `invalid-argument`; `null` for either is accepted as absent; `mediaDurationSec` of `-1`/`9999`/
       `NaN` is dropped, not refused. Confirm RED with `npm run e2e` (exit code captured to a file,
       never piped through `tail`).
-- [ ] 4.3 Source guard (`scripts/test-video-recorder-guards.ts` or a new creator-web scan): every media
+- [x] 4.3 Source guard (`scripts/test-video-recorder-guards.ts` or a new creator-web scan): every media
       `<video` in `RunConsolePage.tsx` and `TeamPage.tsx` passes `poster` and derives `preload` from
       it. Confirm RED.
 
@@ -100,19 +100,19 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
       `requireStorageUrl`, same run + uid) and `mediaDurationSec` (finite, 0 < x ≤ ceiling + 5, else
       dropped). Stored beside `photoUrl` at the task record and the feed item writes. `null` counts as
       absent. 4.2 → green.
-- [ ] 5.2 play-web: `posterUploadPath` (4.1 → green); poster capture at stop from the preview
+- [x] 5.2 play-web: `posterUploadPath` (4.1 → green); poster capture at stop from the preview
       `<video>` (480 px, JPEG 0.7) and for picked files after `loadeddata` + seek 0.5 s, 3 s timeout,
       fails open. Poster upload through `uploadTaskMedia` in parallel with the clip. The submit
       payload **omits** `posterUrl`/`mediaDurationSec` when absent (the `undefined`→`null` rule).
       `mediaDurationSec` comes from the recorder's own elapsed counter, or the picked file's
       readable duration.
-- [ ] 5.3 creator-web: map `posterUrl`/`mediaDurationSec` through the photo-review queue, media gallery,
+- [x] 5.3 creator-web: map `posterUrl`/`mediaDurationSec` through the photo-review queue, media gallery,
       feed and team dossier view models. `<video poster preload={poster ? 'none' : 'metadata'}>` plus a
       duration badge in all four places. 4.3 → green. i18n for the badge's aria label.
 
 ### REFACTOR
 
-- [ ] 6.1 Extract one `<ClipTile>` in creator-web used by all four places, so the poster/preload rule
+- [x] 6.1 Extract one `<ClipTile>` in creator-web used by all four places, so the poster/preload rule
       lives once (update the guard in 4.3 to pin the component instead of four call sites).
 
 ## 3. Stage 3: send while filming, resume instead of restart

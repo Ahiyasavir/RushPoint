@@ -319,7 +319,8 @@ export const verifyStationCode = callable<
 export const submitStationPhoto = callable<
   // audio-tasks: contentType is optional (photo clients may omit it) and is
   // validated server-side against the task's captureKind.
-  Ctx & { teamId: string; taskId: string; photoUrl: string; contentType?: string },
+  // video-upload-speed D7: posterUrl + mediaDurationSec are OMITTED when absent, never null.
+  Ctx & { teamId: string; taskId: string; photoUrl: string; contentType?: string; posterUrl?: string; mediaDurationSec?: number },
   { submitted: boolean; autoApproved: boolean }
 >('submitStationPhoto');
 

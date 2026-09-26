@@ -208,6 +208,8 @@ function uploadViaVps(
   // while the retry sent a second copy of the same file over the same link —
   // exactly the congestion that makes a slow upload look frozen.
   onAbortable?: (abort: () => void) => void,
+  // false for a side upload (a video's poster) that must not drive the player's progress bar.
+  report = true,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -230,8 +232,10 @@ function uploadViaVps(
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) {
         armStall();
-        setUploadProgress(uploadPercent(e.loaded, e.total));
-        noteUploadBytes(e.loaded, e.total);
+        if (report) {
+          setUploadProgress(uploadPercent(e.loaded, e.total));
+          noteUploadBytes(e.loaded, e.total);
+        }
       }
     });
 
@@ -240,7 +244,7 @@ function uploadViaVps(
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const body = JSON.parse(xhr.responseText);
-          setUploadProgress(100);
+          if (report) setUploadProgress(100);
           resolve(body.url);
         } catch {
           reject(Object.assign(new Error('Invalid server response'), { code: 'storage/internal-error' }));
@@ -301,10 +305,11 @@ function uploadViaFirebaseStorage(
   data: Blob | File,
   contentType: string,
   onAbortable?: (abort: () => void) => void,
+  report = true,
 ): Promise<string> {
   const r = storageRef(storage, path);
   return new Promise<string>((resolve, reject) => {
-    setUploadProgress(0);
+    if (report) setUploadProgress(0);
     const task = uploadBytesResumable(r, data, { contentType });
     onAbortable?.(() => { try { task.cancel(); } catch { /* already settled */ } });
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
@@ -319,8 +324,10 @@ function uploadViaFirebaseStorage(
       'state_changed',
       (snap) => {
         armStall();
-        setUploadProgress(uploadPercent(snap.bytesTransferred, snap.totalBytes));
-        noteUploadBytes(snap.bytesTransferred, snap.totalBytes);
+        if (report) {
+          setUploadProgress(uploadPercent(snap.bytesTransferred, snap.totalBytes));
+          noteUploadBytes(snap.bytesTransferred, snap.totalBytes);
+        }
       },
       (err) => {
         if (stallTimer) clearTimeout(stallTimer);
@@ -331,7 +338,7 @@ function uploadViaFirebaseStorage(
       async () => {
         if (stallTimer) clearTimeout(stallTimer);
         try {
-          setUploadProgress(100);
+          if (report) setUploadProgress(100);
           const url = await withTimeout(getDownloadURL(r), DOWNLOAD_URL_MS, 'storage/deadline-exceeded');
           resolve(url);
         } catch (e) { reject(e); }
@@ -391,9 +398,13 @@ async function uploadResilient(
   data: Blob | File,
   contentType: string,
   signal?: AbortSignal,
+  // A side upload (a video's poster, video-upload-speed D7) must not touch the player's progress
+  // bar, retry notice, ETA or uplink sample: those describe the clip.
+  opts: { quiet?: boolean } = {},
 ): Promise<string> {
   await ensureAuth();
-  const gen = ++latestUploadGen;
+  const report = !opts.quiet;
+  const gen = report ? ++latestUploadGen : latestUploadGen;
   let abortCurrent: (() => void) | undefined;
   const onAbort = () => abortCurrent?.();
   signal?.addEventListener('abort', onAbort);
@@ -401,13 +412,15 @@ async function uploadResilient(
     return await runWithRetry(
       async () => {
         if (signal?.aborted) throw abortedError();
-        setUploadRetrying(false);
-        setUploadProgress(0);
-        beginUploadBytes(data.size);
+        if (report) {
+          setUploadRetrying(false);
+          setUploadProgress(0);
+          beginUploadBytes(data.size);
+        }
         let abortUpload: (() => void) | undefined;
         const upload = apiOrigin
-          ? uploadViaVps(path, data, contentType, (abort) => { abortUpload = abort; })
-          : uploadViaFirebaseStorage(path, data, contentType, (abort) => { abortUpload = abort; });
+          ? uploadViaVps(path, data, contentType, (abort) => { abortUpload = abort; }, report)
+          : uploadViaFirebaseStorage(path, data, contentType, (abort) => { abortUpload = abort; }, report);
         abortCurrent = () => abortUpload?.();
         try {
           const url = await withTimeout(
@@ -415,7 +428,7 @@ async function uploadResilient(
             upload, attemptBudgetMs(data.size), 'storage/deadline-exceeded',
             () => abortUpload?.(),
           );
-          recordUplinkSample(data.size);
+          if (report) recordUplinkSample(data.size);
           return url;
         } catch (e) {
           // An abort surfaces from the transport as a deadline code; say what really happened.
@@ -426,13 +439,13 @@ async function uploadResilient(
       {
         attempts: UPLOAD_ATTEMPTS,
         isRetryable: (e) => !signal?.aborted && isRetryableStorageError(e),
-        onRetry: () => { if (gen === latestUploadGen) setUploadRetrying(true); },
+        onRetry: () => { if (report && gen === latestUploadGen) setUploadRetrying(true); },
         sleep: sleepUntilVisible,
       },
     );
   } finally {
     signal?.removeEventListener('abort', onAbort);
-    if (gen === latestUploadGen) {
+    if (report && gen === latestUploadGen) {
       setUploadRetrying(false);
       setUploadProgress(null);
       setUploadBytes(null);
@@ -492,6 +505,16 @@ export async function uploadTaskVideo(
     : 'webm';
   const path = await myUploadPath(p.runId, p.taskId, ext);
   return { url: await uploadResilient(path, blob, contentType, p.signal), contentType };
+}
+
+// A video's poster frame (video-upload-speed D7): a small JPEG in the same mission folder, sent
+// QUIETLY beside the clip. The caller treats any failure as "no poster".
+export async function uploadTaskPoster(
+  blob: Blob,
+  p: { runId: string; taskId: string; signal?: AbortSignal },
+): Promise<string> {
+  const path = await myUploadPath(p.runId, p.taskId, 'jpg');
+  return uploadResilient(path, blob, 'image/jpeg', p.signal, { quiet: true });
 }
 
 // The ONE upload entry point a mission uses (change: media-upload-reliability, D1/D4): TaskRunner

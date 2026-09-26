@@ -30,6 +30,9 @@ export interface DossierMedia {
   status: 'pending' | 'approved' | 'rejected';
   submittedAt: string;
   senderName: string;
+  /** video-upload-speed D7: '' when there is none. */
+  posterUrl: string;
+  durationSec: number | null;
 }
 export interface DossierLedgerLine {
   at: string;
@@ -142,6 +145,8 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
         taskId, title: title(taskId), url, kind, status: st,
         submittedAt: str(sub.submittedAt) ?? '',
         senderName: submissionSenderName({ displayName: str(t.displayName) }, sub as never),
+        posterUrl: kind === 'video' && isRenderableMedia(str(sub.posterUrl) ?? '') ? (str(sub.posterUrl) as string) : '',
+        durationSec: typeof sub.mediaDurationSec === 'number' && Number.isFinite(sub.mediaDurationSec) && sub.mediaDurationSec > 0 ? sub.mediaDurationSec : null,
       });
     }
     media.sort((a, b) => (ms(b.submittedAt) ?? 0) - (ms(a.submittedAt) ?? 0));

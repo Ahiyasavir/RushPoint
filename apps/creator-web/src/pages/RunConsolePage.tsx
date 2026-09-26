@@ -44,6 +44,7 @@ import ConsoleTabs from '../components/ConsoleTabs';
 import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import { buildTeamDossier } from '../lib/teamDossier';
 import TeamPage from '../components/TeamPage';
+import ClipTile from '../components/ClipTile';
 import RunContactsEditor from '../components/RunContactsEditor';
 import QuickActionsBar from '../components/QuickActionsBar';
 import StaffCodesPanel from '../components/StaffCodesPanel';
@@ -2857,18 +2858,12 @@ function PhotoReviewConsole({
       return <audio controls preload="none" src={row.photoUrl} className="w-full" aria-label={rc.photoReviewAudio} />;
     }
     // A video submission fed to <img> renders as nothing at all — the reviewer saw
-    // a bare link and had to leave the console to judge it. `preload="metadata"`
-    // gives the poster frame without pulling every clip in the queue.
+    // a bare link and had to leave the console to judge it. ClipTile shows the poster
+    // and fetches nothing until play (video-upload-speed D7).
     if (row.mediaKind === 'video') {
       return (
-        <video
-          controls
-          playsInline
-          preload="metadata"
-          src={row.photoUrl}
-          aria-label={rc.photoReviewVideo}
-          className="w-full h-32 object-cover rounded-md bg-black"
-        />
+        <ClipTile src={row.photoUrl} posterUrl={row.posterUrl} durationSec={row.mediaDurationSec}
+          ariaLabel={rc.photoReviewVideo} className="w-full h-32 object-cover rounded-md bg-black" />
       );
     }
     return (
@@ -3053,6 +3048,7 @@ function PhotoReviewConsole({
 type FeedItemRow = {
   id: string; taskTitle: string; teamName: string; photoUrl: string;
   mediaKind?: 'photo' | 'audio' | 'video';
+  posterUrl?: string; mediaDurationSec?: number;
   reactions?: Record<string, number>; createdAt?: string;
 };
 
@@ -3079,13 +3075,8 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
         {items.map((item) => (
           <div key={item.id} className="rounded-lg bg-[--surface-2] overflow-hidden">
             {item.mediaKind === 'video' ? (
-              <video
-                controls
-                playsInline
-                preload="metadata"
-                src={item.photoUrl}
-                className="w-full h-28 object-cover bg-black"
-              />
+              <ClipTile src={item.photoUrl} posterUrl={item.posterUrl} durationSec={item.mediaDurationSec}
+                className="w-full h-28 object-cover bg-black" />
             ) : (
               <img src={item.photoUrl} alt="" loading="lazy" className="w-full h-28 object-cover" />
             )}
@@ -3172,14 +3163,8 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
     }
     if (row.mediaKind === 'video') {
       return (
-        <video
-          controls
-          playsInline
-          preload="metadata"
-          src={row.photoUrl}
-          aria-label={rc.mediaGalleryVideoAria}
-          className="w-full h-32 object-cover rounded-md bg-black"
-        />
+        <ClipTile src={row.photoUrl} posterUrl={row.posterUrl} durationSec={row.mediaDurationSec}
+          ariaLabel={rc.mediaGalleryVideoAria} className="w-full h-32 object-cover rounded-md bg-black" />
       );
     }
     return <img src={row.photoUrl} alt={rc.mediaGalleryAlt} loading="lazy" className="w-full h-32 object-cover rounded-md" />;
