@@ -39,9 +39,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 22, not 20: this job's turbo phase runs `astro check` for apps/marketing,
+      # and Astro refuses to start below Node 22.12 (apps/marketing engines:
+      # >=22.22.3), so on 20 the whole gate died before a single test ran. Same
+      # major as deploy-marketing.yml. The emulator and UI jobs stay on 20 to
+      # match the functions runtime (functions/package.json engines: 20).
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
