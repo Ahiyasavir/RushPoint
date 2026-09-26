@@ -27,6 +27,10 @@ import { uploadTaskMedia, uid } from '../services/firebase';
 import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
+  canSwitchCamera, initialFacing, planCameraSwitch, readCameraChoice, shouldMirror, writeCameraChoice,
+  type Facing,
+} from '../lib/cameraChoice';
+import {
   getUploadProgress, subscribeUploadProgress,
   getUploadRetrying, subscribeUploadRetrying,
 } from '../lib/uploadResiliency';
@@ -1490,11 +1494,12 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           <AudioEntry key={task.id} busy={frozen} working={busy} onSubmit={audio}
             onCaptured={(b, type) => { if (b) pending.begin(task.id, b, type); else pending.forget(task.id); }} />
         ) : task.smart?.captureKind === 'video' ? (
-          <VideoEntry key={task.id} smart={task.smart} busy={frozen} working={busy} onSubmit={video}
+          <VideoEntry key={task.id} smart={task.smart} runId={session.runId} busy={frozen} working={busy} onSubmit={video}
             onCaptured={(b, type) => { if (b) pending.begin(task.id, b, type); else pending.forget(task.id); }} />
         ) : (
           <PhotoEntry
             key={task.id}
+            selfie={task.smart?.preferredCamera === 'front'}
             busy={frozen}
             working={busy}
             onSubmit={photo}
@@ -2272,7 +2277,11 @@ function SubmissionWaitingCard({ phase, mediaKind, canReplace, onReplace, onOpen
   );
 }
 
-function PhotoEntry({ busy, working, onSubmit, restored, onCaptured }: {
+function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = false }: {
+  /** A "selfie" mission (smart.preferredCamera 'front'): ask the phone camera to open
+   *  facing the players. It is only a hint, and the phone's camera app keeps its own
+   *  flip button either way (camera-switch D4). */
+  selfie?: boolean;
   busy: boolean;
   /** Something is really in flight (not merely a disabled viewer). Drives the "working" label. */
   working: boolean;
@@ -2409,7 +2418,7 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured }: {
       {/* Visually hidden, NOT `display:none`: on Android a `display:none` capture
           input can fail to fire `change` at all when the camera returns, which is
           one of the four ways this screen used to lose a photo in silence. */}
-      <input ref={inputRef} type="file" accept="image/*" capture="environment" onChange={pickFile}
+      <input ref={inputRef} type="file" accept="image/*" capture={selfie ? 'user' : 'environment'} onChange={pickFile}
         data-testid="photo-file" tabIndex={-1} aria-hidden="true"
         className="absolute w-px h-px opacity-0 pointer-events-none -z-10" />
       <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
@@ -2774,8 +2783,10 @@ function readVideoDuration(url: string): Promise<number | undefined> {
   });
 }
 
-function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
-  smart: { videoMinSeconds?: number; videoMaxSeconds?: number } | undefined;
+function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
+  smart: { videoMinSeconds?: number; videoMaxSeconds?: number; preferredCamera?: 'front' } | undefined;
+  /** Keys the player's remembered camera choice to this run (camera-switch D4). */
+  runId?: string;
   busy: boolean;
   /** Something is really in flight (not merely a disabled viewer). Drives the "working" label. */
   working: boolean;
@@ -2807,6 +2818,11 @@ function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
   const [opening, setOpening] = useState(false);
   const profileRef = useRef<CaptureProfile>(captureProfileFor(undefined));
   const [unsupported, setUnsupported] = useState(false);
+  // camera-switch: which way the open camera faces (drives the mirrored preview),
+  // and whether there is a second camera to switch to at all.
+  const [facing, setFacing] = useState<Facing>('environment');
+  const [canSwitch, setCanSwitch] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -2986,6 +3002,9 @@ function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
       (navigator as Navigator & { connection?: { saveData?: unknown; effectiveType?: unknown } }).connection,
     );
     profileRef.current = profile;
+    // camera-switch D4: the player's own choice this run, then the mission's selfie
+    // default, then the rear camera. Still `ideal`, so a front-only laptop opens.
+    const wanted = initialFacing({ explicit: readCameraChoice(safeSessionStorage(), runId ?? ''), taskDefault: smart?.preferredCamera });
     let stream: MediaStream;
     try {
       stream = await withCameraDeadline(navigator.mediaDevices.getUserMedia({
@@ -2997,7 +3016,7 @@ function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
         //
         // Every constraint is `ideal`, so a laptop or a front-only device still gets
         // a working camera instead of an OverconstrainedError.
-        video: profile.video,
+        video: { ...profile.video, facingMode: { ideal: wanted } },
         audio: true,
       }), CAMERA_OPEN_DEADLINE_MS, (late) => late.getTracks().forEach((tr) => tr.stop()));
     } catch (e) {
@@ -3011,11 +3030,62 @@ function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
     }
     setOpening(false);
     streamRef.current = stream;
+    setFacing(reportedFacing(stream) ?? wanted);
+    // Labels (and so a reliable device count on some browsers) exist only once the
+    // page holds permission, which it does now. Failure just means no switch button.
+    void navigator.mediaDevices.enumerateDevices?.()
+      .then((d) => setCanSwitch(canSwitchCamera(d)))
+      .catch(() => setCanSwitch(false));
     mimeRef.current = mime;
     setRemaining(maxSeconds);
     setElapsed(0);
     elapsedRef.current = 0;
     setMode('camera');
+  }
+
+  // camera-switch D2. Never during a take (the button is not rendered then). The old
+  // tracks are stopped BEFORE asking for the new camera: iOS allows one open camera.
+  async function switchCamera() {
+    if (recording || switching || !navigator.mediaDevices?.getUserMedia) return;
+    setSwitching(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [] as MediaDeviceInfo[]);
+      const current = streamRef.current?.getVideoTracks()[0]?.getSettings?.();
+      const plan = planCameraSwitch({ devices, currentFacing: facing, currentDeviceId: current?.deviceId ?? null });
+      if (!plan) { setCanSwitch(false); return; }
+      const base = { ...profileRef.current.video } as MediaTrackConstraints;
+      delete base.facingMode;
+      const ask = (video: MediaTrackConstraints) => navigator.mediaDevices.getUserMedia({ video, audio: true });
+      stopTracks();
+      let next: MediaStream | null = null;
+      try {
+        next = await ask(plan.kind === 'deviceId'
+          ? { ...base, deviceId: { exact: plan.deviceId } }
+          : { ...base, facingMode: { exact: plan.facing } });
+      } catch {
+        if (plan.kind === 'facing' && plan.fallbackDeviceId) {
+          next = await ask({ ...base, deviceId: { exact: plan.fallbackDeviceId } }).catch(() => null);
+        }
+      }
+      // Never leave the player staring at a black viewfinder: if the other camera
+      // would not open, reopen the one they had.
+      if (!next) {
+        next = await ask({ ...base, facingMode: { ideal: facing } }).catch(() => null);
+        setErr(t.task.cameraSwitchFailed);
+        if (!next) { setMode('idle'); return; }
+      }
+      streamRef.current = next;
+      const nowFacing = reportedFacing(next) ?? plan.facing;
+      setFacing(nowFacing);
+      writeCameraChoice(safeSessionStorage(), runId ?? '', nowFacing);
+      const el = liveVideoRef.current;
+      if (el) {
+        el.srcObject = next;
+        void el.play().catch(() => { /* viewfinder only */ });
+      }
+    } finally {
+      setSwitching(false);
+    }
   }
 
   function beginRecording() {
@@ -3167,7 +3237,9 @@ function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
           muted
           playsInline
           autoPlay
-          className="absolute inset-0 h-full w-full object-cover"
+          // Front camera: mirrored like the system camera. The recorded clip is the
+          // raw track, so players send what others see (camera-switch D3).
+          className={`absolute inset-0 h-full w-full object-cover ${shouldMirror(facing) ? '-scale-x-100' : ''}`}
         />
         <div
           className="relative flex items-start justify-between gap-3 p-4"
@@ -3203,6 +3275,23 @@ function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
             <span className="rounded-full bg-black/60 px-3 py-1.5 text-sm font-semibold text-white">
               {t.task.videoKeepRecording({ sec: shortBy })}
             </span>
+          )}
+          {/* Front / back (camera-switch D2). Rendered only when a second camera
+              exists, and NOT rendered during a take: swapping the track mid-clip
+              would end the recording. Opposite corner from the pause control. */}
+          {!recording && canSwitch && (
+            <button
+              type="button"
+              onClick={() => void switchCamera()}
+              disabled={switching}
+              aria-label={t.task.switchCamera}
+              title={t.task.switchCamera}
+              data-testid="camera-switch"
+              className="absolute start-6 bottom-[34px] flex h-12 w-12 items-center justify-center rounded-full
+                border-2 border-white/80 bg-black/45 backdrop-blur-sm text-xl text-white transition-transform active:scale-95 disabled:opacity-50"
+            >
+              🔄
+            </button>
           )}
           <button
             type="button"
@@ -3301,4 +3390,18 @@ function VideoEntry({ smart, busy, working, onSubmit, onCaptured }: {
       <Button disabled={busy || opening} onClick={() => void openCamera()}>{t.task.startRecording}</Button>
     </div>
   );
+}
+
+// camera-switch helpers. sessionStorage can throw on access (private mode, blocked
+// site data), and a camera must still open without it.
+function safeSessionStorage(): Storage | null {
+  try { return typeof window !== 'undefined' ? window.sessionStorage : null; } catch { return null; }
+}
+
+/** The facing a stream's camera reports about itself, when the browser says. */
+function reportedFacing(stream: MediaStream): Facing | null {
+  try {
+    const f = stream.getVideoTracks()[0]?.getSettings?.().facingMode;
+    return f === 'user' || f === 'environment' ? f : null;
+  } catch { return null; }
 }

@@ -1819,6 +1819,16 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                 </div>
               )}
             </div>
+            {/* camera-switch D4: a selfie mission opens the players' camera on the
+                FRONT side. Photo and video only (a recording has no camera). Unticked
+                ⇒ undefined, which buildSavePayload drops, so it arrives ABSENT. */}
+            {(task.smart?.captureKind ?? 'photo') !== 'audio' && (
+              <label className="flex items-center gap-2 text-xs text-[--ink-2]">
+                <input data-qs-field="smart.preferredCamera" type="checkbox" checked={task.smart?.preferredCamera === 'front'}
+                  onChange={(e) => setSmart({ verificationType: 'photo_upload', preferredCamera: e.target.checked ? 'front' : undefined })} />
+                {b.selfieCamera}
+              </label>
+            )}
             <label className="flex items-center gap-2 text-xs text-[--ink-2]">
               <input data-qs-field="smart.autoApprove" type="checkbox" checked={task.smart?.autoApprove ?? false}
                 onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />

@@ -341,6 +341,8 @@ const ALLOWED_SMART_KEYS = new Set([
   // The video clip-length range passes for the same reason: a recorder cannot
   // enforce a limit it cannot see.
   'captureKind', 'videoMinSeconds', 'videoMaxSeconds',
+  // camera-switch: which camera the viewfinder opens on ('front' = selfie mission).
+  'preferredCamera',
 ]);
 
 function assertTaskPayloadAllowlisted(label, task) {
@@ -3841,6 +3843,15 @@ async function main() {
       clearedAccepted = true;
     } catch (e) { console.log('  cleared err ::', e.message); }
     check('updateGame accepts a cleared range (null === absent over the wire)', clearedAccepted);
+
+    // camera-switch: a selfie mission ('front'), a cleared toggle (null) and an absent
+    // one are all valid; anything else is refused where the creator can fix it.
+    await rejects('an unknown preferredCamera', { preferredCamera: 'sideways' });
+    let camOk = false;
+    try { await save({ preferredCamera: 'front' }); await save({ preferredCamera: null }); camOk = true; } catch (e) {
+      console.log('  preferredCamera err ::', e.message);
+    }
+    check('updateGame accepts preferredCamera "front" and a cleared toggle', camOk);
   }); // scenario: video mission duration range
 
   await scenario('task expiry (timed close + in-flight auto-skip)', async () => {

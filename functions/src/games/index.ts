@@ -348,6 +348,12 @@ function stagesProblems(stages: Stage[] | undefined): string[] {
         const durationError = videoDurationProblem(task.smart.videoMinSeconds, task.smart.videoMaxSeconds);
         if (durationError) problems.push(`Task "${task.title || task.id}": ${durationError}`);
       }
+      // camera-switch: 'front' or absent. null is the transport's "cleared", so it is
+      // accepted like absent (the cleared-optional-field trap).
+      const cam = (task.smart as { preferredCamera?: unknown } | undefined)?.preferredCamera;
+      if (cam !== undefined && cam !== null && cam !== 'front') {
+        problems.push(`Task "${task.title || task.id}": preferredCamera must be "front" or absent`);
+      }
     }
   }
   return problems;

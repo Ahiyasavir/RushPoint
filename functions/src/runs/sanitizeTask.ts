@@ -156,6 +156,8 @@ export function sanitizeTaskForParticipant(
           captureKind: smart.captureKind,
           videoMinSeconds: smart.videoMinSeconds,
           videoMaxSeconds: smart.videoMaxSeconds,
+          // camera-switch: which camera opens first. Not a secret.
+          preferredCamera: smart.preferredCamera,
           attemptLimit: smart.attemptLimit,
           // secretCode intentionally omitted
         }

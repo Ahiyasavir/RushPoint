@@ -135,6 +135,8 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
     // shared resolveVideoDuration() so a garbage value can never break a recorder.
     videoMinSeconds?: number;
     videoMaxSeconds?: number;
+    // camera-switch: 'front' = a selfie mission, the camera opens facing the players.
+    preferredCamera?: 'front';
     stationCoords?: { lat: number; lng: number };
     // How many wrong answers this task allows before submitTaskAnswer refuses
     // with 'resource-exhausted'. Already shipped by sanitizeTaskForParticipant;

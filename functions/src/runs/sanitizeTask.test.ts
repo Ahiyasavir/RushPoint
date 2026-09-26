@@ -144,6 +144,18 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(smart?.adminNotes).toBeUndefined();
   });
 
+  // camera-switch D4: a "selfie" mission opens the front camera, so the phone must
+  // be told. Not a secret.
+  test('smart.preferredCamera survives sanitization', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'photo',
+        smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', preferredCamera: 'front' },
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    expect((out.smart as Record<string, unknown> | undefined)?.preferredCamera).toBe('front');
+  });
+
   // task-media-attachments: general media is participant-visible (no secret) and
   // must survive the sanitizer intact so the TaskRunner can render it.
   test('task media (image + youtube) passes through to the participant unchanged', () => {

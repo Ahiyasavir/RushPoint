@@ -283,6 +283,9 @@ export interface SmartStationConfig {
   // by necessity — the recorder cannot enforce a limit it cannot see.
   videoMinSeconds?: number;
   videoMaxSeconds?: number;
+  // camera-switch D4: photo/video missions only. 'front' = a selfie mission, so the
+  // camera opens facing the players; absent = the rear camera. Participant-visible.
+  preferredCamera?: 'front';
 
   geofenceRadiusMeters?: number;
   stationCoords?: GeoPoint;  // injected by assignTask; never authored
