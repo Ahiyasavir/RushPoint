@@ -55,6 +55,8 @@ import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import { Working } from './Working';
+import { estimateUploadEta, etaLabel, readUplinkSample, uplinkPrior, type EtaLabel } from '../lib/uploadEta';
+import { currentPrior, localStorageOrNull, useUploadEta } from '../hooks/useUploadEta';
 import { LoadingView } from './LoadingView';
 import { feedback } from '../lib/sound';
 import { resolveCardExit } from '../lib/cardExit';
@@ -2173,9 +2175,42 @@ function useUploadStore(): { pct: number | null; retrying: boolean } {
   return { pct, retrying };
 }
 
+// The label as words (change: video-upload-speed, D5). `live` = time LEFT during an upload;
+// otherwise the review screen's "how long sending will take".
+function etaText(t: ReturnType<typeof useT>['t'], label: EtaLabel, live: boolean): string {
+  switch (label.kind) {
+    case 'seconds': return live ? t.task.etaSeconds : t.task.sendEstimateSeconds;
+    case 'about': return live ? t.task.etaAbout({ seconds: label.seconds }) : t.task.sendEstimateAbout({ seconds: label.seconds });
+    case 'range': return live
+      ? t.task.etaRange({ low: label.lowMinutes, high: label.highMinutes })
+      : t.task.sendEstimateRange({ low: label.lowMinutes, high: label.highMinutes });
+    case 'stalled': return t.task.etaStalled;
+    case 'almost-done': return t.task.etaAlmostDone;
+  }
+}
+
+// Before sending: the clip's REAL size over this phone's best prior (its own last upload, the
+// browser's hint, or a pessimistic default). Hidden once an upload is in flight, because the live
+// bar below then carries a measured estimate instead.
+function SendEstimate({ bytes }: { bytes: number }) {
+  const { t } = useT();
+  const { pct, retrying } = useUploadStore();
+  const label = useMemo(() => {
+    const now = Date.now();
+    return etaLabel(estimateUploadEta({ totalBytes: bytes, sentBytes: 0, meter: null, prior: currentPrior(now), nowMs: now }));
+  }, [bytes]);
+  if (pct !== null || retrying) return null;
+  return (
+    <p className="text-xs text-zinc-400" dir="auto" data-testid="send-estimate">
+      {t.task.sendEstimate({ eta: etaText(t, label, false) })}
+    </p>
+  );
+}
+
 function UploadProgress() {
   const { t } = useT();
   const { pct, retrying } = useUploadStore();
+  const eta = useUploadEta();
   if (pct === null && !retrying) return null;
   const known = pct !== null && pct > 0;
   return (
@@ -2188,6 +2223,7 @@ function UploadProgress() {
       </div>
       <p className="text-xs text-zinc-400" dir="auto" aria-live="polite">
         {retrying ? t.task.uploadRetrying : known ? t.task.uploadingPercent({ pct: pct as number }) : t.task.uploadStarting}
+        {!retrying && eta && <span data-testid="upload-eta"> · {etaText(t, eta, true)}</span>}
       </p>
     </div>
   );
@@ -2998,8 +3034,13 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
     setOpening(true);
     // A lighter frame and bitrate on a weak link (change: media-upload-reliability, D9): the
     // upload IS the wait on 3G. Kept for beginRecording so the recorder matches the frame.
+    // video-upload-speed task 0.2: the picture drops ONLY on a weak link. This phone's own recent
+    // uplink sample (the only weak signal an iPhone has) decides when it is fresh.
+    const recentUplink = readUplinkSample(localStorageOrNull());
+    const freshUplink = uplinkPrior({ recent: recentUplink, nowMs: Date.now() }).basis === 'recent' ? recentUplink?.bytesPerSecond : null;
     const profile = captureProfileFor(
       (navigator as Navigator & { connection?: { saveData?: unknown; effectiveType?: unknown } }).connection,
+      freshUplink,
     );
     profileRef.current = profile;
     // camera-switch D4: the player's own choice this run, then the mission's selfie
@@ -3374,6 +3415,7 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured }: {
             {working ? t.task.working : t.task.submitVideo}
           </Button>
         </div>
+        <SendEstimate bytes={blob.size} />
         <UploadProgress />
       </div>
     );

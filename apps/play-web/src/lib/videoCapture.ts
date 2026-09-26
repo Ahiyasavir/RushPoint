@@ -47,7 +47,9 @@ export const CAPTURE_VIDEO_CONSTRAINTS = {
 // smaller. The arithmetic is no longer a comment that cannot fail — see
 // `predictedClipBytes`, asserted against the real cap by scripts/test-video-capture.ts.
 export const VIDEO_BITS_PER_SECOND = 1_500_000;
-export const AUDIO_BITS_PER_SECOND = 96_000;
+// 64 kbps (was 96): Opus is near fullband for speech from ~24 kbps, and 64 to 96 kbps is the
+// stereo MUSIC range (video-upload-speed D1). The picture is unchanged; only overhead goes.
+export const AUDIO_BITS_PER_SECOND = 64_000;
 
 /** Mirrors MAX_PARTICIPANT_VIDEO_BYTES in functions/uploadRoute.js. */
 export const MAX_PARTICIPANT_VIDEO_BYTES = 20 * 1024 * 1024;
@@ -65,17 +67,23 @@ export function predictedClipBytes(seconds: number): number {
   return (VIDEO_BITS_PER_SECOND + AUDIO_BITS_PER_SECOND) * seconds / 8;
 }
 
-// ─── Weak-link profile (change: media-upload-reliability, D9) ────────────────
+// ─── Weak-link profile (change: media-upload-reliability, D9; video-upload-speed D1) ──
 //
-// Every byte recorded crosses the field connection before the mission counts, and on 3G the
-// upload IS the wait. When the browser says the link is weak (or the player asked it to save
-// data), ask for 960x540 at 1.0 Mbps: a third fewer bytes than the default. `ideal` only, the
-// same rule as above. Total: iOS has no `navigator.connection`, and anything unrecognised means
-// the default profile, never a refusal.
+// Every byte recorded crosses the field connection before the mission counts, and on a weak link
+// the upload IS the wait. Owner decision (video-upload-speed task 0.2): the picture drops ONLY on a
+// weak network, in two tiers:
+//   light   (540p, 1.0 Mbps) on `3g`, `saveData`, or a measured uplink under WEAK_UPLINK_BPS
+//   lighter (360p, 600 kbps) on `2g`/`slow-2g`, or a measured uplink under VERY_WEAK_UPLINK_BPS
+// `effectiveType` describes the DOWNLOAD side and does not exist on iOS at all, so a fresh sample
+// of this phone's own uplink to our server (the caller passes it only while it is fresh) decides
+// when present. `saveData` is the player's own request and always wins. `ideal` only, the same rule
+// as above; anything unrecognised means the default profile, never a refusal.
 export interface ConnectionHint {
   saveData?: unknown;
   effectiveType?: unknown;
 }
+
+export type CaptureTier = 'default' | 'light' | 'lighter';
 
 export interface CaptureProfile {
   video: {
@@ -87,30 +95,69 @@ export interface CaptureProfile {
   videoBitsPerSecond: number;
   audioBitsPerSecond: number;
   light: boolean;
+  tier: CaptureTier;
 }
 
-const WEAK_EFFECTIVE_TYPES = new Set(['slow-2g', '2g', '3g']);
 export const LIGHT_VIDEO_BITS_PER_SECOND = 1_000_000;
+export const LIGHTER_VIDEO_BITS_PER_SECOND = 600_000;
+export const LIGHT_AUDIO_BITS_PER_SECOND = 48_000;
+/** Measured uplink, bytes per second. 150 KB/s moves a 60 s 720p clip in about 80 s. */
+export const WEAK_UPLINK_BPS = 150_000;
+export const VERY_WEAK_UPLINK_BPS = 50_000;
 
-export function captureProfileFor(connection: ConnectionHint | null | undefined): CaptureProfile {
-  const weak = !!connection && (
-    connection.saveData === true
-    || (typeof connection.effectiveType === 'string' && WEAK_EFFECTIVE_TYPES.has(connection.effectiveType))
-  );
-  if (!weak) {
+function tierFor(connection: ConnectionHint | null | undefined, measuredUplinkBps: unknown): CaptureTier {
+  if (connection?.saveData === true) {
+    return typeof measuredUplinkBps === 'number' && Number.isFinite(measuredUplinkBps)
+      && measuredUplinkBps > 0 && measuredUplinkBps < VERY_WEAK_UPLINK_BPS ? 'lighter' : 'light';
+  }
+  if (typeof measuredUplinkBps === 'number' && Number.isFinite(measuredUplinkBps) && measuredUplinkBps > 0) {
+    if (measuredUplinkBps < VERY_WEAK_UPLINK_BPS) return 'lighter';
+    if (measuredUplinkBps < WEAK_UPLINK_BPS) return 'light';
+    return 'default';
+  }
+  const et = connection?.effectiveType;
+  if (et === 'slow-2g' || et === '2g') return 'lighter';
+  if (et === '3g') return 'light';
+  return 'default';
+}
+
+export function captureProfileFor(
+  connection: ConnectionHint | null | undefined,
+  measuredUplinkBps?: number | null,
+): CaptureProfile {
+  const tier = tierFor(connection, measuredUplinkBps);
+  if (tier === 'default') {
     return {
       video: { ...CAPTURE_VIDEO_CONSTRAINTS },
       videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
       audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
       light: false,
+      tier,
     };
   }
+  const lighter = tier === 'lighter';
   return {
-    video: { ...CAPTURE_VIDEO_CONSTRAINTS, width: { ideal: 960 }, height: { ideal: 540 } },
-    videoBitsPerSecond: LIGHT_VIDEO_BITS_PER_SECOND,
-    audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+    video: {
+      ...CAPTURE_VIDEO_CONSTRAINTS,
+      width: { ideal: lighter ? 640 : 960 },
+      height: { ideal: lighter ? 360 : 540 },
+    },
+    videoBitsPerSecond: lighter ? LIGHTER_VIDEO_BITS_PER_SECOND : LIGHT_VIDEO_BITS_PER_SECOND,
+    audioBitsPerSecond: LIGHT_AUDIO_BITS_PER_SECOND,
     light: true,
+    tier,
   };
+}
+
+/**
+ * Bytes for a clip recorded with THIS profile (video-upload-speed D1): the ETA must predict with
+ * the profile actually recording, not the default. Total, like predictedClipBytes.
+ */
+export function predictedClipBytesFor(seconds: number, profile: Pick<CaptureProfile, 'videoBitsPerSecond' | 'audioBitsPerSecond'> | null | undefined): number {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return 0;
+  const v = profile && Number.isFinite(profile.videoBitsPerSecond) && profile.videoBitsPerSecond > 0 ? profile.videoBitsPerSecond : VIDEO_BITS_PER_SECOND;
+  const a = profile && Number.isFinite(profile.audioBitsPerSecond) && profile.audioBitsPerSecond >= 0 ? profile.audioBitsPerSecond : AUDIO_BITS_PER_SECOND;
+  return (v + a) * seconds / 8;
 }
 
 // ─── A camera that never answers (change: media-upload-reliability, D5) ──────

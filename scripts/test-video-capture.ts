@@ -22,6 +22,9 @@ import {
   CAMERA_OPEN_DEADLINE_MS,
   withCameraDeadline,
   captureProfileFor,
+  predictedClipBytesFor,
+  WEAK_UPLINK_BPS,
+  VERY_WEAK_UPLINK_BPS,
 } from '../apps/play-web/src/lib/videoCapture';
 import { VIDEO_DURATION_LIMITS } from '../packages/shared/src/videoDuration';
 
@@ -227,10 +230,17 @@ check('CAMERA_OPEN_DEADLINE_MS exists and is under 15 s',
   check('the default profile keeps the 720p constraints', d.video.width.ideal === 1280 && d.video.height.ideal === 720);
   check('4g means default', !captureProfileFor({ effectiveType: '4g' }).light);
   check('garbage connection means default', !captureProfileFor({ effectiveType: 42 as unknown as string }).light);
-  for (const effectiveType of ['slow-2g', '2g', '3g']) {
+  // Owner decision (video-upload-speed task 0.2): quality drops ONLY on a weak network, in two
+  // tiers. 3g is still usable at 540p; 2g needs 360p or the upload is the whole wait.
+  for (const effectiveType of ['3g']) {
     const p = captureProfileFor({ effectiveType });
-    check(`${effectiveType} means the light profile`, p.light && p.videoBitsPerSecond === 1_000_000
-      && p.video.width.ideal === 960 && p.video.height.ideal === 540, JSON.stringify(p));
+    check(`${effectiveType} means the 540p light profile`, p.light && p.tier === 'light' && p.videoBitsPerSecond === 1_000_000
+      && p.video.width.ideal === 960 && p.video.height.ideal === 540 && p.audioBitsPerSecond === 48_000, JSON.stringify(p));
+  }
+  for (const effectiveType of ['slow-2g', '2g']) {
+    const p = captureProfileFor({ effectiveType });
+    check(`${effectiveType} means the 360p lighter profile`, p.light && p.tier === 'lighter' && p.videoBitsPerSecond === 600_000
+      && p.video.width.ideal === 640 && p.video.height.ideal === 360 && p.audioBitsPerSecond === 48_000, JSON.stringify(p));
   }
   check('saveData means the light profile', captureProfileFor({ saveData: true, effectiveType: '4g' }).light);
   const light = captureProfileFor({ effectiveType: '3g' });
@@ -238,6 +248,38 @@ check('CAMERA_OPEN_DEADLINE_MS exists and is under 15 s',
   check('the light profile keeps the rear camera', light.video.facingMode.ideal === 'environment');
   const bytes = (light.videoBitsPerSecond + light.audioBitsPerSecond) * VIDEO_DURATION_LIMITS.ceilingSeconds / 8;
   check('a ceiling-length light clip fits under the upload cap', bytes < MAX_PARTICIPANT_VIDEO_BYTES, String(bytes));
+}
+
+// ── video-upload-speed D1 + task 0.2: "only on a weak network" ───────────────
+{
+  const d = captureProfileFor(undefined);
+  check('good connection keeps the 720p picture at 1.5 Mbps', d.tier === 'default' && d.videoBitsPerSecond === 1_500_000
+    && d.video.width.ideal === 1280, JSON.stringify(d));
+  check('default audio is 64 kbps (speech needs no more; design D1)', d.audioBitsPerSecond === 64_000 && AUDIO_BITS_PER_SECOND === 64_000);
+
+  // iPhones have no navigator.connection, so this phone's OWN measured uplink is their only signal.
+  check('thresholds are ordered', VERY_WEAK_UPLINK_BPS > 0 && VERY_WEAK_UPLINK_BPS < WEAK_UPLINK_BPS);
+  check('a measured slow uplink drops to 540p', captureProfileFor(undefined, WEAK_UPLINK_BPS - 1).tier === 'light');
+  check('a measured very slow uplink drops to 360p', captureProfileFor(undefined, VERY_WEAK_UPLINK_BPS - 1).tier === 'lighter');
+  check('a measured fast uplink keeps 720p', captureProfileFor(undefined, WEAK_UPLINK_BPS * 4).tier === 'default');
+  check('a fresh measured sample beats a download-side 3g hint (it measures the right direction)',
+    captureProfileFor({ effectiveType: '3g' }, WEAK_UPLINK_BPS * 4).tier === 'default');
+  check('saveData always means light, whatever was measured (the player asked)',
+    captureProfileFor({ saveData: true }, WEAK_UPLINK_BPS * 4).light);
+  for (const bad of [NaN, -1, 0, Infinity, 'x', null]) {
+    check(`garbage measured uplink (${String(bad)}) falls back to the hints`,
+      captureProfileFor(undefined, bad as unknown as number).tier === 'default');
+  }
+
+  // Byte prediction follows the profile actually recording.
+  const lighter = captureProfileFor({ effectiveType: '2g' });
+  check('predictedClipBytesFor uses the given profile', predictedClipBytesFor(40, lighter) === (600_000 + 48_000) * 40 / 8);
+  check('predictedClipBytes stays the default-profile wrapper', predictedClipBytes(40) === predictedClipBytesFor(40, d));
+  check('predictedClipBytesFor is total', predictedClipBytesFor(NaN, d) === 0 && predictedClipBytesFor(10, null as never) === predictedClipBytes(10));
+  for (const p of [d, captureProfileFor({ effectiveType: '3g' }), lighter]) {
+    check(`a ceiling ${p.tier} clip fits under the cap`, predictedClipBytesFor(VIDEO_DURATION_LIMITS.ceilingSeconds, p) < MAX_PARTICIPANT_VIDEO_BYTES);
+    check(`${p.tier} profile has no exact constraint`, !JSON.stringify(p.video).includes('exact'));
+  }
 }
 
 async function deadlineCases(): Promise<void> {

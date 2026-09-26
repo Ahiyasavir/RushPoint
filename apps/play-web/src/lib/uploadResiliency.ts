@@ -170,6 +170,26 @@ export function subscribeUploadProgress(fn: Listener): () => void {
   return () => { listeners.delete(fn); };
 }
 
+// The same upload in BYTES, for the ETA (change: video-upload-speed, D5). A sibling channel so
+// nothing that reads the percent above changes. `atMs` is the moment the event arrived; `null` =
+// no upload in flight. `loaded` restarts from 0 on every attempt, which the ETA meter reads as a
+// new attempt.
+export interface UploadBytes { loaded: number; total: number; atMs: number }
+const byteListeners = new Set<(v: UploadBytes | null) => void>();
+let currentBytes: UploadBytes | null = null;
+
+export function setUploadBytes(v: UploadBytes | null): void {
+  currentBytes = v;
+  for (const l of Array.from(byteListeners)) {
+    try { l(v); } catch { /* a broken subscriber must not break the upload */ }
+  }
+}
+export function getUploadBytes(): UploadBytes | null { return currentBytes; }
+export function subscribeUploadBytes(fn: (v: UploadBytes | null) => void): () => void {
+  byteListeners.add(fn);
+  return () => { byteListeners.delete(fn); };
+}
+
 // Set while an upload is between attempts, so the UI can say "retrying" instead
 // of freezing at the percentage the failed attempt reached.
 let retrying = false;

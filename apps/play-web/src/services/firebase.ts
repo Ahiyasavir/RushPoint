@@ -38,9 +38,11 @@ import {
   errorCode,
   uploadPercent,
   setUploadProgress,
+  setUploadBytes,
   setUploadRetrying,
 } from '../lib/uploadResiliency';
 import { participantUploadPath, isFolderRefusal } from '../lib/uploadPath';
+import { meterStart, meterUpdate, sampleFromMeter, writeUplinkSample, type MeterState } from '../lib/uploadEta';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -229,6 +231,7 @@ function uploadViaVps(
       if (e.lengthComputable) {
         armStall();
         setUploadProgress(uploadPercent(e.loaded, e.total));
+        noteUploadBytes(e.loaded, e.total);
       }
     });
 
@@ -317,6 +320,7 @@ function uploadViaFirebaseStorage(
       (snap) => {
         armStall();
         setUploadProgress(uploadPercent(snap.bytesTransferred, snap.totalBytes));
+        noteUploadBytes(snap.bytesTransferred, snap.totalBytes);
       },
       (err) => {
         if (stallTimer) clearTimeout(stallTimer);
@@ -361,6 +365,27 @@ function sleepUntilVisible(ms: number): Promise<void> {
   });
 }
 
+// ── Bytes for the ETA + this phone's uplink sample (change: video-upload-speed, D5) ──
+// One meter per attempt. On success the measured rate is kept in localStorage so the NEXT upload's
+// estimate (and the capture profile, videoCapture.ts) starts from this phone's real uplink rather
+// than a guess. Per-device convenience: private mode or a full quota just means no prior.
+let attemptMeter: MeterState | null = null;
+function beginUploadBytes(total: number): void {
+  const now = Date.now();
+  attemptMeter = meterStart(now);
+  setUploadBytes({ loaded: 0, total, atMs: now });
+}
+function noteUploadBytes(loaded: number, total: number): void {
+  const now = Date.now();
+  if (attemptMeter) attemptMeter = meterUpdate(attemptMeter, loaded, now);
+  setUploadBytes({ loaded, total, atMs: now });
+}
+function recordUplinkSample(bytes: number): void {
+  try {
+    writeUplinkSample(window.localStorage, sampleFromMeter(attemptMeter, bytes, Date.now()));
+  } catch { /* no storage: no prior next time */ }
+}
+
 async function uploadResilient(
   path: string,
   data: Blob | File,
@@ -378,17 +403,20 @@ async function uploadResilient(
         if (signal?.aborted) throw abortedError();
         setUploadRetrying(false);
         setUploadProgress(0);
+        beginUploadBytes(data.size);
         let abortUpload: (() => void) | undefined;
         const upload = apiOrigin
           ? uploadViaVps(path, data, contentType, (abort) => { abortUpload = abort; })
           : uploadViaFirebaseStorage(path, data, contentType, (abort) => { abortUpload = abort; });
         abortCurrent = () => abortUpload?.();
         try {
-          return await withTimeout(
+          const url = await withTimeout(
             // Size-derived: a slow-but-moving clip gets the time it needs; the stall timer kills a dead one.
             upload, attemptBudgetMs(data.size), 'storage/deadline-exceeded',
             () => abortUpload?.(),
           );
+          recordUplinkSample(data.size);
+          return url;
         } catch (e) {
           // An abort surfaces from the transport as a deadline code; say what really happened.
           if (signal?.aborted) throw abortedError();
@@ -407,6 +435,7 @@ async function uploadResilient(
     if (gen === latestUploadGen) {
       setUploadRetrying(false);
       setUploadProgress(null);
+      setUploadBytes(null);
     }
   }
 }

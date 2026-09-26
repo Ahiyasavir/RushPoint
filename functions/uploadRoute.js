@@ -36,10 +36,10 @@ const MAX_PARTICIPANT_BYTES = 10 * 1024 * 1024;  // 10MB
 // SIZING: this must cover the worst clip the PLATFORM allows, which is one at
 // VIDEO_DURATION_LIMITS.ceilingSeconds (60s) — not one at the default 40s max. The
 // participant recorder pins its own bitrate (VIDEO_BITS_PER_SECOND in
-// play-web's lib/videoCapture.ts) at 1.5 Mbps video + 96 kbps audio, so a ceiling-length
-// clip is ~12MB and 20MB leaves ~65% headroom for container overhead and the bitrate
-// overshoot some Android encoders show. On a weak link the recorder drops to 1.0 Mbps
-// (captureProfileFor), which only makes the clip smaller. Raising the ceiling without re-deriving this number ships an upload
+// play-web's lib/videoCapture.ts) at 1.5 Mbps video + 64 kbps audio, so a ceiling-length
+// clip is ~11.7MB and 20MB leaves ~70% headroom for container overhead and the bitrate
+// overshoot some Android encoders show. On a weak link the recorder drops to 1.0 Mbps or
+// 600 kbps (captureProfileFor), which only makes the clip smaller. Raising the ceiling without re-deriving this number ships an upload
 // path that refuses missions the Builder happily authored.
 const MAX_PARTICIPANT_VIDEO_BYTES = 20 * 1024 * 1024;  // 20MB
 const MAX_CREATOR_BYTES = 50 * 1024 * 1024;      // 50MB

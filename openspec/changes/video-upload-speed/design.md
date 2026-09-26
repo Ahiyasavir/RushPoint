@@ -49,6 +49,13 @@ about bounding concurrency and disk, not bandwidth (D6).
 
 ### D1. Record fewer bytes: a profile sized for review, not for watching
 
+> **Owner decision (task 0.2, 2026-09-26): "only on a weak network".** The table below was the
+> proposal. What ships: default **1280x720 @ 1.5 Mbps + 64 kbps** (picture unchanged, audio trimmed);
+> weak tier 1 (`3g`, `saveData`) **960x540 @ 1.0 Mbps + 48 kbps**; weak tier 2 (`2g`, `slow-2g`, or a
+> recent measured uplink below `WEAK_UPLINK_BPS` = 100 KB/s, which also reaches iPhones that have
+> no `navigator.connection`) **640x360 @ 600 kbps + 48 kbps**. The byte savings on good connections
+> therefore come from D4 (send while filming) and resume, not from a softer picture.
+
 | Profile | Frame | Video | Audio | 40 s clip | 60 s clip | vs today |
 |---|---|---|---|---|---|---|
 | today default | 1280x720@30 | 1.5 Mbps | 96 kbps | 7.98 MB | 11.97 MB | — |

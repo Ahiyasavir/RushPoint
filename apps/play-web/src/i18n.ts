@@ -233,6 +233,26 @@ const HE = {
     // on a weak uplink that gap can be seconds, and silence there reads as a freeze.
     uploadStarting: 'מתחיל להעלות…',
     uploadRetrying: 'הרשת איטית. מנסים שוב…',
+    // Upload ETA (change: video-upload-speed, D5): stable buckets, never a countdown.
+    etaSeconds: 'עוד כמה שניות',
+    etaAbout: ({ seconds }: { seconds: number }) =>
+      seconds === 30 ? 'עוד בערך חצי דקה'
+      : seconds === 60 ? 'עוד בערך דקה'
+      : seconds === 90 ? 'עוד בערך דקה וחצי'
+      : seconds >= 120 ? `עוד בערך ${Math.round(seconds / 60)} דקות`
+      : `עוד בערך ${seconds} שניות`,
+    etaRange: ({ low, high }: { low: number; high: number }) => `עוד ${low} עד ${high} דקות`,
+    etaStalled: 'מחכים לקליטה…',
+    etaAlmostDone: 'כמעט סיימנו…',
+    sendEstimate: ({ eta }: { eta: string }) => `זמן שליחה משוער: ${eta}`,
+    sendEstimateSeconds: 'כמה שניות',
+    sendEstimateAbout: ({ seconds }: { seconds: number }) =>
+      seconds === 30 ? 'בערך חצי דקה'
+      : seconds === 60 ? 'בערך דקה'
+      : seconds === 90 ? 'בערך דקה וחצי'
+      : seconds >= 120 ? `בערך ${Math.round(seconds / 60)} דקות`
+      : `בערך ${seconds} שניות`,
+    sendEstimateRange: ({ low, high }: { low: number; high: number }) => `${low} עד ${high} דקות`,
     photoNotCompressed: 'לא הצלחנו לכווץ את התמונה, ההעלאה עשויה להיות איטית.',
     photoCaptureFailed: 'לא הצלחנו לקרוא את התמונה. צלמו אותה שוב.',
     photoTakeFirst: 'קודם צלמו תמונה, ואז שלחו אותה.',
@@ -1068,6 +1088,23 @@ const EN: typeof HE = {
     uploadingPercent: ({ pct }: { pct: number }) => `Uploading… ${pct}%`,
     uploadStarting: 'Starting upload…',
     uploadRetrying: 'Slow network. Retrying…',
+    etaSeconds: 'a few seconds left',
+    etaAbout: ({ seconds }: { seconds: number }) =>
+      seconds === 60 ? 'about a minute left'
+      : seconds === 90 ? 'about a minute and a half left'
+      : seconds >= 120 ? `about ${Math.round(seconds / 60)} minutes left`
+      : `about ${seconds} seconds left`,
+    etaRange: ({ low, high }: { low: number; high: number }) => `${low} to ${high} minutes left`,
+    etaStalled: 'Waiting for signal…',
+    etaAlmostDone: 'Almost done…',
+    sendEstimate: ({ eta }: { eta: string }) => `Estimated sending time: ${eta}`,
+    sendEstimateSeconds: 'a few seconds',
+    sendEstimateAbout: ({ seconds }: { seconds: number }) =>
+      seconds === 60 ? 'about a minute'
+      : seconds === 90 ? 'about a minute and a half'
+      : seconds >= 120 ? `about ${Math.round(seconds / 60)} minutes`
+      : `about ${seconds} seconds`,
+    sendEstimateRange: ({ low, high }: { low: number; high: number }) => `${low} to ${high} minutes`,
     photoNotCompressed: "We couldn't shrink the photo, the upload may be slow.",
     photoCaptureFailed: 'We could not read that photo. Please take it again.',
     photoTakeFirst: 'Take a photo first, then send it.',

@@ -8,20 +8,22 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 - [ ] 0.1 Read back `media-upload-reliability` task 4.4 telemetry if a real run has happened since
       (the `upload` log lines: p50/p95 ms by size band, failure rate). Record the numbers here as the
       baseline D1 is measured against. If there is no run yet, record "no baseline" and carry on.
-- [ ] 0.2 Product owner go-ahead on D1's picture trade-off (720p → 540p default, 540p → 360p light).
-      Show one 20 s clip recorded at each profile on a real phone, played in the Run Console. Record
-      the answer here. If "no", keep 720p and take only the audio and bitrate parts of 1.1.
+- [x] 0.2 Product owner go-ahead on D1's picture trade-off. **Answer (2026-09-26): "only on a weak
+      network".** The default stays 1280x720 @ 1.5 Mbps; only its audio drops 96 → 64 kbps (speech
+      does not need more, design D1). A weak link goes lower in two tiers: `3g` or `saveData` ⇒
+      960x540 @ 1.0 Mbps; `2g`/`slow-2g`, or this phone's own recent uplink sample under
+      `WEAK_UPLINK_BPS` (the only weak signal an iPhone has) ⇒ 640x360 @ 600 kbps. Light audio 48 kbps.
 
 ## 1. Stage 1: fewer bytes, an honest ETA, a server brake
 
 ### RED
 
-- [ ] 1.1 Extend `scripts/test-video-capture.ts` (design D1): default profile 960x540 @ 1.0 Mbps +
+- [x] 1.1 (adapted to 0.2: default stays 720p, tiers 540p/360p only on a weak link) Extend `scripts/test-video-capture.ts` (design D1): default profile 960x540 @ 1.0 Mbps +
       64 kbps; light profile 640x360 @ 600 kbps + 48 kbps; `predictedClipBytesFor(seconds, profile)`
       for both; a ceiling clip on both profiles is under `MAX_PARTICIPANT_VIDEO_BYTES` with ≥ 50%
       headroom; replace the "720p class" assertion (`:138-142`) with the 540p one and a comment
       pointing at design D1; still no `exact`. Confirm RED.
-- [ ] 1.2 New `scripts/test-upload-eta.ts` (design D5): `uplinkPrior` layer order and totality;
+- [x] 1.2 New `scripts/test-upload-eta.ts` (design D5): `uplinkPrior` layer order and totality;
       `meterStart`/`meterUpdate` warm-up discard, EWMA half-life, restart when `loaded` goes backwards;
       `estimateUploadEta` worked example (±1 s), `low ≤ high`, band narrows with progress, `stalled`
       after 5 s, `almost-done` at 97%, cap 900 s, seeded fuzz never yields NaN/Infinity; `etaLabel`
@@ -41,22 +43,22 @@ itself. Stage 1 needs no protocol change. See design.md for every constant and r
 
 ### GREEN
 
-- [ ] 2.1 `videoCapture.ts`: new profile constants, `predictedClipBytesFor`, `predictedClipBytes`
+- [x] 2.1 `videoCapture.ts`: new profile constants, `predictedClipBytesFor`, `predictedClipBytes`
       kept as the default wrapper. `TaskRunner` `VideoEntry` passes the chosen profile's bitrates
       (already does via `profileRef`). 1.1 → green. Update the sizing comment in `uploadRoute.js:36-43`
       and the `MAX_VIDEO_BYTES` comment in `TaskRunner.tsx:2757`.
 - [ ] 2.2 `VIDEO_MIME_PREFERENCE` constant in `videoCapture.ts`; `pickVideoMimeType` reads it. Put
       H.264/MP4 first only if 1.4 passed, otherwise keep today's order and note why. 1.5 → green.
-- [ ] 2.3 `apps/play-web/src/lib/uploadEta.ts` exactly as design D5. 1.2 → green.
-- [ ] 2.4 Progress store: add the `{loaded, total, atMs}` channel beside `pct` in
+- [x] 2.3 `apps/play-web/src/lib/uploadEta.ts` exactly as design D5. 1.2 → green.
+- [x] 2.4 Progress store: add the `{loaded, total, atMs}` channel beside `pct` in
       `uploadResiliency.ts`, published from `uploadViaVps` and `uploadViaFirebaseStorage`. On
       success, write the `UplinkSample` to `localStorage['rp-uplink']` (try/catch, uploads ≥ 200 KB
       only). Nothing that reads `pct` changes.
-- [ ] 2.5 UI: `UploadProgress` shows percent · ETA label, "waiting for signal" when `stalled`,
+- [x] 2.5 (browser check owed: the demo seed has no video mission; real phone check owed too) UI: `UploadProgress` shows percent · ETA label, "waiting for signal" when `stalled`,
       re-evaluated on progress and published at most every 2 s. The `VideoEntry` review screen shows
       "sending takes about X" from the blob's real size + prior (or measured when the capture-time
       upload is already running). No ETA while filming.
-- [ ] 2.6 i18n he/en for every new line (Hebrew first; buckets "כמה שניות", "בערך חצי דקה",
+- [x] 2.6 i18n he/en for every new line (Hebrew first; buckets "כמה שניות", "בערך חצי דקה",
       "1–2 דקות", "מחכים לקליטה", "כמעט סיימנו"). `npm run i18n:check:strict` clean.
 - [ ] 2.7 `uploadRoute.js`: process-local in-flight counter (global 64, per uid 2) → `503` +
       `Retry-After: 3`, released in `finally`; `statfs` disk floor (`max(2 GiB, 5%)`, cached 10 s) →
