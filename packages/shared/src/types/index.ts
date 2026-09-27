@@ -484,6 +484,13 @@ export interface Task {
   // waiting). Evaluated server-side via isExpired(); absent = never expires.
   // Carries no secret → sanitizer passthrough for the "expires in…" countdown UI.
   expiresAfterMinutes?: number;
+  // mission-time-limit: an ABSOLUTE close (ISO), the pair of `releaseAt`. With a relative close
+  // too, the earlier one wins (schedule.ts isExpired). Sanitizer passthrough, like the others.
+  expiresAt?: string;
+  // mission-time-limit: a countdown PER TEAM, in minutes from the moment that team was given the
+  // mission. Time up ⇒ skipped for that team with no points (skipCause 'timeLimit') and routed on.
+  // The phone is sent a remaining duration, never an instant (packages/shared/src/taskTimeLimit.ts).
+  timeLimitMinutes?: number;
   // Unlockable tasks (change: unlockable-tasks): ids of OTHER tasks in the SAME
   // stage that must ALL be completed before this one becomes available (AND
   // semantics). Evaluated server-side via isUnlocked(); validated at save time by
@@ -1107,6 +1114,7 @@ export type SkipCause =
   | 'operatorStage'   // skipStage: the organizer ended the stage
   | 'exclusive'       // the team chose another alternative of an exclusive group
   | 'expired'         // the task's time window closed while the team held it
+  | 'timeLimit'       // mission-time-limit: this team's own countdown ran out
   | 'unreachable'     // retired: gated behind a task this team can never satisfy
   | 'stageSatisfied'; // leftover: the stage's requirement was already met
 
@@ -1290,6 +1298,8 @@ export interface RunTeam {
   /** live-task-close-rules: the mission this team was standing on when the organizers closed it,
    *  so the phone can say why it moved on. Written only for a team that was holding it. */
   closedTaskNotice?: { taskId: string; title: string; at: string };
+  /** mission-time-limit: the mission this team's own countdown ran out on, so the phone can say why. */
+  timeUpNotice?: { taskId: string; title: string; at: string };
   launched: boolean;
   // When this team joined the run. Written by joinRun since long before it was
   // typed here; declared now because the console needs it to tell a team waiting

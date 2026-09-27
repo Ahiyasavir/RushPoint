@@ -438,6 +438,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     releaseAfterMinutes: true, expiresAfterMinutes: true, unlockAfterTaskIds: true, tags: true,
     // pause-clock-tasks: authored on the template, so it must round trip.
     pausesTimer: true,
+    // mission-time-limit
+    expiresAt: true, timeLimitMinutes: true,
   };
   const fullStage: Record<keyof Required<Stage>, true> = {
     id: true, order: true, title: true, tasks: true, isFinal: true, narrative: true,

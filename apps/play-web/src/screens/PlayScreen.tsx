@@ -803,6 +803,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         {activeStage ? (
           <>
             <MissionClosedNotice runId={session.runId} notice={(team as { closedTaskNotice?: unknown }).closedTaskNotice} />
+            <MissionClosedNotice runId={session.runId} notice={(team as { timeUpNotice?: unknown }).timeUpNotice} kind="timeUp" />
             {!isController && senderQuiet({ presence: state.devicePresence, controllerUid: team.controllerUid ?? team.id }) && (
               // The answering phone stopped asking for the state minutes ago while this one is
               // active (team-phones-simple D5): it is probably dead, flat or in a bag.
@@ -891,7 +892,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 // Offline continuity (change: fix-play-offline-continuity): a small non-blocking
 // live-task-close-rules: the organizers closed the mission this team was standing on, and the
 // server already routed it on. Says why the mission vanished, once, until the team taps "got it".
-function MissionClosedNotice({ runId, notice }: { runId: string; notice: unknown }) {
+// mission-time-limit: the same card says a team's own countdown ran out (`kind="timeUp"`).
+function MissionClosedNotice({ runId, notice, kind = 'closed' }: { runId: string; notice: unknown; kind?: 'closed' | 'timeUp' }) {
   const { t } = useT();
   const [, setDismissedAt] = useState(0);
   const read = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
@@ -902,8 +904,8 @@ function MissionClosedNotice({ runId, notice }: { runId: string; notice: unknown
     setDismissedAt(Date.now());
   };
   return (
-    <div dir="auto" className="mb-3 rounded-2xl border border-accent/40 bg-accent/10 p-3 flex items-center gap-3" role="status" data-testid="mission-closed">
-      <p className="flex-1 text-sm text-zinc-200">{t.devices.missionClosed({ title: n.title })}</p>
+    <div dir="auto" className="mb-3 rounded-2xl border border-accent/40 bg-accent/10 p-3 flex items-center gap-3" role="status" data-testid={kind === 'timeUp' ? 'mission-time-up' : 'mission-closed'}>
+      <p className="flex-1 text-sm text-zinc-200">{kind === 'timeUp' ? t.devices.missionTimeUp({ title: n.title }) : t.devices.missionClosed({ title: n.title })}</p>
       <Button className="shrink-0 !w-auto px-4" onClick={dismiss}>{t.devices.missionClosedOk}</Button>
     </div>
   );

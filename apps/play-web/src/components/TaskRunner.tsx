@@ -27,6 +27,7 @@ import { uploadTaskMedia, uploadTaskPoster, createVideoStream, finishVideoStream
 import type { StreamUpload } from '../lib/streamUpload';
 import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
 import type { BgKind } from '../lib/backgroundMedia';
+import { countdownLeftMs, countdownUrgent, formatCountdown } from '../lib/timeLimitCountdown';
 import { backgroundMedia } from '../services/backgroundMedia';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
@@ -1436,6 +1437,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           among SIBLINGS, so a per-component prefix keeps the remount and removes
           the collision. */}
       <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
+      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} onTimeUp={onChanged} />
 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
@@ -1744,6 +1746,45 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
   return (
     <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-ink-alert tabular-nums">
       ⏳ {t.task.expiresInLabel({ time: `${mm}:${ss}` })}
+    </div>
+  );
+}
+
+// mission-time-limit: this team's own countdown. The server sends the time LEFT; it is counted down
+// from when it arrived (lib/timeLimitCountdown.ts), and at zero the state is refreshed so the
+// server's sweep can move the team on.
+function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTimeUp: () => void }) {
+  const { t } = useT();
+  // Re-anchored every time a fresh value arrives (each poll), which keeps the display honest.
+  // Derived state, adjusted during render (React's documented pattern for "reset on prop change").
+  const [anchor, setAnchor] = useState(() => ({ leftMs, at: Date.now() }));
+  if (anchor.leftMs !== leftMs) setAnchor({ leftMs, at: Date.now() });
+  const [now, setNow] = useState(() => Date.now());
+  const fired = useRef(false);
+  const left = countdownLeftMs(anchor.leftMs, anchor.at, now);
+  const running = left !== null && left > 0;
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+  useEffect(() => {
+    if (left === 0 && !fired.current) {
+      fired.current = true;
+      // A beat later, so the server's clock has passed the limit too.
+      const id = setTimeout(onTimeUp, 1500);
+      return () => clearTimeout(id);
+    }
+  }, [left, onTimeUp]);
+  if (left === null) return null;
+  if (left <= 0) {
+    return <p className="mt-2 text-sm text-ink-alert font-medium" data-testid="time-limit-up">⌛ {t.task.timeLimitUpNotice}</p>;
+  }
+  return (
+    <div data-testid="time-limit-countdown" className={countdownUrgent(left)
+      ? 'mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-ink-alert tabular-nums'
+      : 'mt-2 inline-flex items-center gap-1.5 rounded-full bg-app-card border border-glass-border px-3 py-1 text-xs font-bold text-zinc-200 tabular-nums'}>
+      ⏱️ {t.task.timeLimitLeft({ time: formatCountdown(left) })}
     </div>
   );
 }

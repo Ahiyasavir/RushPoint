@@ -97,6 +97,9 @@ import {
   isReleased,
   releaseInstantMs,
   isExpired,
+  hasScheduleGate,
+  isTimeLimitUp,
+  timeLimitRemainingMs,
   isUnlocked,
   lockedTaskIds,
   unreachableTaskIds,
@@ -4812,20 +4815,26 @@ function sweepExpiredInFlight(
   game: Game,
   launchedAt: string | undefined,
   nowMs: number,
-): { stages: RunStageRecord[]; expiredTaskId: string } | null {
+): { stages: RunStageRecord[]; expiredTaskId: string; timeUp: boolean; title: string } | null {
   const activeIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeIdx < 0) return null;
   const assignedRec = team.stages[activeIdx].tasks.find((t) => t.status === 'assigned');
   if (!assignedRec) return null;
   const gameTask = findGameTask(game, assignedRec.taskId);
-  if (!gameTask || !isExpired(gameTask, launchedAt, nowMs)) return null;
+  if (!gameTask) return null;
+  // mission-time-limit: this team's own countdown ran out. A submission already waiting for the
+  // organizers was sent in time, so it is never swept (time is judged at submission).
+  const pendingReview = (team as { taskSubmissions?: Record<string, { status?: string }> }).taskSubmissions?.[assignedRec.taskId]?.status === 'pending';
+  const timeUp = !pendingReview && isTimeLimitUp(gameTask, assignedRec.startedAt, nowMs, 0);
+  if (!timeUp && !isExpired(gameTask, launchedAt, nowMs)) return null;
 
   const now = new Date(nowMs).toISOString();
   const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
   const rec = stages[activeIdx].tasks.find((t) => t.taskId === assignedRec.taskId);
   if (!rec) return null;
   rec.status = 'skipped'; // expired mid-work → skipped, not scored (no partial credit)
-  rec.skipCause = 'expired'; // skip-keeps-the-stage: a time window is authored intent
+  rec.skipCause = timeUp ? 'timeLimit' : 'expired'; // skip-keeps-the-stage: a time window is authored intent
+  rec.earnedScore = 0;
   rec.completedAt = now;
   // fix-fixed-points-speed-template-drift: stamp the expired task's expected
   // route-minutes so a finished team's terminal record is immutable against later
@@ -4837,7 +4846,7 @@ function sweepExpiredInFlight(
   // historically releases no station slots, so the helper's returned
   // held-assigned-task ids are intentionally ignored — behavior preserved exactly.
   applyStageCompletion(stages, activeIdx, game, launchedAt, now);
-  return { stages, expiredTaskId: assignedRec.taskId };
+  return { stages, expiredTaskId: assignedRec.taskId, timeUp, title: gameTask.title ?? '' };
 }
 
 // Advance a team's state on a POLL (getMyTeamState) — scheduled-release unlock and
@@ -4884,18 +4893,21 @@ export async function advanceTeamStateOnPoll(args: {
   const idx = team.stages.findIndex((s) => s.status === 'active');
   const assignedRec = idx >= 0 ? team.stages[idx].tasks.find((t) => t.status === 'assigned') : undefined;
   const gt = assignedRec ? findGameTask(game, assignedRec.taskId) : undefined;
-  if (assignedRec && gt?.expiresAfterMinutes) {
+  if (assignedRec && gt && (gt.expiresAfterMinutes || gt.expiresAt || gt.timeLimitMinutes)) {
     const swept = sweepExpiredInFlight(team, game, launchedAt, nowMs);
     if (swept) {
       const allDone = swept.stages.every((s) => s.status === 'completed');
       team.stages = swept.stages;
       team.activeTaskId = null;
       if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
+      if (swept.timeUp) team.timeUpNotice = { taskId: swept.expiredTaskId, title: swept.title, at: nowIso };
       if (isController) {
         try {
           await args.persist({
             stages: swept.stages,
             activeTaskId: null,
+            // mission-time-limit: why the phone moved on.
+            ...(swept.timeUp ? { timeUpNotice: { taskId: swept.expiredTaskId, title: swept.title, at: nowIso } } : {}),
             ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}),
             updatedAt: nowIso,
           });
@@ -4965,7 +4977,7 @@ export async function assignNextInActiveStage(
     const idx = team.stages.findIndex((s) => s.status === 'active');
     const assignedRec = idx >= 0 ? team.stages[idx].tasks.find((t) => t.status === 'assigned') : undefined;
     const gt = assignedRec ? findGameTask(game, assignedRec.taskId) : undefined;
-    if (assignedRec && gt?.expiresAfterMinutes) {
+    if (assignedRec && gt && (gt.expiresAfterMinutes || gt.expiresAt || gt.timeLimitMinutes)) {
       const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
       const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
       const swept = sweepExpiredInFlight(team, game, launchedAt, Date.now());
@@ -4974,6 +4986,7 @@ export async function assignNextInActiveStage(
         await teamRef.update({
           stages: swept.stages,
           activeTaskId: null,
+          ...(swept.timeUp ? { timeUpNotice: { taskId: swept.expiredTaskId, title: swept.title, at: now } } : {}),
           ...(allDone ? { status: 'finished', finishedAt: now } : {}),
           updatedAt: now,
         });
@@ -5162,7 +5175,8 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   // Scheduled-release gate (change: scheduled-release): a not-yet-released task
   // can't be completed even by calling completeTask directly (anti-cheat: the
   // routing filter already hides it, this stops a hand-crafted bypass).
-  if (gtask && (gtask.releaseAt || gtask.releaseAfterMinutes || gtask.expiresAfterMinutes)) {
+  if (gtask) assertWithinTimeLimit(team, gtask);
+  if (gtask && hasScheduleGate(gtask)) {
     const runSnap = await db.doc(runPath(ctx.ownerUid, ctx.gameId, ctx.runId)).get();
     const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
     if (!isReleased(gtask, launchedAt, Date.now())) {
@@ -5690,13 +5704,35 @@ async function evaluateTeamOutOfBounds(
   }
 }
 
+/** The held mission's remaining time for this team, or null (no held mission, no limit). */
+function activeTaskTimeLeftMs(team: RunTeam, game: Game, nowMs: number): number | null {
+  const stage = (team.stages ?? []).find((st) => st.status === 'active');
+  const rec = stage?.tasks?.find((r) => r.status === 'assigned');
+  if (!rec) return null;
+  return timeLimitRemainingMs(findGameTask(game, rec.taskId), rec.startedAt, nowMs);
+}
+
+// mission-time-limit: this team's own countdown for the mission. Judged at SUBMISSION (a photo
+// sent in time and reviewed later still counts, because review goes straight to
+// completeTaskForTeam), with TIME_LIMIT_GRACE_MS for an answer in flight at the buzzer.
+export function assertWithinTimeLimit(team: RunTeam, task: Pick<Task, 'id' | 'timeLimitMinutes'>): void {
+  if (!task.timeLimitMinutes) return;
+  const rec = (team.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === task.id);
+  if (rec && isTimeLimitUp(task, rec.startedAt, Date.now())) {
+    throw new functions.https.HttpsError('failed-precondition', 'Time is up for this mission', { code: 'timeLimit' });
+  }
+}
+
 // Task expiry guard shared by the answer callables (change: task-expiry). Reads
 // the run doc for `launchedAt` only when the task actually carries an expiry —
 // zero extra reads on the common (no-expiry) path.
 async function assertTaskNotExpired(
   ownerUid: string, gameId: string, runId: string, task: Task,
+  // mission-time-limit: with the team, this team's own countdown is checked too (no read needed).
+  team?: RunTeam,
 ): Promise<void> {
-  if (!task.expiresAfterMinutes) return;
+  if (team) assertWithinTimeLimit(team, task);
+  if (!task.expiresAfterMinutes && !task.expiresAt) return;
   const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
   const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
   if (isExpired(task, launchedAt, Date.now())) {
@@ -5771,7 +5807,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       throw new functions.https.HttpsError('invalid-argument', 'Valid survey response required');
     }
     // Task expiry still applies (a closed task takes no more responses).
-    await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
+    await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task, team);
     const now = new Date().toISOString();
     const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
     // Test mode (change: test-mode-hidden-scoring): a survey has no right answer, so
@@ -5803,7 +5839,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     throw new functions.https.HttpsError('invalid-argument', 'taskId and answer required');
   }
   // Task expiry (change: task-expiry): a closed task takes no more answers.
-  await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
+  await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task, team);
 
   // ── Test mode (change: test-mode-hidden-scoring) ────────────────────────────
   // On a run whose game seals scoring, an answer is FREE AND FINAL: it completes
@@ -6134,7 +6170,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   // before any step-progress read/write.
   assertStageActiveForTask(team, taskId);
   // Task expiry (change: task-expiry): a closed task takes no more steps.
-  await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
+  await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task, team);
 
   const done = team.taskStepProgress?.[taskId] ?? 0;
 
@@ -6605,6 +6641,9 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       instructions: cleanGameInstructions(game.instructions) ?? null,
     },
     activeStageTasks,
+    // mission-time-limit: how long this team has left on the mission it holds, on the SERVER's
+    // clock, as a DURATION (the phone counts it down from when it received it). null = no limit.
+    activeTaskTimeLeftMs: activeTaskTimeLeftMs(team, game, Date.now()),
     // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
     // genuinely release/unlock-gated (routing cannot hand them out yet). The play
     // UI uses this — NOT the presence of omitted content — to decide "all

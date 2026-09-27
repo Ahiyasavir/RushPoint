@@ -83,6 +83,8 @@ export interface SharedTaskView {
   releaseAt?: string;
   releaseAfterMinutes?: number;
   expiresAfterMinutes?: number;
+  expiresAt?: string;
+  timeLimitMinutes?: number;
   unlockAfterTaskIds?: string[];
   choices?: string[];
   surveyChoices?: string[];
@@ -199,6 +201,8 @@ export function sanitizeTaskForShare(task: Task, revealAnswers = false): SharedT
   put(t, 'releaseAt', task.releaseAt);
   put(t, 'releaseAfterMinutes', task.releaseAfterMinutes);
   put(t, 'expiresAfterMinutes', task.expiresAfterMinutes);
+  put(t, 'expiresAt', task.expiresAt);
+  put(t, 'timeLimitMinutes', task.timeLimitMinutes);
   put(t, 'unlockAfterTaskIds', shareStrings(task.unlockAfterTaskIds));
   put(t, 'choices', shareStrings(task.choices));
   put(t, 'surveyChoices', shareStrings(task.surveyChoices));

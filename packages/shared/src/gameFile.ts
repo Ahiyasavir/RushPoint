@@ -37,6 +37,7 @@ import { isValidCoord } from './geo';
 import { stripUnsafeDisplayChars } from './validation';
 import { validateUnlockGraph } from './gating';
 import { validateAvailabilityWindow } from './schedule';
+import { timeLimitProblem } from './taskTimeLimit';
 import { validateOrderItems } from './ordering';
 import { validateSurveyChoices } from './survey';
 
@@ -169,6 +170,8 @@ export const EXPORTED_TASK_KEYS = [
   // pause-clock-tasks: pure authorship (the run-side `excludedMs` lives on the
   // team record, not here), so it round trips like any other authored flag.
   'pausesTimer',
+  // mission-time-limit: the absolute close and the per team countdown.
+  'expiresAt', 'timeLimitMinutes',
 ] as const satisfies readonly (keyof Task)[];
 
 /** `currentTeamCount` is, in the type's own words, a "runtime counter maintained
@@ -378,6 +381,7 @@ const TASK_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   hintAutoRevealAttempts: 'number',
   releaseAfterMinutes: 'number',
   expiresAfterMinutes: 'number',
+  timeLimitMinutes: 'number',
   locationless: 'boolean',
   // mission-card-actions: a benched mission must stay benched across an
   // export/import round trip — a file that silently un-benched every hidden
@@ -692,8 +696,10 @@ export function parseGameFile(input: unknown): ParsedGameFile {
       errors.push(...fieldTypeProblems(task, tLabel, TASK_FIELD_TYPES));
 
       // Pure structural rules — the same functions the Builder save path runs.
-      const windowError = validateAvailabilityWindow(task as { releaseAfterMinutes?: number; expiresAfterMinutes?: number });
+      const windowError = validateAvailabilityWindow(task as { releaseAfterMinutes?: number; expiresAfterMinutes?: number; releaseAt?: string; expiresAt?: string });
       if (windowError) errors.push(`${tLabel}: ${windowError}`);
+      const limitError = timeLimitProblem(task as { timeLimitMinutes?: unknown });
+      if (limitError) errors.push(`${tLabel}: ${limitError}`);
 
       if (task.orderItems !== undefined) {
         if (task.type !== 'quiz') {

@@ -169,6 +169,8 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
   // live-task-close-rules: why the phone was moved off a mission. Without it a team sees its
   // mission vanish with no explanation.
   copy(out, t, 'closedTaskNotice');
+  // mission-time-limit: why the phone was moved off a mission whose countdown ran out.
+  copy(out, t, 'timeUpNotice');
 
   // ── Sealed by test mode ─────────────────────────────────────────────────────
   // Each of these is a scoring or correctness signal. `taskAttempts` and

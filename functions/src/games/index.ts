@@ -36,6 +36,7 @@ import {
   videoDurationProblem,
   answerOutcomesProblem,
   validateAvailabilityWindow,
+  timeLimitProblem,
   validateOrderItems,
   validateSurveyChoices,
   sumEstimatedMinutes,
@@ -272,6 +273,9 @@ function stagesProblems(stages: Stage[] | undefined, scoringPreset?: string): st
     for (const task of stage.tasks ?? []) {
       const windowError = validateAvailabilityWindow(task);
       if (windowError) problems.push(`Task "${task.title || task.id}": ${windowError}`);
+      // mission-time-limit: the per team countdown must be a sane number of minutes.
+      const limitError = timeLimitProblem(task);
+      if (limitError) problems.push(`Task "${task.title || task.id}": ${limitError}`);
       if (task.orderItems !== undefined) {
         const label = `Task "${task.title || task.id}"`;
         if (task.type !== 'quiz') {

@@ -438,6 +438,18 @@ strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify vi
   shipped — `sanitizeTaskForParticipant` still builds the sealed stub by construction, so no
   `coordinates` / `geofenceRadiusMeters` / `smart` reaches it, and `reportArrival`'s server GPS
   verdict is still the only thing that unseals.
+- **Closing a mission mid-run is final; pausing is temporary** (change: live-task-close-rules). A
+  CLOSE takes the mission from every team that has not finished it (`applyTaskClosure`: `skipped`,
+  `skipCause: 'operator'` so what waited for it opens, `closedByOrganizer`, 0 points, requirement
+  lowered via `planTaskSkip`), moves a holder on with `team.closedTaskNotice`, and is applied to late
+  joiners in `joinRun`. A PAUSE never touches a team; what waits for a paused mission counts as
+  unavailable in `planTaskStatusChange`'s winnability check.
+- **Mission time limits** (change: mission-time-limit). `Task.timeLimitMinutes` is a countdown PER
+  TEAM from the claim (`RunTaskRecord.startedAt`), checked at every submission door
+  (`assertWithinTimeLimit`, 5 s grace) and swept on poll/requestNextTask (`skipCause: 'timeLimit'`,
+  `team.timeUpNotice`); a submission waiting for review is never swept. The phone gets
+  `activeTaskTimeLeftMs`, a duration. `Task.expiresAt` is an absolute close beside
+  `expiresAfterMinutes` (earlier wins, `schedule.ts`).
 - **Skip ONE mission for ONE team** — `skipTaskForTeam` (owner or run-scoped staff) marks a single
   task `skipped` with `earnedScore: 0`, releases its station slot, keeps the team **in the same
   stage** and, if the skip put `requiredTaskCount` out of reach, lowers that team's stored

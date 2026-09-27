@@ -15,7 +15,7 @@ import { lastFixStore, lastFixKey } from './lastFixStore';
 import { trackStore } from './trackStore';
 import * as admin from 'firebase-admin';
 import { chunk, MAX_BATCH_OPS } from './batchUtil';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, hasScheduleGate, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 // The recorded answer sheet (change: post-run-player-report) — every submission,
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
 // added to sanitizeTeamForParticipant's allow-list.
@@ -69,7 +69,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -1585,6 +1585,8 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
         releaseAt?: string;
         releaseAfterMinutes?: number;
         expiresAfterMinutes?: number;
+        expiresAt?: string;
+        timeLimitMinutes?: number;
         smart?: { secretCode?: string; attemptLimit?: number };
         type?: string;
         answerOutcomes?: AnswerOutcome[];
@@ -1608,7 +1610,9 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   // Otherwise a station that expires WHILE a team holds it could still be scored by
   // POSTing the code afterward (or a scheduled station completed before its window).
   // Loads the run once, only when the task actually carries a schedule/expiry gate.
-  if (stationTask.releaseAt || stationTask.releaseAfterMinutes || stationTask.expiresAfterMinutes) {
+  // mission-time-limit: this team's own countdown.
+  assertWithinTimeLimit(team, stationTask);
+  if (hasScheduleGate(stationTask)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
     if (!isReleased(stationTask, launchedAt, Date.now())) {
@@ -1776,11 +1780,13 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   let kind: MediaKind = 'photo';
   // wave-h #3: the task's schedule/expiry gate rides the SAME snapshot too — no
   // extra read on the common (no-gate) path. Undefined when the task can't resolve.
-  let scheduleGate: { releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number } | undefined;
+  let scheduleGate: { releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; expiresAt?: string } | undefined;
+  // mission-time-limit: the per team countdown, from the same snapshot.
+  let timeLimitMinutes: number | undefined;
   if (gameSnap.exists) {
     const game = gameSnap.data() as {
       photoFeedEnabled?: boolean;
-      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind; videoMinSeconds?: number; videoMaxSeconds?: number } }[] }[];
+      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; expiresAt?: string; timeLimitMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind; videoMinSeconds?: number; videoMaxSeconds?: number } }[] }[];
     };
     feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
@@ -1794,7 +1800,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
         kind = task.smart?.captureKind === 'audio' || task.smart?.captureKind === 'video'
           ? task.smart.captureKind
           : 'photo';
-        scheduleGate = { releaseAt: task.releaseAt, releaseAfterMinutes: task.releaseAfterMinutes, expiresAfterMinutes: task.expiresAfterMinutes };
+        scheduleGate = { releaseAt: task.releaseAt, releaseAfterMinutes: task.releaseAfterMinutes, expiresAfterMinutes: task.expiresAfterMinutes, expiresAt: task.expiresAt };
+        timeLimitMinutes = task.timeLimitMinutes;
         break;
       }
     }
@@ -1861,7 +1868,9 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // completeTask/verifyStationCode (the shared completeTaskForTeam choke point never
   // carried it). Placed here so the existing stage-active / idempotency / slot
   // guards are untouched; loads the run once, only when the task is actually gated.
-  if (scheduleGate && (scheduleGate.releaseAt || scheduleGate.releaseAfterMinutes || scheduleGate.expiresAfterMinutes)) {
+  // mission-time-limit: judged at SUBMISSION, so a photo sent in time still counts when reviewed later.
+  assertWithinTimeLimit(team, { id: taskId, timeLimitMinutes });
+  if (scheduleGate && hasScheduleGate(scheduleGate)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
     if (!isReleased(scheduleGate, launchedAt, Date.now())) {

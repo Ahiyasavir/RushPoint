@@ -297,6 +297,7 @@ const ALLOWED_TASK_KEYS = new Set([
   'requiredContributors',
   'releaseAt', 'releaseAfterMinutes',
   'expiresAfterMinutes', // task-expiry: the countdown UI needs it — no secret
+  'expiresAt', 'timeLimitMinutes', // mission-time-limit: the countdown needs them — no secret
   'unlockAfterTaskIds',  // unlockable-tasks: the locked row names prerequisites — no secret
   // hint-auto-escalation: free-hint thresholds — they never reveal the hint text
   'hintAutoRevealMinutes', 'hintAutoRevealAttempts',
@@ -10994,6 +10995,113 @@ async function main() {
     check('pause: the refusal counts the locked dependent as unavailable (1 of 2)',
       pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
   }); // scenario: closing a mission mid-run
+
+  // ═══ Mission time limits (change: mission-time-limit) ═══════════════════════
+  //
+  // Owner (2026-09-27): two kinds. A countdown PER TEAM from the moment it got the mission (time up
+  // ⇒ it moves on with no points and a message), and a clock window for everyone (now with an
+  // absolute close, `expiresAt`). Time is judged when the team SUBMITS: a photo sent in time and
+  // reviewed later still counts.
+  await scenario('mission time limits (per team countdown · absolute close · judged at submit)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const base = (id, extra = {}) => ({ id, title: `Mission ${id}`, type: 'self_report', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9, ...extra });
+    const LIMIT = 0.05; // 3 seconds; the server adds a 5 second grace.
+
+    // Save-time validation.
+    const { gameId: vg } = await creator.call('createGame', { title: 'Time Limit Validation', mode: 'individual' });
+    for (const [label, extra] of [['a zero limit', { timeLimitMinutes: 0 }], ['a huge limit', { timeLimitMinutes: 9999 }], ['an unreadable close', { expiresAt: 'soon' }]]) {
+      await expectError(`time limit: ${label} is refused at save time`,
+        creator.call('updateGame', { gameId: vg, stages: [{ id: 'v-s', order: 0, title: 'S', isFinal: true, tasks: [base('v-t', extra)] }] }),
+        { codeIn: ['functions/invalid-argument'] });
+    }
+
+    // A. Per team countdown on a quiz.
+    const { gameId: tg } = await creator.call('createGame', { title: 'Time Limit Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: tg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'tl-s1', order: 0, title: 'Timed', tasks: [
+        base('tl-quiz', { type: 'quiz', choices: ['yes', 'no'], answers: ['yes'], timeLimitMinutes: LIMIT }),
+        base('tl-other'),
+      ] },
+      { id: 'tl-s2', order: 1, title: 'End', isFinal: true, tasks: [base('tl-end')] },
+    ] });
+    const { runId: tr, accessCode: tc } = await creator.call('launchRun', { gameId: tg });
+    const T = { ownerUid: OWNER, gameId: tg, runId: tr };
+    const tp = makeParty('timeLimitPlayer');
+    const tUid = (await signInAnonymously(tp.auth)).user.uid;
+    await tp.call('joinRun', { code: tc, displayName: 'On The Clock' });
+    await creator.call('startTeams', { gameId: tg, runId: tr });
+    if ((await tp.call('getMyTeamState', { code: tc }))?.team?.activeTaskId !== 'tl-quiz') {
+      await creator.call('forceAssignTask', { ...T, teamId: tUid, taskId: 'tl-quiz' });
+    }
+    const s0 = await tp.call('getMyTeamState', { code: tc });
+    const quizPayload = (s0?.activeStageTasks ?? []).find((x) => x.id === 'tl-quiz');
+    check('time limit: the phone is told the mission has a limit', quizPayload?.timeLimitMinutes === LIMIT, JSON.stringify(quizPayload?.timeLimitMinutes));
+    check('time limit: the phone gets the time LEFT as a duration, never an instant',
+      typeof s0?.activeTaskTimeLeftMs === 'number' && s0.activeTaskTimeLeftMs > 0 && s0.activeTaskTimeLeftMs <= 3000, JSON.stringify(s0?.activeTaskTimeLeftMs));
+
+    await sleep(8600);
+    await expectError('time limit: a right answer after the time is up is refused',
+      tp.call('submitTaskAnswer', { ...T, taskId: 'tl-quiz', answer: 'yes' }),
+      { codeIn: ['functions/failed-precondition'] });
+    await tp.call('getMyTeamState', { code: tc }); // the poll sweeps the timed out mission
+    await tp.call('requestNextTask', { ...T, lat: 0, lng: 0 }); // what the phone does next
+    const s1 = await tp.call('getMyTeamState', { code: tc });
+    const tTeam = (await creator.getDocAt(`users/${OWNER}/games/${tg}/runs/${tr}/teams/${tUid}`)).data ?? {};
+    const qRec = (tTeam.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === 'tl-quiz');
+    check('time limit: the mission is skipped for this team as time up, with no points',
+      qRec?.status === 'skipped' && qRec?.skipCause === 'timeLimit' && (qRec?.earnedScore ?? 0) === 0 && (tTeam.score ?? 0) === 0, JSON.stringify({ qRec, score: tTeam.score }));
+    check('time limit: the team was routed on to the next mission', s1?.team?.activeTaskId === 'tl-other', String(s1?.team?.activeTaskId));
+    check('time limit: the phone is told why', s1?.team?.timeUpNotice?.taskId === 'tl-quiz' && s1.team.timeUpNotice.title === 'Mission tl-quiz', JSON.stringify(s1?.team?.timeUpNotice));
+    check('time limit: a mission without a limit sends no countdown', s1?.activeTaskTimeLeftMs === null, JSON.stringify(s1?.activeTaskTimeLeftMs));
+    await tp.call('completeTask', { ...T, taskId: 'tl-other' });
+    const s2 = await tp.call('getMyTeamState', { code: tc });
+    check('time limit: the stage still completes (a timed out mission does not strand the team)',
+      s2?.team?.stages?.[0]?.status === 'completed' && s2?.team?.activeTaskId === 'tl-end', JSON.stringify(s2?.team?.stages?.[0]?.status));
+
+    // B. Judged at submit: a photo sent in time and reviewed later still counts.
+    const { gameId: pg } = await creator.call('createGame', { title: 'Time Limit Photo Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: pg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'tp-s1', order: 0, title: 'Photo', isFinal: true, tasks: [
+        base('tp-photo', { type: 'photo', timeLimitMinutes: LIMIT, smart: { enabled: true, verificationType: 'photo_upload' } }),
+      ] },
+    ] });
+    const { runId: pr, accessCode: pc } = await creator.call('launchRun', { gameId: pg });
+    const P = { ownerUid: OWNER, gameId: pg, runId: pr };
+    const pp = makeParty('timeLimitPhoto');
+    const pUid = (await signInAnonymously(pp.auth)).user.uid;
+    await pp.call('joinRun', { code: pc, displayName: 'Sent In Time' });
+    await creator.call('startTeams', { gameId: pg, runId: pr });
+    const photoUrl = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${pr}/teams/${pUid}/tp.jpg`)}?alt=media`;
+    await pp.call('submitStationPhoto', { ...P, teamId: pUid, taskId: 'tp-photo', photoUrl });
+    await sleep(8600);
+    await pp.call('getMyTeamState', { code: pc });
+    const pTeam = (await creator.getDocAt(`users/${OWNER}/games/${pg}/runs/${pr}/teams/${pUid}`)).data ?? {};
+    const pRec = (pTeam.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === 'tp-photo');
+    check('time limit: a submission waiting for review is NOT timed out', pRec?.status === 'assigned', JSON.stringify(pRec));
+    const rev = await creator.call('reviewStationSubmission', { ...P, teamId: pUid, taskId: 'tp-photo', approved: true });
+    const pTeam2 = (await creator.getDocAt(`users/${OWNER}/games/${pg}/runs/${pr}/teams/${pUid}`)).data ?? {};
+    check('time limit: approving it after the limit still scores it', rev?.approved === true && (pTeam2.score ?? 0) > 0, JSON.stringify({ rev, score: pTeam2.score }));
+
+    // C. An absolute close already in the past: never handed out, refused on completion.
+    const { gameId: ag } = await creator.call('createGame', { title: 'Absolute Close Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: ag, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'ac-s1', order: 0, title: 'Window', isFinal: true, requiredTaskCount: 1, tasks: [
+        base('ac-closed', { expiresAt: new Date(Date.now() - 60_000).toISOString() }), base('ac-open'),
+      ] },
+    ] });
+    const { runId: ar, accessCode: ac } = await creator.call('launchRun', { gameId: ag });
+    const A = { ownerUid: OWNER, gameId: ag, runId: ar };
+    const ap = makeParty('absoluteClose');
+    await signInAnonymously(ap.auth);
+    await ap.call('joinRun', { code: ac, displayName: 'Late' });
+    await creator.call('startTeams', { gameId: ag, runId: ar });
+    check('absolute close: a mission past its close time is never handed out',
+      (await ap.call('getMyTeamState', { code: ac }))?.team?.activeTaskId === 'ac-open');
+    await expectError('absolute close: completing it by hand is refused',
+      ap.call('completeTask', { ...A, taskId: 'ac-closed' }), { codeIn: ['functions/failed-precondition'] });
+  }); // scenario: mission time limits
 
   // ═══ Single-task skip (change: skip-single-task) ════════════════════════════
   // The bug this closes: the console's only skip was `skipStage`, so removing ONE

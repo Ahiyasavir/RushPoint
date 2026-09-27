@@ -8,6 +8,7 @@
 // gate, placement is last and never blocks. Validation messages are withheld
 // until the creator dirties the field group they concern or presses the finish
 // control, so a brand new task is never greeted by its own errors.
+import { isoToLocalInput, localInputToIso } from '../lib/timeWindowInput';
 import { useEffect, useRef, useState, type ReactNode, type ChangeEvent, type DragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Task, TaskStep, TaskType, TaskMedia } from '@rushpoint/shared';
@@ -27,6 +28,8 @@ import {
   normalizeTags,
   // video-submission-task: the SAME range verdict the server's save guard reads.
   VIDEO_DURATION_LIMITS, videoDurationProblem,
+  // mission-time-limit: the per team countdown's ceiling, the same one the server checks.
+  TIME_LIMIT_MAX_MINUTES,
 } from '@rushpoint/shared';
 import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
@@ -2155,16 +2158,31 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           {validateAvailabilityWindow(task) !== null && (
             <p className="text-[13px] text-ink-fire mt-1">{b.expiryWindowError}</p>
           )}
-          {/* Scheduled release disclosure (change: builder-first-task-flow).
-              `releaseAt` / `releaseAfterMinutes` are honored by the server but the
-              Builder has no editor for them; a task can still carry either through
-              duplication, import or a seed script. Read only, and unconditional on
-              any expiry, so a task is never gated shut at a time nothing in the
-              interface mentions. The advanced badge counts them too. */}
-          {task.releaseAt && (
-            <p className="text-[13px] text-[--ink-3] mt-1">
-              🕒 {b.expiryReleaseAtWarn(new Date(task.releaseAt).toLocaleString())}
-            </p>
+          {/* mission-time-limit: a clock window for everyone. `releaseAt` had no editor before
+              (it was only disclosed); `expiresAt` is new. Clearing an input stores ABSENT. */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3] mt-2">
+            <InlineLabel>🕒 {b.windowOpensAt}</InlineLabel>
+            <Input dense type="datetime-local" className="w-auto" value={isoToLocalInput(task.releaseAt)}
+              aria-label={b.windowOpensAt} data-testid="task-opens-at"
+              onChange={(e) => set({ releaseAt: localInputToIso(e.target.value) })} />
+            <InlineLabel>{b.windowClosesAt}</InlineLabel>
+            <Input dense type="datetime-local" className="w-auto" value={isoToLocalInput(task.expiresAt)}
+              aria-label={b.windowClosesAt} data-testid="task-closes-at"
+              onChange={(e) => set({ expiresAt: localInputToIso(e.target.value) })} />
+          </div>
+          {/* mission-time-limit: a countdown PER TEAM from the moment it gets the mission. */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3] mt-2">
+            <InlineLabel>⏱️ {b.timeLimitLead}</InlineLabel>
+            <Input dense type="number" min={0} max={TIME_LIMIT_MAX_MINUTES} step="0.5" className="w-20" value={task.timeLimitMinutes ?? ''}
+              placeholder="0" aria-label={b.timeLimitLead} data-testid="task-time-limit"
+              onChange={(e) => {
+                const n = parseFloat(e.target.value);
+                set({ timeLimitMinutes: Number.isFinite(n) && n > 0 ? Math.min(TIME_LIMIT_MAX_MINUTES, n) : undefined });
+              }} />
+            <span>{b.timeLimitUnit}</span>
+          </div>
+          {typeof task.timeLimitMinutes === 'number' && task.timeLimitMinutes > 0 && (
+            <p className="text-[13px] text-[--ink-3] mt-1" dir="auto">{b.timeLimitHelp}</p>
           )}
           {typeof task.releaseAfterMinutes === 'number' && task.releaseAfterMinutes > 0 && (
             <p className="text-[13px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>

@@ -84,6 +84,23 @@ export function releaseInstantMs(
 /** A thing that may carry an expiry gate (a Task). */
 export interface ExpiryGate {
   expiresAfterMinutes?: number; // minutes after run start; closed once elapsed >= it
+  /** mission-time-limit: an absolute close (ISO). With a relative one too, the EARLIER wins. */
+  expiresAt?: string;
+}
+
+function absoluteCloseMs(gate: ExpiryGate | null | undefined): number | null {
+  const at = gate?.expiresAt;
+  if (typeof at !== 'string' || at === '') return null;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Any schedule gate at all (release or close, relative or absolute). One definition for the
+ *  "is it worth reading the run's launchedAt" checks on the hot paths. */
+export function hasScheduleGate(t: (ReleaseGate & ExpiryGate) | null | undefined): boolean {
+  if (!t) return false;
+  const pos = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  return !!t.releaseAt || pos(t.releaseAfterMinutes) || pos(t.expiresAfterMinutes) || !!t.expiresAt;
 }
 
 /**
@@ -97,6 +114,9 @@ export function isExpired(
   runStartedAt: string | number | null | undefined,
   nowMs: number,
 ): boolean {
+  // An absolute close needs no run start: 11:30 is 11:30.
+  const abs = absoluteCloseMs(gate);
+  if (abs !== null && nowMs >= abs) return true;
   const after = gate?.expiresAfterMinutes;
   if (typeof after !== 'number' || !Number.isFinite(after) || after <= 0) return false;
   const startMs = typeof runStartedAt === 'number'
@@ -114,13 +134,17 @@ export function expiryInstantMs(
   gate: ExpiryGate | null | undefined,
   runStartedAt: string | number | null | undefined,
 ): number | null {
+  const abs = absoluteCloseMs(gate);
   const after = gate?.expiresAfterMinutes;
-  if (typeof after !== 'number' || !Number.isFinite(after) || after <= 0) return null;
   const startMs = typeof runStartedAt === 'number'
     ? runStartedAt
     : (runStartedAt ? Date.parse(runStartedAt) : NaN);
-  if (Number.isNaN(startMs)) return null;
-  return startMs + after * 60_000;
+  const rel = typeof after === 'number' && Number.isFinite(after) && after > 0 && !Number.isNaN(startMs)
+    ? startMs + after * 60_000
+    : null;
+  if (abs === null) return rel;
+  if (rel === null) return abs;
+  return Math.min(abs, rel);
 }
 
 /**
@@ -131,6 +155,15 @@ export function expiryInstantMs(
  * error (the launch time is unknown statically) — the Builder warns instead.
  */
 export function validateAvailabilityWindow(gate: ReleaseGate & ExpiryGate): string | null {
+  // mission-time-limit: an absolute close must be a real time, and after an absolute open.
+  if (gate.expiresAt !== undefined) {
+    const close = typeof gate.expiresAt === 'string' ? Date.parse(gate.expiresAt) : NaN;
+    if (!Number.isFinite(close)) return 'expiresAt must be a date and time';
+    const open = typeof gate.releaseAt === 'string' ? Date.parse(gate.releaseAt) : NaN;
+    if (Number.isFinite(open) && close <= open) {
+      return 'Empty availability window: the task would close at or before it opens';
+    }
+  }
   const release = gate.releaseAfterMinutes;
   const expiry = gate.expiresAfterMinutes;
   const hasRelease = typeof release === 'number' && Number.isFinite(release) && release > 0;

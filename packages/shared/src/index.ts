@@ -59,6 +59,7 @@ export * from './runEmailEligibility';
 export * from './runDigest';
 export * from './reactions';
 export * from './schedule';
+export * from './taskTimeLimit';
 export * from './gating';
 export * from './env';
 // Firebase App Check wiring decision (change: app-check-ready) — READY BUT DARK:
