@@ -125,6 +125,9 @@ export const EXPORTED_GAME_KEYS = [
   // marshals never add points"), so it round trips; a file that dropped it would quietly restore
   // a game whose staff can do everything.
   'staffDefaults',
+  // game-file-full-settings (2026-09-27): three run behaviours an organizer sets once and expects
+  // back. They were missing here, so an exported and re-imported game quietly lost them.
+  'autoApproveAllMedia', 'autoStartLateJoiners', 'requireAllMembersOnline',
 ] as const satisfies readonly (keyof Game)[];
 
 /**
@@ -148,6 +151,13 @@ export const EXPORTED_GAME_KEYS = [
 export const DELIBERATELY_EXCLUDED_GAME_KEYS = [
   'id', 'ownerUid', 'visibility', 'playCount', 'createdAt', 'updatedAt',
   'deletedAt', 'deletedBy', 'integrationWebhookUrl', 'integrationPlatform',
+  // Admin template curation: set only by setGameTemplateFlag. A file that could carry them would
+  // let anyone publish a template into every creator's new-game menu.
+  'isTemplate', 'pinnedFirst', 'templateEmoji', 'templateGenre', 'templateGroupKey', 'templateHidden',
+  'templateLang', 'templateOrder',
+  // game-share-link: the "run only" lock of a shared launch copy. Written only by launchSharedRun;
+  // a file must neither carry nor strip it (exportGameFile already refuses a locked copy).
+  'sharedLaunch',
 ] as const satisfies readonly (keyof Game)[];
 
 export const EXPORTED_STAGE_KEYS = [
@@ -172,6 +182,8 @@ export const EXPORTED_TASK_KEYS = [
   'pausesTimer',
   // mission-time-limit: the absolute close and the per team countdown.
   'expiresAt', 'timeLimitMinutes',
+  // game-file-full-settings (2026-09-27): authored mission fields the export used to drop.
+  'answerOutcomes', 'unmatchedPoints', 'revealOutcomePoints', 'wrongAnswerPenalty', 'requiredContributors',
 ] as const satisfies readonly (keyof Task)[];
 
 /** `currentTeamCount` is, in the type's own words, a "runtime counter maintained
@@ -179,6 +191,8 @@ export const EXPORTED_TASK_KEYS = [
  *  fresh game with phantom occupancy and starve routing. */
 export const DELIBERATELY_EXCLUDED_TASK_KEYS = [
   'currentTeamCount',
+  // Derived by the participant sanitizer from answerOutcomes, never authored.
+  'choicePoints',
 ] as const satisfies readonly (keyof Task)[];
 
 export const EXPORTED_SMART_KEYS = [
@@ -189,7 +203,18 @@ export const EXPORTED_SMART_KEYS = [
   'codeInputLabel', 'hasCode', 'secretCode', 'attemptLimit', 'hintCount',
   'photoReviewRequired', 'allowRetry', 'showIntroScreen', 'showSuccessScreen',
   'showFailureScreen', 'showPendingReviewScreen', 'showHintsOverTime',
+  // camera-switch: an authored choice (open the selfie camera first).
+  'preferredCamera',
 ] as const satisfies readonly (keyof SmartStationConfig)[];
+
+// game-file-full-settings: the drift guard is a TYPE error, not only a test. A field added to Game,
+// Stage, Task or SmartStationConfig and left in neither list fails `npm run typecheck` here, which
+// is how the three run behaviours above went missing: the test's own field list had gone stale too.
+type Unclassified<T, A extends readonly string[], B extends readonly string[]> = Exclude<keyof T, A[number] | B[number]>;
+function assertAllClassified<T extends never>(): T | undefined { return undefined; }
+assertAllClassified<Unclassified<Game, typeof EXPORTED_GAME_KEYS, typeof DELIBERATELY_EXCLUDED_GAME_KEYS>>();
+assertAllClassified<Unclassified<Task, typeof EXPORTED_TASK_KEYS, typeof DELIBERATELY_EXCLUDED_TASK_KEYS>>();
+assertAllClassified<Unclassified<SmartStationConfig, typeof EXPORTED_SMART_KEYS, typeof DELIBERATELY_EXCLUDED_SMART_KEYS>>();
 
 /** `stationCoords` is, in the type's own words, "injected by assignTask; never
  *  authored" — per-run routing state that happens to live on the config object. */
@@ -392,6 +417,9 @@ const TASK_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   // pause-clock-tasks: a boolean or nothing. A file saying `"yes"` is REFUSED by
   // name here rather than coerced — the flag decides how a whole run is timed.
   pausesTimer: 'boolean',
+  revealOutcomePoints: 'boolean',
+  requiredContributors: 'number',
+  answerOutcomes: 'objectList',
   smart: 'object',
   coordinates: 'object',
 };
@@ -415,6 +443,9 @@ const GAME_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   powerUpsEnabled: 'boolean',
   manualLeaderboardReveal: 'boolean',
   testMode: 'boolean',
+  autoApproveAllMedia: 'boolean',
+  autoStartLateJoiners: 'boolean',
+  requireAllMembersOnline: 'boolean',
   wizardSteps: 'objectList',
   staffDefaults: 'object',
 };

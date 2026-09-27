@@ -1528,6 +1528,10 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     setOrClear('powerUpsEnabled', parsed.powerUpsEnabled);
     setOrClear('manualLeaderboardReveal', (parsed as { manualLeaderboardReveal?: boolean }).manualLeaderboardReveal);
     setOrClear('testMode', (parsed as { testMode?: boolean }).testMode);
+    // game-file-full-settings: the three run behaviours ride the in-place door too.
+    setOrClear('autoApproveAllMedia', parsed.autoApproveAllMedia);
+    setOrClear('autoStartLateJoiners', parsed.autoStartLateJoiners);
+    setOrClear('requireAllMembersOnline', parsed.requireAllMembersOnline);
     setOrClear('instructions', instructions);
     // requiresGuardianConsent: `true` was already refused above, so this only ever
     // stores `false` or clears the field.

@@ -328,6 +328,42 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
   ok(deepEqual(serializeGameToFile(back.game!).game, doc.game), 'minimal game round-trips exactly');
 }
 
+// game-file-full-settings (2026-09-27): every authored setting survives a round trip, including the
+// ones the export used to drop, and the admin/lock fields never ride along.
+{
+  const g = randomGame(makeRng(11));
+  const full = {
+    ...g,
+    autoApproveAllMedia: true, autoStartLateJoiners: true, requireAllMembersOnline: true,
+    isTemplate: true, templateGenre: 'party', sharedLaunch: { locked: true, fromToken: 'x', sourceTitle: 'y' },
+  } as Game;
+  full.stages = [{
+    id: 's0', order: 0, title: 'S', isFinal: true,
+    tasks: [
+      { id: 'q', title: 'Q', type: 'quiz', choices: ['a', 'b'], coordinates: { lat: 0, lng: 0 }, difficulty: 1,
+        estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 3, answerOutcomes: [
+          { id: 'o1', label: 'a', answers: ['a'], points: 50 }, { id: 'o2', label: 'b', answers: ['b'], points: 100 },
+        ], unmatchedPoints: 5, revealOutcomePoints: true, wrongAnswerPenalty: 'strict' as never, requiredContributors: 2 },
+      { id: 'v', title: 'V', type: 'photo', coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1,
+        pointValue: 10, maxConcurrentTeams: 3, smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', preferredCamera: 'front' } as never },
+    ],
+  }];
+  const doc = serializeGameToFile(full);
+  const out = doc.game as Record<string, unknown>;
+  ok(out.autoApproveAllMedia === true && out.autoStartLateJoiners === true && out.requireAllMembersOnline === true,
+    'the three run behaviours are exported');
+  ok(!('isTemplate' in out) && !('templateGenre' in out) && !('sharedLaunch' in out), 'template curation and the share lock are never exported');
+  const back = parseGameFile(doc);
+  ok(back.errors.length === 0, `the full game imports cleanly (${back.errors.join(' · ')})`);
+  const q = back.game?.stages[0].tasks[0] as Task | undefined;
+  const v = back.game?.stages[0].tasks[1] as Task | undefined;
+  ok(q?.answerOutcomes?.length === 2 && q?.unmatchedPoints === 5 && q?.revealOutcomePoints === true
+    && q?.wrongAnswerPenalty === ('strict' as never) && q?.requiredContributors === 2, `points by answer, penalty and contributors survive (${JSON.stringify(q)})`);
+  ok((v?.smart as { preferredCamera?: string } | undefined)?.preferredCamera === 'front', 'the preferred camera survives');
+  ok(back.game?.autoApproveAllMedia === true && back.game?.autoStartLateJoiners === true && back.game?.requireAllMembersOnline === true,
+    'the three run behaviours survive the import');
+}
+
 // Hebrew / emoji / RTL survive byte-identically.
 {
   const g = randomGame(makeRng(7));
@@ -426,6 +462,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     secretCode: true, attemptLimit: true, hintCount: true, photoReviewRequired: true,
     allowRetry: true, showIntroScreen: true, showSuccessScreen: true, showFailureScreen: true,
     showPendingReviewScreen: true, showHintsOverTime: true,
+    // camera-switch: an authored choice (open the selfie camera first).
+    preferredCamera: true,
   };
   const fullTask: Record<keyof Required<Task>, true> = {
     id: true, title: true, description: true, type: true, coordinates: true, difficulty: true,
@@ -440,6 +478,11 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     pausesTimer: true,
     // mission-time-limit
     expiresAt: true, timeLimitMinutes: true,
+    // game-file-full-settings (2026-09-27): authored mission fields the export used to drop.
+    answerOutcomes: true, unmatchedPoints: true, revealOutcomePoints: true, wrongAnswerPenalty: true,
+    requiredContributors: true,
+    // choicePoints is DERIVED by the participant sanitizer, never authored: excluded.
+    choicePoints: true,
   };
   const fullStage: Record<keyof Required<Stage>, true> = {
     id: true, order: true, title: true, tasks: true, isFinal: true, narrative: true,
@@ -463,6 +506,11 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     wizardSteps: true,
     // staff-capabilities: an authored organizer choice, EXPORTED.
     staffDefaults: true,
+    // game-file-full-settings (2026-09-27): three run behaviours the export used to drop (EXPORTED),
+    // the share-launch lock and the admin template curation flags (EXCLUDED).
+    autoApproveAllMedia: true, autoStartLateJoiners: true, requireAllMembersOnline: true,
+    sharedLaunch: true, isTemplate: true, pinnedFirst: true, templateEmoji: true, templateGenre: true,
+    templateGroupKey: true, templateHidden: true, templateLang: true, templateOrder: true,
   };
 
   const classify = (

@@ -10618,6 +10618,42 @@ async function main() {
       && smuggled?.credits === undefined && smuggled?.wallet === undefined,
       JSON.stringify({ deletedAt: smuggled?.deletedAt, hook: smuggled?.integrationWebhookUrl,
         credits: smuggled?.credits, wallet: smuggled?.wallet }));
+
+    // game-file-full-settings (2026-09-27): every authored setting survives export → import, on
+    // both doors, including the ones the export used to drop.
+    const { gameId: gSet } = await creator.call('createGame', { title: 'All Settings Game', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: gSet, scoringPreset: 'fixed_points_speed',
+      autoApproveAllMedia: true, autoStartLateJoiners: true, requireAllMembersOnline: true,
+      stages: [{ id: 'as-s', order: 0, title: 'S', isFinal: true, tasks: [
+        { id: 'as-q', title: 'Pick', type: 'quiz', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1,
+          estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, choices: ['sage', 'thyme'],
+          answerOutcomes: [{ id: 'o1', label: 'sage', answers: ['sage'], points: 100 }, { id: 'o2', label: 'thyme', answers: ['thyme'], points: 50 }],
+          unmatchedPoints: 5, revealOutcomePoints: true, requiredContributors: 2, timeLimitMinutes: 3 },
+        { id: 'as-v', title: 'Film', type: 'photo', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1,
+          estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', preferredCamera: 'front' } },
+      ] }],
+    });
+    const { file: setFile } = await creator.call('exportGameFile', { gameId: gSet });
+    const settingsOf = (g) => {
+      const q = (g?.stages ?? [])[0]?.tasks?.find((t) => t.id === 'as-q');
+      const v = (g?.stages ?? [])[0]?.tasks?.find((t) => t.id === 'as-v');
+      return {
+        run: [g?.autoApproveAllMedia, g?.autoStartLateJoiners, g?.requireAllMembersOnline],
+        outcomes: q?.answerOutcomes?.length, unmatched: q?.unmatchedPoints, reveal: q?.revealOutcomePoints,
+        contributors: q?.requiredContributors, limit: q?.timeLimitMinutes, camera: v?.smart?.preferredCamera,
+      };
+    };
+    const expected = JSON.stringify({ run: [true, true, true], outcomes: 2, unmatched: 5, reveal: true, contributors: 2, limit: 3, camera: 'front' });
+    check('game file: the export carries every authored setting', JSON.stringify(settingsOf(setFile?.game)) === expected, JSON.stringify(settingsOf(setFile?.game)));
+    const { gameId: gSetNew } = await creator.call('importGameFile', { file: setFile });
+    const { game: setNew } = await creator.call('getGame', { gameId: gSetNew });
+    check('game file: a NEW game from the file keeps every setting', JSON.stringify(settingsOf(setNew)) === expected, JSON.stringify(settingsOf(setNew)));
+    const { gameId: gBlank } = await creator.call('createGame', { title: 'Blank Target', mode: 'team' });
+    await creator.call('importGameFile', { file: setFile, targetGameId: gBlank });
+    const { game: setInPlace } = await creator.call('getGame', { gameId: gBlank });
+    check('game file: loading the file INTO a game keeps every setting', JSON.stringify(settingsOf(setInPlace)) === expected, JSON.stringify(settingsOf(setInPlace)));
   }); // scenario: game file export/import
 
   // ═══ Live task pause (change: live-task-pause) ══════════════════════════════
