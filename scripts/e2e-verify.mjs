@@ -182,11 +182,15 @@ async function expectError(label, promise, opts = {}) {
 // suite run. The gate NEVER passes it, and an active filter is announced loudly on both
 // ends of the run — a filtered pass must never be mistakable for a full pass.
 const ONLY = (process.argv.find((a) => a.startsWith('--only=')) ?? '').split('=')[1] || '';
+// `--skip=a|b` leaves out every scenario whose name contains one of the alternatives (the mirror of
+// --only), e.g. to run the rest of the suite while one scenario is investigated on its own.
+const SKIP = (process.argv.find((a) => a.startsWith('--skip=')) ?? '').split('=')[1] || '';
 let skippedByFilter = 0;
 
 async function scenario(name, fn) {
   // `a|b|c` runs every scenario matching any of the alternatives.
   if (ONLY && !ONLY.toLowerCase().split('|').some((alt) => alt && name.toLowerCase().includes(alt))) { skippedByFilter++; return; }
+  if (SKIP && SKIP.toLowerCase().split('|').some((alt) => alt && name.toLowerCase().includes(alt))) { skippedByFilter++; return; }
   console.log(`\n━━ ${name} ━━`);
   const rec = { name, ms: 0, checks: 0, failures: 0 };
   currentScenario = rec;

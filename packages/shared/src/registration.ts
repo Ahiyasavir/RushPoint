@@ -24,8 +24,11 @@ export function isNameField(f: RegistrationField): boolean {
  */
 export function resolveRegistrationFields(
   mode: GameMode,
-  fields: RegistrationField[],
+  fields: RegistrationField[] | null | undefined,
 ): RegistrationField[] {
+  // A game document with no registrationFields reaches the join screen as null (the callable
+  // transport); that crashed the whole join form to the error screen. No fields is an empty list.
+  if (!Array.isArray(fields)) return [];
   if (mode === 'team') return fields;
 
   const nameFields = fields.filter(isNameField);

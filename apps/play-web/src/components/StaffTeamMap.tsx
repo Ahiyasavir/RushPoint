@@ -161,14 +161,16 @@ export default function StaffTeamMap({
       if (existing) {
         existing.marker.setLngLat([loc.lng, loc.lat]);
         existing.popup.setHTML(html);
-        existing.el.style.opacity = age.stale ? '0.45' : '1';
+        // On the dot and label, never the marker element: MapLibre owns that element's opacity.
+        for (const child of Array.from(existing.el.children) as HTMLElement[]) child.style.opacity = age.stale ? '0.45' : '1';
+        existing.el.dataset.stale = age.stale ? '1' : '0';
         const label = existing.el.querySelector('span');
         if (label) label.textContent = name;
         continue;
       }
       const el = document.createElement('div');
       el.style.cssText = 'display:flex;align-items:center;gap:4px;pointer-events:auto';
-      el.style.opacity = age.stale ? '0.45' : '1';
+      el.dataset.stale = age.stale ? '1' : '0';
       const dot = document.createElement('div');
       dot.style.cssText = `width:18px;height:18px;border-radius:9999px;border:2px solid #fff;background:${colorForTeam(loc.teamId)};box-shadow:0 1px 4px rgba(0,0,0,.4);flex:none`;
       const label = document.createElement('span');
@@ -176,6 +178,8 @@ export default function StaffTeamMap({
       label.setAttribute('dir', 'auto');
       label.style.cssText = 'font:600 11px system-ui;color:#111;background:rgba(255,255,255,.9);border-radius:6px;padding:1px 5px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.25)';
       el.append(dot, label);
+      // On the dot and label, never the marker element: MapLibre owns that element's opacity.
+      for (const child of [dot, label]) child.style.opacity = age.stale ? '0.45' : '1';
       el.setAttribute('aria-label', name);
       const popup = new maplibregl.Popup({ offset: 14, closeButton: false }).setHTML(html);
       const marker = new maplibregl.Marker({ element: el, anchor: 'left', offset: [-9, 0] }).setLngLat([loc.lng, loc.lat]).setPopup(popup).addTo(m);
