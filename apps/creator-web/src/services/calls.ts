@@ -401,6 +401,10 @@ export const setRunTaskStatus      = callable<
     ok: boolean; taskId: string; status: StationStatus; previousStatus: StationStatus;
     noop: boolean; teamsHolding: number; availableCount: number; requiredCount: number;
     stageUnwinnable: boolean;
+    // live-task-close-rules: teams moved off a closed mission, and what the change opened / locked.
+    teamsMoved?: number;
+    dependentsOpened?: string[];
+    dependentsLocked?: string[];
   }
 >('setRunTaskStatus');
 

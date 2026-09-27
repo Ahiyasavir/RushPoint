@@ -758,6 +758,9 @@ const HE = {
     lostSending: ({ name }: { name: string }) => `${name} עונה עכשיו`,
     takeBack: 'להחזיר אליי',
     senderQuiet: ({ name }: { name: string }) => `הטלפון של ${name} לא מגיב כבר כמה דקות.`,
+    // live-task-close-rules: the organizers closed the mission this team was on.
+    missionClosed: ({ title }: { title: string }) => `המארגנים סגרו את המשימה "${title}". ממשיכים למשימה הבאה, וזה לא פוגע בניקוד שלכם.`,
+    missionClosedOk: 'הבנו',
     linkTeamNotFound: 'לא מצאנו קבוצה עם הקוד שבקישור. בדקו את הקוד של הקבוצה והקלידו אותו כאן.',
     joinTeamByLink: ({ team }: { team: string }) => `מצטרפים לקבוצה ${team}. רק תכתבו איך קוראים לכם.`,
     actionFailed: 'הפעולה נכשלה, נסו שוב',
@@ -1618,6 +1621,8 @@ const EN: typeof HE = {
     lostSending: ({ name }: { name: string }) => `${name} is answering now`,
     takeBack: 'Take it back',
     senderQuiet: ({ name }: { name: string }) => `${name}'s phone has not responded for a few minutes.`,
+    missionClosed: ({ title }: { title: string }) => `The organizers closed the mission "${title}". You're moving on to the next one, and it doesn't count against your score.`,
+    missionClosedOk: 'Got it',
     linkTeamNotFound: 'No team matches the code in the link. Check the team code and type it here.',
     joinTeamByLink: ({ team }: { team: string }) => `Joining team ${team}. Just tell us your name.`,
     actionFailed: 'That did not work, try again',

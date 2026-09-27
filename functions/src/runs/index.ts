@@ -301,6 +301,125 @@ function buildInitialStages(game: Game): RunStageRecord[] {
     });
 }
 
+// ─── Closing a mission for every team (change: live-task-close-rules) ─────────
+//
+// Owner (2026-09-27): a CLOSED mission is gone. For every team that has not finished it the record
+// becomes `skipped` with `skipCause: 'operator'` (so the missions that waited for it open, exactly
+// like an organizer skip; their OTHER prerequisites still hold) plus `closedByOrganizer: true`, it
+// earns NOTHING (unlike a skip, no consolation), and the team's own requirement for that stage is
+// lowered by the smallest amount that keeps the stage winnable (planTaskSkip), so no team is left
+// in a stage it can never finish. A team standing on it is routed on and told why.
+//
+// Mutates `stages` (a copy the caller owns). Returns whether anything changed, whether the team was
+// holding the mission, and the station slots to release after the commit.
+export function applyTaskClosure(
+  stages: RunStageRecord[],
+  game: Game,
+  taskId: string,
+  launchedAt: string | undefined,
+  now: string,
+): { changed: boolean; wasHolding: boolean; releaseIds: string[] } {
+  const stageIdx = stages.findIndex((s) => (s.tasks ?? []).some((t) => t.taskId === taskId));
+  if (stageIdx < 0) return { changed: false, wasHolding: false, releaseIds: [] };
+  const stageRec = stages[stageIdx];
+  const rec = stageRec.tasks.find((t) => t.taskId === taskId)!;
+  if (rec.status !== 'unassigned' && rec.status !== 'assigned') return { changed: false, wasHolding: false, releaseIds: [] };
+  const gameStage = game.stages?.find((st) => st.id === stageRec.stageId);
+  const statusByTaskId: Record<string, TaskProgressStatus> = {};
+  const skipCauseByTaskId: Record<string, unknown> = {};
+  for (const t of stageRec.tasks) { statusByTaskId[t.taskId] = t.status; skipCauseByTaskId[t.taskId] = t.skipCause; }
+  const plan = planTaskSkip({
+    stage: {
+      tasks: (gameStage?.tasks ?? stageRec.tasks.map((t) => ({ id: t.taskId }))).map((t) => ({
+        id: (t as { id?: string }).id ?? '',
+        unlockAfterTaskIds: (t as { unlockAfterTaskIds?: string[] }).unlockAfterTaskIds,
+      })),
+      exclusiveGroups: gameStage?.exclusiveGroups,
+    },
+    statusByTaskId,
+    requiredTaskCount: stageRec.requiredTaskCount,
+    skipCauseByTaskId,
+  }, taskId);
+  if (!plan.ok) return { changed: false, wasHolding: false, releaseIds: [] };
+  const wasHolding = rec.status === 'assigned';
+  rec.status = 'skipped';
+  rec.skipCause = 'operator';
+  rec.closedByOrganizer = true;
+  rec.earnedScore = 0;
+  rec.completedAt = now;
+  stageRec.requiredTaskCount = plan.requiredTaskCount;
+  const releaseIds = wasHolding ? [taskId] : [];
+  if (stageRec.status === 'active') {
+    const { heldAssignedTaskIds } = applyStageCompletion(stages, stageIdx, game, launchedAt, now);
+    releaseIds.push(...heldAssignedTaskIds);
+  }
+  return { changed: true, wasHolding, releaseIds };
+}
+
+/** Every closure already on the run, applied to a team's freshly built stages (a late joiner). */
+function applyRunClosures(stages: RunStageRecord[], game: Game, run: Pick<Run, 'taskStatusOverrides' | 'launchedAt'>, now: string): RunStageRecord[] {
+  const overrides = run.taskStatusOverrides ?? {};
+  for (const [taskId, status] of Object.entries(overrides)) {
+    if (status === 'closed') applyTaskClosure(stages, game, taskId, run.launchedAt, now);
+  }
+  return stages;
+}
+
+/**
+ * Apply a closure to every team of the run, one transaction per team, then give each team that
+ * was standing on the mission its station slot back and its next mission. Best effort per team: one
+ * team's failure is logged and never undoes the others (the override is already written, and a
+ * late joiner or the next call picks the rest up). Returns how many teams were moved off it.
+ */
+export async function closeTaskForAllTeams(
+  ownerUid: string, gameId: string, runId: string, taskId: string, game: Game,
+): Promise<{ teamsMoved: number; teamsChanged: number }> {
+  const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+  const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
+  const title = findGameTask(game, taskId)?.title ?? '';
+  const teams = await db.collection(teamsCol(ownerUid, gameId, runId)).select().get();
+  let teamsMoved = 0;
+  let teamsChanged = 0;
+  for (const doc of teams.docs) {
+    try {
+      const now = new Date().toISOString();
+      let outcome = { changed: false, wasHolding: false, releaseIds: [] as string[] };
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(doc.ref);
+        if (!snap.exists) return;
+        const team = snap.data() as RunTeam;
+        const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
+        outcome = applyTaskClosure(stages, game, taskId, launchedAt, now);
+        if (!outcome.changed) return;
+        const holding = outcome.wasHolding || team.activeTaskId === taskId;
+        const allDone = stages.every((st) => st.status === 'completed');
+        tx.update(doc.ref, {
+          stages,
+          ...(holding ? { activeTaskId: null, closedTaskNotice: { taskId, title, at: now } } : {}),
+          ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+          updatedAt: now,
+        });
+        outcome = { ...outcome, wasHolding: holding };
+      });
+      if (!outcome.changed) continue;
+      teamsChanged++;
+      for (const id of [...new Set(outcome.releaseIds)]) await releaseTask(id, ownerUid, gameId, runId);
+      if (outcome.wasHolding) {
+        teamsMoved++;
+        try {
+          await assignNextInActiveStage(ownerUid, gameId, runId, doc.id, { lat: 0, lng: 0 }, now, game);
+        } catch (e) {
+          functions.logger.warn('closeTaskForAllTeams: re-assignment skipped', { ownerUid, gameId, runId, teamId: doc.id, error: (e as Error).message });
+        }
+      }
+    } catch (e) {
+      functions.logger.warn('closeTaskForAllTeams: team skipped', { ownerUid, gameId, runId, teamId: doc.id, taskId, error: (e as Error).message });
+    }
+  }
+  if (teamsChanged > 0) await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId, { force: true });
+  return { teamsMoved, teamsChanged };
+}
+
 // ─── launchRun ────────────────────────────────────────────────────────────────
 
 /**
@@ -698,9 +817,10 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     memberNames,
     memberCount: game.mode === 'team' ? (memberNames.length || 1) : 1,
     status: selfStart ? 'active' : 'registered',
-    stages: selfStart
+    // live-task-close-rules: a mission the organizers already closed is closed for a late joiner too.
+    stages: applyRunClosures(selfStart
       ? buildInitialStages(game).map((s, i) => ({ ...s, ...(i === 0 ? { startedAt: now } : {}) }))
-      : buildInitialStages(game),
+      : buildInitialStages(game), game, run, now),
     score: 0,
     bonusPenalty: 0,
     launched: selfStart,

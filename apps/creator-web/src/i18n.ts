@@ -1465,6 +1465,11 @@ const HE = {
     taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
       `בשלב "${stage}" יישארו ${available} משימות זמינות מתוך ${required} שנדרשות להשלמת השלב, כך שקבוצות שעדיין לא סיימו אותו ייתקעו. להשהות בכל זאת?`,
     taskAvailForce: 'להשהות בכל זאת',
+    // live-task-close-rules: what a closure does, said before it happens.
+    taskAvailCloseConfirm: ({ title }: { title: string }) =>
+      `לסגור את "${title}" לכל שאר הריצה? קבוצה שנמצאת עליה עכשיו תעבור למשימה הבאה בלי נקודות ותקבל הודעה, משימות שחיכו לה ייפתחו, והשלב יתקצר לכל קבוצה כדי שאף אחת לא תיתקע. אם רק צריך הפסקה, עדיף להשהות.`,
+    taskAvailClosedMoved: ({ n }: { n: number }) => (n === 1 ? 'קבוצה אחת הועברה למשימה הבאה' : `${n} קבוצות הועברו למשימה הבאה`),
+    taskAvailPausedLocks: ({ n }: { n: number }) => (n === 1 ? 'משימה אחת שמחכה לה נעולה עד שתחזור' : `${n} משימות שמחכות לה נעולות עד שתחזור`),
 
     // ── משטח השיתוף המאוחד ──
     shareTitle: 'שיתוף ומסכים',
@@ -1601,6 +1606,7 @@ const HE = {
     // every confirmed action showed a button that did not name the action.
     // One entry per action with confirm: true in runConsoleActions.ts.
     confirmCta: {
+      closeTask: 'לסגור את המשימה',
       startTeams: 'כן, התחילו את כולם',
       publishStandings: 'כן, פרסמו את הדירוג',
       revealStandings: 'כן, חשפו את הדירוג',
@@ -1623,7 +1629,7 @@ const HE = {
       activateHotZone: 'מכפיל את הניקוד של כל משימה בתוך האזור שבחרתם, לזמן מוגבל.',
       deactivateHotZone: 'מכבה את האזור החם. משימות בתוכו חוזרות לניקוד הרגיל.',
       pauseTask: 'מפסיק לשלוח קבוצות למשימה הזו. קבוצה שכבר נמצאת עליה תוכל לסיים אותה.',
-      closeTask: 'מוציא את המשימה מהמשחק לריצה הזו. קבוצה שכבר נמצאת עליה תוכל לסיים אותה.',
+      closeTask: 'מוציא את המשימה מהמשחק לכל שאר הריצה. קבוצה שנמצאת עליה עכשיו עוברת למשימה הבאה בלי נקודות ומקבלת הודעה, משימות שחיכו לה נפתחות, והשלב מתקצר לכל קבוצה כדי שאף אחת לא תיתקע.',
       resumeTask: 'מחזיר את המשימה למשחק, והמערכת תתחיל לשלוח אליה קבוצות שוב.',
       createZone: 'מוסיף שטח שהקבוצות יכולות לכבוש מעכשיו.',
       deleteZone: 'מוחק את השטח מהמשחק. כיבושים שכבר נרשמו נשארים.',
@@ -4368,6 +4374,10 @@ const EN: typeof HE = {
     taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
       `Stage "${stage}" would be left with ${available} available missions out of the ${required} it needs to complete, so teams still in it would be stuck. Pause it anyway?`,
     taskAvailForce: 'Pause anyway',
+    taskAvailCloseConfirm: ({ title }: { title: string }) =>
+      `Close "${title}" for the rest of the run? A team on it right now moves to its next mission with no points and gets a message, missions that were waiting for it open, and each team's stage shrinks so nobody gets stuck. If you only need a break, pause it instead.`,
+    taskAvailClosedMoved: ({ n }: { n: number }) => (n === 1 ? 'One team was moved to its next mission' : `${n} teams were moved to their next mission`),
+    taskAvailPausedLocks: ({ n }: { n: number }) => (n === 1 ? 'One mission waiting for it is locked until it returns' : `${n} missions waiting for it are locked until it returns`),
 
     // ── One consolidated share surface ──
     shareTitle: 'Share and screens',
@@ -4500,6 +4510,7 @@ const EN: typeof HE = {
     // every confirmed action showed a button that did not name the action.
     // One entry per action with confirm: true in runConsoleActions.ts.
     confirmCta: {
+      closeTask: 'Close the mission',
       startTeams: 'Yes, start everyone',
       publishStandings: 'Yes, publish the standings',
       revealStandings: 'Yes, reveal the standings',
@@ -4522,7 +4533,7 @@ const EN: typeof HE = {
       activateHotZone: 'Multiplies the points of every mission inside the area you picked, for a limited time.',
       deactivateHotZone: 'Switches the hot zone off. Missions inside it go back to their normal points.',
       pauseTask: 'Stops routing teams to this mission. A team already on it can still finish it.',
-      closeTask: 'Takes the mission out of play for this run. A team already on it can still finish it.',
+      closeTask: 'Takes the mission out of play for the rest of the run. A team on it right now moves to its next mission with no points and gets a message, missions that were waiting for it open, and each team\'s stage shrinks so nobody gets stuck.',
       resumeTask: 'Puts the mission back in play, and teams start being routed to it again.',
       createZone: 'Adds a territory teams can capture from now on.',
       deleteZone: 'Removes the territory from the game. Captures already recorded are kept.',

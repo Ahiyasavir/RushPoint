@@ -74,7 +74,9 @@ const SEVERITY: Record<RunActionId, ActionSeverity> = {
   // Reversible, but they take a scoring opportunity away from every team that has
   // not reached the stop yet (change: live-task-pause).
   pauseTask: 'cautionary',
-  closeTask: 'cautionary',
+  // Final for every team already playing (change: live-task-close-rules): the team on it is moved
+  // off with no points and every team's stage shrinks.
+  closeTask: 'destructive',
 
   // Irreversible for the players: the run ends, or a score is rewritten.
   adjustTeamScore: 'destructive',
@@ -151,7 +153,7 @@ const CONSEQUENCE: Record<RunActionId, RunActionConsequence> = {
   activateHotZone: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'activateHotZone' },
   deactivateHotZone: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'deactivateHotZone' },
   pauseTask: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'pauseTask' },
-  closeTask: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'closeTask' },
+  closeTask: { audience: 'allTeams', reversible: false, confirm: true, copyKey: 'closeTask' },
   resumeTask: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'resumeTask' },
   createZone: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'createZone' },
   deleteZone: { audience: 'allTeams', reversible: false, confirm: true, copyKey: 'deleteZone' },

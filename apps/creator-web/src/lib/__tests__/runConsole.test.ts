@@ -578,12 +578,15 @@ describe('classifyRunAction', () => {
     expect(classifyRunAction('adjustTeamScore')).toBe('destructive');
   });
 
-  // Taking a task out of play (change: live-task-pause) is reversible, but it
-  // removes a scoring opportunity from every team not yet at the stop; putting it
-  // back only ever adds one.
-  it('treats taking a task out of play as cautionary and restoring it as routine', () => {
+  // Pausing a task (change: live-task-pause) is reversible, but it removes a scoring opportunity
+  // from every team not yet at the stop; putting it back only ever adds one. CLOSING is final for
+  // every team already playing (change: live-task-close-rules): the team on it is moved off, and
+  // each team's stage shrinks. So it is destructive and confirmed.
+  it('treats pausing as cautionary, closing as destructive and confirmed, restoring as routine', () => {
     expect(classifyRunAction('pauseTask')).toBe('cautionary');
-    expect(classifyRunAction('closeTask')).toBe('cautionary');
+    expect(classifyRunAction('closeTask')).toBe('destructive');
+    expect(runActionNeedsConfirm('closeTask')).toBe(true);
+    expect(runActionConsequence('closeTask').reversible).toBe(false);
     expect(classifyRunAction('resumeTask')).toBe('routine');
   });
 

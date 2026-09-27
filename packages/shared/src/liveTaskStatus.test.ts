@@ -249,3 +249,60 @@ describe('planTaskStatusChange — exclusive groups shrink what the stage can yi
     expect(r.ok && r.availableAfter).toBe(2); // one per group, not 3 raw active tasks
   });
 });
+
+// change: live-task-close-rules. A mission that waits for another ("unlock after") is only as
+// available as its prerequisites. Pausing a prerequisite locks what waits for it; CLOSING one
+// opens it (a closure is the organizers' decision, never held against a team), while any OTHER
+// prerequisite of that mission still has to be met. A closure never strands a team: every team's
+// stage requirement is lowered on the server, so closing is never flagged as unwinnable.
+describe('planTaskStatusChange — missions that wait for other missions', () => {
+  type G = { id: string; status?: StationStatus; unlockAfterTaskIds?: string[] };
+  const g = (id: string, after?: string[]): G => ({ id, ...(after ? { unlockAfterTaskIds: after } : {}) });
+
+  it('pausing a prerequisite also takes out what waits for it', () => {
+    const stage = { tasks: [g('a'), g('b', ['a']), g('c')], requiredTaskCount: 2 };
+    const r = plan({ taskId: 'a', stage, overrides: {}, teamsHolding: 0, next: 'paused' });
+    expect(r).toMatchObject({ ok: true, availableAfter: 1, requiredCount: 2, stageUnwinnable: true });
+    expect(r.ok && r.dependentsLocked).toEqual(['b']);
+  });
+
+  it('a chain is followed all the way down', () => {
+    const stage = { tasks: [g('a'), g('b', ['a']), g('c', ['b']), g('d')], requiredTaskCount: 2 };
+    const r = plan({ taskId: 'a', stage, overrides: {}, teamsHolding: 0, next: 'paused' });
+    expect(r.ok && r.dependentsLocked).toEqual(['b', 'c']);
+    expect(r).toMatchObject({ availableAfter: 1, stageUnwinnable: true });
+  });
+
+  it('closing a prerequisite opens what waits for it', () => {
+    const stage = { tasks: [g('a'), g('b', ['a']), g('c')], requiredTaskCount: 2 };
+    const r = plan({ taskId: 'a', stage, overrides: {}, teamsHolding: 0, next: 'closed' });
+    expect(r).toMatchObject({ ok: true, availableAfter: 2, stageUnwinnable: false });
+    expect(r.ok && r.dependentsOpened).toEqual(['b']);
+  });
+
+  it('a mission waiting for the closed one AND a paused one stays locked', () => {
+    const stage = { tasks: [g('a'), g('p'), g('b', ['a', 'p']), g('c')], requiredTaskCount: 2 };
+    const r = plan({ taskId: 'a', stage, overrides: { p: 'paused' }, teamsHolding: 0, next: 'closed' });
+    expect(r.ok && r.dependentsOpened).toEqual([]);
+    expect(r.ok && r.availableAfter).toBe(1);
+  });
+
+  it('closing is never flagged as unwinnable: each team is shrunk on the server', () => {
+    const r = plan({ taskId: 't1', stage: stageOf(2, 2), overrides: {}, teamsHolding: 0, next: 'closed' });
+    expect(r).toMatchObject({ ok: true, stageUnwinnable: false });
+  });
+
+  it('a stage already shrunk by a closure is judged against the shrunk requirement', () => {
+    // 3 of 3, one closed ⇒ teams now need 2; pausing a third leaves 1 < 2.
+    const r = plan({ taskId: 't2', stage: stageOf(3), overrides: { t1: 'closed' }, teamsHolding: 0, next: 'paused' });
+    expect(r).toMatchObject({ requiredCount: 2, availableAfter: 1, stageUnwinnable: true });
+    // A 3-of-4 with one closed still asks for 3 (three remain), so a pause is judged against 3.
+    const ok = plan({ taskId: 't2', stage: stageOf(4, 3), overrides: { t1: 'closed' }, teamsHolding: 0, next: 'paused' });
+    expect(ok).toMatchObject({ requiredCount: 3, availableAfter: 2, stageUnwinnable: true });
+  });
+
+  it('a malformed gate is ignored, never a throw', () => {
+    const stage = { tasks: [g('a'), { id: 'b', unlockAfterTaskIds: 'a' as never }, g('c', ['zz'])] };
+    expect(() => plan({ taskId: 'a', stage, overrides: {}, teamsHolding: 0, next: 'paused' })).not.toThrow();
+  });
+});

@@ -2687,14 +2687,21 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
   }, [ctx.gameId]);
 
   async function apply(taskId: string, status: StationStatus, force = false) {
+    // live-task-close-rules: a closure is final for every team already playing, so it is said
+    // before it happens, naming the mission.
+    if (status === 'closed' && !force) {
+      const title = stages?.flatMap((st) => st.tasks).find((tk) => tk.id === taskId)?.title ?? '';
+      const ok = await dialog.confirm(rc.taskAvailCloseConfirm({ title }), rc.confirmCta.closeTask, true, { title: rc.confirmTitle });
+      if (!ok) return;
+    }
     setBusyTaskId(taskId);
     try {
       const res = await setRunTaskStatus({ ...ctx, taskId, status, ...(force ? { force: true } : {}) });
-      toast.success(
-        res.teamsHolding > 0 && status !== 'active'
-          ? `${rc.taskAvailUpdated}. ${rc.taskAvailHolding({ n: res.teamsHolding })}`
-          : rc.taskAvailUpdated,
-      );
+      const notes = [rc.taskAvailUpdated];
+      if (status === 'closed' && (res.teamsMoved ?? 0) > 0) notes.push(rc.taskAvailClosedMoved({ n: res.teamsMoved ?? 0 }));
+      if (status === 'paused' && res.teamsHolding > 0) notes.push(rc.taskAvailHolding({ n: res.teamsHolding }));
+      if (status === 'paused' && (res.dependentsLocked?.length ?? 0) > 0) notes.push(rc.taskAvailPausedLocks({ n: res.dependentsLocked?.length ?? 0 }));
+      toast.success(notes.join('. '));
     } catch (e) {
       // The server refuses a change that would leave the stage unable to yield the
       // tasks it requires. Show the numbers it returned and let the organizer decide,

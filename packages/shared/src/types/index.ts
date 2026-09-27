@@ -1116,6 +1116,8 @@ export interface RunTaskRecord {
   status: TaskStatus;
   /** Set on every `skipped` record written from skip-keeps-the-stage on. */
   skipCause?: SkipCause;
+  /** live-task-close-rules: skipped because the organizers CLOSED the mission for the run. Earns 0. */
+  closedByOrganizer?: boolean;
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;
@@ -1285,6 +1287,9 @@ export interface RunTeam {
   // Discovery POIs (change: surprise-trivia-waypoints): poiId → lifecycle state.
   discoveryState?: import('./../discoveryPoi').TeamDiscoveryState;
   activeTaskId?: string | null;  // mirror for getStationTeams query
+  /** live-task-close-rules: the mission this team was standing on when the organizers closed it,
+   *  so the phone can say why it moved on. Written only for a team that was holding it. */
+  closedTaskNotice?: { taskId: string; title: string; at: string };
   launched: boolean;
   // When this team joined the run. Written by joinRun since long before it was
   // typed here; declared now because the console needs it to tell a team waiting

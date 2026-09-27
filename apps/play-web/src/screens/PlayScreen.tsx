@@ -52,6 +52,7 @@ import { feedback, feedbackIfQuiet, isRankUp } from '../lib/sound';
 import { missionProgress, type MissionProgress } from '../lib/missionProgress';
 import { crossedMilestone, type Milestone } from '../lib/milestones';
 import { creatorUrl } from '../lib/creatorUrl';
+import { closedNoticeKey, shouldShowClosedNotice, type ClosedTaskNotice } from '../lib/closedTaskNotice';
 
 
 
@@ -801,6 +802,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <div className="mb-4">
         {activeStage ? (
           <>
+            <MissionClosedNotice runId={session.runId} notice={(team as { closedTaskNotice?: unknown }).closedTaskNotice} />
             {!isController && senderQuiet({ presence: state.devicePresence, controllerUid: team.controllerUid ?? team.id }) && (
               // The answering phone stopped asking for the state minutes ago while this one is
               // active (team-phones-simple D5): it is probably dead, flat or in a bag.
@@ -887,6 +889,26 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 // the server unlocks the stage and play resumes.
 
 // Offline continuity (change: fix-play-offline-continuity): a small non-blocking
+// live-task-close-rules: the organizers closed the mission this team was standing on, and the
+// server already routed it on. Says why the mission vanished, once, until the team taps "got it".
+function MissionClosedNotice({ runId, notice }: { runId: string; notice: unknown }) {
+  const { t } = useT();
+  const [, setDismissedAt] = useState(0);
+  const read = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
+  if (!shouldShowClosedNotice(notice, Date.now(), read, runId)) return null;
+  const n = notice as ClosedTaskNotice;
+  const dismiss = () => {
+    try { localStorage.setItem(closedNoticeKey(runId, n), '1'); } catch { /* memory only */ }
+    setDismissedAt(Date.now());
+  };
+  return (
+    <div dir="auto" className="mb-3 rounded-2xl border border-accent/40 bg-accent/10 p-3 flex items-center gap-3" role="status" data-testid="mission-closed">
+      <p className="flex-1 text-sm text-zinc-200">{t.devices.missionClosed({ title: n.title })}</p>
+      <Button className="shrink-0 !w-auto px-4" onClick={dismiss}>{t.devices.missionClosedOk}</Button>
+    </div>
+  );
+}
+
 // pill shown while a poll is failing but we still have state — the game stays on
 // screen and this reassures the player it's syncing (never a full-screen takeover).
 function ReconnectingPill({ show, text }: { show: boolean; text: string }) {

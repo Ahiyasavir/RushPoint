@@ -69,7 +69,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -2408,7 +2408,7 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
   ]);
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
-  const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[] }[] };
+  const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[]; exclusiveGroups?: { id: string; taskIds: string[] }[] }[] };
   const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides };
 
   const stage = (game.stages ?? []).find((s) => (s.tasks ?? []).some((t) => t?.id === ids.taskId));
@@ -2432,7 +2432,9 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
 
   const plan = planTaskStatusChange({
     taskId: ids.taskId,
-    stage: { tasks: stage.tasks ?? [], requiredTaskCount: stage.requiredTaskCount },
+    // The unlock graph and the exclusive groups ride along (live-task-close-rules): what waits for a
+    // paused mission is unavailable too, and a group yields one completion.
+    stage: { tasks: stage.tasks ?? [], requiredTaskCount: stage.requiredTaskCount, exclusiveGroups: stage.exclusiveGroups },
     overrides: run.taskStatusOverrides,
     next: status,
     teamsHolding,
@@ -2468,6 +2470,14 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     tx.update(runRef, { taskStatusOverrides: overrides, updatedAt: new Date().toISOString() });
   });
 
+  // live-task-close-rules: a CLOSURE takes the mission from every team that has not finished it,
+  // moves the ones standing on it, opens what waited for it and shrinks each team's stage. A pause
+  // stays temporary and touches no team.
+  let teamsMoved = 0;
+  if (status === 'closed' && plan.from !== 'closed') {
+    ({ teamsMoved } = await closeTaskForAllTeams(ownerUid, ids.gameId, ids.runId, ids.taskId, gameSnap.data() as Game));
+  }
+
   // Durable, like adjustTeamScore: taking a task out of play changes what every
   // team in the run can score.
   await writeAuditLog({
@@ -2492,6 +2502,9 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     availableCount: plan.availableAfter,
     requiredCount: plan.requiredCount,
     stageUnwinnable: plan.stageUnwinnable,
+    teamsMoved,
+    dependentsOpened: plan.dependentsOpened,
+    dependentsLocked: plan.dependentsLocked,
   };
 });
 

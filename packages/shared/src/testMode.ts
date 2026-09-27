@@ -86,6 +86,8 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
       // team's own progress), and the locked-mission list needs it: a mission opened by an
       // organizer's skip must stop reading "locked" on the player's phone.
       copy(out, r, 'skipCause');
+      // live-task-close-rules: the organizers closed this mission (not the team's doing).
+      copy(out, r, 'closedByOrganizer');
       copy(out, r, 'startedAt');
       copy(out, r, 'completedAt');
       copy(out, r, 'actualMinutes');
@@ -164,6 +166,9 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
   copy(out, t, 'outOfBoundsOverrideUntil');
   copy(out, t, 'evacuatedFrom');
   copy(out, t, 'guardianConsent');
+  // live-task-close-rules: why the phone was moved off a mission. Without it a team sees its
+  // mission vanish with no explanation.
+  copy(out, t, 'closedTaskNotice');
 
   // ── Sealed by test mode ─────────────────────────────────────────────────────
   // Each of these is a scoring or correctness signal. `taskAttempts` and

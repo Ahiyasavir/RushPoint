@@ -10896,6 +10896,105 @@ async function main() {
       plainEntry?.forced === false, JSON.stringify(plainEntry));
   });
 
+  // ═══ Closing a mission mid-run (change: live-task-close-rules) ═══════════════
+  //
+  // Owner (2026-09-27): a CLOSED mission is gone. The team standing on it loses it with a message
+  // and no points and is routed on; missions that waited for it open, but any OTHER prerequisite
+  // they have still holds; no team is left in a stage it can never finish (its requirement shrinks);
+  // a team that joins after the closure gets the same treatment. A PAUSE is temporary and keeps the
+  // old contract (a holder finishes and scores; see the scenario above), but what waits for a
+  // paused mission now counts as unavailable when the stage is judged.
+  await scenario('closing a mission mid-run (holder · dependents · shrink · late joiner)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const t = (id, after) => ({
+      id, title: `Mission ${id}`, type: 'self_report', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9,
+      ...(after ? { unlockAfterTaskIds: after } : {}),
+    });
+    const { gameId: cg } = await creator.call('createGame', { title: 'Close Rules Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: cg, scoringPreset: 'fixed_points_speed', stages: [
+      // Every mission required. B waits for A; C waits for A AND D.
+      { id: 'cl-s1', order: 0, title: 'Chain', tasks: [t('cl-a'), t('cl-b', ['cl-a']), t('cl-c', ['cl-a', 'cl-d']), t('cl-d')] },
+      { id: 'cl-s2', order: 1, title: 'End', isFinal: true, tasks: [t('cl-end')] },
+    ] });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const C = { ownerUid: OWNER, gameId: cg, runId: cr };
+    const teamPath = (uid) => `users/${OWNER}/games/${cg}/runs/${cr}/teams/${uid}`;
+    const rec = (team, id) => (team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === id);
+
+    const p1 = makeParty('closeHolder');
+    const p1Uid = (await signInAnonymously(p1.auth)).user.uid;
+    await p1.call('joinRun', { code: cc, displayName: 'Standing On A' });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+    const held0 = (await p1.call('getMyTeamState', { code: cc }))?.team?.activeTaskId;
+    if (held0 !== 'cl-a') await creator.call('forceAssignTask', { ...C, teamId: p1Uid, taskId: 'cl-a' });
+    check('close precondition: the team is on A',
+      (await p1.call('getMyTeamState', { code: cc }))?.team?.activeTaskId === 'cl-a');
+    const scoreBefore = (await creator.getDocAt(teamPath(p1Uid))).data?.score ?? 0;
+
+    // Every mission is required, yet closing A is NOT refused: no team is stranded by it.
+    const closed = await creator.call('setRunTaskStatus', { ...C, taskId: 'cl-a', status: 'closed', reason: 'street blocked' });
+    check('close: accepted without force, and never reported as unwinnable',
+      closed?.ok === true && closed?.status === 'closed' && closed?.stageUnwinnable === false, JSON.stringify(closed));
+    check('close: the response says who was moved and what opened',
+      closed?.teamsMoved === 1 && JSON.stringify(closed?.dependentsOpened) === JSON.stringify(['cl-b']), JSON.stringify(closed));
+
+    let s1 = await p1.call('getMyTeamState', { code: cc });
+    let team1 = (await creator.getDocAt(teamPath(p1Uid))).data ?? {};
+    const aRec = rec(team1, 'cl-a');
+    check('close: the holder lost A, marked as closed by the organizers, with no points',
+      aRec?.status === 'skipped' && aRec?.closedByOrganizer === true && (aRec?.earnedScore ?? 0) === 0 && (team1.score ?? 0) === scoreBefore,
+      JSON.stringify({ aRec, score: team1.score }));
+    check('close: the holder was routed on to another mission', !!s1?.team?.activeTaskId && s1.team.activeTaskId !== 'cl-a', String(s1?.team?.activeTaskId));
+    check('close: the phone is told why (a notice naming the mission)',
+      s1?.team?.closedTaskNotice?.taskId === 'cl-a' && s1.team.closedTaskNotice.title === 'Mission cl-a', JSON.stringify(s1?.team?.closedTaskNotice));
+    check('close: the stage now asks for the three missions that remain',
+      team1.stages?.[0]?.requiredTaskCount === 3, JSON.stringify(team1.stages?.[0]?.requiredTaskCount));
+    check('close: C still waits for D (its OTHER prerequisite holds)',
+      (s1?.lockedTaskIds ?? []).includes('cl-c') && !(s1?.lockedTaskIds ?? []).includes('cl-b'), JSON.stringify(s1?.lockedTaskIds));
+    let refusedA = false;
+    try { const r = await p1.call('completeTask', { ...C, taskId: 'cl-a' }); refusedA = r?.already === true || r?.ok === false; }
+    catch { refusedA = true; }
+    check('close: the closed mission cannot be completed any more', refusedA
+      && ((await creator.getDocAt(teamPath(p1Uid))).data?.score ?? 0) === scoreBefore);
+
+    // Play the rest: B, D, then C opens; the stage ends and the final stage starts.
+    for (let i = 0; i < 4; i++) {
+      const cur = (await p1.call('getMyTeamState', { code: cc }))?.team?.activeTaskId;
+      if (!cur || cur === 'cl-end') break;
+      await p1.call('completeTask', { ...C, taskId: cur });
+    }
+    team1 = (await creator.getDocAt(teamPath(p1Uid))).data ?? {};
+    check('close: the shrunk stage completes and the team moves to the final stage',
+      team1.stages?.[0]?.status === 'completed' && ['cl-b', 'cl-c', 'cl-d'].every((id) => rec(team1, id)?.status === 'completed'),
+      JSON.stringify(team1.stages?.[0]));
+
+    // A team that joins AFTER the closure starts without A, and can play B at once.
+    const p2 = makeParty('closeLateJoiner');
+    const p2Uid = (await signInAnonymously(p2.auth)).user.uid;
+    await p2.call('joinRun', { code: cc, displayName: 'Came Later' });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+    const team2 = (await creator.getDocAt(teamPath(p2Uid))).data ?? {};
+    const s2 = await p2.call('getMyTeamState', { code: cc });
+    check('close: a late joiner starts with A already closed and the stage shrunk',
+      rec(team2, 'cl-a')?.closedByOrganizer === true && team2.stages?.[0]?.requiredTaskCount === 3, JSON.stringify(team2.stages?.[0]));
+    check('close: a late joiner is never told about a mission it never had',
+      !s2?.team?.closedTaskNotice, JSON.stringify(s2?.team?.closedTaskNotice));
+    check('close: a late joiner is not locked out of B', !(s2?.lockedTaskIds ?? []).includes('cl-b'), JSON.stringify(s2?.lockedTaskIds));
+
+    // A PAUSE locks what waits for it, and the stage check counts that.
+    const { gameId: pg } = await creator.call('createGame', { title: 'Pause Chain Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: pg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'pc-s', order: 0, title: 'Chain', isFinal: true, requiredTaskCount: 2, tasks: [t('pc-a'), t('pc-b', ['pc-a']), t('pc-c')] },
+    ] });
+    const { runId: pr } = await creator.call('launchRun', { gameId: pg });
+    const pausedErr = await expectError('pause: pausing a prerequisite its stage cannot spare is refused',
+      creator.call('setRunTaskStatus', { ownerUid: OWNER, gameId: pg, runId: pr, taskId: 'pc-a', status: 'paused' }),
+      { codeIn: ['functions/failed-precondition'] });
+    check('pause: the refusal counts the locked dependent as unavailable (1 of 2)',
+      pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
+  }); // scenario: closing a mission mid-run
+
   // ═══ Single-task skip (change: skip-single-task) ════════════════════════════
   // The bug this closes: the console's only skip was `skipStage`, so removing ONE
   // unreachable mission destroyed every OTHER mission that team still had in the
