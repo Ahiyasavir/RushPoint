@@ -1,15 +1,23 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
+import { isPlacedCoord } from '../lib/mapAnchor';
+// Keeping a popover inside the viewport (change: popover-stays-on-screen) — the
+// measured fix for a readiness panel that rendered 180px off a 375px phone screen.
+import { popoverPlacement, type PopoverPlacement } from '../lib/popoverPlacement';
+// What to tell a creator about a save still in flight (change: save-tells-the-truth).
+import { saveHealth } from '../lib/saveHealth';
 import type { ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
 import { gameHasOperatorNotes, extractQuickSetupSteps } from '@rushpoint/shared';
-import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags } from '@rushpoint/shared';
+import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags, isTaskHidden, playableTasks, pruneDanglingPrerequisites } from '@rushpoint/shared';
 // Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
+import { defaultCodeCapabilities } from '@rushpoint/shared';
+import { CapabilityChecklist } from '../components/StaffCodesPanel';
 import { resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, MeasuringStrategy,
@@ -22,10 +30,12 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile, loadPop
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
+import { downloadJson } from '../lib/downloadFile';
 import { resolveWizardTarget, type TemplateWizardStep } from '@rushpoint/shared';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, TagChips, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
+import ShareLinkDialog from '../components/ShareLinkDialog';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
@@ -36,6 +46,7 @@ import { useAuth } from '../components/AuthGate';
 // to the full tour, so in practice it reaches the creator who started from scratch
 // — the one person the product guides nowhere else.
 import BuilderSpotlight from '../components/BuilderSpotlight';
+import { useGuidanceCandidate, useGuidanceSlot } from '../components/GuidanceProvider';
 // One mapping from a rejection to copy a creator can act on
 // (change: creator-no-silent-failures).
 import { describeCallFailure, type CallFailure } from '../lib/callFeedback';
@@ -46,14 +57,14 @@ import TaskCard, { GROUP_STYLES, type TaskGroupBadge } from '../components/TaskC
 import ExclusiveGroupsModal from '../components/ExclusiveGroupsModal';
 import TaskWizard from '../components/TaskWizard';
 import {
-  QuickSetupBar, QuickSetupPill, QuickSetupBlocked, QuickSetupWelcome, QuickSetupIntro,
+  QuickSetupBar, QuickSetupPill, QuickSetupBlocked, QuickSetupWelcome,
   QuickSetupCelebration, useQuickSetupFocus,
 } from '../components/QuickSetup';
 import {
   INITIAL_QUICK_SETUP_STATE, quickSetupReducer, quickSetupSteps, outstandingQuickSetupIds,
-  quickSetupLaunchBlockers, currentQuickSetupStep, quickSetupIntroStep, quickSetupProgress,
+  quickSetupLaunchBlockers, currentQuickSetupStep, quickSetupProgress,
   quickSetupFocusPlan, shouldAutoOpenQuickSetup, missionSummaryLine,
-  quickSetupStorageKey, readQuickSetupRecord, writeQuickSetupRecord,
+  quickSetupStorageKey, readQuickSetupRecord, writeQuickSetupRecord, isJustCreatedNavState,
   type QuickSetupState, type QuickSetupAction, type TaskEditorTab, type TaskOptInGroup,
   type QuickSetupCopyKey,
 } from '../lib/quickSetup';
@@ -62,7 +73,7 @@ import {
   normalizeGroups, setTaskGroup, removeTaskFromGroups, groupIndexOfTask,
 } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
-import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
+import { initDraft, replaceDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, shouldAutoOpenFirstTask } from '../lib/wizardLogic';
 // ONE readiness computation, shared by the persistent panel and the launch guard
 // (change: builder-first-task-flow), so the two can never drift.
@@ -71,11 +82,26 @@ import { storyFieldCount } from '../lib/wizardSections';
 import { stageSettingsState, stageChips } from '../lib/stageSettings';
 import type { StageSettingsState } from '../lib/stageSettings';
 import { parseTagsInput } from '../lib/tags';
+import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
 import { buildSavePayload } from '../lib/savePayload';
+// Regenerate one mission from the bank (change: mission-regenerate). The pure
+// decision lives in lib/regenerateMission; the memory of what has already been
+// offered for a mission lives in lib/regenerateHistory.
+import { loadMissionBank, missionBankNow } from '../lib/missionBank';
+import {
+  missionTagProfile, missionRoleAt, regenerateContext, chooseRegeneratedMission,
+  applyRegeneratedMission, seedFor,
+} from '../lib/regenerateMission';
+import { readOfferedKeys, recordOfferedKey } from '../lib/regenerateHistory';
 import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib/gamePresentation';
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 // Builder header stage/mission breadcrumb (change: builder-clarity-mission-hierarchy).
 import { builderBreadcrumbState } from '../lib/builderBreadcrumb';
+// The open mission is addressed by the URL (change: builder-mission-editor-route),
+// so the phone's back gesture closes the editor instead of leaving the Builder.
+import {
+  readOpenMissionId, missionEditorSearch, resolveOpenMission, missionEditorNavAction,
+} from '../lib/missionEditorRoute';
 // Responsive Builder header (change: builder-simplification-round-3): below the
 // Tailwind `sm` boundary the header's secondary controls collapse into ONE
 // OverflowMenu. Branching on the hook (rather than rendering both rows and hiding
@@ -177,6 +203,29 @@ const arrowKeyCoordinates: KeyboardCoordinateGetter = (event, { context, current
   return { x: currentCoordinates.x + (targetRect.left - from.left), y: currentCoordinates.y + (targetRect.top - from.top) };
 };
 
+/**
+ * Structural corruption a creator cannot reach from the editor, repaired on load.
+ *
+ * Today that is exactly one thing: an `unlockAfterTaskIds` entry naming a mission
+ * that is not in the same stage. `validateUnlockGraph` calls it an error, the save
+ * door refuses the WHOLE game for it, and the readiness panel reports it on the
+ * stage as "requires more missions than it can yield" — a sentence about a number
+ * the creator cannot act on, because the id itself is rendered nowhere. Everything
+ * else readiness reports has a control behind it and is deliberately left alone.
+ *
+ * Returns the SAME object when nothing needed repair, so the caller can tell.
+ */
+function repairGame(game: Game): Game {
+  let changed = false;
+  const stages = game.stages.map((s) => {
+    const tasks = pruneDanglingPrerequisites(s.tasks);
+    if (tasks.every((t, i) => t === s.tasks[i])) return s;
+    changed = true;
+    return { ...s, tasks };
+  });
+  return changed ? { ...game, stages } : game;
+}
+
 function blankStage(order: number, title: string): Stage {
   // requiredTaskCount defaults to 1 (change: adaptive-difficulty-routing): a creator
   // who drops several tasks into one level almost always means "each team does ONE
@@ -233,7 +282,11 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
         else e.currentTarget.textContent = title || fallback;
       }}
       data-qs-field="game.title"
-      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[12ch] sm:max-w-[14ch] lg:max-w-[18ch] xl:max-w-[26ch] 2xl:max-w-[34ch] whitespace-nowrap overflow-hidden text-ellipsis"
+      // Phone: `flex-1` with no cap, because the header row no longer has a tab
+      // strip to leave room for (change: builder-mobile-simplification) and a
+      // 12ch cap on a one-line bar rendered the game's name as "מש…". From `sm`
+      // the caps come back — there the strip is real and the title must yield.
+      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire flex-1 sm:flex-none min-w-[6ch] max-w-none sm:max-w-[14ch] lg:max-w-[18ch] xl:max-w-[26ch] 2xl:max-w-[34ch] whitespace-nowrap overflow-hidden text-ellipsis"
     >
       {title || fallback}
     </h2>
@@ -255,6 +308,12 @@ function markGamePreviewed(gameId: string) {
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
+  // Did this mount come straight from the new-game wizard? Read ONCE into a ref
+  // rather than off `location` on every render: the answer is a property of the
+  // navigation that opened this page, and the Quick Setup effect below must give
+  // the same answer whether it runs on mount or after a later re-render.
+  const justCreated = useRef(isJustCreatedNavState(location.state));
   const { user } = useAuth();
   const t = useT();
   const b = t.builder;
@@ -307,8 +366,42 @@ export default function BuilderPage() {
   // Why the last save failed. Persistent (never a toast): the whole failure mode
   // of this bug class is a creator who looks up ten minutes later.
   const [saveError, setSaveError] = useState<CallFailure | null>(null);
+
+  // ── Telling the truth about a save that has not landed (change: save-tells-the-truth)
+  //
+  // The callable SDK waits 70s before rejecting, so `status === 'saving'` used to mean
+  // BOTH "in progress" and "stuck for over a minute", and the creator was told nothing
+  // until the timeout. `saveHealth` escalates on elapsed time instead - but it needs a
+  // clock that MOVES, or the status would be decided once at save time and never
+  // re-render. The interval runs ONLY while a save is in flight and stops the moment
+  // it lands, so an idle Builder ticks nothing.
+  const saveStartedAt = useRef<number | null>(null);
+  const [saveTick, setSaveTick] = useState(0);
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const sync = (): void => setOnline(navigator.onLine);
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => { window.removeEventListener('online', sync); window.removeEventListener('offline', sync); };
+  }, []);
+  useEffect(() => {
+    if (status !== 'saving') return;
+    const id = setInterval(() => setSaveTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  const saveHealthState = useMemo(
+    () => saveHealth({ status, startedAtMs: saveStartedAt.current, nowMs: Date.now(), online }),
+    // `saveTick` is the whole point of the dependency list: it is what makes an
+    // in-flight save re-evaluate every second instead of freezing on its first verdict.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [status, online, saveTick],
+  );
+  const saveLevel = saveHealthState.level;
   const [error, setError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
+  // Share this game by link, published or not (change: game-share-link).
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Refs let the debounced auto-save and the beforeunload guard read the latest
   // game/saved-snapshot without re-subscribing on every keystroke.
@@ -336,9 +429,21 @@ export default function BuilderPage() {
     setError(null);
     void getGame({ gameId })
       .then(({ game }) => {
-        history.reset(game);
+        // REPAIR ON THE WAY IN (change: builder-dangling-prerequisite-wedge). A
+        // stage carrying a prerequisite id that belongs to no mission of that stage
+        // is refused by `updateGame` — so a game already holding one can never be
+        // saved again, and nothing in the editor shows the offending id (the
+        // prerequisite selector lists same-stage missions only). The move path that
+        // wrote them is fixed, but the games it already wrote are stored; loading
+        // one repaired leaves the game DIRTY, so the ordinary autosave persists the
+        // repair by itself. Reference-equal when there was nothing to repair, so a
+        // healthy game is never marked dirty by merely being opened.
+        // A locked shared-launch copy is never repaired or saved: the server refuses every edit to it
+        // (change: shared-launch-opens-console), so a "repair" would only produce a failing autosave.
+        const repaired = game.sharedLaunch?.locked === true ? game : repairGame(game);
+        history.reset(repaired);
         savedSnapshot.current = serializeGame(game);
-        setStatus('saved');
+        setStatus(repaired === game ? 'saved' : 'unsaved');
       })
       .catch((e) => {
         setError(e instanceof Error ? e.message.replace('Firebase: ', '') : b.cannotLoad);
@@ -355,6 +460,7 @@ export default function BuilderPage() {
     const snap = serializeGame(g);
     if (snap === savedSnapshot.current) return true;
     const seq = ++saveSeq.current;
+    saveStartedAt.current = Date.now();
     setStatus('saving');
     try {
       await updateGame(buildSavePayload(g));
@@ -404,6 +510,31 @@ export default function BuilderPage() {
     saveTimer.current = window.setTimeout(() => { void save(); }, AUTOSAVE_DELAY);
     return () => window.clearTimeout(saveTimer.current);
   }, [game, save]);
+
+  // ── AND IT HAS TO RECOVER BY ITSELF (change: save-tells-the-truth, revised) ──
+  //
+  // Telling the truth was only half the job. Reported from production: go offline,
+  // come back, and the header says the save FAILED "and does not stop saying it for a
+  // very long time" - a refresh was the only thing that fixed it.
+  //
+  // Nothing was retrying. The autosave effect below is keyed on `[game, save]`, so it
+  // only fires when the creator EDITS something; a creator who is simply waiting for
+  // their connection edits nothing, so the failed state was terminal. The `online`
+  // listener above existed purely to colour a message, while holding the one piece of
+  // information that should have driven the repair.
+  //
+  // Retry on the offline -> online EDGE, not on the value: `save()` sets status, which
+  // would re-enter this effect and spin if it depended on status. And unconditional
+  // rather than gated on 'failed': `save()` is already a no-op when the snapshot
+  // matches, so a clean Builder pays nothing, while a HUNG save (still inside the SDK's
+  // 70s timeout, never rejected, so never 'failed') is rescued too - its own
+  // `saveSeq` guard discards the stale resolution when it finally lands.
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    const prev = wasOnline.current;
+    wasOnline.current = online;
+    if (online && !prev) void save();
+  }, [online, save]);
 
   // Warn before leaving/closing the tab with unsaved edits.
   useEffect(() => {
@@ -480,12 +611,7 @@ export default function BuilderPage() {
     if (!(await save())) { await dialog.alert(b.saveFailed); return; }
     try {
       const { file } = await exportGameFile({ gameId: game.id });
-      const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = gameFileFilename(game.title);
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadJson(file, gameFileFilename(game.title));
     } catch (e) {
       await dialog.alert(e instanceof Error ? e.message : b.exportFailed);
     }
@@ -639,7 +765,17 @@ export default function BuilderPage() {
       // must leave the gate intact for the creator's next attempt. Marked only
       // after launchRun actually succeeds.
       if (!hasConfirmedFirstLaunch(user?.uid)) {
-        if (!(await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta))) return;
+        // Registered for the length of the await, and cleared in `finally` so a
+        // throw cannot leave the Builder's guidance permanently suppressed
+        // (change: builder-guidance-arbiter, design D5).
+        setLaunchConfirming(true);
+        let confirmed = false;
+        try {
+          confirmed = await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta);
+        } finally {
+          setLaunchConfirming(false);
+        }
+        if (!confirmed) return;
         needFirstLaunchConfirm = true;
       }
     }
@@ -742,20 +878,59 @@ export default function BuilderPage() {
   // Mutually exclusive by status: the bar shows on `running`, the context card on
   // `intro`, so the two can never be on screen together.
   const qsStep = currentQuickSetupStep(qsState, qsSteps);
-  const qsIntro = quickSetupIntroStep(qsState, qsSteps);
-  // On a phone the mission editor is a fixed, near-full-width sheet — without this,
-  // its own top edge sits directly under the floating הקמה מהירה bar/card, and a
-  // creator had to close the mission editor just to read the instruction they were
-  // supposed to be following inside it. Reserving space only while a bar/card is
-  // actually up keeps every OTHER open of the editor exactly as tall as before.
-  const qsOverlayActive = Boolean(qsStep) || Boolean(qsIntro);
+  // WHICH mission the flow is on, for the guided mission editor (change:
+  // quick-setup-guided-editor). Resolved from the step itself so it is right the
+  // moment the flow is on screen, before the navigation effect has written
+  // `quickSetupFocus` — a creator who reloads mid-flow has no such state yet.
+  const qsGuidedTaskId = game && qsStep ? resolveWizardTarget(game, qsStep)?.taskId ?? null : null;
+  // Is the mission editor open? Derived from the SAME URL the editor derives
+  // itself from (change: builder-mission-editor-route), so the two cannot
+  // disagree about it — this used to be a `qsOverlayActive` boolean passed DOWN
+  // to make the sheet shrink itself, which is the negotiation that change removed.
+  // What it decides now is only WHERE the הקמה מהירה instruction renders.
+  const missionEditorOpen = Boolean(resolveOpenMission(game, readOpenMissionId(location.search)));
+  /**
+   * WHERE the הקמה מהירה card renders (change: quick-setup-one-card).
+   *
+   * INSIDE the mission editor, above its content, at every width — the creator's
+   * own words: *"it also looks better that the setup instructions are above the
+   * mission itself."* And it is the honest reading of the flow: the instruction
+   * and the control it points at are one thing, so they belong in one column that
+   * scrolls together, not a card hovering over a different part of the screen.
+   *
+   * It was briefly floated on desktop while the real defect was still
+   * misdiagnosed: the focus scrim (`.rp-qs-scrim`, `absolute inset-0 z-20` in the
+   * canvas column) has `pointer-events-auto` and the editor pane carried no
+   * z-index from `lg` up, so `document.elementFromPoint` on the card's own "הבא"
+   * returned the scrim and the press advanced the flow about one time in three.
+   * That is fixed where it lives — the pane declares `lg:relative lg:z-30`
+   * (SlidePanel) and the scrim goes inert while the editor is open — so the card
+   * no longer has to run away from it.
+   */
+  const qsCardInline = missionEditorOpen;
+
+  // ── Guidance arbitration (change: builder-guidance-arbiter). Each surface below
+  //    declares ONLY its own eligibility; `GuidanceProvider` decides which single
+  //    one may be on screen, using the order in lib/builderGuidance.ts. Declared
+  //    here, above the early returns, because these are hooks (React #300).
+  const qsWantsScreen = qsState.status === 'welcome' || Boolean(qsStep) || qsCelebrating;
+  const qsVisible = useGuidanceSlot('quick-setup', qsWantsScreen);
+  const nudgeVisible = useGuidanceSlot(
+    'ready-nudge',
+    !isMobile && !readyNudgeDismissed && readiness.length === 0 && (game?.playCount ?? 0) === 0,
+  );
+  // A launch confirmation is an awaited dialog, so it has no render to gate — it
+  // registers for the length of the await instead (design D5), which is enough to
+  // suppress the nudge and to make a concurrent "?" press defer rather than stack.
+  const [launchConfirming, setLaunchConfirming] = useState(false);
+  useGuidanceCandidate('launch-confirm', launchConfirming);
   // Quick Setup FOCUS MODE (change: quick-setup-wizard). While any Quick Setup
   // surface is up — welcome, a chapter's intro card, or the running bar — the
   // canvas is a distraction, not help: the creator's whole job right now is one
   // field, and the stage rail plus the rest of the mission grid competed for
   // attention against it. `StepStages` hides the rail and scrims the canvas
   // behind these three statuses; `closed`/`done`/`idle` restore the ordinary view.
-  const qsFocusMode = qsState.status === 'welcome' || qsState.status === 'intro' || qsState.status === 'running';
+  const qsFocusMode = qsState.status === 'welcome' || qsState.status === 'running';
 
   // Restore this creator's postponements for THIS game. Per uid and per game, so
   // two accounts on one browser, or two games of one account, never share them.
@@ -774,6 +949,10 @@ export default function BuilderPage() {
         hasRecord: rec !== null,
         outstanding: outstandingQuickSetupIds(game).length,
         total: quickSetupSteps(game).length,
+        // Landing from the new-game wizard DEFERS the invitation to the next
+        // visit rather than stacking a second guided flow onto the one the
+        // creator just finished. Nothing is recorded, so the offer is intact.
+        justCreated: justCreated.current,
       })) {
         setQsState((prev) => quickSetupReducer(prev, { type: 'invite' }, {
           steps: quickSetupSteps(game), outstanding: outstandingQuickSetupIds(game),
@@ -783,7 +962,7 @@ export default function BuilderPage() {
       setQsState(rec
         // Never restore INTO the running flow: a bar that reappears on load would
         // interrupt a creator who came back to do something else entirely.
-        ? { status: rec.status === 'running' || rec.status === 'intro' || rec.status === 'welcome' ? 'closed' : rec.status, index: rec.index, deferred: rec.deferred }
+        ? { status: rec.status === 'running' || rec.status === 'welcome' ? 'closed' : rec.status, index: rec.index, deferred: rec.deferred }
         : INITIAL_QUICK_SETUP_STATE);
     } catch { setQsState(INITIAL_QUICK_SETUP_STATE); }
   }, [game?.id, qsLoadedFor, user?.uid]);
@@ -907,6 +1086,18 @@ export default function BuilderPage() {
     </Card>
   );
   if (!game) return <LoadingState messages={b.loadingGame} />;
+  // A launch copy from a share link that did not allow copying: it can be RUN, not edited
+  // (change: shared-launch-opens-console). Say so, instead of an editor whose every save fails.
+  if (game.sharedLaunch?.locked === true) {
+    return (
+      <Card className="max-w-lg mx-auto mt-10 p-6 text-center space-y-3">
+        <div className="text-3xl" aria-hidden="true" data-testid="builder-share-locked">🔒</div>
+        <p className="font-semibold text-[--ink-1]" dir="auto">{game.title}</p>
+        <p className="text-sm text-[--ink-2]">{t.sharedGame.launchLockedCopy}</p>
+        <Button onClick={() => nav('/live')}>{t.sharedGame.launchLockedToRuns}</Button>
+      </Card>
+    );
+  }
 
   // Hide the Analytics tab until the game has actually been run: pre-launch it can
   // only render an empty "no analytics yet" message, which reads as broken to a
@@ -931,7 +1122,9 @@ export default function BuilderPage() {
           yield to them: a templated game auto-invites Quick Setup on this same
           mount, and stacking two guided overlays is worse than showing neither. In
           practice that makes this the SCRATCH creator's explainer. */}
-      <BuilderSpotlight quickSetupActive={qsFocusMode || qsState.status === 'welcome'} />
+      {/* The spotlight no longer needs telling what else is on screen — it declares
+          candidacy and GuidanceProvider answers (change: builder-guidance-arbiter). */}
+      <BuilderSpotlight />
       {/* הקמה מהירה: the floating step bar and the launch refusal
           (change: quick-setup-wizard). Both are fixed-position, so they stay legible
           over the mission drawer — which is exactly where the creator is while they
@@ -939,41 +1132,36 @@ export default function BuilderPage() {
       {/* The one-time invitation. Offered on a freshly cloned template rather than
           waiting to be discovered — and it moves nothing on the canvas until the
           creator accepts, so declining costs exactly one click. */}
-      {qsState.status === 'welcome' && (
+      {qsVisible && qsState.status === 'welcome' && (
         <QuickSetupWelcome
           remaining={qsOutstanding.length}
           onBegin={() => dispatchQs({ type: 'begin' })}
           onSkip={() => dispatchQs({ type: 'close' })}
         />
       )}
-      {/* Context before controls: the card naming the mission we are about to set
-          up. Only when the flow CROSSES into a new mission — two fields of the same
-          one run straight on, because the creator is already looking at it. */}
-      {qsIntro && (
-        <QuickSetupIntro
-          step={qsIntro}
-          index={quickSetupProgress(qsState, qsSteps).step - 1}
-          total={qsSteps.length}
-          taskTitle={quickSetupPresentation(qsIntro).taskTitle}
-          summary={quickSetupPresentation(qsIntro).summary}
-          scope={quickSetupPresentation(qsIntro).scope}
-          onBegin={() => dispatchQs({ type: 'begin' })}
-          onDefer={() => dispatchQs({ type: 'defer' })}
-          onClose={() => dispatchQs({ type: 'close' })}
-        />
-      )}
-      {qsStep && (
+      {/* The step card floats unless it is rendering INSIDE the editor sheet (see
+          `qsCardInline`), so exactly ONE instruction is ever on screen — which is
+          what let `reserveTop` and the 62dvh/88dvh height branch be deleted rather
+          than re-tuned (change: builder-mission-editor-route, design D5). */}
+      {qsVisible && qsStep && !qsCardInline && (
         <QuickSetupBar
           step={qsStep}
           index={quickSetupProgress(qsState, qsSteps).step - 1}
           total={qsSteps.length}
           copyKey={quickSetupPresentation(qsStep).copyKey}
+          taskTitle={quickSetupPresentation(qsStep).taskTitle}
+          summary={quickSetupPresentation(qsStep).summary}
+          scope={quickSetupPresentation(qsStep).scope}
           onNext={() => dispatchQs({ type: 'next' })}
+          onBack={qsState.index > 0 ? () => dispatchQs({ type: 'back' }) : undefined}
           onDefer={() => dispatchQs({ type: 'defer' })}
           onClose={() => dispatchQs({ type: 'close' })}
         />
       )}
-      {qsCelebrating && <QuickSetupCelebration onClose={() => setQsCelebrating(false)} />}
+      {qsVisible && qsCelebrating && <QuickSetupCelebration onClose={() => setQsCelebrating(false)} />}
+      {/* Deliberately NOT arbitrated: this is the refusal that answers a launch
+          press, not a guidance overlay. Suppressing it would make the launch button
+          look dead. */}
       <QuickSetupBlocked
         blockers={qsBlockers}
         labelFor={quickSetupLabel}
@@ -990,21 +1178,28 @@ export default function BuilderPage() {
       {/* ── Persistent shell header bar: logo · back · title · save · tabs · launch.
           This is the only header in the Builder (the global app nav is hidden),
           so the workspace gets the full viewport height. ── */}
-      {/* Below `sm` the bar wraps: the controls stay on the first line and the tab
-          strip drops to its own full-width line (`order-last basis-full`) instead
-          of being squeezed to zero. At `sm` and up every class below restores
-          today's exact single-row geometry. */}
-      <header className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 px-2 py-1.5 sm:gap-x-3 sm:px-4 sm:py-0 min-h-14 sm:h-14 border-b border-[--rp-border] bg-[--surface-1]">
+      {/* ONE line at every width (change: builder-mobile-simplification).
+          It used to `flex-wrap` with the tab strip forced onto its own full-width
+          line, which on a 390px phone produced THREE rows — controls, the overflow
+          trigger that no longer fit beside them, then the tabs — roughly 120px of
+          chrome above a canvas that had ~240px left for missions. Wrapping is now
+          impossible by construction (`flex-nowrap` everywhere) and the row is made
+          to fit instead, by moving things out rather than by squeezing them:
+          the tab strip becomes a bottom bar on a phone (BuilderTabBar, below), the
+          duplicate save button is dropped (it is already in the overflow menu), and
+          readiness folds into the launch button. What is left is five controls:
+          back · title · save dot · more · launch. */}
+      <header className="shrink-0 flex flex-nowrap items-center gap-x-1.5 px-2 py-1.5 sm:gap-x-3 sm:px-4 sm:py-0 h-14 border-b border-[--rp-border] bg-[--surface-1]">
         <button onClick={() => { void leaveToGames(); }} aria-label={b.backToGames} className="flex items-center justify-center gap-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
           <span className="text-sm leading-none">←</span> <span className="hidden sm:inline">{b.backToGames}</span>
         </button>
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
         {/* A FAILED save gets its own colour and its own word — it can never be
             read as an ordinary pending save (change: creator-no-silent-failures). */}
-        <span className={`text-xs flex items-center gap-1.5 shrink-0 ${status === 'failed' ? 'text-rp-alert font-semibold' : 'text-[--ink-3]'}`}>
+        <span className={`text-xs flex items-center gap-1.5 shrink-0 ${saveLevel === 'failed' || saveLevel === 'offline' || saveLevel === 'stalled' ? 'text-ink-alert font-semibold' : 'text-[--ink-3]'}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${
-            status === 'failed' ? 'bg-rp-alert'
-              : status === 'saving' ? 'bg-rp-amber animate-pulse'
+            saveLevel === 'failed' || saveLevel === 'offline' || saveLevel === 'stalled' ? 'bg-rp-alert'
+              : saveLevel === 'saving' || saveLevel === 'slow' ? 'bg-rp-amber animate-pulse'
               : status === 'unsaved' ? 'bg-rp-amber'
               : 'bg-rp-go'}`} />
           {/* Below `xl` the WORD is dropped and the coloured dot carries the state —
@@ -1012,9 +1207,17 @@ export default function BuilderPage() {
               explicit save button sits right beside it. A FAILED save is the one
               state that must never be reduced to a dot, so it keeps its word at
               every width. The accessible name is unaffected either way. */}
-          <span className={status === 'failed' ? undefined : 'hidden xl:inline'}>
-            {status === 'failed' ? b.saveFailedShort
-              : status === 'saving' ? b.saving
+          {/* A save that has not landed must never keep saying the word for a save
+              that is landing (change: save-tells-the-truth). The SDK waits 70s before
+              rejecting, so "saving" used to mean both "in progress" and "stuck for a
+              minute". These states keep their word at EVERY width for the same reason
+              a failure does: a coloured dot cannot say "check your connection". */}
+          <span className={saveHealthState.needsAttention ? undefined : 'hidden xl:inline'}>
+            {saveLevel === 'failed' ? b.saveFailedShort
+              : saveLevel === 'offline' ? b.saveOffline
+              : saveLevel === 'stalled' ? b.saveStalled
+              : saveLevel === 'slow' ? b.saveSlow
+              : saveLevel === 'saving' ? b.saving
               : status === 'unsaved' ? b.unsaved
               : b.saved}
           </span>
@@ -1024,15 +1227,28 @@ export default function BuilderPage() {
             and of whatever the current tab/focus state is. `save()` itself is a
             safe no-op when nothing changed, so this can never do harm; it exists
             purely so a creator who is unsure whether autosave "caught up" has one
-            button that unconditionally tries again right now. */}
+            button that unconditionally tries again right now.
+            Desktop only: the phone overflow menu below already carries this exact
+            action, so at 390px it was paying for header width TWICE and it was one
+            of the six controls that pushed the bar onto a second line. */}
+        {!isMobile && (
         <button
           onClick={() => { void save(); }}
-          disabled={status === 'saving'}
+          // NOT disabled while a save is in flight (change: save-tells-the-truth).
+          // This button's own comment above says it exists "purely so a creator who is
+          // unsure whether autosave caught up has one button that unconditionally
+          // tries again right now" - and `disabled={status === 'saving'}` took it away
+          // for the entire 70 second hang, which is exactly when a creator reaches for
+          // it. `save()` is already a safe no-op when nothing changed and carries its
+          // own out-of-order guard (`saveSeq`), so pressing it during a flight cannot
+          // persist a stale snapshot. Same lesson CLAUDE.md records for the join
+          // screen: a disabled button cannot tell you what it wants.
           title={b.saveNowHint}
           className="shrink-0 min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-medium border border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-50 disabled:pointer-events-none transition-colors"
         >
           {b.saveNow}
         </button>
+        )}
 
         {/* Past runs (change: post-run-player-report). The Builder is where a
             creator sits when they wonder how the last group did with a mission
@@ -1054,13 +1270,13 @@ export default function BuilderPage() {
             Desktop only: at phone width these live in the header overflow menu
             below (change: builder-simplification-round-3). */}
         {!isMobile && (
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={undo}
             disabled={!canUndo}
             title={`${b.undo} (Ctrl+Z)`} // i18n-ignore keyboard shortcut
             aria-label={b.undo}
-            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+            className={`${TAP_CLUSTER} rounded-lg border border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors`}
           >
             ↶
           </button>
@@ -1069,7 +1285,7 @@ export default function BuilderPage() {
             disabled={!canRedo}
             title={`${b.redo} (Ctrl+Shift+Z)`} // i18n-ignore keyboard shortcut
             aria-label={b.redo}
-            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+            className={`${TAP_CLUSTER} rounded-lg border border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors`}
           >
             ↷
           </button>
@@ -1105,6 +1321,15 @@ export default function BuilderPage() {
             >
               {b.importFile}
             </button>
+            {/* Sharing lives beside export/import on purpose: all three answer
+                "get this game to somebody else" (change: game-share-link). */}
+            <button
+              role="menuitem"
+              onClick={() => setShareOpen(true)}
+              className={HEADER_MENU_ITEM_CLASS}
+            >
+              {t.share.menuLabel}
+            </button>
           </OverflowMenu>
         </div>
         )}
@@ -1123,8 +1348,16 @@ export default function BuilderPage() {
           }}
         />
 
-        {/* Centered tab strip */}
-        <nav role="tablist" data-tour="builder-tabs" className="flex-1 basis-full sm:basis-0 order-last sm:order-none min-w-0 flex items-center justify-center gap-1 overflow-x-auto">
+        {/* Centered tab strip. Desktop only — on a phone the same tablist renders
+            as <BuilderTabBar> at the BOTTOM of the shell (change:
+            builder-mobile-simplification). Moving between Build, Preview and
+            Settings is the most frequent action in this screen and it was living
+            in the least reachable pixels on a 6.7" phone; at the bottom it is in
+            the thumb zone and it stops competing with the launch button for the
+            one header row. `data-tour="builder-tabs"` travels with whichever one
+            is mounted, so the guided tour still finds exactly one anchor. */}
+        {!isMobile && (
+        <nav role="tablist" data-tour="builder-tabs" className="flex-1 min-w-0 flex items-center justify-center gap-1 overflow-x-auto">
           {visibleTabIds.map((id) => (
             <button
               key={id}
@@ -1133,26 +1366,37 @@ export default function BuilderPage() {
               onClick={() => { void save(); setTab(id); if (id === 'preview' && gameId) markGamePreviewed(gameId); }}
               className={`shrink-0 whitespace-nowrap px-2.5 xl:px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 activeTab === id
-                  ? 'bg-rp-fire/10 text-rp-fire'
+                  ? 'bg-rp-fire/10 text-ink-fire'
                   : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}
             >
               {TAB_LABEL[id]}
             </button>
           ))}
         </nav>
+        )}
 
         {/* Readiness, beside the launch controls: everything that would refuse a
             launch, listed at once, before a launch is attempted. */}
         <ReadinessPanel
           issues={readiness}
           open={readinessOpen}
+          // On a phone the trigger is gone and the LAUNCH button carries the
+          // state instead (change: builder-mobile-simplification) — the popover
+          // still mounts here, anchored to this zero-width slot, so the list and
+          // its navigate-to-the-offender behaviour are unchanged.
+          showTrigger={!isMobile}
           onToggle={() => setReadinessOpen((o) => !o)}
           onActivate={(issue) => {
             setReadinessOpen(false);
             if (!issue.stageId) return; // an empty game has nothing to navigate to
             setTab('build');
             setActiveStageId(issue.stageId);
-            if (issue.taskId) setFocusIssue({ stageId: issue.stageId, taskId: issue.taskId, nonce: Date.now() });
+            // A STAGE-level blocker (stageUnwinnable / stageHasNoTask) names no
+            // mission, and this used to simply return — so the row that says
+            // "clicking opens what needs fixing" opened nothing at all, on the one
+            // blocker whose fix is not in a mission editor. It is forwarded with an
+            // empty taskId, which StepStages reads as "open the STAGE".
+            setFocusIssue({ stageId: issue.stageId, taskId: issue.taskId ?? '', nonce: Date.now() });
           }}
         />
 
@@ -1161,18 +1405,51 @@ export default function BuilderPage() {
             launchable?" and "have I filled in what this template asked for?" — and a
             creator working through a template needs both in one place. Renders
             nothing at all for a game with no setup steps. */}
-        <QuickSetupPill
-          remaining={qsOutstanding.length}
-          total={qsSteps.length}
-          onResume={() => dispatchQs({ type: 'resume' })}
-        />
+        {/* Desktop header only (change: builder-mobile-simplification). Measured
+            on a 375px phone the bar had ~56px of free width and the game's own
+            NAME was the thing being squeezed into it — "משחק ללא שם" rendered as
+            "מש…", which identifies nothing. This pill is a resume door, and on a
+            phone the flow already announces itself far more loudly than a 48px
+            chip: the welcome card, the floating step bar and the launch-refusal
+            dialog are all full-width surfaces. Giving its width to the title is
+            the better trade at that size. */}
+        {!isMobile && (
+          <QuickSetupPill
+            remaining={qsOutstanding.length}
+            total={qsSteps.length}
+            onResume={() => dispatchQs({ type: 'resume' })}
+          />
+        )}
 
         {/* The SECONDARY launch (a rehearsal run) collapses into the menu on a
             phone; the PRIMARY launch always stays on the bar. */}
         {!isMobile && (
           <Button variant="ghost" loading={launching} onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
         )}
-        <Button onClick={() => saveAndLaunch(false)} loading={launching} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
+        {/* The primary launch. On a phone it ALSO carries readiness (change:
+            builder-mobile-simplification): with blockers outstanding it turns amber,
+            shows their count and opens the readiness list instead of attempting a
+            launch that `saveAndLaunch` would refuse anyway. One control, the same
+            guarantee — a creator still cannot launch past an unmet requirement, and
+            the refusal now arrives as the list of what to fix rather than as an
+            error after the fact. At desktop widths the separate readiness pill is
+            still there, so nothing changes. */}
+        {isMobile && readiness.length > 0 ? (
+          <button
+            type="button"
+            data-tour="builder-launch"
+            onClick={() => setReadinessOpen((o) => !o)}
+            aria-expanded={readinessOpen}
+            aria-label={b.readinessAria(readiness.length)}
+            className="shrink-0 inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg border border-rp-amber/60 bg-rp-amber/10 text-ink-amber text-sm font-semibold transition-colors hover:bg-rp-amber/20"
+          >
+            <span aria-hidden>⚠</span>
+            <span>{b.launchRun}</span>
+            <span aria-hidden className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rp-amber text-white text-[12px] font-bold leading-none tabular-nums">{readiness.length}</span>
+          </button>
+        ) : (
+          <Button onClick={() => saveAndLaunch(false)} loading={launching} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
+        )}
 
         {/* Phone width: ONE menu holding every secondary header control. Back,
             title, save status, tabs, readiness and the primary launch stay on the
@@ -1181,9 +1458,13 @@ export default function BuilderPage() {
         {isMobile && (
           <div className="shrink-0">
             <OverflowMenu
-              label={b.headerMoreMenu}
+              // Icon-only trigger on a phone: the word "עוד" cost ~13px of a row
+              // whose scarcest resource is the game title beside it, and ⋯ is the
+              // one glyph a menu can wear without a label. `ariaLabel` is unchanged,
+              // so the accessible name still says what it opens.
+              label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
               ariaLabel={b.headerMoreMenuAria}
-              triggerClassName="min-h-[44px] px-3 rounded-lg text-sm gap-1"
+              triggerClassName="min-h-[44px] w-11 justify-center rounded-lg text-lg leading-none"
             >
               <button
                 role="menuitem"
@@ -1234,10 +1515,21 @@ export default function BuilderPage() {
               >
                 {b.launchTestRun}
               </button>
+              <button
+                role="menuitem"
+                onClick={() => setShareOpen(true)}
+                className={HEADER_MENU_ITEM_CLASS}
+              >
+                {t.share.menuLabel}
+              </button>
             </OverflowMenu>
           </div>
         )}
       </header>
+
+      {shareOpen && game && (
+        <ShareLinkDialog gameId={game.id} gameTitle={game.title} onClose={() => setShareOpen(false)} />
+      )}
 
       {/* ── Persistent failed-save banner ──────────────────────────────────
           Deliberately NOT a toast: a toast auto-dismisses in ~3 seconds, and
@@ -1250,12 +1542,12 @@ export default function BuilderPage() {
           role="status"
           className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-alert/40 bg-rp-alert/10 px-4 py-2 text-xs text-[--ink-1]"
         >
-          <span className="font-semibold text-rp-alert">{b.saveFailedBanner}</span>
+          <span className="font-semibold text-ink-alert">{b.saveFailedBanner}</span>
           <span className="text-[--ink-2] text-start">{t.callFailure[saveError.key]}</span>
           {saveError.retryable && (
             <Button
               variant="ghost"
-              className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg ms-auto"
+              className="min-h-0 px-2.5 py-1 text-[13px] rounded-lg ms-auto"
               onClick={() => { void save(); }}
             >
               {b.saveFailedRetry}
@@ -1269,20 +1561,29 @@ export default function BuilderPage() {
           creator can go live but has no obvious signal they are done. One line,
           dismissible, right under the launch controls. It reuses the readiness
           ready title and never shows once the game has a run or the creator
-          dismisses it. */}
-      {!readyNudgeDismissed && readiness.length === 0 && (game.playCount ?? 0) === 0 && (
+          dismisses it.
+          NOT SHOWN AT ALL on a phone (change: builder-mobile-simplification). On
+          844px of screen it wrapped to three lines and spent ~145px saying that
+          nothing is wrong — the single largest thing on a canvas that had ~240px
+          left for actual missions, and the creator had to dismiss it every session
+          to get that space back. Nothing is lost: readiness is folded into the
+          launch button at that width, so a ready game is exactly the game whose
+          launch button is the ordinary orange one, and an unready game's button is
+          amber with the count. The banner survives on desktop, where the row it
+          occupies is not competing with anything. */}
+      {nudgeVisible && !readyNudgeDismissed && readiness.length === 0 && (game.playCount ?? 0) === 0 && (
         <div
           role="status"
           className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-go/40 bg-rp-go/10 px-4 py-2 text-xs text-[--ink-1]"
         >
           <span aria-hidden>✓</span>
-          <span className="font-semibold text-rp-go">{b.readinessReadyTitle}</span>
+          <span className="font-semibold text-ink-go">{b.readinessReadyTitle}</span>
           <span className="text-[--ink-2] text-start">{b.readyNudge}</span>
           <button
             type="button"
             onClick={() => setReadyNudgeDismissed(true)}
             aria-label={t.common.dismiss}
-            className="ms-auto shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 text-[11px] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
+            className="ms-auto shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 text-[13px] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
           >
             {t.common.dismiss}
           </button>
@@ -1316,7 +1617,48 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef} qsOverlayActive={qsOverlayActive} />}
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
+          quickSetupInlineBar={qsVisible && qsStep && qsCardInline ? (
+            <QuickSetupBar
+              inline
+              /* Guided is the layout that puts this card in its own column from
+                 `lg` up (see ContextPanel), which is where its height cap must
+                 lift (change: guided-card-should-not-scroll). */
+              beside={qsFocusMode}
+              step={qsStep}
+              index={quickSetupProgress(qsState, qsSteps).step - 1}
+              total={qsSteps.length}
+              copyKey={quickSetupPresentation(qsStep).copyKey}
+              taskTitle={quickSetupPresentation(qsStep).taskTitle}
+              summary={quickSetupPresentation(qsStep).summary}
+              scope={quickSetupPresentation(qsStep).scope}
+              onNext={() => dispatchQs({ type: 'next' })}
+              onBack={qsState.index > 0 ? () => dispatchQs({ type: 'back' }) : undefined}
+              onDefer={() => dispatchQs({ type: 'defer' })}
+              onClose={() => dispatchQs({ type: 'close' })}
+            />
+          ) : null}
+          /* Guided editing (change: quick-setup-guided-editor). While the flow is
+             RUNNING, the mission editor it just opened answers one question at a
+             time; `anchor` is the control the current step points at. Gated on
+             `qsFocusMode` — the SAME gate the canvas scrim reads — rather than on
+             `running` alone. Gating on `running` was tried and is wrong: a chapter
+             intro card leaves the status at `intro` with the editor still open, so
+             the full editor flashed back — three tabs, the type grid, a second
+             next button — underneath the card the creator was mid-sentence in.
+             `qsStep` is not part of the test either, for the same reason: it is
+             null while an intro card is up (that card reads `qsIntro`), which is
+             exactly the window the flash appeared in.
+             `close` (not `reset`) is the exit: the flow is postponed with its
+             progress intact, which is what "edit everything" means and not "throw
+             the setup away". */
+          quickSetupGuided={qsFocusMode
+            ? {
+                taskId: qsGuidedTaskId,
+                anchor: qsFocusAnchor.anchor,
+                onExit: () => dispatchQs({ type: 'close' }),
+              }
+            : null} />}
         {activeTab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
         {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} qsAnchor={qsFocusAnchor} /></div></div>}
         {activeTab === 'analytics' && (
@@ -1328,7 +1670,63 @@ export default function BuilderPage() {
           </Card>
         )}
       </div>
+
+      {/* Phone-width tab bar. A flex CHILD of the shell, not a fixed overlay: the
+          shell is already a full-height flex column, so a sibling row is laid out
+          around rather than painted over — no z-index to lose against the mission
+          sheet, and no phantom padding to keep in sync with its height. */}
+      {isMobile && (
+        <BuilderTabBar
+          tabs={visibleTabIds}
+          active={activeTab}
+          label={TAB_LABEL}
+          onSelect={(id) => { void save(); setTab(id); if (id === 'preview' && gameId) markGamePreviewed(gameId); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Phone tab bar (change: builder-mobile-simplification) ────────────────────
+// The header's tab strip, moved to the thumb zone. Same roles, same labels, same
+// handler — only the position and the touch target change. Icons are decorative
+// and paired with their word, never on their own: a builder's three surfaces are
+// not conventional enough for a glyph alone to name them.
+const BUILDER_TAB_ICON: Record<BuilderTab, string> = {
+  build: '🧩', preview: '👁', settings: '⚙', analytics: '📊',
+};
+
+function BuilderTabBar({ tabs, active, label, onSelect }: {
+  tabs: readonly BuilderTab[];
+  active: BuilderTab;
+  label: Record<BuilderTab, string>;
+  onSelect: (id: BuilderTab) => void;
+}) {
+  return (
+    <nav
+      role="tablist"
+      data-tour="builder-tabs"
+      // pb-[env(safe-area-inset-bottom)] so the row clears a gesture bar rather
+      // than sitting under it on a device that has one.
+      className="shrink-0 flex items-stretch gap-1 border-t border-[--rp-border] bg-[--surface-1] px-1 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]"
+    >
+      {tabs.map((id) => {
+        const on = active === id;
+        return (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={on}
+            onClick={() => onSelect(id)}
+            className={`flex-1 min-w-0 min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
+              on ? 'bg-rp-fire/10 text-ink-fire' : 'text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1]'}`}
+          >
+            <span aria-hidden className="text-base leading-none">{BUILDER_TAB_ICON[id]}</span>
+            <span className="text-[12px] font-medium truncate max-w-full px-1">{label[id]}</span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -1340,22 +1738,83 @@ export default function BuilderPage() {
 // `issues` is a PROP, not re-derived here (change: builder-readiness-autoopen):
 // the parent already computed it under a useMemo, and computing it again made the
 // same walk run twice per render for no gain.
-function ReadinessPanel({ issues, open, onToggle, onActivate }: {
+// `showTrigger` false (phone width, change: builder-mobile-simplification) renders
+// the popover WITHOUT its own pill: the launch button in the header opens it, so a
+// second control saying the same thing would be one more thing to read on the row
+// this change exists to shorten. The wrapper still renders, zero-width, because the
+// popover positions against it — hiding the whole component would take the list
+// with it, and the list is the part that matters.
+/** What the readiness popover asks for. 22rem, the width it has always rendered at
+ *  on a roomy screen — `popoverPlacement` narrows it only when a viewport cannot
+ *  hold it (change: popover-stays-on-screen). */
+const READINESS_PANEL_WIDTH_PX = 352;
+
+function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true }: {
   issues: ReadinessIssue[]; open: boolean; onToggle: () => void; onActivate: (issue: ReadinessIssue) => void;
+  showTrigger?: boolean;
 }) {
   const b = useT().builder;
   const ISSUE_LABEL: Record<ReadinessCode, string> = {
     stageHasNoTask: b.issueStageHasNoTask,
     taskNotCompletable: b.issueTaskNotCompletable,
     taskNotPlaced: b.issueTaskNotPlaced,
+    taskNotNamed: b.issueTaskNotNamed,
     stageUnwinnable: b.issueStageUnwinnable,
   };
   const where = (issue: ReadinessIssue): string => {
     const stage = issue.stageTitle || b.untitledStage;
     return issue.taskId ? `${stage} · ${issue.taskTitle || b.untitledTask}` : stage;
   };
+
+  // Keep the popover on screen (change: popover-stays-on-screen).
+  //
+  // MEASURED, not guessed: on a phone `showTrigger` is false, so the wrapper below is
+  // a ZERO-WIDTH slot and the old `end-0 w-[22rem] max-w-[calc(100vw-1.5rem)]` put the
+  // box at left 204 -> right 555 on a 375px viewport. 180px off screen, 49% visible,
+  // and `scrollWidth` stayed 375 so the overflow was CLIPPED rather than scrollable.
+  // The max-width cap computed to exactly 351px and changed nothing, because a maximum
+  // width bounds how WIDE a box is and never WHERE it sits. In RTL the lost half is
+  // the half every Hebrew line begins on, and on a phone this popover IS the launch
+  // button's action — so the one control that starts a game opened an unreadable
+  // explanation of why it would not.
+  //
+  // Tailwind cannot express a runtime pixel value (a computed class compiles to no
+  // CSS at all), so the clamp is applied as an inline style and the defeated classes
+  // are removed rather than left to look protective.
+  const slotRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
+  useLayoutEffect(() => {
+    if (!open) { setPlacement(null); return; }
+    const measure = (): void => {
+      const slot = slotRef.current;
+      if (!slot) return;
+      const rect = slot.getBoundingClientRect();
+      const viewport = popoverPlacement({
+        anchorLeft: rect.left,
+        anchorWidth: rect.width,
+        preferredWidth: READINESS_PANEL_WIDTH_PX,
+        viewportWidth: document.documentElement.clientWidth,
+        rtl: getComputedStyle(document.documentElement).direction !== 'ltr',
+      });
+      // `popoverPlacement` answers in VIEWPORT pixels, which is the only frame the
+      // clamp can be expressed in. But the popover is absolutely positioned, so its
+      // `left` is measured from its CONTAINING BLOCK — this zero-width slot — not
+      // from the viewport. Setting the viewport number directly moved the box to
+      // slot.left + left and it was still 192px off screen; the browser said so, the
+      // types did not. Convert once, here, at the boundary between the two frames.
+      setPlacement({ ...viewport, left: viewport.left - rect.left });
+    };
+    measure();
+    // An orientation change while the popover is open would otherwise leave a stale
+    // placement, which is the same defect in a different costume.
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open]);
+
   return (
-    <div className="relative shrink-0">
+    <div ref={slotRef} className="relative shrink-0">
+      {showTrigger && (
       <button
         type="button"
         onClick={onToggle}
@@ -1363,22 +1822,31 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
         aria-label={b.readinessAria(issues.length)}
         className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
           issues.length === 0
-            ? 'border-rp-go/40 text-rp-go hover:bg-[--surface-2]'
-            : 'border-rp-amber/50 text-rp-amber hover:bg-[--surface-2]'}`}
+            ? 'border-rp-go/40 text-ink-go hover:bg-[--surface-2]'
+            : 'border-rp-amber/50 text-ink-amber hover:bg-[--surface-2]'}`}
       >
         <span aria-hidden>{issues.length === 0 ? '✓' : '⚠'}</span>
         <span className="hidden 2xl:inline">{b.readinessTitle}</span>
         {issues.length > 0 && <Badge color="gold">{b.readinessCount(issues.length)}</Badge>}
       </button>
+      )}
 
       {open && (
-        <div className="absolute z-50 end-0 top-full mt-1 w-[22rem] max-w-[calc(100vw-1.5rem)] rounded-xl border border-[--rp-border] bg-[--surface-1] shadow-soft">
+        <div
+          ref={panelRef}
+          // `end-0`, `w-[22rem]` and `max-w-[calc(100vw-1.5rem)]` are GONE on purpose:
+          // all three were defeated by the zero-width anchor, and leaving them would
+          // tell the next reader the cap is still protecting them. Geometry has one
+          // owner now. `left: 0` until measured so the first paint cannot flash off
+          // screen; `popoverPlacement` is total, so this is never NaN.
+          style={{ left: placement?.left ?? 0, width: placement?.width ?? READINESS_PANEL_WIDTH_PX }}
+          className="absolute z-50 top-full mt-1 rounded-xl border border-[--rp-border] bg-[--surface-1] shadow-soft">
           <Advanced dense title={b.readinessTitle} open onToggle={onToggle}>
             {issues.length === 0 ? (
               <EmptyState icon="🚀" title={b.readinessReadyTitle} body={b.readinessReadyBody} />
             ) : (
               <div className="space-y-1">
-                <p className="text-[11px] text-[--ink-3] leading-snug">{b.readinessIntro}</p>
+                <p className="text-[13px] text-[--ink-3] leading-snug">{b.readinessIntro}</p>
                 <ul className="space-y-1 max-h-72 overflow-y-auto">
                   {issues.map((issue, i) => (
                     <li key={`${issue.code}-${issue.stageId}-${issue.taskId ?? ''}-${i}`}>
@@ -1390,7 +1858,7 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
                       >
                         <span className="block text-[12px] text-[--ink-1]">{ISSUE_LABEL[issue.code]}</span>
                         {issue.stageId && (
-                          <span dir="auto" className="block text-[11px] text-[--ink-3] truncate">{where(issue)}</span>
+                          <span dir="auto" className="block text-[13px] text-[--ink-3] truncate">{where(issue)}</span>
                         )}
                       </button>
                     </li>
@@ -1425,7 +1893,7 @@ function StepDetails({ game, patch, qsAnchor }: {
           {(['individual', 'team'] as GameMode[]).map((m) => (
             <button key={m} onClick={() => patch({ mode: m })}
               className={`flex-1 py-2 rounded-lg text-sm border ${
-                game.mode === m ? 'border-rp-fire/50 bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-3]'}`}>
+                game.mode === m ? 'border-rp-fire/50 bg-rp-fire/10 text-ink-fire' : 'border-[--rp-border] text-[--ink-3]'}`}>
               {modeLabel[m]}
             </button>
           ))}
@@ -1493,6 +1961,47 @@ function StepDetails({ game, patch, qsAnchor }: {
         </label>
         {/* UGC disclosure (change: feed-ugc-safety, D7): run-wide visibility + organizer responsibility. */}
         <p className="text-xs text-[--ink-3] -mt-2">{b.photoFeedResponsibility}</p>
+
+        {/* A team that joins after the start (change: late-joiner-autostart):
+            default OFF. The console flags a stranded late joiner either way; this
+            only decides whether the platform starts them without being asked. */}
+        <label title={b.autoStartLateJoinersHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.autoStartLateJoiners}
+            onChange={(e) => patch({ autoStartLateJoiners: e.target.checked })} />
+          {b.autoStartLateJoinersLabel}
+        </label>
+
+        {/* Approve every media submission automatically (change: late-joiner-autostart):
+            default OFF. Copied onto the run at launch, so changing it here affects the
+            NEXT run, never one already in flight. */}
+        <label title={b.autoApproveAllMediaHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.autoApproveAllMedia}
+            onChange={(e) => patch({ autoApproveAllMedia: e.target.checked })} />
+          {b.autoApproveAllMediaLabel}
+        </label>
+
+        {/* Staff permissions default (change: staff-capabilities). What a new staff code may do;
+            each code can still be changed on the run screen during the game. Absent = everything,
+            so an untouched game behaves exactly as before. */}
+        <details className="rounded-lg border border-[--rp-border] px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium text-[--ink-1] min-h-[44px] flex items-center">{b.staffDefaultsTitle}</summary>
+          <p className="text-xs text-[--ink-3] mt-1 mb-2">{b.staffDefaultsHint}</p>
+          <CapabilityChecklist
+            value={defaultCodeCapabilities(game.staffDefaults)}
+            onChange={(next) => patch({ staffDefaults: { capabilities: next } })}
+          />
+        </details>
+
+        {/* Everyone on their own phone (change: every-member-plays): default OFF.
+            Fails open on an unknown headcount - a game that never collects member
+            names cannot hold anyone, because it does not know how many people a team
+            is. The hint says so rather than letting a creator switch it on and wonder
+            why nothing happened. */}
+        <label title={b.requireAllMembersOnlineHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.requireAllMembersOnline}
+            onChange={(e) => patch({ requireAllMembersOnline: e.target.checked })} />
+          {b.requireAllMembersOnlineLabel}
+        </label>
 
         {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
         <label title={b.powerUpsHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
@@ -1726,7 +2235,7 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
       <TagChips tags={game.tags} className="mt-1.5" more={b.moreTags} max={20} />
       {suggestions.length > 0 && (
         <div className="mt-2">
-          <p className="text-[11px] text-[--ink-3] mb-1">{b.popularTags}</p>
+          <p className="text-[13px] text-[--ink-3] mb-1">{b.popularTags}</p>
           <div className="flex flex-wrap items-center gap-1">
             {suggestions.map((tag) => (
               <button
@@ -1734,7 +2243,7 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
                 type="button"
                 dir="auto"
                 onClick={() => patch({ tags: normalizeTags([...game.tags, tag]) })}
-                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-rp-fire hover:bg-rp-fire/10"
+                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[13px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-ink-fire hover:bg-rp-fire/10"
               >
                 + {tag}
               </button>
@@ -1769,7 +2278,7 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
       open={open}
       onToggle={() => setOpen(!open)}
       meta={configured
-        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(1)}</span>
+        ? <span className="rounded-full bg-rp-fire/10 text-ink-fire px-1.5 py-px text-[12px]">{b.sectionSetCount(1)}</span>
         : undefined}
     >
       <Input
@@ -1781,7 +2290,7 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
         dir="ltr"
       />
       {err
-        ? <p className="text-rp-alert text-xs mt-1">{err}</p>
+        ? <p className="text-ink-alert text-xs mt-1">{err}</p>
         : <p className="text-xs text-[--ink-3] mt-1">{b.webhookHelp}</p>}
     </Advanced>
   );
@@ -1856,14 +2365,14 @@ function SafeZoneField({ game, patch }: { game: Game; patch: (p: Partial<Game>) 
                 dir="ltr"
               />
               {err
-                ? <p className="text-rp-alert text-xs mt-1">{err}</p>
+                ? <p className="text-ink-alert text-xs mt-1">{err}</p>
                 : <p className="text-xs text-[--ink-3] mt-1">{b.safeZoneRadiusHint}</p>}
             </div>
             <p className="text-xs text-[--ink-3]" dir="ltr">
               {zone.center.lat.toFixed(5)}, {zone.center.lng.toFixed(5)}
             </p>
             {suggestion && suggestion.coversAllTasks === false && (
-              <p className="text-xs text-rp-amber">{b.safeZoneTooSpread}</p>
+              <p className="text-xs text-ink-amber">{b.safeZoneTooSpread}</p>
             )}
             <div className="flex gap-2">
               <Button variant="ghost" onClick={enable} disabled={!suggestion}>
@@ -1906,7 +2415,7 @@ function StageStory({ stage, onChange }: { stage: Stage; onChange: (n: Stage['na
       open={open}
       onToggle={() => setOpen(!open)}
       meta={filledCount > 0
-        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(filledCount)}</span>
+        ? <span className="rounded-full bg-rp-fire/10 text-ink-fire px-1.5 py-px text-[12px]">{b.sectionSetCount(filledCount)}</span>
         : undefined}
     >
       <div className="space-y-2" title={b.storyHint}>
@@ -1966,7 +2475,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
           <label className="flex items-center gap-1 text-xs text-[--ink-3]">
             <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />{b.regRequired}
           </label>
-          {f.id !== 'name' && <button className="text-rp-alert text-xs" aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
+          {f.id !== 'name' && <button className={`${TAP_INLINE} shrink-0 rounded text-ink-alert hover:bg-rp-alert/10 text-xs`} aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
         </div>
       ))}
       <Button variant="subtle" onClick={add}>+ {b.regAddField}</Button>
@@ -1986,7 +2495,7 @@ function StatusChip({ title, children }: { title: string; children: ReactNode })
     <span
       title={title}
       className="inline-flex items-center gap-1 rounded-full border border-[--rp-border] bg-[--surface-2]/40
-        ps-2 pe-2.5 py-1 text-[11px] font-medium text-[--ink-2] tabular-nums"
+        ps-2 pe-2.5 py-1 text-[13px] font-medium text-[--ink-2] tabular-nums"
     >
       {children}
     </span>
@@ -2016,14 +2525,14 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
       onClick={onClick}
       className="flex-1 h-11 rounded-xl border border-dashed border-[--rp-border] text-[--ink-3]
                  flex items-center justify-center gap-1.5 text-sm
-                 hover:border-rp-fire/60 hover:text-rp-fire transition"
+                 hover:border-rp-fire/60 hover:text-ink-fire transition"
     >
       <span className="text-lg leading-none">＋</span>{label}
     </button>
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, qsOverlayActive }: {
+function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, quickSetupInlineBar, quickSetupGuided }: {
   game: Game; setGame: (g: Game) => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
   // An activated readiness entry (change: builder-first-task-flow). The `nonce`
@@ -2038,22 +2547,115 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   quickSetupFocusMode?: boolean;
   // Parent-owned auto-open guard (survives this component's tab-switch remounts).
   autoOpenedGameRef: { current: string | null };
-  // A הקמה מהירה bar/card is currently floating (change: quick-setup-mobile-visibility)
-  // — forwarded to the mission editor's mobile sheet so it can reserve room at its
-  // own top edge instead of being hidden underneath it.
-  qsOverlayActive?: boolean;
+  // The live הקמה מהירה step, already rendered by the parent in its INLINE form,
+  // to be placed inside the mission editor (change: builder-mission-editor-route).
+  // Non-null only while the editor is open; the parent hides its floating copy for
+  // exactly that period, so one instruction is on screen and nothing overlaps.
+  quickSetupInlineBar?: ReactNode;
+  // Guided editing (change: quick-setup-guided-editor): non-null while the flow is
+  // RUNNING. `anchor` is the current step's `data-qs-field`; the editor keeps that
+  // control and withholds every unrelated one until `onExit` is taken.
+  quickSetupGuided?: { taskId: string | null; anchor: string | null; onExit: () => void } | null;
 }) {
   const b = useT().builder;
+  // The signed-in creator, for the per-creator regenerate memory
+  // (change: mission-regenerate). A browser holds several accounts, and one
+  // creator's "already seen" must not narrow another's pool.
+  const { user } = useAuth();
+  // Where this game is ALREADY placed (change: location-picker-game-anchor). The
+  // map picker for a mission with no pin opens on these instead of on a zoom-8
+  // view of the whole country, so the neighbourhood is found once per GAME rather
+  // than once per mission. Game-wide, not stage-wide: mission two is routinely in
+  // a different stage from mission one. Read only at the picker's mount, so the
+  // camera never re-fits itself while the creator is aiming (see lib/mapAnchor).
+  const gameAnchors = useMemo(
+    () => (game?.stages ?? [])
+      .flatMap((st) => st.tasks ?? [])
+      .map((t) => t.coordinates)
+      .filter(isPlacedCoord),
+    [game],
+  );
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
   // The stage-settings drawer starts CLOSED (change: wave-k stage-editor-redesign)
   // so the stage reads calm at rest — just its name and task cards. It collapses
   // again whenever the creator switches stages, keeping every stage calm by default.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // `revealAll` is set only when the editor was opened from the readiness
-  // surface, so the creator does not land on a silent form after clicking the
-  // statement of the problem.
-  const [editing, setEditing] = useState<{ stageId: string; taskId: string; revealAll?: boolean } | null>(null);
+  // ── The open mission lives in the URL (change: builder-mission-editor-route) ──
+  //
+  // This was `useState<{stageId, taskId, revealAll?}>`, set by SIX call sites and
+  // cleared by FIVE, with nothing tying it to the page's history. On a phone —
+  // where back is the primary navigation — back therefore did not close the
+  // editor, it left the Builder entirely, which is the most destructive thing
+  // available. One addressable value replaces eleven scattered assignments and
+  // hands dismissal to the platform.
+  //
+  // `stageId` is gone from the state on purpose: it is DERIVED from the task id
+  // (resolveOpenMission), so the open mission and the stage the Builder thinks it
+  // is in can no longer disagree. They used to, whenever a mission was dragged to
+  // another stage while its editor was open — see moveTaskToStage below, which
+  // only had to close the editor because the pair could go stale.
+  const location = useLocation();
+  const nav = useNavigate();
+  // Read at call time, never closed over: the helpers below run from handlers and
+  // effects, where a search captured at render would be one navigation behind.
+  const searchRef = useRef(location.search);
+  searchRef.current = location.search;
+  // Did WE push the live editor entry? It decides whether closing consumes an
+  // entry (`back`) or clears one we never made (`replace`) — a `back` we did not
+  // earn walks a deep-linked creator straight off the site.
+  const weOwnEntryRef = useRef(false);
+  // A mission we just asked to open, pending its arrival in `game` (see the stale
+  // address effect).
+  const pendingOpenRef = useRef<string | null>(null);
+  // `revealAll` stays LOCAL and keyed by task id. It is transient intent ("show
+  // this mission's validation now" — the creator arrived from the readiness
+  // surface), not a location: putting it in the URL would make a shared link
+  // shout at whoever opened it, and keying it stops it leaking onto the next
+  // mission the creator opens.
+  const [revealForTaskId, setRevealForTaskId] = useState<string | null>(null);
+
+  const openMissionId = readOpenMissionId(location.search);
+  const openMission = resolveOpenMission(game, openMissionId);
+
+  /**
+   * Open a mission, switch missions, or close the editor.
+   *
+   * The ONE door — every former `setEditing(...)` call site routes through here,
+   * so all six entry points and five exits share one history discipline instead
+   * of each deciding for itself. Which of push/replace/back/none applies is
+   * `missionEditorNavAction`, tested exhaustively in
+   * scripts/test-mission-editor-route.ts.
+   */
+  const setEditing = useCallback((next: { taskId: string; revealAll?: boolean } | null) => {
+    const taskId = next?.taskId ?? null;
+    setRevealForTaskId(next?.revealAll && taskId ? taskId : null);
+    const action = missionEditorNavAction(readOpenMissionId(searchRef.current), taskId, weOwnEntryRef.current);
+    if (action === 'none') return;
+    pendingOpenRef.current = taskId;
+    if (action === 'back') { weOwnEntryRef.current = false; nav(-1); return; }
+    nav({ search: missionEditorSearch(searchRef.current, taskId) }, { replace: action === 'replace' });
+    if (action === 'push') weOwnEntryRef.current = true;
+  }, [nav]);
+
+  // Whatever closed the editor — our ✕, Escape, or the creator's own back gesture
+  // — we no longer hold an entry. Deriving this from the URL is why there is no
+  // `popstate` listener here: nothing has to tell our own back() from the user's.
+  useEffect(() => { if (!openMissionId) weOwnEntryRef.current = false; }, [openMissionId]);
+
+  // A stale address: the URL names a task this game does not have — deleted,
+  // belonging to another game, or hand-typed. Clear it with REPLACE (never push,
+  // which could trap someone in a back-button loop) and open nothing. No error
+  // surface: a dead link to a mission is not something the creator can act on.
+  useEffect(() => {
+    if (!openMissionId || openMission) { pendingOpenRef.current = null; return; }
+    // A mission we JUST asked to open can be absent from `game` for one render if
+    // the state update that adds it and this navigation are not batched together
+    // (addTask does both in one handler). Give it exactly one pass before
+    // declaring the address dead.
+    if (pendingOpenRef.current === openMissionId) { pendingOpenRef.current = null; return; }
+    nav({ search: missionEditorSearch(searchRef.current, null) }, { replace: true });
+  }, [openMissionId, openMission, nav]);
   // Enforce the invariant the Builder UI implies — `isFinal` is only offered on
   // the LAST stage. The server treats ANY isFinal stage as the finale (finishing
   // the team on completion, runs/helpers.ts), so an isFinal flag left on a
@@ -2148,9 +2750,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     const next = moveTaskBetweenStages(game.stages, fromStageId, taskId, toStageId, toIndex);
     if (next === game.stages) return;
     setStages(next);
-    // The moved task lives in a different stage now; the open panel would point
-    // at a stale (stageId, taskId) pair, so close it.
-    if (editing?.taskId === taskId) setEditing(null);
+    // The editor no longer has to close here: the stage is DERIVED from the task
+    // id now (change: builder-mission-editor-route), so a moved mission simply
+    // resolves to its new stage on the next render instead of leaving a stale
+    // (stageId, taskId) pair behind. Keeping it open is also the better
+    // behaviour — moving a mission is not a reason to throw away what the
+    // creator was writing in it.
   }
 
   // ── One DndContext for the whole Builder body (change: builder-dnd-groups) ──
@@ -2236,26 +2841,240 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     ? game.stages.flatMap((s) => s.tasks).find((t) => t.id === activeDrag.id)
     : undefined;
 
+  /**
+   * Delete ONE mission, with every consequence its stage carries
+   * (change: mission-card-actions).
+   *
+   * Extracted from the mission editor's own ✕ menu, where it had lived inline,
+   * because the mission CARD now offers the same action and a second copy of this
+   * would be a second chance to forget one of the three cleanups: a dangling
+   * prerequisite id fails save-time validation and wedges the autosave, a
+   * now-oversized `requiredTaskCount` leaves the stage unwinnable, and a group
+   * quietly shrunk to one member stops being exclusive with nothing on screen
+   * saying so. One implementation, two call sites.
+   *
+   * Refuses the LAST mission of a stage: a stage with no missions is a readiness
+   * blocker, and offering an action whose only outcome is a new error is not an
+   * action. The callers hide the control in that case.
+   */
+  async function removeTask(stageId: string, taskId: string): Promise<void> {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const task = stage?.tasks.find((t) => t.id === taskId);
+    if (!stage || !task || stage.tasks.length <= 1) return;
+    // ASK FIRST (change: builder-mobile-simplification). Name the thing, then act
+    // — the same posture as confirmRemoveStage, deleteGame and skipTaskForTeam.
+    const ok = await dialog.confirm(
+      b.deleteTaskConfirm(task.title?.trim() || b.untitledTask),
+      b.deleteTask,
+      true,
+    );
+    if (!ok) return;
+    const nextTasks = stage.tasks
+      .filter((x) => x.id !== taskId)
+      .map((x) => {
+        if (!x.unlockAfterTaskIds?.includes(taskId)) return x;
+        const rest = x.unlockAfterTaskIds.filter((id) => id !== taskId);
+        return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
+      });
+    const nextGroups = stage.exclusiveGroups
+      ? removeTaskFromGroups(stage.exclusiveGroups, taskId)
+      : undefined;
+    updateStage(stage.id, {
+      tasks: nextTasks,
+      // Clamped against what the stage can YIELD, not its raw task count
+      // (change: stage-winnability) — and against the POST-delete groups.
+      requiredTaskCount: clampRequiredTaskCount(
+        stage.requiredTaskCount,
+        maxCompletableTasks({ tasks: nextTasks, exclusiveGroups: nextGroups }),
+      ),
+      ...(stage.exclusiveGroups ? { exclusiveGroups: nextGroups } : {}),
+    });
+    if (openMission?.task.id === taskId) setEditing(null);
+  }
+
+  /**
+   * Copy a mission into the same stage, right after the original
+   * (change: mission-card-actions).
+   *
+   * A FRESH id, and deliberately nothing else carried over that is keyed to the
+   * old one: `unlockAfterTaskIds` is dropped, because a copy that inherits "only
+   * after mission 3" is a copy the creator did not ask for and would have to
+   * discover. The copy is NOT added to any exclusive group either — joining a
+   * "pick one of these" set is an authoring decision, and silently making the
+   * duplicate an alternative of its own original would change what the stage
+   * yields without a word on screen.
+   *
+   * The title is marked as a copy so two identical rows are distinguishable at a
+   * glance; everything else is verbatim, which is the point of the action.
+   */
+  function duplicateTask(stageId: string, taskId: string): void {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const at = stage?.tasks.findIndex((t) => t.id === taskId) ?? -1;
+    if (!stage || at < 0) return;
+    const source = stage.tasks[at];
+    const copy: Task = {
+      ...source,
+      id: crypto.randomUUID(),
+      title: b.duplicatedTaskTitle(source.title?.trim() || b.untitledTask),
+      unlockAfterTaskIds: undefined,
+    };
+    const tasks = [...stage.tasks.slice(0, at + 1), copy, ...stage.tasks.slice(at + 1)];
+    updateStage(stage.id, { tasks });
+    setSettingsOpen(false);
+    setEditing({ taskId: copy.id });
+  }
+
+  /**
+   * Swap this mission for the closest bank mission, and drift on repeat
+   * (change: mission-regenerate).
+   *
+   * The ask this answers is the one the Builder had no word for: *this slot is
+   * right, this mission is not, give me another one like it.* Writing a
+   * replacement by hand or hunting the library both cost more than the whole
+   * generation did.
+   *
+   * Everything that DECIDES lives in `lib/regenerateMission.ts` and is pure — the
+   * profile derived from the outgoing mission, the similarity score, the drift and
+   * the merge. This function only gathers the inputs and commits the result, which
+   * is what keeps the algorithm assertable without a DOM
+   * (scripts/test-mission-regenerate.ts).
+   *
+   * Three things worth not re-deriving later:
+   *
+   *   - DRIFT IS THE PRESS COUNT. The offered history for this mission IS how many
+   *     times it has been regenerated, so the two can never disagree; a separate
+   *     counter would be a second source of truth for one fact.
+   *   - ONE HISTORY ENTRY. The swap commits through `updateStage`, the same path
+   *     every other edit takes, so the Builder's existing undo reverses it in one
+   *     press. That is what buys the right to ask no confirmation: the action is
+   *     destructive to the mission's text, and the answer to that is a cheap undo,
+   *     not a dialog in front of a button meant to be pressed repeatedly.
+   *   - SYNCHRONOUS BANK. `missionBankNow()` is the last successful load or the
+   *     authored bank compiled into the bundle, never empty, so the button answers
+   *     a press immediately. `loadMissionBank()` is fired and NOT awaited, so an
+   *     admin's edit is picked up by the next press.
+   */
+  function regeneratedTaskFor(source: Task | undefined): Task | null {
+    if (!source) return null;
+
+    // The SLOT's role, not the task's: whatever mission ends up first has to be
+    // one a group can walk up to and begin with, and the bank tags its openers
+    // and finales for exactly that reason. Found in the browser — the first real
+    // press replaced this game's opening mission with a mid-game one.
+    const si = game.stages.findIndex((st) => st.tasks.some((t) => t.id === source.id));
+    const ti = si < 0 ? -1 : game.stages[si].tasks.findIndex((t) => t.id === source.id);
+    const role = missionRoleAt(si, ti, game.stages.length, si < 0 ? 0 : game.stages[si].tasks.length);
+
+    void loadMissionBank();
+    const offeredKeys = readOfferedKeys(user?.uid, game.id, source.id);
+    const picked = chooseRegeneratedMission({
+      bank: missionBankNow(),
+      profile: missionTagProfile(source, role),
+      context: regenerateContext(game, source),
+      drift: offeredKeys.length,
+      offeredKeys,
+      seed: seedFor(source.id, offeredKeys.length),
+    });
+    if (!picked) { void dialog.alert(b.regenerateNothingLeft); return null; }
+
+    let built: Task;
+    try {
+      built = picked.build();
+    } catch {
+      // A bank entry that cannot build is a content defect, not a reason to take
+      // the Builder down with it.
+      void dialog.alert(b.regenerateNothingLeft);
+      return null;
+    }
+
+    recordOfferedKey(user?.uid, game.id, source.id, picked.key);
+    return applyRegeneratedMission(source, built);
+  }
+
+  /**
+   * The CARD's regenerate: compute the replacement and commit it to the stage.
+   *
+   * The editor has its own path (`onRegenerate` on ContextPanel) and deliberately
+   * does NOT reuse this one. The editor holds a local draft of the open mission
+   * and `applyRegeneratedMission` preserves the task id, so the panel's `key`
+   * does not change and it never remounts — committing behind its back would
+   * leave the draft holding the OLD mission, and its own autosave would write
+   * that back over the replacement a moment later. So the editor commits through
+   * its own change handler, and this function serves the card only.
+   */
+  function regenerateTask(stageId: string, taskId: string): void {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const at = stage?.tasks.findIndex((t) => t.id === taskId) ?? -1;
+    if (!stage || at < 0) return;
+    const next = regeneratedTaskFor(stage.tasks[at]);
+    if (!next) return;
+    updateStage(stage.id, { tasks: stage.tasks.map((t, i) => (i === at ? next : t)) });
+  }
+
+  /**
+   * Bench a mission, or bring it back (change: mission-card-actions).
+   *
+   * The Builder's only answer to "not this one, not this time" was DELETE, which
+   * loses the work. A benched mission stays in the template — authored, editable,
+   * exported, one click from returning — and takes no part in the game: it is left
+   * out of every run `launchRun` builds, it is not published to the gallery, and
+   * readiness stops demanding a name or a pin for it. See shared/hiddenTask.
+   *
+   * `undefined` rather than `false` when un-benching, so the field goes back to
+   * ABSENT: `buildSavePayload` drops undefined keys inside `stages`, and absent is
+   * what every reader of this field treats as playable. Writing `false` would work
+   * too, but it would leave the mark of a decision on a mission that no longer
+   * carries one.
+   *
+   * The stage's `requiredTaskCount` is re-clamped on the way in: benching a
+   * mission lowers what the stage can yield, and "complete 3 of 3" with one
+   * benched is a stage no team can finish. Coming back OUT does not raise it —
+   * the creator's authored number is theirs, and a count that grew on its own
+   * would be a change nobody asked for.
+   */
+  function toggleTaskHidden(stageId: string, taskId: string): void {
+    const stage = game.stages.find((s) => s.id === stageId);
+    const task = stage?.tasks.find((t) => t.id === taskId);
+    if (!stage || !task) return;
+    const nextHidden = !isTaskHidden(task);
+    const tasks = stage.tasks.map((t) => (t.id === taskId ? { ...t, hidden: nextHidden || undefined } : t));
+    updateStage(stage.id, {
+      tasks,
+      ...(nextHidden
+        ? {
+            requiredTaskCount: clampRequiredTaskCount(
+              stage.requiredTaskCount,
+              maxCompletableTasks({ tasks, exclusiveGroups: stage.exclusiveGroups }),
+            ),
+          }
+        : {}),
+    });
+    if (nextHidden && openMission?.task.id === taskId) setEditing(null);
+  }
+
   function addTask(stageId: string) {
     const stage = game.stages.find((s) => s.id === stageId);
     if (!stage) return;
     const t = blankTask();
     updateStage(stageId, { tasks: [...stage.tasks, t] });
     setSettingsOpen(false);
-    setEditing({ stageId, taskId: t.id });
+    setEditing({ taskId: t.id });
   }
 
-  const editingStage = editing && game.stages.find((s) => s.id === editing.stageId);
-  const editingTask = editingStage?.tasks.find((t) => t.id === editing?.taskId);
+  // Both derived from the ONE addressed task id, so they cannot disagree.
+  const editingTask = openMission?.task ?? null;
+  const editingStage = openMission ? game.stages.find((s) => s.id === openMission.stageId) ?? null : null;
 
   // Builder header breadcrumb (change: builder-clarity-mission-hierarchy): the
   // wizard's open task only counts toward the breadcrumb while it belongs to the
-  // currently active stage, so a stale (stageId, taskId) pair from a just-completed
-  // cross-stage move never shows a mission from the wrong stage.
+  // currently active stage, so a mission in another stage never shows here. The
+  // stage now comes from the task itself (change: builder-mission-editor-route),
+  // so the "stale pair" this guard was written against can no longer occur — the
+  // guard stays because the ACTIVE-stage condition is still a real one.
   const breadcrumbState = builderBreadcrumbState(
     game.stages,
     activeStage?.id,
-    editing?.stageId === activeStage?.id ? editing?.taskId : undefined,
+    openMission?.stageId === activeStage?.id ? openMission.task.id : undefined,
     { untitledStage: b.untitledStage, untitledMission: b.untitledTask },
   );
   const breadcrumbText = breadcrumbState && (
@@ -2264,7 +3083,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
       : b.breadcrumbStage(breadcrumbState.stageNumber, breadcrumbState.stageName)
   );
 
-  const m = activeStage ? activeStage.tasks.length : 0;
+  // The PLAYABLE count, not the raw one (change: mission-card-actions). Every
+  // "N of M" the Builder shows has to be the M the run will actually contain —
+  // a benched mission still counted here told the creator "4 of 7" while the
+  // launched run held 6, which is the Builder contradicting itself about the
+  // game it just built.
+  const m = activeStage ? playableTasks(activeStage).length : 0;
   const isLastStage = !!activeStage && game.stages[game.stages.length - 1]?.id === activeStage.id;
   // Scheduled-release: the first stage opens at run start, so timed release only
   // applies to later stages (a timed "drop" of a chapter mid-game / on day N).
@@ -2297,7 +3121,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     if (autoOpenedGameRef.current === game.id) return;
     autoOpenedGameRef.current = game.id;
     const target = shouldAutoOpenFirstTask(game);
-    if (target) setEditing({ stageId: target.stageId, taskId: target.taskId });
+    if (target) setEditing({ taskId: target.taskId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2305,8 +3129,17 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   // message already visible.
   useEffect(() => {
     if (!focusIssue) return;
+    // No mission named ⇒ the blocker is the STAGE's own (an unreachable completion
+    // count, an empty stage). The fix lives in the stage settings pane, so open
+    // THAT — closing it, which is what this effect did for every issue alike, left
+    // the creator on a stage with no indication of what to change.
+    if (!focusIssue.taskId) {
+      setEditing(null);
+      setSettingsOpen(true);
+      return;
+    }
     setSettingsOpen(false);
-    setEditing({ stageId: focusIssue.stageId, taskId: focusIssue.taskId, revealAll: true });
+    setEditing({ taskId: focusIssue.taskId, revealAll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusIssue?.nonce]);
 
@@ -2316,9 +3149,15 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   useEffect(() => {
     if (!quickSetupFocus?.taskId) return;
     setSettingsOpen(false);
-    setEditing({ stageId: quickSetupFocus.stageId, taskId: quickSetupFocus.taskId });
+    setEditing({ taskId: quickSetupFocus.taskId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quickSetupFocus?.nonce]);
+
+  // Phone width: the stage header collapses into the rail pill and the ⚙ settings
+  // pane (change: builder-mobile-simplification). Declared with the other hooks,
+  // above every early return this component has, so the hook order is fixed —
+  // the rules-of-hooks lane exists because of exactly this mistake.
+  const isMobile = useIsMobile();
 
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
@@ -2328,8 +3167,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           The hierarchy was never labelled on screen — a creator inferred which
           stage was open and which mission they were editing purely from
           rail-vs-canvas layout position. Live-derived off state the Builder
-          already holds; no new Firestore read. */}
-      {breadcrumbText && (
+          already holds; no new Firestore read.
+          Desktop only (change: builder-mobile-simplification): on a phone the
+          stage rail's ACTIVE pill already reads "שלב 1 · חימום", so the breadcrumb
+          repeated it one line above in a paler colour. */}
+      {breadcrumbText && !isMobile && (
         <div
           className="shrink-0 px-1 text-xs font-medium text-[--ink-3] truncate"
           data-tour="builder-breadcrumb"
@@ -2382,7 +3224,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           <>
             <div className="shrink-0 space-y-2">
             {/* Title row — the calm centre of the stage at rest: just the name,
-                the finale toggle on the last stage, and delete. */}
+                the finale toggle on the last stage, and delete.
+                Desktop only (change: builder-mobile-simplification). On a phone
+                this cost 56px to restate a name the active rail pill already
+                shows, and it did it with an always-live <input>, which on a touch
+                screen is a tap magnet that opens the keyboard by accident — with a
+                bare red ✕ that destroys the whole stage sitting right beside it.
+                Renaming, the finale toggle and delete all moved INTO the ⚙ stage
+                settings pane, one deliberate tap away, where delete can also carry
+                its own heading rather than being a loose glyph. */}
+            {!isMobile && (
             <div className="flex items-center gap-2">
               <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
@@ -2392,10 +3243,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 </label>
               )}
               {game.stages.length > 1 && (
-                <button className="text-neon-red text-sm shrink-0" aria-label={b.deleteStage} title={b.deleteStage}
+                <button className={`${TAP_INLINE} rounded text-neon-red hover:bg-neon-red/10 text-sm shrink-0`} aria-label={b.deleteStage} title={b.deleteStage}
                   onClick={() => void confirmRemoveStage(activeStage)}>✕</button>
               )}
             </div>
+            )}
 
             {/* ── Settings bar (change: wave-k stage-editor-redesign) ──────────
                 ONE thin row: a single "stage settings" affordance plus at-rest
@@ -2413,16 +3265,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                   onClick={() => { setEditing(null); setSettingsOpen((o) => !o); }}
                   aria-expanded={settingsOpen}
                   aria-label={b.stageSettingsAria(settings.activeCount)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-medium transition-colors
                     focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60
                     ${settingsOpen
-                      ? 'border-rp-fire/50 bg-rp-fire/10 text-rp-fire'
+                      ? 'border-rp-fire/50 bg-rp-fire/10 text-ink-fire'
                       : 'border-[--rp-border] bg-[--surface-2]/60 text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1]'}`}
                 >
                   <span aria-hidden>⚙</span>
                   <span>{b.stageSettings}</span>
                   {settings.activeCount > 0 && (
-                    <span aria-hidden className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rp-fire text-white text-[10px] font-bold leading-none tabular-nums">{settings.activeCount}</span>
+                    <span aria-hidden className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rp-fire text-white text-[12px] font-bold leading-none tabular-nums">{settings.activeCount}</span>
                   )}
                   <span aria-hidden className={`transition-transform duration-200 ${settingsOpen ? 'rotate-90' : ''}`}>›</span>
                 </button>
@@ -2531,27 +3383,72 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             <div className="flex-1 min-h-0">
               <TaskCanvas
                 tasks={activeStage.tasks}
-                activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
-                onSelect={(taskId) => { setSettingsOpen(false); setEditing({ stageId: activeStage.id, taskId }); }}
+                activeTaskId={openMission?.stageId === activeStage.id ? openMission.task.id : undefined}
+                onSelect={(taskId) => { setSettingsOpen(false); setEditing({ taskId }); }}
                 stageId={activeStage.id}
                 groupOf={groupOf}
                 moveTargets={game.stages
                   .map((s, i) => ({ id: s.id, label: s.title || b.stageLabel(i + 1) }))
                   .filter((s) => s.id !== activeStage.id)}
                 onMoveToStage={(taskId, toStageId) => moveTaskToStage(activeStage.id, taskId, toStageId)}
+                onDuplicate={(taskId) => duplicateTask(activeStage.id, taskId)}
+                onRegenerate={(taskId) => regenerateTask(activeStage.id, taskId)}
+                onToggleHidden={(taskId) => toggleTaskHidden(activeStage.id, taskId)}
+                /* Withheld for the last mission of a stage: a stage with none is a
+                   readiness blocker, so the only outcome would be a new error. */
+                onDelete={activeStage.tasks.length > 1
+                  ? (taskId) => { void removeTask(activeStage.id, taskId); }
+                  : undefined}
+                /* ADD SITS AT THE END OF THE LIST, NOT BELOW THE CANVAS
+                   (change: add-a-mission-follows-the-missions).
+ 
+                   This row used to be a sibling under TaskCanvas, which is
+                   `flex-1` — so on a stage with ONE mission it sat 380px below it
+                   on an 812px phone. Nearly half the screen between the list and
+                   the button that adds to it, with the void reading as the end of
+                   the page. Passed as the canvas's own list footer it follows the
+                   last mission and scrolls with it, and it still renders on an
+                   empty stage (see TaskCanvas's early return).
+ 
+                   `mb-12` on a phone keeps it clear of <ActiveRunBar>, a
+                   `fixed … bottom-20 start-4` pill that floats over whatever the
+                   canvas's last row happens to be. It only appears while a run is
+                   live, and when it does it landed squarely on "add a mission". */
+                footer={(
+                  <div className="flex gap-2 mt-2.5 mb-12 sm:mb-0">
+                    <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
+                    <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
+                  </div>
+                )}
               />
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
-              <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
             </div>
           </>
         )}
         {/* Quick Setup FOCUS MODE scrim (change: quick-setup-wizard). A translucent,
-            blurred layer over the canvas ONLY — never over the mission editor,
-            which is this div's sibling. `pointer-events-auto` deliberately blocks
-            interaction with the dimmed grid: the creator's attention belongs on
-            the floating card, not on a task card they can half-see behind it. */}
+            blurred layer over the canvas, meant to sit UNDER the mission editor,
+            which is this div's sibling.
+ 
+            IT SWALLOWED THE FLOW'S OWN "NEXT" (change: quick-setup-one-card). The
+            scrim is `absolute inset-0 z-20` inside the canvas column and spans the
+            whole canvas area; the editor pane overlaps that area and, from `lg`
+            up, carried no z-index at all. With `pointer-events-auto` on the scrim,
+            `document.elementFromPoint` on the Quick Setup card's own "הבא" button
+            — which renders INSIDE that pane — returned `DIV.rp-qs-scrim`. The
+            press advanced the flow roughly one time in three, which reads as an
+            app that has stopped responding, not as a stacking bug, and it is a
+            large part of why the flow felt broken. The pane now declares
+            `lg:relative lg:z-30` (see SlidePanel) so it paints above.
+ 
+            AND the scrim stops eating clicks whenever the editor is open. Blocking
+            the dimmed grid is worth something — a half-seen task card behind the
+            scrim is not where the creator's attention belongs, and opening a
+            different mission mid-flow desyncs the card from the canvas — but it is
+            worth much less than a primary button that works two presses out of
+            three. While the editor is open the flow's controls live inside it, so
+            the scrim goes inert and any stacking surprise costs a stray click on
+            the canvas rather than a dead button. With no editor open (the welcome
+            card, a game-level step) nothing of ours is over the canvas and the
+            block still holds. */}
         {quickSetupFocusMode && (
           <div
             aria-hidden
@@ -2559,7 +3456,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             // cannot apply an opacity modifier to an arbitrary CSS custom
             // property, so that class compiled to no rule and the "scrim" was
             // actually fully transparent (blur only, no tint).
-            className="rp-qs-scrim absolute inset-0 z-20 rounded-xl pointer-events-auto transition-opacity duration-300"
+            className={`rp-qs-scrim absolute inset-0 z-20 rounded-xl transition-opacity duration-300 ${
+              quickSetupInlineBar ? 'pointer-events-none' : 'pointer-events-auto'}`}
           />
         )}
       </div>
@@ -2575,7 +3473,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           editor (change: wave-k stage-settings-sidepanel). It and the task editor
           are mutually exclusive (one right-hand pane), so opening it shrinks the
           centre canvas horizontally instead of pushing the task grid down. */}
-      {settingsOpen && activeStage && settings && !editing && (
+      {settingsOpen && activeStage && settings && !openMission && (
         <StageSettingsPanel
           key={activeStage.id}
           stage={activeStage}
@@ -2584,53 +3482,56 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           onUpdateStage={(p) => updateStage(activeStage.id, p)}
           onOpenGroups={() => setGroupsOpen(true)}
           onClose={() => setSettingsOpen(false)}
+          // Phone only: the name, the finale toggle and delete moved off the
+          // canvas into this pane (change: builder-mobile-simplification). Passing
+          // `undefined` at desktop widths is what keeps that section from appearing
+          // twice — the canvas still owns them there.
+          identity={isMobile ? {
+            isLastStage: game.stages[game.stages.length - 1]?.id === activeStage.id,
+            canDelete: game.stages.length > 1,
+            onDelete: () => { setSettingsOpen(false); void confirmRemoveStage(activeStage); },
+          } : undefined}
         />
       )}
 
-      {editing && editingStage && editingTask && (
+      {openMission && editingStage && editingTask && (
         <ContextPanel
           key={editingTask.id}
           task={editingTask}
           gameId={game.id}
-          revealAll={editing.revealAll}
+          revealAll={revealForTaskId === editingTask.id}
           focus={quickSetupFocus && quickSetupFocus.taskId === editingTask.id ? quickSetupFocus : null}
           siblings={editingStage.tasks}
-          reserveTop={!!qsOverlayActive}
+          gameAnchors={gameAnchors}
+          quickSetupStep={quickSetupInlineBar}
+          /* Guided only when the flow is pointing at THIS mission. The identity
+             comes from the STEP's own resolved target, not from `quickSetupFocus`
+             above: that state is written by the navigation effect, which is gated
+             on `running`, so it is null for a creator who reloads mid-flow and
+             lands on an intro card — the editor was open (the URL carries it) and
+             the flow owned it, but the test said otherwise and the full editor
+             came back under the card. An editor opened beside a flow aimed at a
+             different mission still stays whole.
+
+             EITHER id counts, and both are needed. `quickSetupFocus` alone misses
+             the reload case above; the step's target alone misses the frame or two
+             between a step advancing and the navigation effect swapping the open
+             mission, where the editor still holds the previous one. Together they
+             say "this editor belongs to the flow", which is the question being
+             asked. */
+          guided={quickSetupGuided
+            && (quickSetupGuided.taskId === editingTask.id || quickSetupFocus?.taskId === editingTask.id)
+            ? quickSetupGuided : null}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
+          /* Returns the replacement rather than committing it — the panel owns the
+             open mission's draft and commits through its own change handler. See
+             `regenerateTask` for why the two paths are separate. */
+          onRegenerate={() => regeneratedTaskFor(editingTask)}
+          /* The SAME delete the mission card's ⋯ menu runs (change:
+             mission-card-actions) — see `removeTask`, which owns the confirm and
+             the three stage-level cleanups a delete drags behind it. */
           onRemove={editingStage.tasks.length > 1
-            ? () => {
-                // Also strip the removed task's id from any sibling's prerequisite
-                // gate (unlockable-tasks) — a dangling id would fail save-time
-                // validation and wedge the autosave.
-                const nextTasks = editingStage.tasks
-                  .filter((x) => x.id !== editingTask.id)
-                  .map((x) => {
-                    if (!x.unlockAfterTaskIds?.includes(editingTask.id)) return x;
-                    const rest = x.unlockAfterTaskIds.filter((id) => id !== editingTask.id);
-                    return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
-                  });
-                // Clamp a now-oversized requiredTaskCount: dropping a task below the
-                // required count would leave the stage unwinnable (and the count
-                // select would show a value not in its options). `undefined` = all.
-                // Drop the removed id from any exclusive group too (wave-b task 5).
-                // A dangling id is inert by contract, but leaving it would silently
-                // shrink a group to one member (= no exclusivity) with no UI trace.
-                const nextGroups = editingStage.exclusiveGroups
-                  ? removeTaskFromGroups(editingStage.exclusiveGroups, editingTask.id)
-                  : undefined;
-                const patch: Partial<Stage> = {
-                  tasks: nextTasks,
-                  // Clamped against what the stage can YIELD, not its raw task count
-                  // (change: stage-winnability) — and against the POST-delete groups.
-                  requiredTaskCount: clampRequiredTaskCount(
-                    editingStage.requiredTaskCount,
-                    maxCompletableTasks({ tasks: nextTasks, exclusiveGroups: nextGroups }),
-                  ),
-                  ...(editingStage.exclusiveGroups ? { exclusiveGroups: nextGroups } : {}),
-                };
-                updateStage(editingStage.id, patch);
-                setEditing(null);
-              }
+            ? () => { void removeTask(editingStage.id, editingTask.id); }
             : undefined}
           onClose={() => setEditing(null)}
         />
@@ -2669,30 +3570,67 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, reserveTop }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, quickSetupStep, gameAnchors, guided, onRegenerate }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
   siblings?: Task[];
+  // Every PLACED mission of the whole game (change: location-picker-game-anchor):
+  // the view an unplaced mission's map opens on. Drilled rather than contexted —
+  // it is one optional array on a path `gameId` and `siblings` already take.
+  gameAnchors?: readonly { lat: number; lng: number }[];
+  // The live הקמה מהירה step, rendered INSIDE this editor while it is full-screen
+  // (change: builder-mission-editor-route, design D5). See the note at the render
+  // site below for why it stopped being a floating bar.
+  quickSetupStep?: ReactNode;
   // Opened from a readiness entry: show that task's validation messages at once.
   revealAll?: boolean;
   // Opened by a הקמה מהירה step (change: quick-setup-wizard): which editor tab owns
   // the target field and which collapsed group it hides in.
   focus?: { tab: TaskEditorTab | null; group: TaskOptInGroup | null; nonce: number } | null;
-  // A הקמה מהירה bar/card is currently floating over the phone-width sheet
-  // (change: quick-setup-mobile-visibility) — reserve room at its top edge instead
-  // of letting the two overlap.
-  reserveTop?: boolean;
+  // Guided editing (change: quick-setup-guided-editor) — see lib/guidedEditor.
+  guided?: { anchor: string | null; onExit: () => void } | null;
+  /**
+   * Produce a replacement for the open mission, or `null` when the bank has
+   * nothing further to offer (change: mission-regenerate). It RETURNS the task
+   * instead of committing it, so this panel puts it through its own change
+   * handler and keeps its draft and global state in step: the task id survives a
+   * regenerate, so this panel is never remounted, and a commit made behind it
+   * would be overwritten by its own autosave a moment later.
+   */
+  onRegenerate?: () => Task | null;
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
-  const [shown, setShown] = useState(false);
+  /**
+   * MOUNTED ALREADY OPEN (change: quick-setup-one-card).
+   *
+   * This used to start `false` and be flipped by a mount effect, so the panel's
+   * VISIBILITY — not just its animation — depended on a second render landing:
+   * until the flip, SlidePanel holds it at `max-lg:translate-y-full`, a full
+   * viewport below the fold. When that flip did not land, the mission editor, the
+   * Quick Setup card inside it and its "next" button were all off-screen with
+   * nothing on the page saying why. Measured repeatedly while stepping through
+   * the flow: the panel's computed transform read `translateY(604px)` in a 604px
+   * viewport, on some remounts and not others.
+   *
+   * It was `requestAnimationFrame` first (throttled to zero on a tab that is not
+   * compositing — the trap `useQuickSetupFocus` documents at length), then a
+   * `setTimeout`, which still failed on some remounts. The pattern is the bug:
+   * every step of the flow REMOUNTS this component (`key={editingTask.id}`), so a
+   * 200 ms entrance was being re-run dozens of times per session and only had to
+   * miss once to strand the creator.
+   *
+   * So the entrance is gone rather than repaired. The panel is open when it is
+   * mounted, which is the only state that was ever correct; `shown` stays as
+   * SlidePanel's prop because the stage-settings pane and the desktop
+   * width-animation still read it, and because a future entrance belongs in CSS —
+   * where the resting state is on-screen and an animation that never runs costs
+   * nothing.
+   */
+  const [shown] = useState(true);
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Slide in on mount.
-  useEffect(() => {
-    const r = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(r);
-  }, []);
+
 
   // Safety flush on unmount — normally a no-op since every edit flushes live, but
   // guards against any edit that hasn't reached global state yet (close or switch).
@@ -2705,11 +3643,17 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
     // Update the local draft (keeps inputs responsive) and push to global state
     // immediately so the canvas + undo/redo update live. commit() keeps the draft
     // and committed in sync so the unmount safety flush stays a no-op.
-    setState((d) => commit(editDraft(d, t)));
+    setState((d) => commit(replaceDraft(d, t)));
     onFlush(t);
   }
 
   function close() { onClose(); }
+
+  // One handler for both render branches below, so the guided and unguided
+  // editors cannot drift about what the action does.
+  const regenerate = onRegenerate
+    ? () => { const next = onRegenerate(); if (next) handleChange(next); }
+    : undefined;
 
   // Esc closes the panel (flush-on-unmount preserves the draft).
   useEffect(() => {
@@ -2725,12 +3669,60 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
   // (flex-1 min-w-0) yields the space; no separate title bar here (the close control
   // lives in the wizard's tab row, reclaiming ~45px of chrome for the content).
   return (
-    <SlidePanel shown={shown} reserveTop={reserveTop}>
-      <div className="flex-1 min-h-0 p-2.5">
-        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll}
-          focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce} />
-        {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
-      </div>
+    <SlidePanel shown={shown} variant="fullscreen" wide={!!guided}>
+      {/* הקמה מהירה, rendered IN FLOW at the top of the editor rather than as a
+          floating bar over it (change: builder-mission-editor-route, design D5).
+          The bar used to be a separate fixed z-50 element claiming the same corner
+          as this sheet, and the two negotiated by hand through a `reserveTop` prop
+          that cost the editor a third of its height (88dvh → 62dvh) at exactly the
+          moment the creator had the most to read. Both earlier attempts are
+          recorded in the change: painting the sheet over the bar hid the
+          instruction, painting it under hid the editor's own tab row. Neither can
+          happen to something that is inside the editor. */}
+      {/* GUIDED, ON A WIDE SCREEN, THE INSTRUCTION SITS BESIDE THE WORK — NOT ON TOP
+          OF IT (change: guided-uses-the-whole-screen).
+ 
+          Stacked, the card is `shrink-0` above a `flex-1` body, so its height comes
+          straight out of the control the step is about. Measured on the map step at
+          a 620px window: card 201px, leaving the wizard's scroller 247px, so the
+          map block's own `min-h-[280px]` could not be honoured and the map rendered
+          202px tall — a strip you cannot place a pin on, which is the whole purpose
+          of that step. The pane is 946px wide while guided and the card needs ~320
+          of them, so the height was being spent on a column that had width to
+          spare.
+ 
+          Beside, the card costs the map NOTHING vertically: same card, same copy,
+          same component — only the axis changes, and only from `lg` up, where the
+          pane is an inline column. Below `lg` the pane is the whole phone screen
+          and stacking is the only thing that fits, which is why this is
+          `lg:flex-row` and not a second layout. */}
+      {guided ? (
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row lg:items-stretch">
+          {/* The column is `lg:w-[20rem]` and owns its own height, so the card
+              inside it is unbounded and never scrolls (change:
+              guided-card-should-not-scroll). `overflow-y-auto` stays on the COLUMN
+              as a last resort for a viewport shorter than the instruction itself —
+              a container that can scroll is not the same as a card that does. */}
+          <div className="shrink-0 lg:w-[20rem] lg:overflow-y-auto flex flex-col">{quickSetupStep}</div>
+          <div className="flex-1 min-h-0 p-2.5">
+            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+              focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
+              guided={!!guided} guidedAnchor={guided?.anchor ?? null} onExitGuided={guided?.onExit} />
+          </div>
+        </div>
+      ) : (
+        <>
+          {quickSetupStep}
+          <div className="flex-1 min-h-0 p-2.5">
+            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+              focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
+              /* This branch is the NOT-guided one, so these are constants — the
+                 optional chains that used to be here narrowed to `never`. */
+              guided={false} guidedAnchor={null} onExitGuided={undefined} />
+          </div>
+          {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
+        </>
+      )}
     </SlidePanel>
   );
 }
@@ -2744,25 +3736,113 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
 // owns `shown` so it can drive the mount slide-in. The `!` widths win over the
 // inline style, which only drives the lg open/close animation.
 //
-// `reserveTop` (change: quick-setup-mobile-visibility): the floating הקמה מהירה
-// bar/card is a fixed z-50 element pinned near the phone's top edge — same corner
-// as this sheet's own z-40. Rather than fight over who paints on top (either
-// answer disturbs the other: over it hides the mission editor's own tab row,
-// under it hides the very instruction the creator opened the editor to read),
-// the sheet steps its OWN top edge down by the overlay's rough height only while
-// one is actually up, so both stay fully visible and fully usable at once.
-function SlidePanel({ shown, children, reserveTop }: { shown: boolean; children: ReactNode; reserveTop?: boolean }) {
+// `variant` (change: builder-mission-editor-route):
+//
+//   'sheet'      — today's behaviour, and what StageSettingsPanel still uses.
+//                  Below `lg` a BOTTOM sheet at a definite `h-[88dvh]`.
+//   'fullscreen' — the mission editor. Below `lg` it takes the whole viewport.
+//
+// The mission editor went full-screen to end a negotiation, not to gain a little
+// room. It used to give up a third of its height (88dvh → 62dvh, the deleted
+// `reserveTop` prop) whenever the floating הקמה מהירה bar was up, because the bar
+// was a separate fixed z-50 element claiming the same corner as this sheet's z-40.
+// Both ways of resolving that by paint order failed and are recorded in the change:
+// over the bar hid the instruction, under it hid the editor's own tab row. The
+// instruction now renders INSIDE the editor (see ContextPanel), so there is nothing
+// left to negotiate and no height to surrender.
+//
+// What the bottom-sheet shape was protecting still holds and is NOT lost by going
+// full-screen: the panel is a flex column whose BODY is the only scroller and whose
+// footer (`הבא`, save, delete) is pinned, so the primary action stays above the
+// keyboard. A top-anchored panel with a `100dvh`-era height was what pushed that
+// footer under the keyboard originally; here the height is the viewport itself, and
+// `interactive-widget=resizes-content` (index.html) makes the viewport actually
+// shrink when the keyboard opens.
+//
+// The height stays DEFINITE rather than a max, in both variants: the column inside
+// needs a constraining parent, and `h-full` against an `h-auto` parent resolves to
+// `auto` — which is how the body once grew instead of scrolling and dropped the
+// footer 360px below the sheet.
+//
+// `env(safe-area-inset-*)`: an installed PWA draws under the notch. play-web learned
+// this and has `.rp-safe-t`; creator-web has no equivalent, and a full-screen surface
+// is the first thing here that reaches the physical top edge, so the insets are
+// applied directly.
+/**
+ * How wide the inline pane is, from `lg` up (change: guided-uses-the-whole-screen).
+ *
+ * Declared ONCE. It used to be the same expression typed out in three places, under
+ * a comment claiming the copies "cannot drift" — which is a hope, not a mechanism.
+ *
+ * `PANEL_W` is the ordinary pane: narrow on purpose, because the canvas behind it is
+ * live and is what the creator is going back to.
+ *
+ * `PANEL_W_GUIDED` is the pane while Quick Setup is driving. There the canvas behind
+ * is covered by the focus scrim and is INERT — it is not context you can use, it is
+ * dead space, and at a 1266px viewport it was two thirds of the screen. The creator's
+ * words: the map should get that room. So the pane takes it and every step benefits,
+ * not only the map one — the sequence editor, the media picker and the quiz choices
+ * are all cramped in 500px for the same reason.
+ *
+ * Widening the ONE pane rather than moving the map out into the canvas area is
+ * deliberate: a map that renders in two different containers is two mount points and
+ * two lifecycles for one MapLibre instance, and this repo has paid for that shape
+ * before. `20rem` of canvas is left showing so "where am I" still has an answer.
+ * Below `lg` neither value is used — `max-lg:!w-full` makes the pane full-screen.
+ */
+const PANEL_W = 'min(500px, calc(100vw - 1.5rem))';
+const PANEL_W_GUIDED = 'min(1000px, calc(100vw - 20rem))';
+
+function SlidePanel({ shown, children, variant = 'sheet', wide = false }: {
+  shown: boolean; children: ReactNode; variant?: 'sheet' | 'fullscreen';
+  /** Quick Setup is driving: take the room the inert canvas is wasting. */
+  wide?: boolean;
+}) {
+  const full = variant === 'fullscreen';
+  const width = wide ? PANEL_W_GUIDED : PANEL_W;
   return (
     <aside
-      className={`shrink-0 self-stretch h-full max-lg:h-auto overflow-hidden transition-[width] duration-200 ease-out
-        max-lg:fixed max-lg:bottom-0 max-lg:end-0 max-lg:z-40 max-lg:!w-[min(100vw,32rem)] max-lg:p-2 max-lg:shadow-soft
-        ${reserveTop ? 'max-lg:top-32' : 'max-lg:top-0'}`}
-      style={{ width: shown ? 'min(500px, calc(100vw - 1.5rem))' : 0 }}
+      // `lg:relative lg:z-30` is load-bearing, not decoration (change:
+      // quick-setup-one-card). Below `lg` this aside is `fixed … z-40`, which is
+      // already above the Quick Setup focus scrim; from `lg` up it was an INLINE
+      // pane with no z-index at all, while the scrim — its sibling, inside the
+      // canvas column — is `absolute inset-0 z-20`. The scrim spans the whole
+      // canvas area, this pane overlaps it, and `auto` loses to `20`, so on a
+      // desktop the scrim painted OVER the mission editor. The scrim also carries
+      // `pointer-events-auto` by design (it blocks the dimmed grid behind it), so
+      // it swallowed clicks aimed at the editor — including the Quick Setup card's
+      // own "next", which renders INSIDE this pane. `document.elementFromPoint` on
+      // that button returned `DIV.rp-qs-scrim`. The symptom was a flow whose
+      // primary button worked about one press in three, which reads as an app that
+      // has stopped responding rather than as a stacking bug. The scrim's own
+      // comment already said it must never cover the editor; this is what makes
+      // that true.
+      className={`shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out lg:relative lg:z-30
+        max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:!w-full max-lg:p-0 max-lg:shadow-soft
+        ${full
+          ? 'max-lg:inset-y-0 max-lg:h-[100dvh]'
+          : 'max-lg:bottom-0 max-lg:top-auto max-lg:h-[88dvh]'}`}
+      style={{ width: shown ? width : 0 }}
     >
       <div
-        style={{ willChange: 'transform', width: 'min(500px, calc(100vw - 1.5rem))' }}
-        className={`h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden max-lg:!w-full
-          transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{
+          willChange: 'transform',
+          width,
+          // Full-screen is the only surface in this console that reaches the
+          // device's physical top and bottom edges, so it is the only one that has
+          // to know about the notch and the home indicator. Inline rather than a
+          // Tailwind class because `env()` is not expressible as one.
+          ...(full ? {
+            paddingTop: 'env(safe-area-inset-top, 0px)',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          } : {}),
+        }}
+        className={`h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden
+          max-lg:!w-full max-lg:h-full transition-transform duration-200 ease-out
+          ${full
+            ? 'max-lg:rounded-none max-lg:border-0'
+            : 'max-lg:rounded-b-none max-lg:rounded-t-2xl max-lg:border-b-0'}
+          ${shown ? 'translate-x-0 max-lg:translate-y-0' : 'translate-x-full max-lg:translate-x-0 max-lg:translate-y-full'}`}
       >
         {children}
       </div>
@@ -2775,28 +3855,29 @@ function SlidePanel({ shown, children, reserveTop }: { shown: boolean; children:
 // task editor. Holds every advanced control (completion count, timed release,
 // exclusive groups entry, chapter story) — each offered only when it applies to
 // this stage. Presentation only; all state still flows through `onUpdateStage`.
-function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, onOpenGroups, onClose }: {
+function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, onOpenGroups, onClose, identity }: {
   stage: Stage;
   settings: StageSettingsState;
   effectiveGroups: string[][];
   onUpdateStage: (p: Partial<Stage>) => void;
   onOpenGroups: () => void;
   onClose: () => void;
+  /** Present at phone width only: the stage's name, finale flag and delete, which
+   *  the canvas no longer shows there (change: builder-mobile-simplification). */
+  identity?: { isLastStage: boolean; canDelete: boolean; onDelete: () => void };
 }) {
   const b = useT().builder;
-  const m = stage.tasks.length;
+  // Playable only — see the note on the Builder's own `m` above.
+  const m = playableTasks(stage).length;
   // What the stage can actually YIELD (change: stage-winnability). Exclusive groups
   // are alternatives, so three pairs yield three completions, never six — the
   // control must not offer a value the game can never satisfy.
   const ceiling = maxCompletableTasks(stage);
   const req = stage.requiredTaskCount ?? m;
-  const [shown, setShown] = useState(false);
+  // Mounted already open — see the note on the task editor's `shown`.
+  const [shown] = useState(true);
 
-  // Slide in on mount (drives the shared shell's width + transform).
-  useEffect(() => {
-    const r = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(r);
-  }, []);
+
 
   // Esc closes the pane, matching the task editor.
   useEffect(() => {
@@ -2815,12 +3896,38 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
             <span className="text-sm font-semibold text-[--ink-1] truncate">{b.stageSettings}</span>
           </div>
           <button onClick={onClose} aria-label={b.closePanel}
-            className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+            className={`${TAP_TARGET} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}>
             ✕
           </button>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto pe-0.5 space-y-3.5">
+          {/* Phone: the stage's own name, first — it is the thing a creator opens
+              this pane to change most often, and it is the one control the canvas
+              gave up. Same `onUpdateStage` path as before, so the field is still a
+              plain live edit feeding the Builder's autosave. */}
+          {identity && (
+            <SettingRow icon="🏷️" title={b.stageTitlePlaceholder}>
+              <Input
+                value={stage.title}
+                onChange={(e) => onUpdateStage({ title: e.target.value })}
+                placeholder={b.stageTitlePlaceholder}
+                aria-label={b.stageTitlePlaceholder}
+                dir="auto"
+              />
+              {identity.isLastStage && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-[--ink-2]">
+                  <input
+                    type="checkbox"
+                    checked={!!stage.isFinal}
+                    onChange={(e) => onUpdateStage({ isFinal: e.target.checked })}
+                  />
+                  {b.finalLabel}
+                </label>
+              )}
+            </SettingRow>
+          )}
+
           <p className="text-xs text-[--ink-3]">{b.stageSettingsIntro}</p>
 
           {/* Task completion — how many of the pool a team must finish */}
@@ -2902,7 +4009,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
                       title={b.exclusiveChipAria(letter, members.length)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] ps-1 pe-2 py-0.5"
                     >
-                      <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[10px] font-bold leading-none ${st.badge}`}>{letter}</span>
+                      <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[12px] font-bold leading-none ${st.badge}`}>{letter}</span>
                       <span className="tabular-nums">{b.taskCount(members.length)}</span>
                     </span>
                   );
@@ -2910,7 +4017,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
                 {effectiveGroups.length === 0 && <span className="text-[--ink-4]">{b.exclusiveNoGroups}</span>}
                 <button
                   type="button"
-                  className="rounded-full border border-rp-fire/40 bg-rp-fire/10 text-rp-fire px-2.5 py-0.5 hover:bg-rp-fire/15 transition-colors"
+                  className="rounded-full border border-rp-fire/40 bg-rp-fire/10 text-ink-fire px-2.5 py-0.5 hover:bg-rp-fire/15 transition-colors"
                   onClick={onOpenGroups}
                 >{b.exclusiveOpenEditor}</button>
               </div>
@@ -2919,6 +4026,22 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 
           {/* Chapter story — the existing sub-disclosure. */}
           <StageStory stage={stage} onChange={(n) => onUpdateStage({ narrative: n })} />
+
+          {/* Phone: delete, LAST and clearly separated. It used to be a bare red ✕
+              beside the stage's own title field on the canvas — a destructive
+              action one mis-tap from a text input, wearing no label. It still goes
+              through `confirmRemoveStage`, which names what it will take. */}
+          {identity?.canDelete && (
+            <div className="pt-1 border-t border-[--rp-border]">
+              <button
+                type="button"
+                onClick={identity.onDelete}
+                className="mt-2.5 w-full min-h-[44px] rounded-lg border border-rp-alert/40 text-ink-alert text-sm font-medium hover:bg-rp-alert/10 transition-colors"
+              >
+                {b.deleteStage}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </SlidePanel>
@@ -2928,8 +4051,10 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 // ── Step 3: Preview ──
 function StepPreview({ game }: { game: Game }) {
   const b = useT().builder;
-  const taskCount = game.stages.reduce((s, st) => s + st.tasks.length, 0);
-  const estMin = game.stages.flatMap((s) => s.tasks).reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0);
+  // This tab answers "what IS this game", so it counts and times only what will
+  // be played (change: mission-card-actions).
+  const taskCount = game.stages.reduce((s, st) => s + playableTasks(st).length, 0);
+  const estMin = game.stages.flatMap((s) => playableTasks(s)).reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0);
   const modeLabel: Record<GameMode, string> = { individual: b.modeIndividual, team: b.modeTeam };
   return (
     <Card className="p-5 space-y-4">
@@ -2947,10 +4072,10 @@ function StepPreview({ game }: { game: Game }) {
       <ol className="space-y-2">
         {game.stages.map((s, i) => (
           <li key={s.id} className="flex items-center gap-3">
-            <span className="w-6 h-6 rounded-full bg-rp-fire/15 text-rp-fire text-xs flex items-center justify-center">{i + 1}</span>
+            <span className="w-6 h-6 rounded-full bg-rp-fire/15 text-ink-fire text-xs flex items-center justify-center">{i + 1}</span>
             <span className="text-sm text-[--ink-2]" dir="auto">{s.title}</span>
             <span className="text-xs text-[--ink-3]">
-              {b.taskCount(s.tasks.length)}{s.tasks.length > 1 ? b.routedSuffix : ''}
+              {b.taskCount(playableTasks(s).length)}{playableTasks(s).length > 1 ? b.routedSuffix : ''}
               {s.isFinal ? ` · 🏁 ${b.finalTag}` : ''}
             </span>
           </li>

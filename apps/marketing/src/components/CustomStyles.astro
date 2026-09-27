@@ -35,10 +35,10 @@
 
 <style is:inline>
   :root {
-    --aw-font-sans: var(--font-inter);
-    --aw-font-serif: var(--font-inter);
+    --aw-font-sans: var(--rp-font-body);
+    --aw-font-serif: var(--rp-font-body);
     /* Space Grotesk is the apps' `--rp-font-display` / `font-brand`. */
-    --aw-font-heading: var(--font-space-grotesk), var(--font-inter);
+    --aw-font-heading: var(--rp-font-display), var(--rp-font-body);
 
     /* rp-fire, and a darker press state of the same hue. */
     --aw-color-primary: #ff5722;
@@ -68,6 +68,23 @@
     /* play-web's "Warm Trail" page surface. */
     --aw-color-bg-page: #fffcf7;
 
+    /*
+     * The alternating section surface (change: marketing-home-cro-redesign).
+     *
+     * Not a new colour so much as a stop the ramp was missing. Every section on
+     * this page used to sit on the same #FFFCF7, so a reader scrolling had no
+     * signal at all about where one idea ended and the next began, and the page
+     * read as one long undifferentiated sheet. This is that surface one step
+     * warmer and one step darker, taken between --color-slate-50 (#faf7f2) and
+     * --color-slate-100 (#f2ece3) in tailwind.css rather than picked by eye, so
+     * it belongs to the ramp instead of sitting beside it.
+     *
+     * 1.05:1 against the page surface. Deliberately below any contrast
+     * threshold: it is a boundary, not a container, and a tint strong enough to
+     * read as a panel would turn a rhythm into a stack of boxes.
+     */
+    --aw-color-bg-tint: #f8f2e9;
+
     --aw-color-bg-page-dark: #14110d;
 
     /* play-web's `glass-border`. A warm hairline, so a divider does not read as
@@ -83,9 +100,9 @@
   }
 
   .dark {
-    --aw-font-sans: var(--font-inter);
-    --aw-font-serif: var(--font-inter);
-    --aw-font-heading: var(--font-space-grotesk), var(--font-inter);
+    --aw-font-sans: var(--rp-font-body);
+    --aw-font-serif: var(--rp-font-body);
+    --aw-font-heading: var(--rp-font-display), var(--rp-font-body);
 
     /* Unchanged. The accents are the brand, not a mode. */
     --aw-color-primary: #ff5722;
@@ -96,6 +113,9 @@
     --aw-color-text-default: #f0ece5;
     --aw-color-text-muted: #b6ada1;
     --aw-color-bg-page: #14110d;
+    /* The same one step separation, LIFTED rather than darkened: on a dark
+       surface a section that recedes reads as a hole, not as a neighbour. */
+    --aw-color-bg-tint: #1c1813;
     --aw-color-border: rgba(240, 236, 229, 0.16);
 
     ::selection {

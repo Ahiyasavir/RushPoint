@@ -124,15 +124,20 @@ export const deleteMyAccount = loggedCallable('deleteMyAccount', async (data, co
   }
 
   // 1) Public gallery denorm + access codes (queries across top-level collections)
-  const [pubGames, pubTasks, codes] = await Promise.all([
+  // Share links (change: game-share-link) join this list for the same reason
+  // access codes are here: they are top-level documents keyed by a credential,
+  // so the recursiveDelete on users/{uid} below never reaches them, and a
+  // survivor would be a live read token for a game that no longer exists.
+  const [pubGames, pubTasks, codes, shareLinks] = await Promise.all([
     db.collection('publicGames').where('ownerUid', '==', uid).get(),
     db.collection('publicTasks').where('ownerUid', '==', uid).get(),
     db.collection('accessCodes').where('ownerUid', '==', uid).get(),
+    db.collection('gameShareLinks').where('ownerUid', '==', uid).get(),
   ]);
   // Chunked so a prolific creator with >500 combined gallery entries + codes
   // can't blow the per-batch cap and silently orphan right-to-erasure data.
   await deleteDocsInChunks(
-    [...pubGames.docs, ...pubTasks.docs, ...codes.docs].map((d) => d.ref),
+    [...pubGames.docs, ...pubTasks.docs, ...codes.docs, ...shareLinks.docs].map((d) => d.ref),
   ).catch((e) => logBestEffort('account.galleryCodes.delete', { uid }, e));
 
   // 2) Purge uploaded photos for every run the user owns, BEFORE the Firestore

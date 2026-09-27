@@ -10,6 +10,7 @@
 // that team's stored requirement). No emulator, no Firebase. Runs via `npm test`
 // (scripts/run-unit-tests.mjs auto-discovers scripts/test-*.ts).
 import { planTaskSkip } from '../packages/shared/src/taskSkip';
+import { skipAward } from '../packages/shared/src/scoringPresets';
 import type { SkipTaskStage } from '../packages/shared/src/taskSkip';
 
 let failures = 0;
@@ -259,6 +260,83 @@ console.log('\nskip-single-task — planTaskSkip');
   ok('a completed task is absent from remainingTaskIds', !p.remainingTaskIds.includes('b'));
   ok('a previously skipped task is absent from remainingTaskIds', !p.remainingTaskIds.includes('c'));
   eq('nothing playable is left, so the stage completes', p.stageCompletes, true);
+}
+
+// ── 12. What a skipped mission is WORTH (change: live-ops-feedback-loop) ─────
+// `planTaskSkip` decides the stage arithmetic and deliberately knows nothing about
+// scoring — the preset lives on the game, not on the stage. So the VALUE is pinned
+// here against `skipAward` directly, and the WIRING (that skipTaskForTeam actually
+// applies it) is pinned by the skip scenario in scripts/e2e-verify.mjs. Do not push
+// the preset into planTaskSkip to make this prettier.
+//
+// This used to be zero. Run ijI9JMITSf8C9heN1Cwp is why it is not: the organiser
+// computed the fair value by hand mid-run and paid it as an untraceable manual bonus.
+{
+  const task = { pointValue: 50, difficulty: 5, estimatedMinutes: 10 };
+  eq('a points game pays the mission point value', skipAward('fixed_points_speed', task), 50);
+  ok('a smart weighted game pays the on target value, which is positive',
+    skipAward('smart_weighted', task) > 0, String(skipAward('smart_weighted', task)));
+  eq('a time ranked game pays nothing, because it has no points to pay',
+    skipAward('time_only', task), 0);
+  // The same value skipStage pays for the same task — that equality IS the change.
+  eq('the single mission skip and the stage skip agree',
+    skipAward('smart_weighted', task), skipAward('smart_weighted', task));
+  // A hand written or legacy task must never poison the leaderboard through this path.
+  for (const bad of [Number.NaN, -100, undefined]) {
+    const v = skipAward('fixed_points_speed', { ...task, pointValue: bad as number });
+    ok(`a ${String(bad)} pointValue yields a finite award of at least zero :: ${v}`,
+      Number.isFinite(v) && v >= 0);
+  }
+  for (const preset of ['time_only', 'fixed_points_speed', 'smart_weighted'] as const) {
+    const v = skipAward(preset, { ...task, difficulty: Number.NaN, estimatedMinutes: 0 });
+    ok(`${preset} survives a malformed task with a finite award :: ${v}`, Number.isFinite(v) && v >= 0);
+  }
+}
+
+// ── skip-keeps-the-stage: the plan knows the unlock graph ─────────────────────
+// Production run oNaUvNrCWRia4Y1b9xOO (2026-09-22): one skip of the head of this chain ended the
+// team's stage. The plan feeds the console's confirmation ("this opens X, the stage continues"),
+// so it must compute the SAME outcome applyStageCompletion will.
+console.log('\n[skip-keeps-the-stage] the plan knows what a skip opens');
+{
+  const chain: SkipTaskStage = {
+    tasks: [
+      { id: 'f13163ca' },
+      { id: '2b83fd50', unlockAfterTaskIds: ['f13163ca'] },
+      { id: 'c42b88d4', unlockAfterTaskIds: ['2b83fd50', 'f13163ca'] },
+    ],
+  };
+  const head = planTaskSkip({
+    stage: chain,
+    statusByTaskId: { f13163ca: 'assigned', '2b83fd50': 'unassigned', c42b88d4: 'unassigned' },
+  }, 'f13163ca');
+  eq('skipping the head does NOT end the stage', head.stageCompletes, false);
+  eqJson('it opens exactly the next link', head.dependentsOpened, ['2b83fd50']);
+  eqJson('both dependents remain playable', head.remainingTaskIds, ['2b83fd50', 'c42b88d4']);
+  eq('the requirement drops by one (3 → 2), keeping the stage winnable', head.requiredTaskCount, 2);
+
+  // An EXCLUSIVE-lost prerequisite elsewhere still retires its dependents in the plan's view.
+  const branch: SkipTaskStage = {
+    tasks: [{ id: 'a1' }, { id: 'a2' }, { id: 'b', unlockAfterTaskIds: ['a1'] }, { id: 'c' }],
+    exclusiveGroups: [{ id: 'g', taskIds: ['a1', 'a2'] }],
+  };
+  const withLoss = planTaskSkip({
+    stage: branch,
+    statusByTaskId: { a1: 'skipped', a2: 'completed', b: 'unassigned', c: 'assigned' },
+    skipCauseByTaskId: { a1: 'exclusive' },
+    requiredTaskCount: 2,
+  }, 'c');
+  eqJson('a task behind an exclusive loss is not counted as remaining', withLoss.remainingTaskIds, []);
+  eq('so skipping the last playable task ends the stage', withLoss.stageCompletes, true);
+  eqJson('and it opens nothing', withLoss.dependentsOpened, []);
+
+  // A dependent that still waits on ANOTHER unfinished prerequisite is not "opened".
+  const mid = planTaskSkip({
+    stage: chain,
+    statusByTaskId: { f13163ca: 'unassigned', '2b83fd50': 'assigned', c42b88d4: 'unassigned' },
+  }, '2b83fd50');
+  eqJson('skipping the middle link opens nothing yet (c42b88d4 still waits on the head)', mid.dependentsOpened, []);
+  eq('and the stage continues', mid.stageCompletes, false);
 }
 
 console.log('');

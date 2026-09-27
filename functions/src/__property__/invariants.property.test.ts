@@ -549,17 +549,66 @@ describe('wrongAnswerCost — penalty invariants', () => {
     }
   });
 
-  test('the replay hash is stable, normalizing, and collision-free on the sampled space', () => {
+  // change: replay-hash-short-answer-collisions.
+  //
+  // This test found a real defect once N was raised, and had a flaw of its own.
+  //
+  // The defect: the old rolls (`h1*33 ^ c`, `h2*31 + c`) folded each character
+  // into the LOW bits only, so an early character difference could be exactly
+  // cancelled by a later one and SHORT answers collided structurally — "1p"/"32",
+  // "1q"/"33", "1t"/"36". Over the 100,000 shortest base36 strings (exactly the
+  // space this generator draws from) that was 4,572 collisions. A collision makes
+  // `submitTaskAnswer` mistake a different wrong answer for a replay: no attempt
+  // recorded, no points charged, no cooldown.
+  //
+  // The flaw: the assertion compared the RAW strings, but two different raws that
+  // normalize identically ("Ab " and "ab") are the same attempt and SHOULD share a
+  // hash — that is the normalization this very test asserts one line above. So it
+  // conflated "collision" with "working as designed", and would have failed for
+  // the wrong reason. It compares normalized forms now, and so stays correct at
+  // any N. The sweep below is exhaustive rather than sampled, because the defect
+  // lived in short inputs and a few hundred random draws walked straight past it.
+  test('the replay hash is stable, normalizing, and collision-free', () => {
     const rng = makeRng(24);
+    const norm = (s: string) => s.trim().toLowerCase();
     const seen = new Map<string, string>();
     for (let i = 0; i < N; i++) {
       const raw = Math.floor(rng() * 100000).toString(36);
       const mangled = `  ${[...raw].map((ch) => (rng() < 0.5 ? ch.toUpperCase() : ch)).join('')} `;
       expect(hashAnswerForReplay(mangled)).toBe(hashAnswerForReplay(raw));
-      const prior = seen.get(hashAnswerForReplay(raw));
-      if (prior !== undefined) expect(prior).toBe(raw);   // same hash ⇒ same answer
-      seen.set(hashAnswerForReplay(raw), raw);
+      const hash = hashAnswerForReplay(raw);
+      const prior = seen.get(hash);
+      // Same hash ⇒ the same ANSWER, not necessarily the same keystrokes.
+      if (prior !== undefined) expect(norm(prior)).toBe(norm(raw));
+      seen.set(hash, raw);
     }
+  });
+
+  test('short answers do not collide — the case that actually broke', () => {
+    // Every 1- and 2-character base36 answer, exhaustively. These are real
+    // answers (a numeric reply, a short code), and they are where the old pair
+    // collided by construction rather than by chance.
+    const seen = new Map<string, string>();
+    const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+    for (const a of alphabet) {
+      for (const b of ['', ...alphabet]) {
+        const answer = a + b;
+        const hash = hashAnswerForReplay(answer);
+        const prior = seen.get(hash);
+        if (prior !== undefined) {
+          throw new Error(`replay-hash collision: "${prior}" and "${answer}" both hash to ${hash}`);
+        }
+        seen.set(hash, answer);
+      }
+    }
+    expect(seen.size).toBe(36 * 37);
+  });
+
+  test('an ordering arrangement can never collide with the joined plain string', () => {
+    // The NUL delimiter exists for this; keep it honest.
+    expect(hashAnswerForReplay(['a', 'b'])).not.toBe(hashAnswerForReplay('ab'));
+    expect(hashAnswerForReplay(['ab'])).not.toBe(hashAnswerForReplay('ab'));
+    expect(hashAnswerForReplay(['a', 'bc'])).not.toBe(hashAnswerForReplay(['ab', 'c']));
   });
 });
 

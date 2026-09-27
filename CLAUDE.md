@@ -3,6 +3,10 @@
 > Coding guidelines & Firestore path rules: [INSTRUCTIONS.md](INSTRUCTIONS.md) ·
 > Architecture: [TECH_SPEC.md](TECH_SPEC.md) · Directory map: [STRUCTURE.md](STRUCTURE.md) ·
 > **Going live + payments: [DEPLOY.md](DEPLOY.md)**
+>
+> Per-file indexes: [scripts/README.md](scripts/README.md) (what each script is, and which are
+> one-off) · [docs/README.md](docs/README.md) (the point-in-time material) ·
+> [openspec/changes/README.md](openspec/changes/README.md) (what is still open vs archived).
 
 ## ⚙️ How we work — Spec-Driven Development + TDD (mandatory)
 
@@ -172,6 +176,17 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   single game. `dist-playtest` is deliberately NOT covered — it is emulator-bound by design.
   An unbuilt directory is skipped, never failed. Decisions are pure in
   `scripts/lib/backendOriginGuard.mjs`, unit-tested by `scripts/test-backend-origin-guard.ts`.
+- **`scripts/check-env-present.mjs`** (`npm run env:check -- <hosting|backend|all>`) — the
+  FAIL-FAST tripwire, wired as the FIRST step of `deploy:hosting` and `deploy:backend`, **before
+  any build**. Reads the gitignored source `.env` files directly and refuses to proceed if a
+  required one (`apps/creator-web/.env`, `apps/play-web/.env`, `functions/.env`) is missing, empty,
+  or still carries the `emulator-key` fallback. Exists because on 2026-08-27 a deploy ran from a
+  **git worktree** (which, like a fresh clone or a CI runner, carries none of those files) and
+  creator.rush-point.com shipped `apiKey: "emulator-key"` — nobody could sign in. `origin:check`
+  catches the same thing but only after ~4 full app builds and only if the deploy went through the
+  npm script; this is the cheap early check, `origin:check` stays as the post-build backstop.
+  **Only ever deploy from the main checkout**, or provision those `.env` files first. Pure logic in
+  `scripts/lib/envPresenceGuard.mjs`, unit-tested by `scripts/test-env-presence-guard.ts`.
 - **`scripts/backfill-public-tasks.mjs`** (`npm run backfill:public-tasks`) — operator entry point
   that drives the admin callable `backfillPublicTaskCoordinatesNow` to completion, repairing
   legacy `publicTasks` docs that still carry exact `coordinates`. **DRY-RUN by default**; a real
@@ -252,6 +267,21 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   hang wedged the gate forever. `RUSHPOINT_UNIT_CONCURRENCY=1` restores serial live-streamed output
   for debugging. Same lesson elsewhere: `npx <bin>` inside an npm script is pure overhead — npm
   already puts every workspace's and the root's `node_modules/.bin` on PATH.
+- **`scripts/measure-location-cost.mjs` + `scripts/fs-ops-report.mjs`** (the Firestore op counter,
+  change: spark-tier-location-load) — the Spark tier is capped at **50,000 reads / 20,000 writes a
+  day**, and the only honest way to argue about that is to COUNT. `functions/src/opCounter.ts` puts
+  the invoking callable's name in an `AsyncLocalStorage` context (entered once, inside
+  `loggedCallable`, so all ~112 callables are attributed through the one existing wrapper) and the
+  `docCache.ts` proxy tallies reads and writes against it; each invocation emits its own `fsops`
+  record into the structured log, which `fs-ops-report.mjs` aggregates. **Opt-in via
+  `RUSHPOINT_FS_OPCOUNT=1`, inert otherwise, and every hook is wrapped so a counting defect can
+  never fail the operation it is measuring.** Per-INVOCATION records rather than a process-global
+  tally is deliberate: the Functions emulator runs a `RuntimeWorkerPool`, so a global would be split
+  across worker processes and unreadable. `npm run measure:location` (piped through
+  `npm run fsops:report`) drives stationary / drifting / walking ping patterns separately — `simulate-run.mjs` never calls `updateLocation` at all, so it
+  cannot measure this. Pass `--cadence-ms=20000` (play-web's real cadence): firing pings back to
+  back lets the 60 s write interval suppress nearly everything and reports a saving no real run
+  would ever see.
 - **New pure suites in `npm test`** (each is a `scripts/test-*.ts` run by the aggregator):
   `test-bundle-budget` · `test-callable-hardening` · `test-emulator-reap` · `test-play-a11y-scan` ·
   `test-public-task-backfill` · `test-public-task-seed` (publicTasks privacy on the write path) ·
@@ -260,15 +290,29 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   `test-play-web-i18n-dictionary` · `test-i18n-leak` (the shared leak predicate + that both checkers
   import it) · `test-legal-routes` · `test-join-code` · `test-held-team-notice` ·
   `test-task-duration-defaults` · `test-build-artifact-guard` (asset base vs. serve path + the
-  playtest build/serve wiring) · `test-emulator-ports` (the offset resolver + the generated config) ·
+  playtest build/serve wiring) · `test-env-presence-guard` (the fail-fast deploy `.env`-presence
+  tripwire) · `test-emulator-ports` (the offset resolver + the generated config) ·
   `test-emulator-gate-isolation` (private hub locator + the free-ports sweep verdicts) ·
   `test-task-media-durability` (stored media survives a runtime whose accept-set refuses it) ·
   `test-task-media-repair` (the orphan-recovery planner) · `test-upload-origin-parity` (the
   canonical upload origin is declared identically in shared and functions/server.js) ·
   `test-hidden-search-area` (the coarse sealed-task circle + the play-web selector) ·
   `test-map-recenter` (the play map's recentre verdict) · `test-skip-single-task` (`planTaskSkip`) ·
+  `test-game-share-link` (the share-link token shape + the fail-CLOSED read/copy verdicts) ·
+  `test-shared-game-view` (the share projection: a deep sweep for every secret NAME and every secret
+  VALUE, plus a guard that a new `Task` field is projected or declared withheld) ·
+  `test-public-creator-path` (which creator-web routes render without signing in — a share link that
+  lands on the login screen is indistinguishable from a broken one) ·
   `test-gallery-task-detail` (the gallery mission detail view-model + its secrecy sweep) ·
-  `test-creator-tour` (the guided-tour step data, reducer and persistence). The runner
+  `test-creator-tour` (the guided-tour step data, reducer and persistence) ·
+  `test-location-ping-economy` (the ping write/retain verdicts, incl. every fail-open case) ·
+  `test-last-fix-store` (the in-process last-fix map + its eviction) ·
+  `test-firestore-op-counter` (per-callable read/write attribution under interleaved calls) ·
+  `test-fs-ops-aggregate` (the log aggregator, incl. refusing to invent a record) ·
+  `test-heatmap-sampling-fidelity` (a distance-sampled track still ranks cells like the
+  unsampled one — standing still must not become the hottest cell) ·
+  `test-creator-tap-targets` (every GLYPH-only `<button>` in creator-web declares a real
+  box — see the tap-target gotcha below). The runner
   **auto-discovers** every `scripts/test-*.ts` — drop a file in and it is in the gate.
 
 > ⚠️ **Stop with Ctrl+C** so `--export-on-exit` persists emulator data.
@@ -301,6 +345,14 @@ publicGames/{gameId}, publicTasks/{taskId}                   denormalized galler
                                                              exact `coordinates` key is never written.
 wallets/{uid}, wallets/{uid}/transactions/{txId}             creator credit ledger
 accessCodes/{CODE}                                           join-code → {ownerUid, gameId, runId}
+gameShareLinks/{token}                                       read-only SHARE link to a game, published or not
+                                                             (change: game-share-link). The document id IS the
+                                                             credential, exactly like accessCodes: the holder
+                                                             resolves owner+game FROM the address. Closed to
+                                                             clients in BOTH directions — an open read would
+                                                             list every live token on the platform. Nothing is
+                                                             written to publicGames/publicTasks: not publishing
+                                                             is the whole point.
 auditLogs/{id}                                               immutable admin trail (CF only)
 ```
 
@@ -322,7 +374,7 @@ helpers are **internal** (not triggers) — never re-export them.
 
 | Module | Callables |
 |---|---|
-| `games/index.ts` | createGame · updateGame · **deleteGame (SOFT: tombstone + 30-day trash)** · listDeletedGames · restoreGame · purgeGameNow · duplicateGame · publishGame · getGame · listGames · checkChallengeAnswer · translateGame · **exportGameFile** · **importGameFile** |
+| `games/index.ts` | createGame · updateGame · **deleteGame (SOFT: tombstone + 30-day trash)** · listDeletedGames · restoreGame · purgeGameNow · duplicateGame · publishGame · getGame · listGames · checkChallengeAnswer · translateGame · **exportGameFile** · **importGameFile** · **createGameShareLink** · **listGameShareLinks** · **revokeGameShareLink** · **getSharedGame** (games/share.ts; getSharedGame is PUBLIC — the second unauthenticated callable, declared in `PUBLIC_CALLABLES` with its reason, connection-keyed rate limit, and a copy-out projection instead of a strip-list. `duplicateGame` grew a `shareToken` door: the token resolves owner+game itself, so a caller cannot pair it with someone else's gameId) |
 | `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · **skipTaskForTeam (skips ONE mission for ONE team, stays in the stage)** · finalizeRun · refreshLeaderboard · getPublicLeaderboard · getRunRecap · getRunReplay · getRunAnalytics · getRunSummary · getRunHeatmap · listRunTeams · completeTask · requestNextTask · requestTaskHint · reportArrival · submitTaskAnswer · submitSequenceStep · getRecommendedTasks · checkOutTask · getMyTeamState · listLiveRuns · getMyProfile · createTrackable · getRunTrackables · pickUpTrackable · dropTrackable · startInstantPlay · createZone · deleteZone · getRunZones · captureZone · joinTeamAsDevice · transferController · claimController · submitRunFeedback · getRunFeedbackSummary · getRunSurveyResults · requestGuardianConsent · grantGuardianConsent · activateHotZone · deactivateHotZone · getRunDiscoveryPois · claimDiscoveryPoi · **onRunFinalized (Firestore trigger, not a callable)** |
 | `gallery/index.ts` | searchGallery · searchTaskLibrary · incrementTaskCopyCount · **setPublicLike** |
 | `payments/index.ts` | getWallet · getWalletStatus · purchaseCredits · subscribePro · claimReferral · stripeWebhook (onRequest) |
@@ -338,7 +390,7 @@ The key is derived from the connection, never from the payload) · **listContact
 audit logged, read at `apps/creator-web` `/admin/contact`; the collection is closed to clients in both
 directions) |
 | `admin/templates.ts` | **listGameTemplates** (the new-game menu: every admin-authored template, to any authenticated caller — projected through `TEMPLATE_LIST_FIELDS`, see the field-mask gotcha below) · **createGameFromTemplate** (instantiate one into the caller's own games) · **listAdminTemplates** · **setGameTemplateFlag** (admin-only authoring/curation) |
-| `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · **sendTeamChatMessage** · acknowledgeAlert · **clearTeamOutOfBounds** · pushAnnouncement · deactivateAnnouncement · pushFlashMission · **reactToFeedItem** · **reportFeedItem** · **hideFeedItem** · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore ·
+| `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · **sendTeamChatMessage** · acknowledgeAlert · **clearTeamOutOfBounds** · pushAnnouncement · deactivateAnnouncement · pushFlashMission · **reactToFeedItem** · **reportFeedItem** · **hideFeedItem** · verifyStationCode · submitStationPhoto · **attachSubmissionMedia** (the file for an auto-approved submission that was approved BEFORE it existed: `submitStationPhoto({mediaDeferred})` approves and routes the team on, play-web's `lib/backgroundMedia.ts` queue uploads in the background, persisted in IndexedDB, and attaches; change: background-media-upload) · reviewStationSubmission · adjustTeamScore ·
 **setRunTaskStatus** (pause/close/resume ONE task for ONE run) · listAuditLogs |
 | `routing/assignNextTask.ts` | (internal) `assignTask` · `buildRecommendations` · `computeSkillRatio` · `releaseTask` |
 | `scoring/` | `taskScore.ts`, `calculateScore.ts`, `scoringPresets.ts` (in shared), `stationVerification.ts` |
@@ -386,6 +438,18 @@ strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify vi
   shipped — `sanitizeTaskForParticipant` still builds the sealed stub by construction, so no
   `coordinates` / `geofenceRadiusMeters` / `smart` reaches it, and `reportArrival`'s server GPS
   verdict is still the only thing that unseals.
+- **Closing a mission mid-run is final; pausing is temporary** (change: live-task-close-rules). A
+  CLOSE takes the mission from every team that has not finished it (`applyTaskClosure`: `skipped`,
+  `skipCause: 'operator'` so what waited for it opens, `closedByOrganizer`, 0 points, requirement
+  lowered via `planTaskSkip`), moves a holder on with `team.closedTaskNotice`, and is applied to late
+  joiners in `joinRun`. A PAUSE never touches a team; what waits for a paused mission counts as
+  unavailable in `planTaskStatusChange`'s winnability check.
+- **Mission time limits** (change: mission-time-limit). `Task.timeLimitMinutes` is a countdown PER
+  TEAM from the claim (`RunTaskRecord.startedAt`), checked at every submission door
+  (`assertWithinTimeLimit`, 5 s grace) and swept on poll/requestNextTask (`skipCause: 'timeLimit'`,
+  `team.timeUpNotice`); a submission waiting for review is never swept. The phone gets
+  `activeTaskTimeLeftMs`, a duration. `Task.expiresAt` is an absolute close beside
+  `expiresAfterMinutes` (earlier wins, `schedule.ts`).
 - **Skip ONE mission for ONE team** — `skipTaskForTeam` (owner or run-scoped staff) marks a single
   task `skipped` with `earnedScore: 0`, releases its station slot, keeps the team **in the same
   stage** and, if the skip put `requiredTaskCount` out of reach, lowers that team's stored
@@ -581,8 +645,12 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   to **play-web**, which returns 200 with its own SPA HTML → the live creator console is a **blank
   page**. **(b) backend clobber** — `isEmulatorBuild` (`packages/shared/src/env.ts`) is
   `DEV || MODE === 'playtest'`, so ONLY the playtest bundle keeps the emulator wiring; `play:build`'s
-  production bundle points participants' phones at real Firebase, where anonymous auth is disabled
-  (`auth/admin-restricted-operation`) and nobody can join. Fixed structurally: `--mode playtest`
+  production bundle points participants' phones at real Firebase rather than at the emulator the
+  playtest is actually running. (At the time this was written anonymous auth was disabled on the
+  real project, so the symptom was `auth/admin-restricted-operation` and nobody could join.
+  Anonymous auth is ENABLED in production now — verified 2026-08-28 with a live
+  `accounts:signUp` — so the symptom today is subtler: phones sign in fine and then find none of
+  the playtest's data, which is worse to diagnose, not better.) Fixed structurally: `--mode playtest`
   builds to **`dist-playtest`**, the gate keeps **`dist`**, and both playtest previews pin
   `--outDir dist-playtest` (supported on the pinned Vite 5.4.21,
   `node_modules/vite/dist/node/cli.js:878`). So: **gate/deploy ⇒ `npm run creator:build` /
@@ -739,6 +807,103 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   on the VPS. Writes are intercepted on the single exported `db` handle rather than at the 216
   write call sites, and `scripts/test-doc-cache-interception.ts` fails the build if a module builds
   its own `admin.firestore()`.
+- **An `INTERNAL` from the load simulator is usually the EMULATOR timing out, not the product.**
+  `scripts/simulate-run.mjs` treats any player-facing `functions/internal` as a hard violation,
+  which is right — but the Functions emulator runs callables through a `RuntimeWorkerPool` on one
+  machine, and at `--teams=16` on a developer laptop it saturates and hits its own **60-second
+  function timeout**. That surfaces to the client as exactly the same opaque INTERNAL a real bug
+  would. Separate them by COUNTING: `grep -c 'Your function timed out' <log>` and
+  `grep -c 'socket hang up'` against the reported INTERNAL count — a 1:1 match across runs means
+  the emulator, not the code. Corroborate with `grep -c '"message":"callable.error"'`: a genuine
+  product error reaches `loggedCallable`'s error path and is logged, an emulator timeout never
+  does (observed: 253 `callable.ok`, 0 `callable.error`, 5 INTERNAL, 5 timeouts). Production is
+  the tiebreaker — a 100-team run against the VPS made ~11,000 callables with zero INTERNAL.
+  Fewer reads means shorter functions means fewer timeouts, so this signal gets BETTER as the
+  read cost drops: the pre-optimisation control timed out 21 times where the optimised build
+  timed out 5.
+- **The most expensive read in the product was invisible, because it was billed to someone else.**
+  `maybeRefreshLeaderboardSnapshot` runs INSIDE player callables on a 20 s throttle and used to
+  do an uncached `db.collection(teamsCol(...)).get()` — every team document, 225 times over a
+  75-minute run, ~27,450 reads at 120 teams against a 50,000/day ceiling. No call site looked
+  expensive; the cost showed up as `submitTaskAnswer` measuring 10.53 reads/call for three
+  documents of work. `listRunTeams` had already solved it with `cachedGetCollection` (which
+  re-reads only documents that were written) and the leaderboard refresh simply never adopted it.
+  Same for `resolveCallerTeam`, the most-CALLED read in the product: every participant callable
+  resolves its team through it, ~23,000 times per run at 120 teams, one uncached document read
+  each. **When a callable's measured read count exceeds the documents it obviously touches, look
+  for work running INSIDE it on a timer.** `scripts/test-hot-path-reads.ts` now declares which
+  hot-path reads must be cached, with the reason each is safe, and fails on a regression or a
+  rename — the same shape as `callableHardening.mjs` and `transactionRetry.mjs`.
+- **A projection built from a COMPRESSED simulation understates anything wall-clock-throttled.**
+  The first read budget measured per-call costs in a sim that packed 75 minutes into 10, so the
+  20 s leaderboard throttle and the 5 s console poll fired a fraction as often per unit of game
+  time as they really do — and the projection came out at 40,600 reads when the honest figure was
+  ~83,000. Per-call costs measured under compression are fine; **call FREQUENCIES must come from
+  the real intervals**, not from the harness's clock.
+- **A location ping is the highest-frequency write in the product, so its cost is a DESIGN
+  constraint, not an implementation detail.** `updateLocation` used to cost **2 writes + 3 reads per
+  ping** — and the third read was pure waste: `resolveCallerTeam` had already fetched the team
+  document and `updateLocation` destructured only `teamId` off it, then re-read the same doc for the
+  safe-zone check. At play-web's 20 s cadence that is 81,000 reads and 54,000 writes for 120 players
+  over 75 minutes: **location alone blew both Spark ceilings**, before a single mission, photo or
+  chat message. Now measured at **1.52 reads / 0.43 writes per ping** ⇒ ~41,000 reads and ~11,600
+  writes, inside both. Three levers, in order of size: (1) the pin is written at most once per 60 s,
+  with an immediate write on a jump beyond 75 m; (2) the duplicate team read is gone; (3) the game
+  doc (`safeZone`, immutable mid-run) goes through `cachedGetDoc`. Rules that must survive any future
+  edit here: **the last-fix state lives in an in-process `Map`** (`functions/src/lastFixStore.ts`,
+  modelled on `rateLimitStore.ts`) — reading `teamLocations` to decide whether to write
+  `teamLocations` would add back the read the change exists to remove, so this is now the **third**
+  module depending on the API running as ONE process (with `docCache.ts`, `rateLimitStore.ts`,
+  `runs/locationFreshnessCache.ts` and `trackStore.ts`;
+  see the single-process entry above). **Significance is judged against the fix's own accuracy
+  radius**, not a fixed metre threshold — a stationary phone with 20 m accuracy jitters 10–30 m, so
+  a flat 15 m rule would be defeated by noise; this mirrors what `safeZone.ts` already does for
+  boundary crossings. And **the safe-zone evaluation stays strictly UPSTREAM of the suppression
+  decision**: a stationary team standing OUTSIDE the zone must still raise a breach alert while its
+  position write is suppressed, and a suppressed ping from inside must still clear the flag. Those
+  are the two highest-value assertions in `scripts/e2e-verify.mjs` — never let a suppression path
+  reach the safety logic. Verdicts are pure and total in
+  `packages/shared/src/locationPingEconomy.ts`, failing toward WRITING on any malformed input.
+- **A per-ping history track makes a movement heatmap report the opposite of movement.** Retaining
+  a `locationTrack` point per ping meant the places teams **stood still** — at a task, in a queue —
+  became the hottest cells, at >10× a typical moving cell. Retention is now per ~100 m travelled,
+  which takes that distortion to ≤1.5× while keeping the busy-vs-quiet corridor ratio within 35% of
+  the unsampled map (`scripts/test-heatmap-sampling-fidelity.ts`). Sampling by DISTANCE is more
+  truthful here, not merely cheaper — don't "restore fidelity" by going back to per-ping.
+  **Follow-on, deliberately deferred:** a per-run opt-in (default off) would take the track to zero
+  writes for runs that never open the heatmap — it needs a `Game` setting, Builder UI, i18n and a
+  `BUILDER_EDITABLE_FIELDS` entry, which is why it was left out here rather than half-built
+  (design D4 of `spark-tier-location-load`).
+- **The distance sampling above exists ONLY to buy Firestore write quota — so where writes are
+  free, it is skipped entirely** (change: `vps-track-storage`). `functions/src/trackStore.ts`
+  appends the track to the VPS's own disk as one JSONL file per run when `RUSHPOINT_TRACK_DIR` is
+  set, recording EVERY ping; `getRunHeatmap` prefers that file and falls back to the Firestore
+  `locationTrack` collection when there is none. **But full fidelity is a WRITE-side decision
+  only** — `getRunHeatmap` runs `sampleTrackByDistance` (per team) before the points reach
+  `buildMovementDensity`. Skipping that reproduces the idle-cell distortion above exactly: a
+  smoke run with disk storage on measured `pointCount` going 3 → 6 while the team stood still.
+  More data is better raw material and worse input to an aggregator that counts points per cell.
+  Four things about it are load-bearing:
+  **(1)** `read()` returns `null` for "no file" but `[]` for "file exists and is empty" — the
+  fallback turns on `null`, so conflating the two would make a fresh disk-mode run look like a
+  legacy Firestore one and re-read Firestore for it. **(2)** Appends are serialised through a
+  per-run promise chain, NOT left to `fs.appendFile`'s POSIX atomicity: that guarantee only holds
+  below `PIPE_BUF`, and one added field on a track point could cross it silently. **(3)** The env
+  var must stay UNSET under the emulator and real Cloud Functions — this is the FIFTH module
+  resting on the single-process precondition (with `docCache.ts`, `rateLimitStore.ts`,
+  `lastFixStore.ts`, `runs/locationFreshnessCache.ts`) and the only one whose multi-process failure
+  is **corruption** rather than staleness. `pruneRunPII` deletes the disk file alongside the
+  Firestore sweep, unconditionally, so the 90-day promise holds in whichever mode recorded the run.
+  Pinned by `scripts/test-track-store.ts`.
+- **Device presence is in-process too — the SIXTH single-process module.**
+  `functions/src/devicePresenceStore.ts` remembers when each attached phone last called
+  `getMyTeamState` (zero Firestore reads or writes), and `getMyTeamState` returns it as
+  `devicePresence` so the other phones can tell the team its sending phone went quiet
+  (`senderQuiet` in `packages/shared/src/senderQuiet.ts`). Under several processes a phone would
+  look quiet to whichever worker never saw it, so the verdict fails OPEN: unknown or missing
+  presence (including an empty store after a restart) is NEVER "quiet". Same rule as the other
+  five — never run the API as more than one process while this is relied on. Pinned by
+  `scripts/test-device-presence-store.ts` + `scripts/test-sender-quiet.ts`.
 - **`enforceRateLimit` no longer persists anything.** It used to run a Firestore transaction (1
   read + 1 WRITE) on EVERY rate-limited callable — ~1,516 of each in nine minutes of one 29-person
   run, against a 50,000-read / 20,000-write daily quota, which is how the 2026-08-26 exam run hit
@@ -748,6 +913,107 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   keyed limiter, store each key's OWN window beside its state — looking the window back up by
   bucket name returns `undefined` for override budgets and unknown buckets, which reads as
   "elapsed" and deletes a LIVE exhausted key, turning the cap off for whoever is hammering hardest.
+- **A fail-safe is a claim about what a missing value MEANS, and an unrelated change can
+  quietly falsify it.** `computeLocationRelevant` (now
+  `apps/play-web/src/lib/locationRelevance.ts`) decided whether to run GPS and draw the map,
+  and treated an active-stage task record with no sanitized content as *"unknown, assume
+  located"* — correct when the client received every task in the stage. Wave D
+  (play-task-gating) then made `getMyTeamState` ship content only for `assigned`/`completed`
+  tasks, so an UNASSIGNED task has no content **by design** and its absence says nothing
+  about location. Every stage holding one unassigned task — essentially every stage of every
+  game — hit the fail-safe on its first iteration and returned TRUE unconditionally. The
+  feature became dead code while reading as perfectly healthy: both halves typecheck, the
+  predicate is total, and the symptom is a map that appears when it should not, which looks
+  exactly like a map. It cost every locationless game a dead 208px placeholder above the
+  mission, a **browser location permission prompt** asked of a family playing indoors, and a
+  live `watchPosition` with its `updateLocation` pings — the write CLAUDE.md elsewhere calls
+  a hard Spark-tier design constraint. Found by PLAYING the seeded all-locationless demo, not
+  by any gate. Two rules follow. **When you narrow what a payload carries, grep for every
+  reader that treats absence as information.** And when a decision latches, the latch and the
+  verdict are different values: the pre-payload "assume TRUE" is an absence of data, not an
+  observation, and latching it pins the flag ON forever — the first repair of this bug did
+  exactly that and reproduced it with new code. `scripts/test-location-relevance.ts` pins
+  both.
+- **Tailwind emits NOTHING for a colour token that does not exist, silently.** `bg-app` (the
+  token is `app-card`; bare `app` has never existed) sat on both reorder buttons of the
+  ordering task, rendering them as unfilled ghosts on a warm row — which reads as "disabled",
+  not "tap me". No signal anywhere: typecheck does not see class strings, eslint does not know
+  the theme, the a11y scan checks contrast between tokens that DID resolve, and a screenshot
+  shows a button that merely looks subtle. `scripts/test-brand-class-scan.ts` now fails on any
+  utility naming a token absent from the app's own `tailwind.config.js`, scoped to our own
+  namespaces (`app`/`rp`/`ink`/`glass`/`accent`/`danger`) so every finding is certain rather
+  than a guess about Tailwind's default palette.
+- **A house tap-target size is only real once it is DECLARED and GATED — the sibling drift
+  above happened again, in the other app.** An audit of creator-web found exactly the shape the
+  entry below describes: two ✕ buttons had been grown to a real 44×44 box, each with a comment
+  explaining why, while **fourteen siblings were still bare glyphs**. A text-styled `<button>`
+  with no size class is only line-height tall — ~16–20px, under the WCAG 2.2 AA floor of 24×24
+  CSS px — and among them were the button that DELETES A STAGE, every modal's close, the toast
+  dismiss and the map's topo⇄satellite switch. Nothing was loud: the class strings are valid,
+  every gate was green, and a screenshot shows a control that merely looks subtle. Fixed
+  structurally, the way play-web already had it: the sizes are declared ONCE in
+  `apps/creator-web/src/lib/interaction.ts` — `TAP_TARGET` (44×44, a control that owns its box),
+  `TAP_INLINE` (44×44 with `-m-2`, so a lone glyph in a dense row keeps a real hit area while
+  contributing only 28px of layout) and `TAP_CLUSTER` (36×36, the DOCUMENTED exception for
+  ADJACENT glyph controls, paired with `gap-2` — three 44px boxes plus gaps is 148px, which on a
+  375px phone pushes the row's own input off the useful part of the screen). They are plain
+  STATIC literals, never an interpolated class builder: Tailwind only sees static strings, so a
+  computed "44px" compiles to no CSS and silently renders at the old size.
+  `scripts/test-creator-tap-targets.ts` gates it, and is scoped to the ONE case that IS decidable
+  from source — a `<button>` whose entire content is a glyph has no text to give it size, so its
+  box is exactly what its own class string says. Anything with a word in it, a dynamic body, or a
+  `// tap-target-ignore` marker is skipped rather than guessed at. The guard imports the real
+  constants, so shrinking one fails the gate instead of moving the goalposts. Measured after the
+  fix in a real browser at 375px: close 44×44, cluster 36×36 at exactly 8px apart, and the
+  ordering row's input still 203px wide.
+- **A 44px tap-target fix applied to one control does not travel to its siblings.** The join
+  screen's staff button carries the comment *"Visually 11px to stay quiet, but a REAL 44px tap
+  target … styling it down to inline text shrank it to 17px."* Three links in the same
+  paragraph and the footer immediately below it still measured 17px, and the SOS alert's
+  "open the team's location" link in the staff console measured ~16px — the control a staff
+  member hits while responding to a distressed child. Measured, not guessed: the sizes come
+  from `getBoundingClientRect` in a real browser, which is the layout engine
+  `scripts/lib/playA11yScan.ts` correctly says a source scan does not have. A text-styled
+  `<a>`/`<button>` with no `min-h-` is line-height tall; use the house constants in
+  `apps/play-web/src/lib/interaction.ts`.
+- **Three independently-`fixed` overlays at three hardcoded top offsets is an overlap waiting
+  to happen.** The offline banner (top 0), power-up toast (0.75rem) and reconnect pill (2rem)
+  were each sized so that IT alone looked right, and are owned by two unrelated React trees,
+  so none could see the others; measured they span ~[0,28], ~[12,48] and ~[32,60]. Going
+  offline is precisely the event that raises the banner AND fails the poll. They now flow in
+  ONE fixed flex column (`.rp-top-stack`, `components/TopOverlays.tsx`), ordered by flex
+  `order` because portals mount in arbitrary sequence — so no combination can overlap however
+  many are added later. Related and separate: `viewport-fit=cover` + `display: standalone`
+  means an installed PWA/TWA draws UNDER the notch, and only those overlays folded in
+  `env(safe-area-inset-top)` — every page SHELL ran on a flat `pt-6`, putting the header
+  inside the cutout. Invisible in a browser tab, where the inset is 0 and browser chrome hides
+  it, so no desktop screenshot can ever show it. `.rp-safe-t` / `.rp-safe-t-flush` fix it;
+  `scripts/test-top-overlay-stack.ts` keeps every full-height shell declaring its intent.
+- **A `sm:`/`lg:` breakpoint asks about the WINDOW, so a component inside a fixed-width panel
+  must not use one — and a component that renders both floating and in-panel needs two
+  answers, not one.** The Quick Setup step card is rendered in two places: floating (it really
+  does span the viewport) and inline at the top of the mission editor's column, whose width is
+  `min(500px, calc(100vw - 1.5rem))`. It carried ONE class string with `sm:flex-row`. On a
+  1400px viewport that row applied to a 482px card, so the `shrink-0` action cluster — a full
+  Hebrew sentence plus two buttons and a close box — took ~250px and left the text ~230px,
+  wrapping three short sentences into six lines. Nothing was loud: the classes are valid, the
+  breakpoint is CORRECT for the floating variant, and every gate was green. Combined with two
+  pieces of unbounded authored prose (the mission's description and the template author's
+  note, both rendered open), the card measured **387px of the column's 510px — 76%, leaving
+  113px for the mission it was instructing about**. The creator's words were "it completely
+  hides the whole mission", and they were describing the arithmetic exactly. Three fixes, all
+  three needed to reach 201px / 39%: inline always stacks; the template note is a disclosure,
+  collapsed, reset per step INSIDE the component (neither call site keys it — the same
+  crossing-state failure this file records for TaskRunner's entry components, and a reset in
+  the component cannot be forgotten by a third call site); and the inline variant is capped at
+  `max-h-[45%] overflow-y-auto`, so the mission keeps the majority of its own column for prose
+  nobody has written yet. **Two rules generalise. A card that carries authored text of unknown
+  length, above the thing it is instructing about, must be BOUNDED — clamping or collapsing is
+  what makes it short in practice, a cap is what makes it short in principle. And when a
+  component's width comes from its container rather than the viewport, a media query is
+  answering the wrong question: branch on the placement prop, not the breakpoint.** Measured
+  in a real browser at 1400x620, 1000x620 and 390x740 — a source scan cannot know a rendered
+  height, which is why no gate saw any of it.
 - **`text-zinc-*` is REVERSED in creator-web** (`tailwind.config.js` maps `zinc-700` → `#d6d3d1`),
   a leftover from the dark theme. On the light "Warm Trail" surfaces that is pale grey on beige
   (~1.2:1) — the map search results looked like a disabled control, which is most of why search
@@ -777,6 +1043,177 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   creator-web already uses to reverse zinc). `scripts/test-marketing-theme.ts` reads the brand
   OUT of `apps/*/tailwind.config.js` and `creator-web/src/index.css` rather than restating it, so
   changing the brand in one place and not the other fails.
+- **Which host serves which app is NOT guessable from the app names** (change: marketing-to-apex,
+  2026-09-01). `rush-point.com` is the **marketing site**; the participant app is
+  `player.rush-point.com`; `www.` 301s to the apex. It was the other way round until this change,
+  so any doc, memory or habit that says "the apex is play-web" is stale. The origins are declared
+  ONCE each — `CANONICAL_PLAY_URL` / `CANONICAL_MARKETING_URL`
+  (`packages/shared/src/canonicalHosts.ts`) for the apps, `PLAYER_ORIGIN` / `SITE_ORIGIN`
+  (`apps/marketing/src/utils/i18n.ts`) for the marketing site — and
+  `scripts/test-canonical-hosts.ts` pins all three and fails if two ever name the same host.
+  **The apps' `.env` files override those constants** (`VITE_PLAY_URL`), so a host move that edits
+  only the constant ships nothing; see the `.env.local` entry above for the same class of trap.
+  Four things outside the repo carry this and no gate can see any of them: the Firebase Hosting
+  custom-domain assignment, the Cloudflare records, **Authentication → Authorized domains** (a
+  missing entry there locks every participant out of anonymous sign-in), and `ALLOWED_ORIGINS` on
+  the VPS (a missing entry makes every callable 403 while the app looks healthy). The Play Store
+  TWA is bound to its host by Digital Asset Links, which is why the apex still serves a copy of
+  `assetlinks.json` and why `apps/marketing/src/components/common/PlayerDeepLink.astro` forwards
+  `?code=` / `?game=` / `?board=` / `?staff` to the participant host: every link minted before the
+  move, printed QR codes included, still arrives at the apex.
+
+- **A user-initiated action that resolves "failed" and shows nothing is a DEAD BUTTON, and a
+  cancellation resolving "failed" is what makes call sites build one.** `navigator.share()` rejects
+  with `AbortError` when the player dismisses the OS sheet, which is the most common outcome of
+  tapping share. Five surfaces had each hand-rolled the same share/download/clipboard ladder and
+  only two mapped that to `'cancelled'`; the other three returned `'failed'`, so call sites
+  suppressed the notice on `'failed'` altogether to avoid a false "couldn't share" after every
+  cancel — and a GENUINE failure then showed nothing at all, on the finish screen the whole viral
+  loop runs through. `PlayScreen`'s mid-run brag ignored the result entirely and was silent on
+  every outcome, success included. The ladder now lives once in
+  `apps/play-web/src/lib/shareLadder.ts`, always returns the full five-member union, and
+  `shareOutcomeFeedback` turns it into confirm / silent / visible-fallback. **Adding a share
+  surface means calling `routeShare`, never re-deriving the sequence.** Two traps it also closes:
+  `URL.revokeObjectURL` on the same tick as `a.click()` races the browser's read of the blob and
+  silently downloads NOTHING outside Chrome (the creator's four exports had it too, GDPR "export my
+  data" included — `apps/creator-web/src/lib/downloadFile.ts` now owns that, plus the Excel BOM);
+  and `if (nav.share)` is always-true to TypeScript, because lib.dom types `Navigator.share` as
+  REQUIRED, so the capability check has to be a runtime `typeof`. Pinned by
+  `scripts/test-share-ladder.ts` + `scripts/test-download-file.ts`.
+- **React keys only have to be unique among SIBLINGS — and two siblings keyed to the same id is
+  UNDEFINED behaviour, not a lint nit.** `<ExpiryCountdown key={task.id}>` and
+  `<MissionExtras key={task.id}>` are both direct children of the same `<Card>` in `TaskRunner`,
+  each keyed to force a per-mission remount, each with a comment explaining why. Together they gave
+  one parent two children with the identical key: React logged *"Encountered two children with the
+  same key … may cause children to be duplicated and/or omitted"* twelve times on the first mission
+  of the flagship demo, which voids the exact guarantee both keys were added for. Prefix them
+  (`expiry-${task.id}`, `extras-${task.id}`). Found by RUNNING the app — no gate sees it, because it
+  is a console warning in a render that otherwise looks healthy.
+- **TaskRunner does not remount between missions, so an entry component's local state crosses the
+  mission boundary unless it is keyed.** The parent resets itself with
+  `useEffect(…, [assignedRec?.taskId])` — that is the proof the instance survives. Two of the nine
+  entry components were keyed (each with a comment describing this failure for its own case) and
+  seven were not, so the number typed for the previous numeric task, the station code, the
+  half-typed sequence answer and — worst — `PhotoEntry`'s captured `file` AND `preview` survived
+  into the next mission, primed to submit. A player photographs mission A, a staff skip routes them
+  to mission B, and B is already holding A's picture with nothing on screen saying it is stale.
+  Every branch of that JSX now carries `key={task.id}`; `scripts/test-task-entry-keying.ts` fails
+  when a new task type is added without one.
+- **A `disabled` primary button explains nothing, cannot fire, and therefore cannot tell the user
+  what it wants.** The join form's submit was disabled while any required field was blank, so a
+  group standing in a car park with one phone tapped the big orange button and it simply did not
+  respond — the submit path that highlights the missing field is unreachable by construction, and
+  `disabled` also removes the control from the tab order. It stays ENABLED now and ANSWERS:
+  `joinReadiness` (`apps/play-web/src/lib/joinReadiness.ts`) names what is missing, marks every
+  offending field, and focuses the first in visual order. The Builder had already reached the same
+  conclusion for its mission editor ("Never disabled: the first press reveals every unrevealed
+  blocker"); the rule simply had not travelled. **Prefer an answering button to a disabled one
+  wherever the reason is not visible right beside the control.**
+- **Readiness that measures only STRUCTURE will call an unauthored game launch-ready.** The four
+  original codes checked shape (a stage with tasks, an answer key, a pin, a winnable count) and
+  nothing checked that anything had been NAMED — while `canGoNext('details', …)` in the very same
+  Builder refuses to advance past an empty mission title. So closing the auto-opened editor with ✕
+  left an untitled mission and the panel announced "everything is ready to launch"; players see
+  `task.title` verbatim, i.e. a mission with a blank heading. `taskNotNamed` is a blocking issue
+  now, and deliberately NOT a test-drive blocker (rehearsing is when a creator is still naming
+  things, and `launchRun` accepts it). **A new readiness rule changes what can LAUNCH — decide
+  explicitly whether it is hard or soft, and add it to `TEST_DRIVE_HARD_CODES` or not.**
+- **`dialog.confirm(message, confirmLabel, danger)` puts its SECOND argument on the BUTTON.** The
+  Run Console wanted a heading, the dialog had no title slot, so `rc.confirmTitle` went there — and
+  every confirmed run action offered a button reading *"Before you go ahead"*: start all teams,
+  publish the standings, reveal the standings, end the run. Ten actions, most classified by the
+  console itself as irreversible, none of whose buttons named the action, on the screen a host uses
+  under time pressure. The dialog has a real `title` slot now and each action a verb
+  (`rc.confirmCta`); `scripts/test-confirm-cta.ts` fails if an action gains `confirm: true` without
+  gaining one.
+- **A permission that is written and never read is not a permission.** Staff invites carried a
+  `permissions` array from day one; no gate ever consulted it, so every staff PIN could add points,
+  skip missions and read teams' survey answers. The organizer found out by asking for the feature.
+  Since change `staff-capabilities`, every callable that admits staff calls
+  `assertStaffCan(context, ownerUid, runId, '<capability>')` (`functions/src/auth.ts`), which resolves
+  the person's grant and code LIVE, and the capability is declared once in
+  `STAFF_CAPABILITY_BY_CALLABLE` (`packages/shared/src/staffCapabilities.ts`).
+  `scripts/test-callable-hardening.ts` (C6) fails on a bare `assertStaffOrOwner` in a callable, on a
+  gate whose capability disagrees with the table, and on a stale table entry. **A new staff-reachable
+  callable ⇒ add it to the table and gate it with `assertStaffCan`; an inline `token.staff` check is
+  the same hole again.** Two traps closed with it: a refusal carries its reason in the HttpsError
+  `details` (`staffRefusal`), never the message, because `permission-denied` otherwise reads as an
+  expired session and sends a marshal to a PIN screen that cannot help; and an invite minted before
+  the change has NO `capabilities` field, which means FULL, so a run live at deploy time keeps its staff.
+- **A safety callable with two entry points will drift, and the silent one is the dangerous one.**
+  `triggerSOS` is called from PlayScreen's SOS button (which always alerted on failure) and from
+  TaskRunner's "I'm stuck" affordance, whose catch read `/* let the player tap again; nothing
+  persisted */`. Nothing WAS persisted — that is the problem: `setHelpSentFor` is only reached on
+  success, so a failed distress call left the button and the screen unchanged, for a player who is
+  already stuck. Same shape in StaffConsole's chat reply ("the listener reconciles" is false for a
+  message that was never sent). `scripts/test-safety-call-feedback.ts` declares both call sites.
+- **A default that equals the label beside it is a duplicate, not a default.** `stageLabel(n)` and
+  `stageDefaultTitle(n)` are both the same string, and the stage rail draws them side by side, so
+  every stage read "שלב 1  שלב 1" until renamed — on a `max-w-[60vw]` phone pill that truncates, so
+  half a scarce line repeated what was already on it. Fixed as a DISPLAY rule
+  (`apps/creator-web/src/lib/stageRailTitle.ts`), not a data change: rewriting the stored default
+  would leave every existing game duplicating, and `stage.title` is read by several surfaces that
+  read better with a real value. The blank-game default was also a hardcoded Hebrew literal, i.e. a
+  Hebrew stage title shipped to an English creator.
+- **A tour step that cannot reach its surface must not be shown seven times.** `tourNavIntent`
+  correctly turns every Builder step into `awaitAction` for a creator with no game — but there are
+  SEVEN consecutive Builder steps, so Next walked a brand-new creator through seven cards carrying
+  the identical prompt, pointing at the same button, none able to show what they described. The
+  prompt said the game was needed *to continue* while Next continued anyway. A blocked RUN is one
+  situation, not seven: `nextReachableTourIndex` lands on the first reachable step, and the button
+  says "Continue without it" rather than "Next".
+- **`npm run verify` piped into `head`/`tail` reports the PAGER's exit code.** This file already
+  says it for `verify:emulator`; it bit again here, in the shape
+  `npm run verify > log 2>&1; echo "EXIT=$?"; grep … | head`. The harness reported exit 0 for the
+  pipeline while the unit lane had in fact been failing for several changes in a row. Redirect,
+  make the `$?` capture the LAST statement, and read the number — never trust a summary line.
+- **Editing files with a tool that rewrites line endings turns a five-line change into a whole-file
+  diff.** Python's text-mode write translates `\n` to `os.linesep`, so on Windows a scripted edit can
+  flip a file LF→CRLF; with `core.autocrlf=false` and no `.gitattributes`, git then stores the flip.
+  It made a 65-line TaskRunner change read as 5,041 changed lines and buried the real edit. Use
+  `newline=''` (or write bytes) for any scripted edit.
+  **This tree is MIXED, so "is it LF?" is the wrong question** — plenty of files are legitimately
+  CRLF in HEAD (creator-web's `i18n.ts`, `DashboardPage.tsx`, `creatorOnboarding.ts`,
+  `services/calls.ts`, several `scripts/test-*.ts`), and "normalising" those would itself be churn.
+  The right check compares a file against ITS OWN HEAD — `git show HEAD:<f> | tr -cd '\r' | wc -c`
+  against the same count on the working copy — or just read `git diff --numstat`: a whole-file
+  `+N -N` where the edit was five lines is the tell. A repo-level `.gitattributes` with
+  `* text=auto eol=lf` would end the ambiguity, at the cost of one normalising commit.
+- **A hash that folds each character into the LOW bits collides structurally on SHORT inputs, and
+  short inputs are the realistic ones.** `hashAnswerForReplay` used djb2 (`h1*33 ^ c`) plus a
+  Bernstein-ish roll (`h2*31 + c`). Both are linear enough that a difference in an early character
+  is exactly cancelled by a difference in a later one — `31·c₁ + c₂` is equal whenever c₁ moves by
+  1 and c₂ by −31 — so `"0p"`/`"22"`, `"1p"`/`"32"`, `"1q"`/`"33"` all hashed the same. **16
+  collisions in the exhaustive 1-2 character space; 4,572 across the 100,000 shortest base36
+  strings**, under a doc comment promising "vanishingly unlikely". Long wordy answers were clean,
+  which is exactly why it went unnoticed: numeric replies and short codes are what collide, and
+  they are what players actually type. `submitTaskAnswer` compares this hash to the team's stored
+  `lastHash` to recognise a replay and returns early with "no attempt recorded, no points charged,
+  no cooldown" — so two different wrong answers in a row that collide hand out a free wrong guess
+  and quietly weaken the attempt cap the replay guard's own comment leans on ("a brute-forcer
+  submits DIFFERENT answers by definition"). Now FNV-1a for h1 and a murmur3 round for h2 (each
+  multiplies the WHOLE word every step, so one bit avalanches) plus an fmix finalizer keyed on the
+  length, zero-padded to a fixed 14 chars so the two halves cannot bleed into one another. Zero
+  collisions across every space measured. **A finalizer alone does not fix this** — it is a
+  per-value function, so inputs that already agree still agree; the mixing has to happen inside the
+  loop. Two lessons beyond the hash: the property lane's `N = 300` is a floor, not a proof (raising
+  it is how this surfaced, and the short-input case wants an EXHAUSTIVE sweep rather than sampling);
+  and that test's own collision assertion compared RAW strings, so two inputs that normalize to the
+  same answer — which SHOULD share a hash — would have failed it for the wrong reason.
+- **The port-offset lane removes PORT contention, not CPU contention — and the load sim fails on
+  CPU.** `RUSHPOINT_EMULATOR_PORT_OFFSET=1000 npm run verify:emulator` really does run beside a live
+  stack without fighting for 8080/9099/5001, but it is still the same laptop. Run beside `dev:all`
+  (its own emulator + two Vite servers + a browser) the gauntlet reached the load sim and reported
+  `VIOLATION no player callable surfaced INTERNAL under load :: 2× [completeTask]`, exit 1. Nothing
+  was wrong with the product: the documented diagnostic separated it cleanly — **2 INTERNAL = 2
+  "Your function timed out" = 2 "socket hang up"**, the timeouts were on `onRunFinalized` (a
+  background trigger, not the callable that surfaced INTERNAL), and of 326 logged `callable.error`
+  records **zero** carried `errorCode: "internal"`, i.e. no product code threw. Re-running the same
+  phase with the dev stack stopped: `✅ LOAD SIM CONSISTENT`, 0 INTERNAL, 0 timeouts, and **68s of
+  wall time against 131s** — the second number is the tell, because it says the machine, not the
+  code, was the variable. So: the offset lane is for a gate that must not DISTURB a live playtest;
+  it is not a way to get a trustworthy `simulate` result while the machine is busy. Stop the other
+  stack before believing a load-sim violation, and always run the 1:1:1 count before chasing one.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

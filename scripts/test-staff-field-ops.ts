@@ -4,7 +4,7 @@
 import {
   BONUS_REASONS, PENALTY_REASONS, OTHER_REASON,
   reasonsForDelta, resolveReason, parseAdjustAmount,
-} from '../apps/play-web/src/lib/scoreReasons';
+} from '../packages/shared/src/scoreReasons';
 import { filterTeamsByName, teamNeedsAttention } from '../apps/play-web/src/lib/staffTeamFilter';
 
 let passed = 0;

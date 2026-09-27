@@ -14,7 +14,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
-import { CANONICAL_PLAY_URL, CANONICAL_CREATOR_URL, LEGACY_FIREBASE_HOSTS } from '../packages/shared/src/canonicalHosts';
+import { CANONICAL_PLAY_URL, CANONICAL_CREATOR_URL, CANONICAL_MARKETING_URL, LEGACY_FIREBASE_HOSTS } from '../packages/shared/src/canonicalHosts';
 
 let passed = 0;
 let failed = 0;
@@ -54,10 +54,18 @@ if (offenders.length) offenders.forEach((o) => console.error(`  ✗ ${o}`));
 ok(offenders.length === 0, 'no app source links to a Firebase default host');
 
 // The constants themselves must stay on the real domain.
-ok(CANONICAL_PLAY_URL === 'https://rush-point.com', 'CANONICAL_PLAY_URL is the real play domain');
+ok(CANONICAL_PLAY_URL === 'https://player.rush-point.com', 'CANONICAL_PLAY_URL is the real play domain');
 ok(CANONICAL_CREATOR_URL === 'https://creator.rush-point.com', 'CANONICAL_CREATOR_URL is the real creator domain');
-ok(!LEGACY_FIREBASE_HOSTS.some((h) => [CANONICAL_PLAY_URL, CANONICAL_CREATOR_URL].some((u) => u.includes(h))),
-  'neither canonical URL is a Firebase default host');
+ok(CANONICAL_MARKETING_URL === 'https://rush-point.com', 'CANONICAL_MARKETING_URL is the apex');
+ok(!LEGACY_FIREBASE_HOSTS.some((h) => [CANONICAL_PLAY_URL, CANONICAL_CREATOR_URL, CANONICAL_MARKETING_URL].some((u) => u.includes(h))),
+  'no canonical URL is a Firebase default host');
+
+// The apex belongs to the marketing site (change: marketing-to-apex). The three
+// origins must stay DISTINCT: the bug this guards against is a half-finished
+// migration where the participant app and the marketing site both claim the apex,
+// which serves whichever one was deployed last and looks fine in every test.
+ok(new Set([CANONICAL_PLAY_URL, CANONICAL_CREATOR_URL, CANONICAL_MARKETING_URL]).size === 3,
+  'the three canonical origins are distinct hosts');
 
 console.log(`canonical-hosts: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

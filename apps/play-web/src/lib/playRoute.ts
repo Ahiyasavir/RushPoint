@@ -23,6 +23,7 @@
 // is authoritative here, the route is ONE discriminated union, and the params a
 // route consumes can never be re-read by a later branch.
 
+import { normalizeDeviceCode } from './deviceJoinLink';
 import { parseChallengeParam } from '@rushpoint/shared';
 
 /**
@@ -78,7 +79,7 @@ export type PlayRoute =
    * only alongside a code — "join this without making me fill the form". Absent
    * everywhere else, so a real participant's link resolves exactly as before.
    */
-  | { kind: 'join'; code: string | null; autoJoin?: boolean };
+  | { kind: 'join'; code: string | null; autoJoin?: boolean; deviceCode?: string };
 
 export interface PlayRouteInput {
   /** `window.location.search`, with or without the leading `?`. */
@@ -212,6 +213,9 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
   // Only ever consulted together with `linkCode` below — a bare `?testdrive` with
   // no code is meaningless and must not change any route.
   const autoJoin = p.has(TEST_DRIVE_ROUTE_PARAM);
+  // "Add a phone" (change: team-phones-simple): `&join=<DEVICECODE>` beside the run code turns
+  // the join screen into "join team <name>". Meaningless without a run code, like `testdrive`.
+  const deviceCode = normalizeDeviceCode(p.get('join')) || undefined;
 
   // 1. Staff — highest precedence, and it CONSUMES owner/game/run so no later
   //    branch can re-read `game` as a promo id. A staff link never touches the
@@ -253,7 +257,7 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
   //    (and, per the guard above, a stored staff session too).
   if (linkCode) {
     const sessionCode = normCode(session?.code);
-    if (!session) return { route: { kind: 'join', code: linkCode, autoJoin }, clearSession: false };
+    if (!session) return { route: { kind: 'join', code: linkCode, autoJoin, ...(deviceCode ? { deviceCode } : {}) }, clearSession: false };
     // Same run → a no-op resume. This is the load-bearing case: re-scanning the
     // team's own QR mid-event must not drop their progress. A finished run with
     // the same code also resumes, so the player keeps their results screen.
@@ -261,7 +265,7 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
       return { route: { kind: 'play' }, clearSession: false };
     }
     // Different run (or a session with no code at all) → the URL wins.
-    return { route: { kind: 'join', code: linkCode, autoJoin }, clearSession: true };
+    return { route: { kind: 'join', code: linkCode, autoJoin, ...(deviceCode ? { deviceCode } : {}) }, clearSession: true };
   }
 
   // 8. No code in the URL → a stored session simply resumes.

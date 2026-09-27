@@ -78,6 +78,15 @@ rushpoint/
 │   │       ├── services/{firebase.ts, calls.ts}   # offline cache, Storage upload, typed calls
 │   │       └── store.ts                # session + staff-session persistence
 │   │
+│   ├── marketing/                    # Astro static site — rush-point.com (the APEX is marketing;
+│   │   └── src/                      #   the participant app is player.rush-point.com)
+│   │       ├── pages/[lang]/         # bilingual routes: index · story · blog · contact · rss.xml
+│   │       ├── copy/ · data/         # page + post content, kept out of the components
+│   │       ├── components/common/PlayerDeepLink.astro  # forwards ?code=/?game=/?board=/?staff
+│   │       │                         #   to the participant host, so pre-move links still land
+│   │       ├── utils/i18n.ts         # PLAYER_ORIGIN / SITE_ORIGIN — pinned by test-canonical-hosts
+│   │       └── assets/styles/tailwind.css  # ⭐ the SCALES are redefined here; repointing only the
+│   │                                 #   --aw-color-* tokens leaves the vendored template's navy
 │   └── mobile/                       # ⚠️ ARCHIVED v1 Expo app — not in workspaces, not maintained
 │
 ├── functions/
@@ -143,12 +152,29 @@ rushpoint/
 │   ├── lib/playA11yScan.ts        # pure a11y source scan of play-web .tsx (RTL classes, icon buttons)
 │   ├── lib/i18nLeak.ts            # ⭐ the ONE HE/EN leak predicate — imported by check-i18n.ts AND
 │   │                              #   test-i18n-parity.ts; never re-implement it in a checker
-│   └── test-*.ts                   # unit tests — AUTO-DISCOVERED by run-unit-tests.mjs, so a new
-│                                   #   scripts/test-*.ts is in `npm test` with no registration
+│   ├── test-*.ts                   # unit tests — AUTO-DISCOVERED by run-unit-tests.mjs, so a new
+│   │                               #   scripts/test-*.ts is in `npm test` with no registration
+│   └── README.md                   # ⭐ index: what every script in here is, and which are [one-off]
+│
+├── openspec/
+│   ├── specs/                       # ⭐ the LIVING specs — what the platform is required to do
+│   ├── changes/                     # in-flight changes, one flat folder each (see changes/README.md)
+│   ├── changes/archive/             # completed changes, folded into specs/, named <date>-<change>
+│   └── config.yaml                  # project context + the per-artifact rules driving the SDD flow
+│
+├── docs/                            # point-in-time material: audits, playtests, waves, marketing
+│                                    #   assets, design reviews. Index + staleness notes in docs/README.md
+├── e2e-ui/                          # Playwright UI specs (playwright.config.ts at the root)
+├── deploy/                          # VPS material: Caddyfile, bootstrap.sh, systemd units/timers
+├── autopilot/                       # ⚠️ untracked, DISABLED experiment (see autopilot/DO_NOT_RUN.md)
 │
 ├── firestore.rules · storage.rules · firestore.indexes.json · firebase.json
+├── Dockerfile.api · docker-compose.api.yml · Caddyfile.api · api.env.example  # the self-hosted API
+├── twa-manifest.json + the Bubblewrap Android output (app/ build/ gradle* *.apk *.aab
+│                                    #   android.keystore) — all gitignored; see PLAY_STORE.md
 ├── turbo.json · package.json (npm workspaces)
-└── CLAUDE.md · INSTRUCTIONS.md · TECH_SPEC.md · STATUS.md · STRUCTURE.md
+└── CLAUDE.md · INSTRUCTIONS.md · TECH_SPEC.md · STRUCTURE.md · DEPLOY.md · PLAYTEST.md ·
+    PLAY_STORE.md · LAUNCH.md · PAYMENT_SETUP.md · RUN_ON_VPS.md · VPS_UPLOADS.md
 ```
 
 **Quick map — "where do I change X?"**

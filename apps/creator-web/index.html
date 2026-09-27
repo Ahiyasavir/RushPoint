@@ -71,7 +71,21 @@
         });
       })();
     </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `interactive-widget=resizes-content` (change: creator-mobile-mechanics):
+         by default the on-screen keyboard FLOATS over an unchanged layout
+         viewport, so the Builder's bottom-anchored mission sheet kept its
+         pre-keyboard height and its footer (הבא / save / delete) ended up
+         underneath the keyboard — the primary action disappearing at exactly the
+         moment it is needed. Asking the browser to resize the layout instead
+         means the sheet's own dvh cap shrinks with it.
+
+         Deliberately NO `maximum-scale` and NO `user-scalable=no`. Both would
+         stop the iOS focus-zoom this console suffers from, and both would do it
+         by taking pinch zoom away from every person who needs it. The zoom is
+         fixed properly, with a 16px floor under the form controls themselves
+         (src/index.css); scripts/test-mobile-form-zoom.ts fails if anyone
+         reaches for the shortcut later. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#050508" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -91,15 +105,15 @@
     <!-- Fonts: preconnect first so the stylesheet request is non-blocking -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@200..800&family=Rubik:wght@300..900&family=JetBrains+Mono:wght@400;500&display=swap" />
     <!-- NO HYPHEN OR DASH may appear in any of the copy below. This is the product's
          UI text standard (change: ui-no-dashes), and page metadata is the copy with
          the WIDEST reach: it is what Google prints. It shipped with em dashes anyway,
          because the standard's gate only scanned the t.* dictionaries and component
          source, and a <title> lives in neither. PART C of scripts/test-no-dashes.ts now
          scans this file plus the manifest, so a dash here fails `npm test`. -->
-    <title>RushPoint: build your own real world field game</title>
-    <meta name="description" content="Design a scavenger hunt or amazing race anywhere in your city, launch a live run, and let RushPoint route every team and score them automatically. No code required." />
+    <title>בונים מירוץ חי משלכם, RushPoint</title>
+    <meta name="description" content="מעצבים תחנות ומשימות בכל מקום, בשטח או בבית, מפעילים מירוץ חי, והמערכת מנתבת כל קבוצה ומנקדת אותה אוטומטית. בלי לכתוב שורת קוד." />
     <!-- Canonical URL. Firebase serves this console at its *.web.app and
          *.firebaseapp.com defaults too; the inline redirect above sends humans to the
          custom domain, but a crawler that reaches a default host needs this tag to
@@ -112,16 +126,16 @@
     <meta property="og:url" content="https://creator.rush-point.com/" />
     <meta property="og:locale" content="he_IL" />
     <meta property="og:locale:alternate" content="en_US" />
-    <meta property="og:title" content="RushPoint: build your own real world field game" />
-    <meta property="og:description" content="Build a real world team game, share one join code, and watch the live leaderboard score itself." />
+    <meta property="og:title" content="בונים מירוץ חי משלכם, RushPoint" />
+    <meta property="og:description" content="בונים מירוץ קבוצתי אמיתי בכל מקום, משתפים קוד הצטרפות אחד, והטבלה החיה מתנקדת לבד." />
     <meta property="og:image" content="https://creator.rush-point.com/og.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="The RushPoint field game builder" />
+    <meta property="og:image:alt" content="בונה המירוצים החיים של RushPoint" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="RushPoint: build your own real world field game" />
-    <meta name="twitter:description" content="Build a real world team game, share one join code, and watch the live leaderboard score itself." />
+    <meta name="twitter:title" content="בונים מירוץ חי משלכם, RushPoint" />
+    <meta name="twitter:description" content="בונים מירוץ קבוצתי אמיתי בכל מקום, משתפים קוד הצטרפות אחד, והטבלה החיה מתנקדת לבד." />
     <meta name="twitter:image" content="https://creator.rush-point.com/og.jpg" />
     <!-- Structured data. Tells Google WHAT this is (a web application, free to start,
          for organising real world team games) rather than leaving it to infer from prose
@@ -136,7 +150,7 @@
         "applicationCategory": "GameApplication",
         "operatingSystem": "Any",
         "inLanguage": ["he", "en"],
-        "description": "Build and run real world team field games: scavenger hunts, amazing race style routes and geolocated missions, scored automatically with a live leaderboard.",
+        "description": "בונים ומריצים מירוצי משימות קבוצתיים אמיתיים, בכל מקום, ציד מטמון ומשימות עם מיקום, עם ניקוד אוטומטי וטבלה חיה.",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "ILS" },
         "featureList": [
           "Visual game builder with staged missions",

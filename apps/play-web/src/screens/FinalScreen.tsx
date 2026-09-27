@@ -13,6 +13,8 @@ import { fireConfetti } from '../lib/confetti';
 import { feedback } from '../lib/sound';
 import { creatorUrl } from '../lib/creatorUrl';
 import { shareCardLabels } from '../lib/shareCardLabels';
+import { shareOutcomeFeedback, type ShareOutcome } from '../lib/shareFeedback';
+import { loadChunk } from '../lib/loadChunk';
 import LegalFooter from '../components/LegalFooter';
 import { LoadingView } from '../components/LoadingView';
 
@@ -64,7 +66,15 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
     }
   }
   const hintsUsed = team.taskHintsUsed?.length ?? 0;
-  const [shared, setShared] = useState(false);
+  // One note for all three share buttons (change: share-ladder-unification).
+  // 'ok' = it genuinely landed; 'copied' = the channel failed and we put the link
+  // on the clipboard instead; null = nothing to say, which now means ONLY "the
+  // player dismissed the OS share sheet". Before this, a cancellation and a real
+  // failure both resolved to 'failed' and both stayed silent, so a broken share
+  // was indistinguishable from a dead button — on the one screen that carries the
+  // whole viral loop.
+  const [shareNote, setShareNote] = useState<'ok' | 'copied' | null>(null);
+  const shared = shareNote === 'ok';
 
   // Celebrate the finish once — a brand-colored confetti burst plus the existing
   // mute-gated rank-up sound+haptic, timed to land with the score-pop. Reduced-motion
@@ -79,6 +89,17 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
     return () => window.clearTimeout(id);
   }, []);
 
+  // Auto-hide, keyed on the note VALUE rather than scheduled inside noteShare.
+  // Three buttons share this note, so two shares in quick succession would
+  // otherwise leave the first call's pending timeout alive to clear the second
+  // call's note early. Same shape as PlayScreen's toast timer, for the same
+  // reason recorded there.
+  useEffect(() => {
+    if (!shareNote) return;
+    const id = window.setTimeout(() => setShareNote(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [shareNote]);
+
   // A team photo to offer as a branded individual share (share-branding).
   const firstPhotoUrl = (() => {
     const subs = (team as { taskSubmissions?: Record<string, { photoUrl?: string }> }).taskSubmissions;
@@ -90,10 +111,27 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   // Top-3 podium for the reveal + the branded podium share (podium-share-moment).
   const { podium } = selectPodium(board?.rankings ?? [], team.id);
 
+  // Every share button reports through here, so no surface can quietly go dead
+  // again. `fallbackLink` is what lands on the clipboard when the channel failed.
+  async function noteShare(result: ShareOutcome, fallbackLink: string) {
+    const verdict = shareOutcomeFeedback(result);
+    if (verdict === 'silent') return; // the player dismissed the sheet
+    if (verdict === 'fallback') {
+      try { await navigator.clipboard.writeText(fallbackLink); } catch { /* still show the notice */ }
+      setShareNote('copied');
+    } else {
+      setShareNote('ok');
+    }
+  }
+
   async function sharePodiumFn() {
     if (podium.length === 0) return;
-    const { sharePodium } = await import('../lib/podiumCard');
-    await sharePodium(podium, {
+    // A redeploy renames this chunk; a tab on the old shell 404s it. Degrade to
+    // the ordinary failure notice rather than an unhandled rejection and a dead
+    // button (change: handler-chunk-resilience).
+    const mod = await loadChunk(() => import('../lib/podiumCard'));
+    if (!mod) { await noteShare('failed', creatorUrl()); return; }
+    const result = await mod.sharePodium(podium, {
       gameName: game.branding?.name ?? game.title,
       ctaUrl: creatorUrl(),
       title: shareCardLabels(t.final, isTimeOnly).podiumTitle,
@@ -102,13 +140,15 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
       }),
     });
+    await noteShare(result, creatorUrl());
   }
 
   async function sharePhotoFn() {
     if (!firstPhotoUrl) return;
     const playBase = window.location.origin;
-    const { sharePhoto } = await import('../lib/sharePhoto');
-    await sharePhoto(firstPhotoUrl, {
+    const mod = await loadChunk(() => import('../lib/sharePhoto'));
+    if (!mod) { await noteShare('failed', creatorUrl()); return; }
+    const result = await mod.sharePhoto(firstPhotoUrl, {
       playBaseUrl: playBase,
       gameId: (game as { id?: string }).id ?? null,
       urlText: creatorUrl().replace(/^https?:\/\//, ''),
@@ -117,6 +157,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
       }),
     });
+    await noteShare(result, creatorUrl());
   }
 
   async function share() {
@@ -131,8 +172,9 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         url: creatorUrl().replace(/^https?:\/\//, ''),
       });
       const labels = shareCardLabels(t.final, isTimeOnly);
-      const { shareStoryCard } = await import('../lib/storyCard');
-      const result = await shareStoryCard({
+      const mod = await loadChunk(() => import('../lib/storyCard'));
+      if (!mod) { await noteShare('failed', creatorUrl()); return; }
+      const result = await mod.shareStoryCard({
         gameName: name,
         teamName: team.displayName,
         score: finalScore,
@@ -148,10 +190,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         stagesLabel: labels.stagesLabel,
         ctaText: labels.ctaText,
       }, text);
-      // Confirm a genuine delivery: a native share ('shared') as well as a download
-      // or clipboard copy. A cancellation resolves to 'failed', so it stays silent —
-      // no false "shared!". Reuses the existing shareSaved label (no new i18n key).
-      if (result === 'downloaded' || result === 'copied' || result === 'shared') { setShared(true); setTimeout(() => setShared(false), 2500); }
+      await noteShare(result, creatorUrl());
   }
 
   // Single-flight guards (mirrors PlayScreen's shareProgress): setBusy is async, so a
@@ -258,6 +297,11 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
               )}
             </div>
           )}
+          {/* A share that FAILED now says so and tells the player what we did
+              instead. A cancelled one still says nothing — see noteShare. */}
+          {shareNote === 'copied' && (
+            <p role="status" className="mt-2 text-center text-sm font-semibold text-zinc-400">{t.final.shareFailed}</p>
+          )}
         </Card>
 
         {/* Post-game feedback survey (post-game-feedback): shown from the moment
@@ -282,7 +326,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                     style={{ animationDelay: `${place * 80}ms` }}>
                     <div className="text-2xl leading-none">{MEDAL[place - 1]}</div>
                     <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-ink-fire' : 'text-zinc-200'}`}>{e.teamName}</div>
-                    <div className="text-[11px] text-zinc-400 mb-1">
+                    <div className="text-[13px] text-zinc-400 mb-1">
                       {isTimeOnly
                         ? (() => { const d = board?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
                         : e.score}
@@ -355,7 +399,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
       {run.billingType !== 'pro' && (
         <a href={PAYMENTS_ENABLED ? `${creatorUrl()}/?ref=${team.ownerUid}` : creatorUrl()} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
-          <div className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 mb-0.5">
+          <div className="flex items-center justify-center gap-1.5 text-[13px] text-zinc-500 mb-0.5">
             <span>⚡</span> {t.final.poweredBy}
           </div>
           <div className="text-sm font-semibold" style={{ color: accent }}>
@@ -375,7 +419,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
 function Stat({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
     <div className="bg-app-raised rounded-xl px-3 py-2.5 text-start">
-      <div className="text-[11px] text-zinc-500 mb-0.5">{label}</div>
+      <div className="text-[13px] text-zinc-500 mb-0.5">{label}</div>
       <div className="text-base font-semibold font-brand" style={{ color: accent }}>{value}</div>
     </div>
   );
@@ -457,7 +501,7 @@ function BadgesCard({ finalized }: { finalized: boolean }) {
           >
             <span aria-hidden>{BADGE_EMOJI[b] ?? '🏅'}</span>
             <span dir="auto">{label(b)}</span>
-            {fresh.has(b) && <span className="text-[10px] font-bold uppercase">{t.badges.new}</span>}
+            {fresh.has(b) && <span className="text-[12px] font-bold uppercase">{t.badges.new}</span>}
           </div>
         ))}
       </div>

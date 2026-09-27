@@ -22,6 +22,7 @@ import type { Stage } from '@rushpoint/shared';
 import { effectiveExclusiveGroups, maxAttainableCompletions } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { GROUP_STYLES } from './TaskCard';
+import { TAP_INLINE, TAP_TARGET } from '../lib/interaction';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -83,7 +84,7 @@ export default function ExclusiveGroupsModal({ stage, onAssign, onRemoveGroup, o
         title={title}
         aria-label={title}
         onClick={onSelect}
-        className={`inline-flex items-center justify-center min-w-[26px] h-[22px] px-1 rounded border text-[11px] font-bold leading-none
+        className={`inline-flex items-center justify-center min-w-[26px] h-[22px] px-1 rounded border text-[13px] font-bold leading-none
           transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60
           ${styleClass ?? 'border-[--rp-border] text-[--ink-3]'}
           ${checked ? 'ring-2 ring-rp-fire/70' : 'opacity-50 hover:opacity-100'}`}
@@ -114,7 +115,7 @@ export default function ExclusiveGroupsModal({ stage, onAssign, onRemoveGroup, o
             onClick={onClose}
             aria-label={b.exclusiveClose}
             title={b.exclusiveClose}
-            className="ms-auto shrink-0 text-[--ink-3] hover:text-[--ink-1]"
+            className={`${TAP_TARGET} ms-auto -me-2 shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]`}
           >✕</button>
         </div>
 
@@ -188,7 +189,7 @@ export default function ExclusiveGroupsModal({ stage, onAssign, onRemoveGroup, o
               </span>
               <button
                 type="button"
-                className="text-neon-red"
+                className={`${TAP_INLINE} shrink-0 rounded-lg text-neon-red hover:bg-neon-red/10`}
                 title={b.exclusiveRemoveGroup}
                 aria-label={`${b.exclusiveRemoveGroup} ${letterOf(gi)}`}
                 onClick={() => onRemoveGroup(g.id)}

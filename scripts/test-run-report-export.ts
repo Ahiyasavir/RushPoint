@@ -49,13 +49,14 @@ const labels = {
   wrong: 'שגוי',
   yes: 'כן',
   no: 'לא',
+  outcomeOther: 'תשובה אחרת',
   columns: {
     player: 'שחקן', members: 'משתתפים', rank: 'דירוג', score: 'ניקוד',
     penalty: 'קנסות', status: 'סטטוס', started: 'התחלה', finished: 'סיום',
     durationMinutes: 'דקות', missionsDone: 'משימות שהושלמו', missionsSkipped: 'דילוגים',
     hints: 'רמזים', wrongAnswers: 'תשובות שגויות', media: 'מדיה',
     stage: 'שלב', mission: 'משימה', type: 'סוג', question: 'שאלה',
-    expected: 'תשובה נכונה', theirAnswer: 'התשובה שלהם', verdict: 'תוצאה',
+    expected: 'תשובה נכונה', theirAnswer: 'התשובה שלהם', outcome: 'התשובה שנבחרה', verdict: 'תוצאה',
     attempts: 'ניסיונות', points: 'נקודות', minutes: 'דקות', mediaLink: 'קישור מדיה',
     players: 'שחקנים', completed: 'הושלמו', skipped: 'דולגו',
     completionRate: 'אחוז השלמה', medianMinutes: 'חציון דקות',
@@ -268,6 +269,27 @@ check('a player name that Excel would execute as a formula is neutralised', (() 
   const cell = String(wb.sheets.find((s) => s.id === 'players')!.rows[1][0]);
   return !cell.startsWith('=');
 })());
+
+// answer-scored-question 2.7: the sheet says WHICH answer/code each team gave.
+{
+  const g2 = { id: 'g2', title: 'x', stages: [{ id: 's', title: 'S', order: 0, tasks: [
+    { id: 'spice', title: 'תבלין', type: 'smart_station', answerOutcomes: [
+      { id: 'z', label: 'זעתר', points: 50 }, { id: 'm', label: 'מרווה', points: 100 },
+    ], unmatchedPoints: 5 },
+  ] }] } as unknown as Game;
+  const r2 = { id: 'r2', gameId: 'g2', ownerUid: 'o', status: 'finished', accessCode: 'X1' } as unknown as Run;
+  const mk = (id: string, outcomeId?: string) => ({ id, displayName: id, status: 'finished', score: 0,
+    stages: [{ stageId: 's', status: 'completed', tasks: [{ taskId: 'spice', taskIndex: 0, status: 'completed', earnedScore: 5, ...(outcomeId ? { outcomeId } : {}) }] }] }) as unknown as RunTeam;
+  const wb = buildReportWorkbook(buildRunPlayerReport({ game: g2, run: r2, teams: [mk('A', 'm'), mk('B', 'unmatched'), mk('C')] }), labels);
+  const sheet = wb.sheets.find((x) => x.id === 'answers')!;
+  const oc = sheet.rows[0].indexOf('התשובה שנבחרה');
+  const byPlayer = (n: string) => sheet.rows.slice(1).find((r) => r[0] === n)!;
+  check('answers sheet has an outcome column', oc >= 0, JSON.stringify(sheet.rows[0]));
+  check('the outcome a team hit is named', byPlayer('A')[oc] === 'מרווה');
+  check('the catch-all reads as "another answer"', byPlayer('B')[oc] === 'תשובה אחרת');
+  check('no outcome is an empty cell', byPlayer('C')[oc] === '');
+  check('widths still match the header', sheet.columnWidths.length === sheet.rows[0].length);
+}
 
 console.log(`\n${failures === 0 ? 'ALL RUN-REPORT-EXPORT TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

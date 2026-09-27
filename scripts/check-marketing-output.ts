@@ -23,7 +23,10 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { hasEnglishWord, hasHebrew } from './lib/i18nLeak.ts';
-import { CONTACT_FALLBACK_EMAIL } from '../apps/marketing/src/copy/contact.ts';
+// Moved out of the copy modules when the pages became editable content: the
+// address is configuration, not copy, so an editor cannot change it in one
+// language and not the other (change: editable-pages-and-media).
+import { CONTACT_FALLBACK_EMAIL } from '../apps/marketing/src/utils/i18n.ts';
 import {
   SITE_ORIGIN,
   DIRECTION,
@@ -108,7 +111,7 @@ const OUR_HOST_PATTERN = /https?:\/\/[a-z0-9.-]*(?:rush-point\.com|rushpoint[a-z
 const SIBLING_ORIGINS = [
   'https://creator.rush-point.com',
   'https://api.rush-point.com',
-  'https://rush-point.com',
+  'https://player.rush-point.com',
 ];
 
 const isSelfUrl = (url: string): boolean =>

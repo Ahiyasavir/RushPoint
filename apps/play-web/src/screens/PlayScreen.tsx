@@ -1,17 +1,27 @@
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
+import { emergencyTelHref, gateSatisfiedTaskIds, senderQuiet, toTelHref } from '@rushpoint/shared';
+import { claimController } from '../services/calls';
+import { haptic } from '../lib/haptics';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
+import { shouldSendPing } from '../lib/pingGate';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { syncErrorVerdict } from '../lib/syncError';
+import { shareOutcomeFeedback } from '../lib/shareFeedback';
+import { loadChunk } from '../lib/loadChunk';
 // Why a not-yet-started team is not started (change: held-team-visibility).
 import { heldNotice } from '../lib/holdNotice';
 // Which sealed hidden missions may be drawn as a search circle
 // (change: hidden-mission-search-area).
 import { selectSearchAreas } from '../lib/searchAreas';
+// Whether to run GPS and draw the map at all. Extracted from this file so the
+// decision is unit-testable — it had silently latched ON for every game; see
+// lib/locationRelevance.ts (change: locationless-fail-safe-vs-task-gating).
+import { computeLocationRelevant } from '../lib/locationRelevance';
 import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
@@ -19,6 +29,8 @@ import TaskRunner from '../components/TaskRunner';
 import { LoadingView } from '../components/LoadingView';
 import TeamDevicesPanel from '../components/TeamDevicesPanel';
 import InRunAlerts from '../components/InRunAlerts';
+// Shared top overlay stack (change: play-top-overlay-stack) — see components/TopOverlays.tsx.
+import { TopOverlay } from '../components/TopOverlays';
 import type { NavTarget } from '../components/NavMap';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
@@ -39,50 +51,10 @@ import { formatDuration } from '../lib/boardTime';
 import { feedback, feedbackIfQuiet, isRankUp } from '../lib/sound';
 import { missionProgress, type MissionProgress } from '../lib/missionProgress';
 import { crossedMilestone, type Milestone } from '../lib/milestones';
+import { creatorUrl } from '../lib/creatorUrl';
+import { closedNoticeKey, shouldShowClosedNotice, type ClosedTaskNotice } from '../lib/closedTaskNotice';
 
-// Creator app — viral CTA baked into every shared progress card.
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
-// "Is location relevant right now?" (change: locationless-no-gps-no-map).
-// TRUE if ANYTHING located could appear on the map or drive GPS this render:
-// a real task pin, a sealed-hidden search area, a territory zone, an active hot
-// zone, or a sealed hidden task awaiting a GPS-confirmed arrival. Only when ALL
-// of those are absent (the confidently pure-locationless case, e.g. the
-// all-locationless "Pocket Spy Academy" demo) is it FALSE.
-//
-// Fail SAFE toward today's behavior: total and never throws — if state isn't
-// loaded yet, or any piece is missing/undefined, it returns TRUE, so a located
-// game keeps its GPS watcher + map exactly as before. Suppression only happens
-// when we are CONFIDENT nothing is located.
-function computeLocationRelevant(state: MyTeamState | null, zones: CaptureZone[]): boolean {
-  if (!state) return true; // not loaded yet — keep current behavior
-  try {
-    if (zones.length > 0) return true;
-    if (state.run?.hotZone) return true;
-    const contents = state.activeStageTasks ?? [];
-    // A sealed hidden task is unsealed by a server-verified GPS arrival, so it
-    // MUST count as location-relevant (it also draws completed pins + a circle).
-    if (contents.some((c) => c.arrivalPending)) return true;
-    if (selectSearchAreas(contents).length > 0) return true;
-    const stage = state.team?.stages?.find((s) => s.status === 'active');
-    if (stage) {
-      for (const rec of stage.tasks) {
-        if (rec.status === 'completed' || rec.status === 'skipped') continue;
-        const content = contents.find((c) => c.id === rec.taskId);
-        if (!content) return true; // unknown content → assume located (fail safe)
-        if (content.locationless) continue;
-        if (content.arrivalPending) continue; // sealed — no pin (handled above)
-        const coords = content.smart?.stationCoords ?? content.coordinates;
-        if (coords && (coords.lat !== 0 || coords.lng !== 0)) return true;
-      }
-    }
-    return false;
-  } catch {
-    return true; // never throw — default to current (located) behavior
-  }
-}
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const { t, lang } = useT();
@@ -115,6 +87,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // powerUps.log grows across polls (ref-compared), for both award types.
   const [powerUpToast, setPowerUpToast] = useState<'double_points' | 'bonus_points' | null>(null);
   const powerUpLogLen = useRef<number | null>(null);
+  // Outcome of the mid-run brag share (change: share-ladder-unification). This
+  // button used to `await shareStoryCard(...)` and ignore the result entirely, so
+  // it was silent on EVERY outcome — success included. A player tapped 📸, the
+  // card was built, and nothing on screen ever acknowledged it.
+  const [shareNote, setShareNote] = useState<'ok' | 'copied' | null>(null);
   // Audio/haptic cue baselines (change: audio-haptic-feedback) — ref-compared
   // across polls, like the power-up toast. null/undefined = not yet observed, so a
   // mid-run reload records the baseline instead of replaying past events.
@@ -139,12 +116,17 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // mistake that crashed TaskRunner in production (CLAUDE.md, rules-of-hooks).
   // `session.teamId` is stable for the life of this screen.
   const [viewingTab, setViewingTab] = useState<DrawerTabId | null>(null);
+  // Something on the mission card asked for a drawer tab (change: submission-status-truth:
+  // "message the organizer" on the waiting card). A nonce so the same tab can be asked twice.
+  const [drawerRequest, setDrawerRequest] = useState<{ tab: DrawerTabId; nonce: number } | null>(null);
   const { unreadCount: chatUnread } = useTeamChat(session, session.teamId ?? uid() ?? '', viewingTab === 'chat');
   // Shared team devices: only the CONTROLLING phone pings the live map, so the
   // team's pin follows whoever is actually playing instead of flickering.
   const controllerRef = useRef(true);
-  // Last time we pinged updateLocation, for ~20s client-side throttling.
-  const lastPing = useRef(0);
+  // The last fix this device actually SENT (position + time), not merely the last time we
+  // tried. `shouldSendPing` needs the position to judge whether the team has really moved;
+  // a bare timestamp could only ever express a fixed throttle (change: participant-read-budget).
+  const lastPing = useRef<{ lat: number; lng: number; atMs: number } | null>(null);
   // play-task-gating: the id of the team's assigned hidden-location task that is
   // still SEALED (awaiting a server-confirmed arrival), or null. Read by the
   // geolocation watcher (which mounts once) so it can probe reportArrival on the
@@ -152,6 +134,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // for teams with nothing sealed.
   const pendingArrivalRef = useRef<string | null>(null);
   const lastArrivalProbe = useRef(0);
+  // Latch for the location verdict above. A ref, not state: it must never itself
+  // trigger a render, and it is read during render right after it is written.
+  const everLocationRelevant = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -222,9 +207,26 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // an unhandled promise rejection and skip attaching the listener for this mount.
     // Swallow it — the 12s fallback poll below still recovers gameplay state.
 
-    // Slow fallback poll keeps the leaderboard fresh (it arrives via the
-    // callable, not our team doc) and recovers if the listener can't attach.
-    timer.current = window.setInterval(() => { void refresh(); }, 12_000);
+    // Slow fallback poll keeps the leaderboard fresh (it arrives via the callable, not our
+    // team doc) and recovers if the listener can't attach. Gameplay state does NOT depend on
+    // it — the onSnapshot listener above refreshes on every change to our own team document.
+    //
+    // 60s, not 12s (changes: participant-read-budget, then hot-path-read-cost).
+    //
+    // getMyTeamState costs ~1.54 Firestore reads per call measured under real production load.
+    // At the original 12s that is 375 calls x 120 teams = ~69,000 reads for ONE 75-minute run,
+    // against a Spark ceiling of 50,000 READS PER DAY — the fallback poll alone exceeded the
+    // whole day's budget. 45s brought it to ~18,500; 60s brings it to ~13,900.
+    //
+    // The extra step to 60s is not fine-tuning: the first budget was built from per-call costs
+    // measured in a COMPRESSED simulation, which understates anything wall-clock-throttled.
+    // Re-measured at real time-scale the run needed roughly another 5,000 reads of headroom.
+    //
+    // Gameplay does not wait for this. The onSnapshot listener above refreshes on every change
+    // to this team's own document; the interval exists for the leaderboard and to recover a
+    // listener that never attached. If you shorten it, do the arithmetic for the largest run
+    // you intend to support and check it against the ceiling — this is a cost decision.
+    timer.current = window.setInterval(() => { void refresh(); }, 60_000);
 
     return () => {
       alive = false;
@@ -259,7 +261,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // the map block. A boolean, so the watcher effect only re-mounts when the value
   // actually flips (not on every poll). When a later located stage flips it true,
   // the watcher starts THEN — so an all-locationless demo never prompts for GPS.
-  const locationRelevant = computeLocationRelevant(state, zones);
+  // Sticky: a game does not shed its places mid-run, and re-judging each render
+  // would make the map vanish and return in the gap between two missions — a
+  // ~224px layout jump twice per mission. See lib/locationRelevance.ts.
+  // The latch is deliberately NOT the same value as the verdict: the pre-payload
+  // TRUE is a safe default, not an observation, and latching it would pin every
+  // game ON from its first render. See lib/locationRelevance.ts.
+  const locationVerdict = computeLocationRelevant(state, zones, everLocationRelevant.current);
+  const locationRelevant = locationVerdict.relevant;
+  everLocationRelevant.current = locationVerdict.latch;
 
   // Track the participant's live position for the navigation map, and report it
   // to the host's live team map (throttled to once per ~20s, only while active).
@@ -275,12 +285,24 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         const lng = p.coords.longitude;
         setMe({ lat, lng });
         const now = Date.now();
-        if (activeRef.current && controllerRef.current && now - lastPing.current >= 20_000) {
-          lastPing.current = now;
+        // change: participant-read-budget. A flat 20s throttle spent a callable — and a
+        // Firestore read, measured at 1.00/call in production — on fixes the server was
+        // going to discard anyway. `shouldSendPing` applies the SAME verdict the server
+        // uses (so the two cannot drift about what "moved" means) plus a hard silence
+        // floor, because the safe-zone check only runs when a ping arrives. A walking
+        // team still reports ~76 times per 75-minute run; a stationary one stops paying
+        // for fixes nobody writes.
+        const accuracyMeters = Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : undefined;
+        const gate = shouldSendPing({
+          fix: { lat, lng, accuracyMeters },
+          lastSent: lastPing.current,
+          nowMs: now,
+        });
+        if (activeRef.current && controllerRef.current && gate.send) {
+          lastPing.current = { lat, lng, atMs: now };
           // Send the fix's own error radius (change: out-of-bounds-recovery) so the
           // server's safe-zone verdict can tell "50 m outside, ±5 m" from "50 m
           // outside, ±300 m". Purely a report — the decision stays server-side.
-          const accuracyMeters = Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : undefined;
           updateLocation({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat, lng, accuracyMeters })
             .catch(() => undefined);
         }
@@ -329,6 +351,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     const id = window.setTimeout(() => setPowerUpToast(null), 4000);
     return () => window.clearTimeout(id);
   }, [powerUpToast]);
+
+  // Same shape, same reason as the power-up timer above: keyed on the note value
+  // itself, so a poll landing inside the window cannot run this effect's cleanup
+  // and clear the pending timeout, leaving the note stuck on screen.
+  useEffect(() => {
+    if (!shareNote) return;
+    const id = window.setTimeout(() => setShareNote(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [shareNote]);
 
   // Task-complete cue: fire when the total count of completed tasks grows across
   // polls. Counting the server-confirmed 'completed' status (not the callable
@@ -388,6 +419,39 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return () => window.clearTimeout(id);
   }, [beat]);
 
+  // Hand-over without a dialog (change: team-phones-simple, D4). The role is derived live from the
+  // team doc, so a flip shows up on every phone's next snapshot. The phone that LOST it gets a 10 s
+  // "X is sending now · take it back" (undo protects against a mistaken tap without taxing every
+  // intentional one); the phone that GAINED it gets a short "you're sending now" and a haptic.
+  const liveIsController = state ? (state.team.controllerUid ?? state.team.id) === uid() : null;
+  const prevIsController = useRef<boolean | null>(null);
+  const [handover, setHandover] = useState<{ kind: 'lost' | 'gained'; name: string } | null>(null);
+  useEffect(() => {
+    if (liveIsController === null) return;
+    const prev = prevIsController.current;
+    prevIsController.current = liveIsController;
+    if (prev === null || prev === liveIsController || !state) return;
+    if (liveIsController) {
+      haptic('success');
+      setHandover({ kind: 'gained', name: '' });
+    } else {
+      const to = state.team.controllerUid ?? state.team.id;
+      setHandover({ kind: 'lost', name: state.team.devices?.find((d) => d.uid === to)?.name ?? '' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveIsController]);
+  useEffect(() => {
+    if (!handover) return;
+    const id = window.setTimeout(() => setHandover(null), handover.kind === 'lost' ? 10_000 : 4_000);
+    return () => window.clearTimeout(id);
+  }, [handover]);
+  async function takeOver() {
+    haptic('tap');
+    setHandover(null);
+    try { await claimController(session); await refresh(); }
+    catch { await dialog.alert(t.devices.actionFailed); }
+  }
+
   async function leave() {
     // A finished run has nothing left to lose, so skip the "are you sure" prompt
     // (this is the demo-finish exit path via FinalScreen). Mid-run still confirms.
@@ -396,7 +460,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }
 
   async function sos() {
-    if (!(await dialog.confirm(t.play.sosConfirm, { confirmLabel: t.play.sosSend, danger: true }))) return;
+    // Emergency services FIRST (change: sos-points-to-101). This alert reaches the ORGANIZER, who
+    // may be far away; an injury or a real danger needs 101, so every dialog of this flow offers
+    // the call, and none of them promises that help is on the way.
+    const call101 = { href: emergencyTelHref(), label: t.play.sosCall101 };
+    if (!(await dialog.confirm(t.play.sosConfirm, { confirmLabel: t.play.sosSend, danger: true, callAction: call101 }))) return;
     // Resolve a best-effort location first, THEN actually send — and only confirm
     // "sent" once triggerSOS resolves. Reporting success before the call (or
     // ignoring its failure) on a SAFETY feature could leave a team in trouble
@@ -412,9 +480,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     try {
       await triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, ...(coords ?? {}) });
       feedback('alert');
-      await dialog.alert(t.play.sosSent);
+      await dialog.alert(t.play.sosSent, { callAction: call101 });
     } catch {
-      await dialog.alert(t.play.sosFailed);
+      await dialog.alert(t.play.sosFailed, { callAction: call101 });
     }
   }
 
@@ -435,19 +503,31 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         game: name,
         rankPart: rank ? t.play.shareRankPart({ rank }) : '',
         score: team.score,
-        url: CREATOR_URL.replace(/^https?:\/\//, ''),
+        url: creatorUrl().replace(/^https?:\/\//, ''),
       });
-      const { shareStoryCard } = await import('../lib/storyCard');
-      await shareStoryCard({
+      // See lib/loadChunk.ts: a redeploy mid-run renames this chunk, and a bare
+      // import would reject into nothing at all.
+      const mod = await loadChunk(() => import('../lib/storyCard'));
+      if (!mod) { setShareNote('copied'); try { await navigator.clipboard.writeText(creatorUrl()); } catch { /* the notice still stands */ } return; }
+      const result = await mod.shareStoryCard({
         gameName: name,
         teamName: team.displayName,
         score: team.score,
         rank,
         stagesDone: `${done}/${team.stages.length}`,
-        ctaUrl: CREATOR_URL,
+        ctaUrl: creatorUrl(),
         headline,
         scoreLabel: t.play.pointsSoFar,
       }, text);
+      // 'silent' means the player dismissed the OS sheet — they know. Anything
+      // else gets an acknowledgement, so the button is never a no-op again.
+      const verdict = shareOutcomeFeedback(result);
+      if (verdict === 'fallback') {
+        try { await navigator.clipboard.writeText(creatorUrl()); } catch { /* still show the notice */ }
+        setShareNote('copied');
+      } else if (verdict === 'confirm') {
+        setShareNote('ok');
+      }
     }
   }
 
@@ -547,7 +627,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
             <div className="w-full max-w-sm rounded-xl bg-app-raised border border-rp-amber/40 px-4 py-3 text-start space-y-1.5">
               <p className="text-sm font-bold text-ink-amber">{t.play.heldTitle}</p>
               <p className="text-sm text-zinc-400">
-                {hold.kind === 'guardian_consent' ? t.play.heldConsent : t.play.heldGeneric}
+                {hold.kind === 'guardian_consent' ? t.play.heldConsent
+                  /* change: every-member-plays. The only hold a team can clear
+                     themselves, so the copy says HOW rather than just that they are
+                     waiting. `offerHelp` stays true underneath it: a team whose sixth
+                     member went home must not be trapped. */
+                  : hold.kind === 'members_offline' ? t.play.heldMembersOffline
+                    : t.play.heldGeneric}
               </p>
               <p className="text-sm text-zinc-400">{t.play.heldAskHost}</p>
             </div>
@@ -557,8 +643,18 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           <HowToPlayCard instructions={game.instructions} lang={lang} />
         </div>
         {hasTeammateDevices && myUid && (
-          <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
+          <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} defaultOpen />
         )}
+        {/* quick-dial-and-actions: the numbers the organizer published for players. */}
+        {(state.contacts ?? []).map((c) => {
+          const href = toTelHref(c.phone);
+          return href ? (
+            <a key={c.id} href={href} data-testid="call-contact-waiting"
+              className="flex items-center justify-center gap-2 min-h-[48px] rounded-xl border border-glass-border bg-app-card text-sm font-semibold text-zinc-200 mb-2">
+              📞 <span dir="auto">{t.play.callContact({ label: c.label })}</span>
+            </a>
+          ) : null;
+        })}
         <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
       </Screen>
     );
@@ -643,6 +739,18 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
+      {handover && (
+        <TopOverlay kind="handover">
+          <div role="status" aria-live="polite" data-testid="handover-toast"
+            className="max-w-[calc(100%-2rem)] rounded-full bg-zinc-800/90 text-zinc-100 text-sm font-semibold px-4 py-2 shadow-lg flex items-center gap-3">
+            <span dir="auto">{handover.kind === 'gained' ? t.devices.nowSending : t.devices.lostSending({ name: handover.name || t.devices.deviceFallbackName })}</span>
+            {handover.kind === 'lost' && (
+              <button className="min-h-[44px] px-2 text-ink-fire font-bold" onClick={() => void takeOver()}>{t.devices.takeBack}</button>
+            )}
+          </div>
+        </TopOverlay>
+      )}
+      <ShareNoteToast note={shareNote} />
       {/* ONE compact strip (change: play-card-simplification). Identity, score,
           progress, streak and every utility used to be EIGHT stacked full-width
           rows before the map — so on a phone the player scrolled past their own
@@ -656,7 +764,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
+        callContact={state.contacts?.[0]}
         isTestDrive={session.isTestDrive}
+        phones={hasTeammateDevices && myUid
+          ? { count: team.devices?.length ?? team.deviceUids?.length ?? 1, onOpen: () => setDrawerRequest({ tab: 'devices', nonce: Date.now() }) }
+          : undefined}
         streak={streak} streakMilestone={milestone}
         progress={progress.total > 0 ? (
           <MissionProgressRow progress={progress} beat={beat} accent={accent} />
@@ -690,7 +802,24 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <div className="mb-4">
         {activeStage ? (
           <>
-            <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} readOnly={!isController} />
+            <MissionClosedNotice runId={session.runId} notice={(team as { closedTaskNotice?: unknown }).closedTaskNotice} />
+            <MissionClosedNotice runId={session.runId} notice={(team as { timeUpNotice?: unknown }).timeUpNotice} kind="timeUp" />
+            {!isController && senderQuiet({ presence: state.devicePresence, controllerUid: team.controllerUid ?? team.id }) && (
+              // The answering phone stopped asking for the state minutes ago while this one is
+              // active (team-phones-simple D5): it is probably dead, flat or in a bag.
+              <div dir="auto" className="mb-3 rounded-2xl border border-accent/40 bg-accent/10 p-3 flex items-center gap-3" role="status" data-testid="sender-quiet">
+                <p className="flex-1 text-sm text-zinc-200">{t.devices.senderQuiet({ name: controllerName })}</p>
+                <Button className="shrink-0 !w-auto px-4" onClick={() => void takeOver()}>{t.devices.sendFromMyPhone}</Button>
+              </div>
+            )}
+            <TaskRunner
+              session={session} state={state} stage={activeStage} onChanged={refresh}
+              role={isController ? 'sender' : 'viewer'} senderName={controllerName}
+              onTakeOver={() => void takeOver()}
+              onOpenChat={drawerPlan.tabs.some((tab) => tab.id === 'chat')
+                ? () => setDrawerRequest({ tab: 'chat', nonce: Date.now() })
+                : undefined}
+            />
             <LockedTasksList stage={activeStage} state={state} />
           </>
         ) : state.nextStageReleaseAt && state.nextStageReleaseAt > Date.now() ? (
@@ -718,14 +847,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           A tab exists only when its feature is actually in play, so folding them
           together did not resurrect the empty sections that used to self-hide. */}
       <div className="mt-1 -mx-1 px-1">
-        {!isController && (
-          <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
-            👀 {t.devices.viewingBanner({ name: controllerName })}
-          </div>
-        )}
         <MoreDrawer
           plan={drawerPlan}
           onActiveTabChange={setViewingTab}
+          openRequest={drawerRequest}
           renderTab={(id) => {
             if (id === 'board') {
               return state.run.leaderboard
@@ -765,17 +890,43 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 // the server unlocks the stage and play resumes.
 
 // Offline continuity (change: fix-play-offline-continuity): a small non-blocking
+// live-task-close-rules: the organizers closed the mission this team was standing on, and the
+// server already routed it on. Says why the mission vanished, once, until the team taps "got it".
+// mission-time-limit: the same card says a team's own countdown ran out (`kind="timeUp"`).
+function MissionClosedNotice({ runId, notice, kind = 'closed' }: { runId: string; notice: unknown; kind?: 'closed' | 'timeUp' }) {
+  const { t } = useT();
+  const [, setDismissedAt] = useState(0);
+  const read = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
+  if (!shouldShowClosedNotice(notice, Date.now(), read, runId)) return null;
+  const n = notice as ClosedTaskNotice;
+  const dismiss = () => {
+    try { localStorage.setItem(closedNoticeKey(runId, n), '1'); } catch { /* memory only */ }
+    setDismissedAt(Date.now());
+  };
+  return (
+    <div dir="auto" className="mb-3 rounded-2xl border border-accent/40 bg-accent/10 p-3 flex items-center gap-3" role="status" data-testid={kind === 'timeUp' ? 'mission-time-up' : 'mission-closed'}>
+      <p className="flex-1 text-sm text-zinc-200">{kind === 'timeUp' ? t.devices.missionTimeUp({ title: n.title }) : t.devices.missionClosed({ title: n.title })}</p>
+      <Button className="shrink-0 !w-auto px-4" onClick={dismiss}>{t.devices.missionClosedOk}</Button>
+    </div>
+  );
+}
+
 // pill shown while a poll is failing but we still have state — the game stays on
 // screen and this reassures the player it's syncing (never a full-screen takeover).
 function ReconnectingPill({ show, text }: { show: boolean; text: string }) {
   if (!show) return null;
+  // In the shared top stack's TOAST slot (change: play-top-overlay-stack): it
+  // floats, because a poll that fails for one cycle and recovers must not shove
+  // the mission down and back. It sits BELOW the offline banner when both show,
+  // which is the pair that actually co-occurs: losing the radio is what fails the
+  // poll, and the two used to be laid out as though only one could ever exist.
   return (
-    <div className="fixed rp-safe-top-8 inset-x-0 z-40 flex justify-center pointer-events-none" role="status" aria-live="polite">
-      <div className="flex items-center gap-2 rounded-full bg-zinc-800/90 text-zinc-100 text-xs px-3 py-1.5 shadow">
+    <TopOverlay kind="reconnecting">
+      <div className="flex items-center gap-2 rounded-full bg-zinc-800/90 text-zinc-100 text-xs px-3 py-1.5 shadow" role="status" aria-live="polite">
         <span className="w-3 h-3 rounded-full border-2 border-zinc-400/40 border-t-zinc-100 animate-spin" />
         {text}
       </div>
-    </div>
+    </TopOverlay>
   );
 }
 
@@ -972,8 +1123,10 @@ function useTeamChat(ctx: Session, teamId: string, viewing: boolean) {
 //
 // Closed by default: during a race the mission is the screen, and everything in
 // here is something you go looking for. The badge is what keeps that honest.
-function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
+function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest }: {
   plan: ReturnType<typeof planMoreDrawer>;
+  /** Open the drawer on this tab and bring it into view. A new nonce re-opens. */
+  openRequest?: { tab: DrawerTabId; nonce: number } | null;
   renderTab: (id: DrawerTabId) => ReactNode;
   /**
    * Fires with the tab actually ON SCREEN (drawer open + that tab active), or
@@ -987,6 +1140,13 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<DrawerTabId | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!openRequest) return;
+    setPicked(openRequest.tab);
+    setOpen(true);
+    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [openRequest]);
 
   const label: Record<DrawerTabId, string> = {
     board: t.more.board, feed: t.more.feed, chat: t.more.chat,
@@ -1006,7 +1166,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
   if (plan.empty) return null;
 
   return (
-    <div className="mt-1">
+    <div className="mt-1" ref={rootRef}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -1020,7 +1180,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
             // The number alone is meaningless to a screen reader sitting next to
             // "עוד" — aria-label supplies the sentence the visible digit implies.
             <span data-testid="more-drawer-badge" aria-label={t.more.unread({ n: plan.totalBadge })}
-              className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-ink-fire text-white text-[11px] font-bold">
+              className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-ink-fire text-white text-[13px] font-bold">
               {plan.totalBadge}
             </span>
           )}
@@ -1041,7 +1201,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
                   aria-selected={active === tab.id}
                   onClick={() => setPicked(tab.id)}
                   data-testid={`more-tab-${tab.id}`}
-                  className={`shrink-0 inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                  className={`shrink-0 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg text-xs font-semibold border transition-colors ${
                     active === tab.id
                       ? 'bg-rp-fire/15 border-rp-fire/40 text-ink-fire'
                       : 'bg-app-card border-glass-border text-zinc-400'
@@ -1050,7 +1210,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
                   {label[tab.id]}
                   {tab.badge > 0 && (
                     <span aria-label={t.more.unread({ n: tab.badge })}
-                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-ink-fire text-white text-[10px] font-bold">
+                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-ink-fire text-white text-[12px] font-bold">
                       {tab.badge}
                     </span>
                   )}
@@ -1201,10 +1361,10 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
 // but do not "fix" it by re-shipping locked tasks to the client.
 function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTeamState }) {
   const { t } = useT();
-  const completedIds = state.team.stages
-    .flatMap((s) => s.tasks)
-    .filter((rec) => rec.status === 'completed')
-    .map((rec) => rec.taskId);
+  // skip-keeps-the-stage: the SAME satisfied-id rule the server gates with (completed +
+  // operator-skipped), so a mission an organizer opened by skipping its prerequisite is not
+  // shown as locked, and its "after X" line does not name the skipped mission.
+  const completedIds = gateSatisfiedTaskIds(state.team.stages);
   const locked = stage.tasks
     .filter((rec) => rec.status === 'unassigned')
     .map((rec) => state.activeStageTasks.find((c) => c.id === rec.taskId))
@@ -1223,7 +1383,7 @@ function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTea
             <div className="flex items-center gap-2 text-sm text-zinc-300">
               <span aria-hidden>🔒</span>
               <span className="font-medium truncate">{c!.title}</span>
-              <span className="ms-auto text-[10px] uppercase tracking-wide text-zinc-500 shrink-0">{t.play.lockedTaskLabel}</span>
+              <span className="ms-auto text-[12px] uppercase tracking-wide text-zinc-500 shrink-0">{t.play.lockedTaskLabel}</span>
             </div>
             {names && <p className="text-xs text-zinc-500 mt-0.5">{t.play.lockedCompleteFirst({ names })}</p>}
           </div>
@@ -1276,7 +1436,7 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
 
 function Header({
   game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy,
-  isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing,
+  isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing, phones, callContact,
 }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
   // time_only runs are ranked purely by time and never award points, so the
@@ -1294,6 +1454,11 @@ function Header({
   progress?: ReactNode;
   howToPlay?: ReactNode;
   onShare?: () => void; sharing?: boolean;
+  // team-phones-simple D6: how many phones the team has, one tap from the devices
+  // panel. Omitted for a solo game with a single phone.
+  phones?: { count: number; onOpen: () => void };
+  // quick-dial-and-actions: one tap to call the organizer, when the run published a number.
+  callContact?: { label: string; phone: string };
 }) {
   const { t } = useT();
   // Test mode (change: test-mode-hidden-scoring): no score, no streak, no power-up
@@ -1318,25 +1483,32 @@ function Header({
               <span
                 key={streakMilestone ?? streak}
                 data-testid="streak-chip"
-                className={`inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-2 py-0.5 text-[11px] font-bold text-ink-fire ${streakMilestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
+                className={`inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-2 py-0.5 text-[13px] font-bold text-ink-fire ${streakMilestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
               >
                 {t.play.streak({ n: streak })}
               </span>
             )}
             {!sealed && powerUpArmed && (
-              <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-ink-fire">
+              <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[13px] font-bold text-ink-fire">
                 {t.play.powerUpArmedChip}
               </span>
             )}
             {isTestDrive && (
               <span data-testid="test-run-chip"
-                className="inline-flex items-center rounded-full bg-app-raised border border-rp-amber/40 px-2 py-0.5 text-[11px] font-bold text-ink-amber">
+                className="inline-flex items-center rounded-full bg-app-raised border border-rp-amber/40 px-2 py-0.5 text-[13px] font-bold text-ink-amber">
                 🧪 {t.play.testRunBanner}
               </span>
             )}
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          {phones && (
+            <button type="button" onClick={phones.onOpen} data-testid="phones-chip"
+              aria-label={t.devices.phonesChipAria({ n: phones.count })} title={t.devices.panelTitle}
+              className="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[44px] px-1 rounded-lg text-sm font-bold text-zinc-300">
+              📱<span className="font-mono">{phones.count}</span>
+            </button>
+          )}
           {howToPlay}
           {onShare && (
             <button type="button" onClick={onShare} disabled={sharing}
@@ -1345,6 +1517,13 @@ function Header({
               className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base text-ink-fire disabled:opacity-50">
               {sharing ? '…' : '📸'}
             </button>
+          )}
+          {callContact && toTelHref(callContact.phone) && (
+            <a href={toTelHref(callContact.phone)!} data-testid="call-contact"
+              aria-label={t.play.callContact({ label: callContact.label })} title={t.play.callContact({ label: callContact.label })}
+              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base">
+              📞
+            </a>
           )}
           {onSos && (
             <button type="button" onClick={onSos} aria-label={t.play.sosAria} disabled={sosBusy}
@@ -1391,13 +1570,13 @@ function MissionProgressRow({ progress, beat, accent }: {
           key={beat}
           role="status"
           data-testid="milestone-beat"
-          className="text-[11px] font-bold shrink-0 animate-answer-pop motion-reduce:animate-none"
+          className="text-[13px] font-bold shrink-0 animate-answer-pop motion-reduce:animate-none"
           style={{ color: accent }}
         >
           {beatLabel[beat]}
         </span>
       ) : (
-        <span data-testid="mission-counter" className="text-[11px] tabular-nums text-zinc-500 shrink-0">
+        <span data-testid="mission-counter" className="text-[13px] tabular-nums text-zinc-500 shrink-0">
           {t.play.missionCounter({ current: progress.current, total: progress.total })}
         </span>
       )}
@@ -1422,16 +1601,34 @@ function ElapsedClock({ startedAt }: { startedAt?: string }) {
   return <span className="text-ink-fire font-mono">{formatDuration(sec)}</span>;
 }
 
+// Acknowledges the mid-run brag share. Deliberately the LOWEST-priority overlay:
+// the player initiated it a moment ago, so it must never sit above an offline
+// banner or a reconnect pill. 'copied' is the honest "that channel failed, here
+// is the link instead" — the case the old silent handler could not express.
+function ShareNoteToast({ note }: { note: 'ok' | 'copied' | null }) {
+  const { t } = useT();
+  if (!note) return null;
+  return (
+    <TopOverlay kind="share">
+      <div role="status" aria-live="polite"
+        className={`max-w-[calc(100%-2rem)] rounded-full text-sm font-semibold px-4 py-2 shadow-lg ${note === 'ok' ? 'bg-ink-fire text-white' : 'bg-zinc-800/90 text-zinc-100'}`}>
+        {note === 'ok' ? t.play.shareSaved : t.play.shareFailed}
+      </div>
+    </TopOverlay>
+  );
+}
+
 // Power-ups (change: power-ups): a transient award toast at the top of the screen.
 function PowerUpToast({ type }: { type: 'double_points' | 'bonus_points' | null }) {
   const { t } = useT();
   if (!type) return null;
   const text = type === 'double_points' ? t.play.powerUpDoubleToast : t.play.powerUpBonusToast;
   return (
-    <div role="status" aria-live="polite" className="fixed inset-x-0 rp-safe-top-3 z-50 flex justify-center px-4 pointer-events-none">
-      <div className="rounded-full bg-ink-fire text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
+    <TopOverlay kind="powerUp">
+      <div role="status" aria-live="polite"
+        className="max-w-[calc(100%-2rem)] rounded-full bg-ink-fire text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
         {text}
       </div>
-    </div>
+    </TopOverlay>
   );
 }

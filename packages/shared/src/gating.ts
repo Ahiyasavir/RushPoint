@@ -16,16 +16,49 @@ export interface UnlockGate {
 }
 
 /**
- * Whether a gated task is unlocked given the team's completed task ids. An
- * absent / empty / malformed (non-array) gate is always unlocked. Otherwise
- * EVERY listed prerequisite must be completed. An unknown id can never be
- * completed, so it never silently unlocks — save-time validation
- * (validateUnlockGraph) rejects unknown ids so they don't reach a live run.
+ * Whether a gated task is unlocked given the ids that SATISFY a gate for this team: completed
+ * tasks plus tasks an operator skipped (see `gateSatisfiedTaskIds`, change: skip-keeps-the-stage).
+ * Pass that list, never a bare "completed" filter: an organizer skipping the head of a chain must
+ * open the rest of it. An absent / empty / malformed (non-array) gate is always unlocked. Otherwise
+ * EVERY listed prerequisite must be satisfied. An unknown id can never be satisfied, so it never
+ * silently unlocks — save-time validation (validateUnlockGraph) rejects unknown ids so they don't
+ * reach a live run.
  */
-export function isUnlocked(gate: UnlockGate | null | undefined, completedTaskIds: string[]): boolean {
+export function isUnlocked(gate: UnlockGate | null | undefined, satisfiedTaskIds: string[]): boolean {
   const prereqs = gate?.unlockAfterTaskIds;
   if (!Array.isArray(prereqs) || prereqs.length === 0) return true;
-  return prereqs.every((id) => completedTaskIds.includes(id));
+  return prereqs.every((id) => satisfiedTaskIds.includes(id));
+}
+
+/**
+ * Does this task record satisfy the unlock gate of a task that waits for it?
+ * (change: skip-keeps-the-stage)
+ *
+ * Completed: yes. Skipped: ONLY when an operator skipped that one mission (`skipCause:
+ * 'operator'`). Production run oNaUvNrCWRia4Y1b9xOO (2026-09-22) is why: one organizer skip of the
+ * head of a three-task chain retired the other two and ended the team's stage, because a skipped
+ * prerequisite read as dead. An exclusive-group loss, an expiry, an automatic retirement or a
+ * leftover keeps closing its dependents, and so does a legacy skip with no recorded cause: records
+ * written before this field existed keep exactly the meaning they had. Total.
+ */
+export function satisfiesGate(rec: { status?: unknown; skipCause?: unknown } | null | undefined): boolean {
+  if (!rec || typeof rec !== 'object') return false;
+  return rec.status === 'completed' || (rec.status === 'skipped' && rec.skipCause === 'operator');
+}
+
+/** Every task id, across a team's stages, whose record satisfies a gate. Total. */
+export function gateSatisfiedTaskIds(
+  stages: readonly { tasks?: readonly ({ taskId?: unknown; status?: unknown; skipCause?: unknown } | null | undefined)[] }[] | null | undefined,
+): string[] {
+  if (!Array.isArray(stages)) return [];
+  const out: string[] = [];
+  for (const s of stages) {
+    const tasks = Array.isArray(s?.tasks) ? s.tasks : [];
+    for (const t of tasks) {
+      if (t && typeof t.taskId === 'string' && satisfiesGate(t)) out.push(t.taskId);
+    }
+  }
+  return out;
 }
 
 /**
@@ -81,6 +114,40 @@ export function partialStageStarvationWarning(stage: {
   const locationless = tasks.filter((t) => t?.locationless === true).length;
   const located = tasks.length - locationless;
   return locationless > 0 && located > 0;
+}
+
+/**
+ * Strip prerequisite ids that are NOT ids of this stage's own tasks (and a task's
+ * reference to itself), returning the repaired task array.
+ *
+ * WHY THIS EXISTS. `unlockAfterTaskIds` is stage-scoped, and validateUnlockGraph
+ * turns a dangling id into a save-blocking ERROR — which the Builder's autosave
+ * surfaces as "stage X requires more missions than it can yield" and then refuses
+ * every subsequent save of the whole game. The creator cannot act on that: the
+ * prerequisite selector only lists missions of the SAME stage, so an id pointing
+ * at a mission that is no longer there is invisible AND unremovable. A dangling
+ * id is the one kind of unlock-graph corruption with no door out, so it is
+ * REPAIRED rather than reported. A self-reference goes with it (the selector never
+ * offers a mission itself, so that id is unreachable too); a CYCLE is deliberately
+ * left to validation — every mission in a cycle is on screen and can be unchecked.
+ *
+ * Pure and total: a non-array gate is left exactly as it is (validation still
+ * judges it), an emptied gate becomes `undefined` rather than `[]` so it reads as
+ * "no gate" everywhere, and a task that needed no repair is returned BY REFERENCE
+ * so a caller can detect "nothing changed" with `===`.
+ */
+export function pruneDanglingPrerequisites<T extends UnlockGraphTask>(
+  tasks: readonly T[] | null | undefined,
+): T[] {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const known = new Set(list.map((t) => t?.id).filter((id): id is string => !!id));
+  return list.map((t) => {
+    const gate = t?.unlockAfterTaskIds;
+    if (!Array.isArray(gate)) return t;
+    const kept = gate.filter((id) => id !== t.id && known.has(id));
+    if (kept.length === gate.length) return t;
+    return { ...t, unlockAfterTaskIds: kept.length > 0 ? kept : undefined };
+  });
 }
 
 export interface UnlockGraphReport {
@@ -227,15 +294,20 @@ export type TaskProgressStatus = 'unassigned' | 'assigned' | 'completed' | 'skip
 export function unreachableTaskIds(
   tasks: UnlockGraphTask[],
   statusByTaskId: Record<string, TaskProgressStatus | undefined>,
+  // Why each skipped record was skipped (change: skip-keeps-the-stage). Optional so every existing
+  // caller keeps its exact behaviour: a skip with no recorded cause is dead, as it always was.
+  skipCauseByTaskId?: Record<string, unknown>,
 ): string[] {
   const list = (Array.isArray(tasks) ? tasks : []).filter((t): t is UnlockGraphTask => !!t?.id);
   const ids = new Set(list.map((t) => t.id));
   const statusOf = (id: string): TaskProgressStatus => statusByTaskId?.[id] ?? 'unassigned';
 
+  // Seed: what the team holds now, plus everything that SATISFIES a gate (completed, or skipped by
+  // an operator). An operator skip of a chain's head therefore leaves the chain reachable.
   const alive = new Set<string>();
   for (const t of list) {
     const s = statusOf(t.id);
-    if (s === 'completed' || s === 'assigned') alive.add(t.id);
+    if (s === 'assigned' || satisfiesGate({ status: s, skipCause: skipCauseByTaskId?.[t.id] })) alive.add(t.id);
   }
   let grew = true;
   while (grew) {

@@ -35,10 +35,11 @@ const MAX_PARTICIPANT_BYTES = 10 * 1024 * 1024;  // 10MB
 //
 // SIZING: this must cover the worst clip the PLATFORM allows, which is one at
 // VIDEO_DURATION_LIMITS.ceilingSeconds (60s) — not one at the default 40s max. The
-// participant recorder pins its own bitrate (see VIDEO_BITS_PER_SECOND in
-// play-web's TaskRunner) at 2 Mbps video + 96 kbps audio, so a ceiling-length clip
-// is ~15.7MB and 20MB leaves ~27% headroom for container overhead and bitrate
-// overshoot. Raising the ceiling without re-deriving this number ships an upload
+// participant recorder pins its own bitrate (VIDEO_BITS_PER_SECOND in
+// play-web's lib/videoCapture.ts) at 1.5 Mbps video + 64 kbps audio, so a ceiling-length
+// clip is ~11.7MB and 20MB leaves ~70% headroom for container overhead and the bitrate
+// overshoot some Android encoders show. On a weak link the recorder drops to 1.0 Mbps or
+// 600 kbps (captureProfileFor), which only makes the clip smaller. Raising the ceiling without re-deriving this number ships an upload
 // path that refuses missions the Builder happily authored.
 const MAX_PARTICIPANT_VIDEO_BYTES = 20 * 1024 * 1024;  // 20MB
 const MAX_CREATOR_BYTES = 50 * 1024 * 1024;      // 50MB
@@ -96,9 +97,11 @@ function contentTypeAllowed(kind, contentType) {
 // arrived. Resolves with the byte count on success; rejects with an Error whose
 // `.reason` is 'too-large' | 'stalled' | 'aborted' | 'io' otherwise. The caller
 // owns cleanup of destPath on rejection.
-function streamToFileWithLimit(req, destPath, maxBytes, stallMs = UPLOAD_STALL_MS) {
+// `opts.flags: 'a'` appends (resumable sessions, video-upload-speed D4); maxBytes is then the room
+// LEFT under the cap, which is what makes the cap cumulative across appends.
+function streamToFileWithLimit(req, destPath, maxBytes, stallMs = UPLOAD_STALL_MS, opts = {}) {
   return new Promise((resolve, reject) => {
-    const out = fs.createWriteStream(destPath);
+    const out = fs.createWriteStream(destPath, { flags: opts.flags === 'a' ? 'a' : 'w' });
     let received = 0;
     let settled = false;
     let stallTimer;
@@ -216,15 +219,148 @@ async function sweepStaleTempUploads(uploadDir, now = Date.now(), ttlMs = TMP_TT
   return removed;
 }
 
+// ─── Server brake (change: video-upload-speed, D6) ───────────────────────────
+//
+// At our scale bandwidth, RAM and CPU are not what knocks the box over: a full disk stops the API
+// and every callable with it, and an unbounded pile of streams (a retry storm, a bug, a hostile
+// authenticated device) is the other way. Both answers are statuses the phone already RETRIES
+// (5xx), so a player on a busy minute waits a few seconds instead of losing the clip.
+// Process-local counters are correct because the API is ONE process (the rateLimitStore reasoning);
+// Sized for the Race to Tzion (~35 teams, several phones each, a video mission): one team
+// normally sends one clip, a retake can briefly overlap its aborted first try, so 128 leaves
+// ~2x headroom over "every team at once, twice". An idle stream costs ~80 KB of RAM; the
+// worst temp disk in flight is 128 x 20 MB = 2.5 GB, checked against the disk floor anyway.
+const MAX_CONCURRENT_UPLOADS = 128;
+const MAX_UPLOADS_PER_UID = 2;
+const BUSY_RETRY_AFTER_SECONDS = 3;
+const DISK_FLOOR_MIN_BYTES = 2 * 1024 ** 3;
+const DISK_FLOOR_FRACTION = 0.05;
+const DISK_CHECK_CACHE_MS = 10_000;
+
+function createUploadSlots({ maxConcurrent = MAX_CONCURRENT_UPLOADS, maxPerUid = MAX_UPLOADS_PER_UID } = {}) {
+  let inFlight = 0;
+  let peak = 0;
+  const perUid = new Map();
+  return {
+    acquire(uid) {
+      if (inFlight >= maxConcurrent) return { ok: false, reason: 'global' };
+      const mine = perUid.get(uid) || 0;
+      if (mine >= maxPerUid) return { ok: false, reason: 'uid' };
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      perUid.set(uid, mine + 1);
+      let released = false;
+      return {
+        ok: true,
+        release() {
+          if (released) return;
+          released = true;
+          inFlight -= 1;
+          const n = (perUid.get(uid) || 1) - 1;
+          if (n <= 0) perUid.delete(uid); else perUid.set(uid, n);
+        },
+      };
+    },
+    stats() { return { inFlight, peak }; },
+    resetPeak() { peak = inFlight; },
+  };
+}
+
+function diskFloorBytes(totalBytes) {
+  const pct = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes * DISK_FLOOR_FRACTION : 0;
+  return Math.max(DISK_FLOOR_MIN_BYTES, pct);
+}
+
+// Free space under the floor? Cached for 10 s so a burst costs one statfs. FAILS OPEN: a platform
+// without statfs, or any error, must never refuse a player's clip.
+function createDiskGuard(uploadDir, statfs, now = () => Date.now()) {
+  let cached = null;
+  return async function belowFloor() {
+    const t = now();
+    if (cached && t - cached.at < DISK_CHECK_CACHE_MS) return cached.below;
+    let below = false;
+    try {
+      const st = await statfs(uploadDir);
+      const bsize = Number(st && st.bsize);
+      const free = Number(st && st.bavail) * bsize;
+      const total = Number(st && st.blocks) * bsize;
+      below = Number.isFinite(free) && free < diskFloorBytes(total);
+    } catch {
+      below = false;
+    }
+    cached = { at: t, below };
+    return below;
+  };
+}
+
+// One line per minute (video-upload-speed D6): did uploads starve the callables? `loop` is a
+// perf_hooks.monitorEventLoopDelay histogram (nanoseconds). Returns null for a quiet minute (no
+// upload and a healthy loop), so an idle server does not fill the log.
+const LOOP_P99_ALERT_MS = 100;
+function uploadsTelemetryRecord(stats, loop) {
+  const inFlight = stats && Number.isFinite(stats.inFlight) ? stats.inFlight : 0;
+  const peak = stats && Number.isFinite(stats.peak) ? stats.peak : 0;
+  let p99 = 0;
+  try { p99 = loop && typeof loop.percentile === 'function' ? loop.percentile(99) / 1e6 : 0; } catch { p99 = 0; }
+  if (!Number.isFinite(p99) || p99 < 0) p99 = 0;
+  if (peak === 0 && inFlight === 0 && p99 < LOOP_P99_ALERT_MS) return null;
+  return { msg: 'uploads', inFlight, peak, loopDelayP99Ms: Math.round(p99) };
+}
+
 // Build the PUT /upload handler. Dependencies are injected so tests can run it
 // without the callables bundle or real Firebase credentials.
 //   verifyIdToken(token) -> Promise<{uid}>  — throws/rejects on an invalid token
 //   uploadDir                                — root of the served upload tree
 //   resolveOrigin(req)                       — returns the origin for the {url} reply
 //   onResponse(req, res)                     — hook to set CORS headers before replying
-function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse }) {
-  return async function uploadHandler(req, res) {
+// media-upload-reliability: what a stream FAILURE answers. A server-side stall used to answer
+// 400 INVALID_ARGUMENT, which the phone treats as a PERMANENT refusal (it retries only 408, 429 and
+// 5xx), so a phone that paused sending for 45 s (screen locked, app switched) was told "upload
+// failed" and never retried. Only an oversized body is a real refusal; anything else is retryable.
+function uploadFailureResponse(reason) {
+  if (reason === 'too-large') {
+    return { status: 400, body: { error: { status: 'INVALID_ARGUMENT', message: 'File too large' } } };
+  }
+  if (reason === 'stalled') {
+    return { status: 408, body: { error: { status: 'DEADLINE_EXCEEDED', message: 'Upload stalled' } } };
+  }
+  return { status: 500, body: { error: { status: 'INTERNAL', message: 'Upload failed' } } };
+}
+
+// media-upload-reliability: one structured record per upload, so "how long do uploads take in the
+// field, and how often do they fail?" finally has an answer in production. The run id is parsed
+// from the path; the uploader's uid and the file name are deliberately NOT recorded.
+function uploadLogRecord({ contentType, bytes, ms, outcome, uploadPath }) {
+  const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+  const parts = typeof uploadPath === 'string' ? uploadPath.split('/') : [];
+  const isRun = parts[0] === 'runs' && typeof parts[1] === 'string' && parts[1] !== '';
+  const kind = !isRun ? 'creator'
+    : type.startsWith('video/') ? 'video'
+      : type.startsWith('audio/') ? 'audio'
+        : 'photo';
+  return {
+    msg: 'upload',
+    kind,
+    bytes: Number.isFinite(bytes) ? bytes : 0,
+    ms: Number.isFinite(ms) ? Math.round(ms) : 0,
+    outcome,
+    runId: isRun ? parts[1] : null,
+  };
+}
+
+// `slots` / `belowFloor` may be passed in so PUT /upload and the resumable session routes
+// (uploadSessionRoute.js) share ONE budget; a caller that passes neither gets its own.
+function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onResponse, log, limits, statfs, slots: sharedSlots, belowFloor: sharedFloor }) {
+  const emit = (record) => {
+    try { (log || ((r) => console.log(JSON.stringify(r))))(record); } catch { /* telemetry never fails an upload */ }
+  };
+  const slots = sharedSlots || createUploadSlots(limits || {});
+  const statfsImpl = statfs || (fs.promises.statfs ? (p) => fs.promises.statfs(p) : null);
+  const belowFloor = sharedFloor || (statfsImpl ? createDiskGuard(uploadDir, statfsImpl) : async () => false);
+  async function uploadHandler(req, res) {
     let tempPath;
+    let slot;
+    const startedAt = Date.now();
     try {
       // 1. Auth — header only, no body bytes consumed yet.
       const authHeader = req.headers.authorization || '';
@@ -266,6 +402,21 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
       }
 
       const maxBytes = maxBytesFor(kind, contentType);
+
+      // 4b. The brake (video-upload-speed D6): disk first (nothing else matters on a full disk),
+      // then concurrency. Both are retryable 5xx on the phone.
+      if (await belowFloor()) {
+        emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes: 0, ms: Date.now() - startedAt, outcome: 'disk-floor', uploadPath }));
+        res.set('Retry-After', '30');
+        return res.status(507).json({ error: { status: 'RESOURCE_EXHAUSTED', message: 'Server storage is full' } });
+      }
+      slot = slots.acquire(uid);
+      if (!slot.ok) {
+        emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes: 0, ms: Date.now() - startedAt, outcome: `busy-${slot.reason}`, uploadPath }));
+        slot = undefined;
+        res.set('Retry-After', String(BUSY_RETRY_AFTER_SECONDS));
+        return res.status(503).json({ error: { status: 'UNAVAILABLE', message: 'Too many uploads right now' } });
+      }
 
       // 5. Declared-length fast path. Advisory only — Content-Length can be absent
       // or wrong, so the streaming byte count below is the authoritative guard.
@@ -309,10 +460,12 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
             error: { status: 'INVALID_ARGUMENT', message: `File too large (max ${maxBytes / 1024 / 1024}MB)` },
           });
         }
-        // Client vanished / stalled / io error — the socket is usually already
-        // gone, so only answer if we still can.
+        emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes: 0, ms: Date.now() - startedAt, outcome: (e && e.reason) || 'io', uploadPath }));
+        // Client vanished / stalled / io error — the socket is usually already gone, so only answer
+        // if we still can, and answer RETRYABLY (uploadFailureResponse): a stall is 408, not 400.
         if (res.headersSent || res.writableEnded) return undefined;
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Upload failed' } });
+        const failure = uploadFailureResponse(e && e.reason);
+        return res.status(failure.status).json(failure.body);
       }
 
       if (bytes === 0) {
@@ -327,6 +480,7 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
       tempPath = undefined;
 
       const url = `${resolveOrigin(req)}/uploads/${encodeURI(uploadPath)}`;
+      emit(uploadLogRecord({ contentType: req.headers['content-type'], bytes, ms: Date.now() - startedAt, outcome: 'ok', uploadPath }));
       onResponse?.(req, res);
       return res.json({ url });
     } catch (e) {
@@ -334,11 +488,25 @@ function createUploadHandler({ verifyIdToken, uploadDir, resolveOrigin, onRespon
       console.error('Upload error:', e);
       if (res.headersSent || res.writableEnded) return undefined;
       return res.status(500).json({ error: { status: 'INTERNAL', message: 'Upload failed' } });
+    } finally {
+      // Every exit (ok, too-large, stalled, aborted, io) gives the slot back.
+      if (slot) slot.release();
     }
-  };
+  }
+  uploadHandler.stats = () => slots.stats();
+  // Exposed so the resumable session routes mint the identical url (uploadSessionRoute.js).
+  uploadHandler.resolveOrigin = resolveOrigin;
+  uploadHandler.resetPeak = () => slots.resetPeak();
+  return uploadHandler;
 }
 
 module.exports = {
+  uploadsTelemetryRecord,
+  MAX_CONCURRENT_UPLOADS,
+  MAX_UPLOADS_PER_UID,
+  createUploadSlots,
+  diskFloorBytes,
+  createDiskGuard,
   ALLOWED_CONTENT_TYPES,
   ALLOWED_CREATOR_TYPES,
   MAX_PARTICIPANT_BYTES,
@@ -354,4 +522,6 @@ module.exports = {
   streamToFileWithLimit,
   sweepStaleTempUploads,
   createUploadHandler,
+  uploadFailureResponse,
+  uploadLogRecord,
 };

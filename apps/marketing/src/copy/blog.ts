@@ -19,8 +19,8 @@ export interface BlogCopy {
 export const blogCopy: Record<Language, BlogCopy> = {
   he: {
     title: 'הבלוג',
-    description: 'רעיונות למשחקי שדה, מה עובד בשטח ומה לא, ומה למדנו מאירועים אמיתיים.',
-    headline: 'מה למדנו בשטח',
+    description: 'רעיונות למירוצי משימות, מה עובד ומה לא, ומה למדנו מאירועים אמיתיים.',
+    headline: 'מה למדנו מהמירוצים',
     intro: 'רעיונות למשימות, טעויות ששווה לא לחזור עליהן, ודברים שגילינו רק כשאנשים באמת שיחקו.',
     empty: 'עוד לא פורסמו כאן פוסטים. חוזרים בקרוב.',
     readMore: 'להמשך קריאה',
@@ -29,8 +29,8 @@ export const blogCopy: Record<Language, BlogCopy> = {
   },
   en: {
     title: 'Blog',
-    description: 'Ideas for field games, what works outside and what does not, and what real events taught us.',
-    headline: 'What we learned outside',
+    description: 'Ideas for mission races, what works and what does not, and what real events taught us.',
+    headline: 'What we learned from real races',
     intro: 'Task ideas, mistakes worth not repeating, and things we only found out once people actually played.',
     empty: 'No posts published here yet. Back soon.',
     readMore: 'Read more',

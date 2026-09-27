@@ -46,7 +46,21 @@ const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 // The upload route (content-type allowlists, size caps and the streaming write)
 // lives in uploadRoute.js so it can be tested without this file's built-bundle
 // and Admin-SDK dependencies.
-const { createUploadHandler, sweepStaleTempUploads } = require('./uploadRoute.js');
+const { createUploadHandler, sweepStaleTempUploads, uploadsTelemetryRecord, createUploadSlots, createDiskGuard } = require('./uploadRoute.js');
+const { createUploadSessionRoutes } = require('./uploadSessionRoute.js');
+const { monitorEventLoopDelay } = require('perf_hooks');
+// Pure decisions for GET /uploads/* — content type, byte range, download
+// disposition (change: media-serving-correctness). See functions/mediaServing.js.
+const mediaServing = require('./mediaServing.js');
+// Server-side fetch of a picture dragged from another tab (change:
+// server-side-url-ingest). See urlIngestGuard.js for the SSRF rules — this
+// endpoint makes THIS box an HTTP client for an address a caller chose.
+const { createIngestUrlHandler } = require('./ingestUrlRoute.js');
+const dns = require('dns').promises;
+
+// The marketing CMS's GitHub token exchange. Same reasoning: a self-contained
+// route factored out so it can be tested without this file's dependencies.
+const { createOAuthHandlers } = require('./oauthRoute.js');
 
 // Initialise the Admin SDK ONCE. With GOOGLE_APPLICATION_CREDENTIALS set it uses
 // that service account; GCLOUD_PROJECT (or the credential's project) picks the
@@ -98,6 +112,31 @@ function reflectCors(req, res) {
 // Liveness/readiness for the reverse proxy and `docker healthcheck`.
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
+// ── The marketing CMS's GitHub sign in (change: marketing-cms-oauth) ──────
+//
+// Decap CMS is a static page; the token it needs can only be minted with a client
+// secret, so the exchange lives here. See oauthRoute.js for the whole handshake.
+//
+// The redirect URI must match the GitHub OAuth application's "Authorization
+// callback URL" byte for byte, so it is derived from the same canonical origin
+// the uploads use rather than from the request, which is behind a proxy.
+const oauth = createOAuthHandlers({
+  clientId: process.env.OAUTH_GITHUB_CLIENT_ID || '',
+  clientSecret: process.env.OAUTH_GITHUB_CLIENT_SECRET || '',
+  redirectUri: process.env.OAUTH_GITHUB_REDIRECT_URI
+    || `${VPS_UPLOAD_ORIGIN || CANONICAL_UPLOAD_ORIGIN}/oauth/callback`,
+  // Which pages may be handed a GitHub token. Falls back to the API's own origin
+  // allow-list, which already names the marketing site — a SEPARATE variable
+  // exists so the CMS can be limited to fewer origins than the API serves, never
+  // more. Unset and empty both mean "not configured", and refuse every sign in.
+  allowedOrigins: (process.env.OAUTH_ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+});
+app.get('/oauth/callback', (req, res) => oauth.callback(req, res));
+app.get('/oauth', (req, res) => oauth.begin(req, res));
+
 // ── File upload + serving (change: vps-upload-route) ──────────────────────
 // With Firebase Storage behind Blaze billing (no bucket), uploads are routed
 // through this server instead. Files are saved to /data/uploads/<path> (where
@@ -117,7 +156,14 @@ app.options('/upload', (req, res) => {
   res.sendStatus(204);
 });
 
-app.put('/upload', createUploadHandler({
+// ONE concurrency budget and ONE disk guard for every upload route (video-upload-speed D6), so a
+// resumable session cannot dodge the brake PUT obeys.
+const uploadSlots = createUploadSlots();
+const uploadDiskLow = fs.promises.statfs ? createDiskGuard(UPLOAD_DIR, (p) => fs.promises.statfs(p)) : async () => false;
+
+const uploadHandler = createUploadHandler({
+  slots: uploadSlots,
+  belowFloor: uploadDiskLow,
   verifyIdToken: (token) => admin.auth().verifyIdToken(token),
   uploadDir: UPLOAD_DIR,
   // The request-derived form is the LAST resort (change: task-media-durability).
@@ -133,47 +179,96 @@ app.put('/upload', createUploadHandler({
       || `${fwdProto || req.protocol}://${req.get('host')}`;
   },
   onResponse: reflectCors,
+});
+app.put('/upload', uploadHandler);
+
+// ── /upload/sessions: resumable uploads (change: video-upload-speed, D4) ─────
+// Send-while-filming and resume-from-offset for clips. SINGLE PROCESS ONLY (see the header of
+// uploadSessionRoute.js). CORS goes on EVERY response here, not only success: the phone must be
+// able to READ a 409's Upload-Offset to resume, and a response without CORS headers reads to the
+// browser as a network error.
+app.use('/upload/sessions', (req, res, next) => {
+  reflectCors(req, res);
+  res.set('Access-Control-Expose-Headers', 'Upload-Offset, Upload-Length, Location, Retry-After');
+  next();
+});
+app.options(['/upload/sessions', '/upload/sessions/:id'], (req, res) => {
+  res.set('Access-Control-Allow-Methods', 'POST, HEAD, PATCH, DELETE, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Upload-Offset, Upload-Length, Tus-Resumable');
+  res.set('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+const sessionRoutes = createUploadSessionRoutes({
+  verifyIdToken: (token) => admin.auth().verifyIdToken(token),
+  uploadDir: UPLOAD_DIR,
+  // The SAME origin rule as PUT /upload above, so a session mints the identical url shape.
+  resolveOrigin: (req) => uploadHandler.resolveOrigin(req),
+  slots: uploadSlots,
+  belowFloor: uploadDiskLow,
+});
+app.post('/upload/sessions', sessionRoutes.create);
+app.head('/upload/sessions/:id', sessionRoutes.head);
+app.patch('/upload/sessions/:id', sessionRoutes.patch);
+app.delete('/upload/sessions/:id', sessionRoutes.remove);
+
+// One `{msg:'uploads'}` line a minute when anything happened (video-upload-speed D6): in-flight
+// streams, the minute's peak, and the event-loop delay p99, so "did uploads starve the
+// callables" is a number. unref'd so it never keeps a stopping process alive.
+const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+loopDelay.enable();
+setInterval(() => {
+  try {
+    const rec = uploadsTelemetryRecord(uploadHandler.stats(), loopDelay);
+    // eslint-disable-next-line no-console
+    if (rec) console.log(JSON.stringify(rec));
+  } catch { /* telemetry never takes the API down */ }
+  loopDelay.reset();
+  uploadHandler.resetPeak();
+}, 60_000).unref();
+
+// ── POST /ingest-url ────────────────────────────────────────────────────────
+// Same auth, same ownership check, same content-type allowlist, same size caps
+// and the same staged temp->rename write as PUT /upload — by calling those very
+// functions, not by restating them. What is new is the address guard.
+app.options('/ingest-url', (req, res) => {
+  reflectCors(req, res);
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.set('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+// No route-level body parser: `express.json` is already mounted app-wide above,
+// and a second one is a no-op on an already-parsed body — so a `limit` here
+// would read as enforced while doing nothing. The global 1mb cap bounds the
+// body; the real bound on this route is `validateIngestUrl`, which refuses a
+// URL over 2048 characters before anything is fetched.
+app.post('/ingest-url', createIngestUrlHandler({
+  verifyIdToken: (token) => admin.auth().verifyIdToken(token),
+  uploadDir: UPLOAD_DIR,
+  resolveOrigin: (req) => {
+    const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    return VPS_UPLOAD_ORIGIN
+      || CANONICAL_UPLOAD_ORIGIN
+      || `${fwdProto || req.protocol}://${req.get('host')}`;
+  },
+  // `verbatim: true` so we judge the SAME answers the connection will use, and
+  // `all: true` so a name that returns one public and one private address is
+  // refused rather than sampled.
+  lookupAll: (hostname) => dns.lookup(hostname, { all: true, verbatim: true }),
+  fetchImpl: (...args) => fetch(...args),
+  onResponse: reflectCors,
 }));
 
-// Serve uploaded files. Content-Type is derived from the extension.
-// These URLs are the "download URLs" — equivalent to Firebase's getDownloadURL().
-const EXTENSION_TYPES = {
-  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-  '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heif',
-  '.gif': 'image/gif', '.webm': 'audio/webm', '.m4a': 'audio/mp4',
-  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.mp4': 'video/mp4',
-  '.aac': 'audio/aac', '.3gp': 'audio/3gpp', '.3gpp': 'audio/3gpp', '.amr': 'audio/amr',
-  '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
-};
-
-app.get(/^\/uploads\/(.+)$/, (req, res) => {
-  const relativePath = req.params[0];
-  if (!relativePath || relativePath.includes('..')) {
-    return res.status(400).json({ error: 'Invalid path' });
-  }
-  const fullPath = fsPath.join(UPLOAD_DIR, relativePath);
-  // Ensure we don't escape UPLOAD_DIR
-  if (!fullPath.startsWith(fsPath.resolve(UPLOAD_DIR))) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  if (!fs.existsSync(fullPath)) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-  const ext = fsPath.extname(fullPath).toLowerCase();
-  const ct = EXTENSION_TYPES[ext] || 'application/octet-stream';
-  res.set('Content-Type', ct);
-  // nosniff is load-bearing here, not boilerplate. Content-Type is derived from
-  // the FILENAME, while the upload validated the declared Content-Type HEADER —
-  // two different things, so the two can disagree. Without nosniff a browser may
-  // ignore our declared type, sniff the bytes and render an uploaded file as
-  // HTML on this origin. An unknown extension is served as octet-stream, and
-  // nosniff is what makes that verdict stick.
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('Cache-Control', 'public, max-age=31536000, immutable');
-  // Allow cross-origin (play-web on rush-point.com fetches from api.rush-point.com).
-  res.set('Access-Control-Allow-Origin', '*');
-  fs.createReadStream(fullPath).pipe(res);
-});
+// Serve uploaded files. These URLs are the "download URLs" — equivalent to
+// Firebase's getDownloadURL().
+//
+// The handler itself lives in ./mediaServing.js and takes its upload directory by
+// injection, the same way ./uploadRoute.js already does — so a scripts/test-*.ts
+// can mount it on a bare express app and drive REAL HTTP without the built
+// callables bundle or a real Admin SDK. That matters here: the emulator does not
+// serve /uploads at all, so scripts/e2e-verify.mjs cannot reach this route and
+// the round trip has to be proven somewhere else (change: media-serving-correctness).
+app.get(/^\/uploads\/(.+)$/, mediaServing.createUploadsGetHandler({ uploadDir: UPLOAD_DIR }));
 
 // Internal: delete an upload prefix (local ops only — not for browser use).
 app.delete(/^\/uploads\/(.+)$/, async (req, res) => {
@@ -245,9 +340,15 @@ sweepStaleTempUploads(UPLOAD_DIR)
 
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '0.0.0.0';
-app.listen(port, host, () => {
+const server = app.listen(port, host, () => {
   // eslint-disable-next-line no-console
   console.log(`RushPoint API listening on ${host}:${port} — ${mounted.length} callables mounted`);
 });
+// Node 20 ends ANY request after 300 s (server.requestTimeout), however healthy. A 12MB clip on a
+// weak field link can take longer than that while still moving, and the phone then re-sends the
+// whole file (change: media-upload-reliability, D2). The client caps one attempt at 15 minutes
+// (attemptBudgetMs), so the server allows 16. A DEAD connection is still cut after 45 s of no
+// bytes by uploadRoute.js's own stall timer; headersTimeout keeps its default.
+server.requestTimeout = 16 * 60_000;
 
 module.exports = { app };

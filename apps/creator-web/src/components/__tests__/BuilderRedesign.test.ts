@@ -13,7 +13,7 @@ import type { Task } from '@rushpoint/shared';
 import { taskPreviewLine } from '../../lib/taskCardPreview';
 import { choicesFromTask, choicesToTask, addChoice, setChoiceText, toggleCorrect } from '../../lib/quizFields';
 import { TASK_SAMPLES, applySample } from '../../lib/taskTemplates';
-import { initDraft, editDraft, isDirty, commit } from '../../lib/taskDraft';
+import { initDraft, editDraft, replaceDraft, isDirty, commit } from '../../lib/taskDraft';
 
 function task(p: Partial<Task> = {}): Task {
   return {
@@ -110,5 +110,25 @@ describe('context-panel state isolation (keystrokes do not reach the canvas)', (
     const flushed = commit(editDraft(initDraft(task()), { title: 'X' }));
     flushed.draft.title = 'mutated';
     expect(flushed.committed.title).toBe('X');
+  });
+});
+
+// answer-scored-question: an editor that REMOVES a key (switching a quiz to
+// "points by answer" drops `answers`) must see the key gone. The merging editDraft
+// kept it, so the next keystroke wrote the old answer back and every save was
+// refused ("cannot be combined with a single right answer"). Found in the browser.
+describe('replaceDraft (a whole-task edit)', () => {
+  it('a key the editor removed stays removed', () => {
+    const s0 = initDraft(task({ type: 'quiz', answers: ['a'] }));
+    const { answers: _drop, ...without } = s0.draft;
+    void _drop;
+    const s1 = replaceDraft(s0, { ...without, answerOutcomes: [] } as never);
+    expect('answers' in s1.draft).toBe(false);
+  });
+  it('leaves committed untouched, like editDraft', () => {
+    const s0 = initDraft(task({ title: 'A' }));
+    const s1 = replaceDraft(s0, { ...s0.draft, title: 'B' });
+    expect(s1.committed).toBe(s0.committed);
+    expect(s1.draft.title).toBe('B');
   });
 });

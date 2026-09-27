@@ -11,7 +11,8 @@
 // best-effort context is run through `redact()` to drop known-sensitive keys.
 
 import * as functions from 'firebase-functions';
-import { sanitizeFinite } from '@rushpoint/shared';
+import { sanitizeFinite, isFirestoreQuotaExhausted, DAILY_QUOTA_REASON } from '@rushpoint/shared';
+import { withCallableAttribution, invocationFirestoreCost } from '../opCounter';
 
 export interface CallMeta {
   callable: string;
@@ -164,6 +165,7 @@ export const HOT_PATH_MAX_INSTANCES: Record<string, number> = {
   getMyTeamState: 10,
   verifyStationCode: 10,
   submitStationPhoto: 10,
+  attachSubmissionMedia: 10,
   // Continuous background GPS pings from every device at once.
   updateLocation: 10,
   // Thundering herd: a whole event scans the join code within the same minute.
@@ -234,18 +236,91 @@ function idsFromPayload(data: unknown): Pick<CallMeta, 'runId' | 'gameId'> {
  * runtimeOpts.maxInstances still wins) and resolveRuntimeOpts fills
  * DEFAULT_MAX_INSTANCES into whatever gap is left.
  */
+/**
+ * Emit one invocation's Firestore cost as a structured record (change:
+ * spark-tier-location-load). A no-op unless RUSHPOINT_FS_OPCOUNT=1.
+ *
+ * The marker string is stable and greppable on purpose — it is what an offline aggregator
+ * keys on to total a whole run's cost from the logs, which is the only way to measure a
+ * multi-process runtime (see opCounter.ts). Never throws: instrumentation must not be able
+ * to fail the call it just measured.
+ */
+function logFirestoreCost(callable: string): void {
+  try {
+    const cost = invocationFirestoreCost();
+    if (!cost) return;
+    functions.logger.info('fsops', {
+      callable,
+      reads: cost.reads,
+      writes: cost.writes,
+    });
+  } catch {
+    // Swallowed by design — see above.
+  }
+}
+
+/**
+ * Substitute Firestore's raw quota refusal with a callable error the clients can
+ * act on (change: daily-quota-user-message).
+ *
+ * When the project's daily Firestore budget is spent, every read rejects with a
+ * gRPC ServiceError carrying the NUMBER 8. `functions.https.onCall` does not
+ * recognise that as an HttpsError, so it reports a bare `internal` to the client —
+ * which both apps then render as "something went wrong", indistinguishable from a
+ * genuine bug. That is exactly what happened on 2026-08-28: hours of "טעינת
+ * המשחקים נכשלה" with nothing actually broken.
+ *
+ * Doing this HERE rather than at the call sites is the whole point: every one of
+ * the ~112 callables is built through loggedCallable (the callable-hardening suite
+ * enforces that no `functions.https.onCall` is called directly), so one conversion
+ * covers all of them by construction and a callable added tomorrow inherits it.
+ *
+ * An error we already classified is passed through untouched — our own rate
+ * limiter's `resource-exhausted` must keep meaning "slow down", not "come back
+ * tomorrow".
+ */
+export function asClientError(err: unknown): unknown {
+  if (!isFirestoreQuotaExhausted(err)) return err;
+  return new functions.https.HttpsError(
+    'resource-exhausted',
+    // Never rendered: both clients classify on `details.reason` and show their own
+    // localized copy. Kept meaningful for logs and for any future API consumer.
+    'Daily capacity reached. Service resumes when the quota resets.',
+    { reason: DAILY_QUOTA_REASON },
+  );
+}
+
 export function loggedCallable(
   name: string,
   handler: CallableHandler,
   runtimeOpts?: functions.RuntimeOptions,
 ) {
   return functions.runWith(resolveRuntimeOpts(withHotPathCeiling(name, runtimeOpts))).https.onCall(async (data, context) =>
-    logCall(
-      { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
-      // Backstop: a callable must never return a non-finite number — one Infinity
-      // crashes the ENTIRE response at JSON-encode. Degrade any to null here so a
-      // computation bug becomes a benign null field, not a failed call.
-      async () => sanitizeFinite(await handler(data, context)),
-    ),
+    // Firestore op attribution (change: spark-tier-location-load) wraps the OUTERMOST
+    // layer so every read and write the invocation performs — including inside logCall's
+    // own work — is charged to this callable. It is an AsyncLocalStorage context, so it
+    // survives every await below; when counting is disabled it calls straight through.
+    withCallableAttribution(name, async () => {
+      try {
+        return await logCall(
+          { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
+          // Backstop: a callable must never return a non-finite number — one Infinity
+          // crashes the ENTIRE response at JSON-encode. Degrade any to null here so a
+          // computation bug becomes a benign null field, not a failed call.
+          async () => sanitizeFinite(await handler(data, context)),
+        );
+      } catch (err) {
+        // OUTSIDE logCall on purpose: logCall has already recorded the ORIGINAL
+        // rejection, so the raw `errorCode: 8` stays in the logs where it is the
+        // diagnostic that identifies a quota outage. Only what travels to the
+        // client is substituted.
+        throw asClientError(err);
+      } finally {
+        // In `finally`, so a FAILED call still reports what it spent — a callable that
+        // throws after twenty reads has still spent twenty reads of the daily quota, and
+        // that is exactly the sort of cost that otherwise hides.
+        logFirestoreCost(name);
+      }
+    }),
   );
 }

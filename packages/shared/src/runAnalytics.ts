@@ -3,7 +3,10 @@
 // tab. Deterministic regardless of team order; retention-safe (a pruned team
 // just contributes nothing). No Firestore, no DOM.
 import type { RunTeam } from './types';
-import { median, benchmarkIndicator, type BenchmarkIndicator } from './benchmark';
+import {
+  median, benchmarkIndicator, benchmarkIndicatorFor,
+  type BenchmarkIndicator, type BenchmarkAggregate,
+} from './benchmark';
 
 export interface TaskAnalytics {
   taskId: string;
@@ -84,10 +87,29 @@ export function computeRunAnalytics(teams: RunTeam[], gameTasks: AnalyticsTask[]
 }
 
 /**
- * Compare a task's median time to the platform median for its type. Thin wrapper
- * over benchmarkIndicator (platform-benchmark) — 'unknown' until a platform
- * median is available.
+ * Compare a task's median time to the platform median for its type.
+ *
+ * NOT YET WIRED TO ANY SCREEN, which is worth knowing before it is: the
+ * aggregate it would read is currently 44 runs, 28 of them from one account, so
+ * `benchmarkIndicatorFor` is the entry point to use when this is surfaced — it
+ * refuses to compare against a sample too thin to mean anything, which the bare
+ * median cannot do.
+ *
+ * This overload is kept for the median-only case and is deliberately the weaker
+ * of the two.
  */
 export function compareToPlatformMedian(taskMedianMs: number, platformMedianMs: number | null | undefined): BenchmarkIndicator {
   return benchmarkIndicator(taskMedianMs, platformMedianMs ?? 0);
+}
+
+/**
+ * The comparison to reach for: it consults the aggregate's sample size, so a
+ * platform benchmark built from a founder testing his own game reports
+ * `unknown` rather than calling real teams slow.
+ */
+export function compareToPlatformBenchmark(
+  taskMedianMs: number,
+  aggregate: BenchmarkAggregate | null | undefined,
+): BenchmarkIndicator {
+  return benchmarkIndicatorFor(taskMedianMs, aggregate);
 }

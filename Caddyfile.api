@@ -20,7 +20,9 @@ api.rush-point.com {
 	# default or a 50MB creator video is rejected by the PROXY before the server
 	# ever sees it — and the server's own limit (50MB) would never apply.
 	# Keep this >= MAX_CREATOR_BYTES in functions/server.js.
-	@upload path /upload
+	# /upload/sessions* is the resumable route (video-upload-speed D4): each PATCH is a slice of a
+	# clip, and the last one can carry the whole rest of it, so it needs the same raised limit.
+	@upload path /upload /upload/sessions*
 	handle @upload {
 		request_body {
 			max_size 60MB

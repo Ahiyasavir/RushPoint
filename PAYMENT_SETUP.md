@@ -196,7 +196,7 @@ Params:
 
 ## כתובת דוא"ל לפניות תשלום
 
-לכל שאלה לגבי חיוב, ניתוב לכתובת: **spendora.tracker@gmail.com**
+לכל שאלה לגבי חיוב, ניתוב לכתובת: **admin.rushpoint@gmail.com**
 
 ---
 

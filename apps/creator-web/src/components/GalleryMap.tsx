@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, type MapMode } from '@rushpoint/shared';
+import { resolveMapStyle, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
@@ -64,7 +64,7 @@ export default function GalleryMap({
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
-  const [mode, setMode] = useState<MapMode>('topo');
+  const [mode, setMode] = useState<MapMode>(DEFAULT_MAP_MODE);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
@@ -133,7 +133,7 @@ export default function GalleryMap({
             {emptyLabel}
           </span>
           {emptyDetail && (
-            <span className="bg-app-bg/80 text-zinc-400 text-[11px] leading-relaxed px-3 py-1.5 rounded-xl max-w-md text-center">
+            <span className="bg-app-bg/80 text-zinc-400 text-[13px] leading-relaxed px-3 py-1.5 rounded-xl max-w-md text-center">
               {emptyDetail}
             </span>
           )}
@@ -142,7 +142,7 @@ export default function GalleryMap({
       {/* A pin a creator can see is a pin a creator will believe. Say out loud
           that a task pin is an area, so it is never read as a location fix. */}
       {notice && (
-        <p className="mt-1.5 text-[11px] text-[--ink-3] text-start">{notice}</p>
+        <p className="mt-1.5 text-[13px] text-[--ink-3] text-start">{notice}</p>
       )}
     </div>
   );

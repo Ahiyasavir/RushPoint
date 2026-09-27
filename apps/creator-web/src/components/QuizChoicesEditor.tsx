@@ -22,6 +22,7 @@ import {
 } from '../lib/quizFields';
 import { Button, Input, Label } from './ui';
 import { useT } from './LanguageContext';
+import { TAP_INLINE } from '../lib/interaction';
 
 export default function QuizChoicesEditor({
   task,
@@ -62,7 +63,7 @@ export default function QuizChoicesEditor({
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-2">
             <label
-              className="flex items-center gap-1 text-[11px] text-[--ink-2] shrink-0 cursor-pointer select-none"
+              className="flex items-center gap-1 text-[13px] text-[--ink-2] shrink-0 cursor-pointer select-none"
               title={b.correct}
             >
               <input
@@ -84,7 +85,7 @@ export default function QuizChoicesEditor({
             <button
               type="button"
               onClick={() => apply(removeChoice(rows, row.id))}
-              className="text-neon-red shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent"
+              className={`${TAP_INLINE} text-neon-red shrink-0 rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent`}
               aria-label={`${b.deleteTask} ${i + 1}`}
               disabled={rows.length <= 1}
             >
@@ -99,7 +100,7 @@ export default function QuizChoicesEditor({
       </Button>
 
       {revealError && !anyCorrect && (
-        <p className="text-[11px] text-rp-amber">
+        <p className="text-[13px] text-ink-amber">
           {b.quizNeedsCorrect}
         </p>
       )}

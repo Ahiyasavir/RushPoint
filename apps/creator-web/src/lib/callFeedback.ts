@@ -23,10 +23,13 @@
 // key resolves to real, language-correct, code-free copy, so a key added later
 // without copy goes red instead of rendering `undefined` at a live event.
 
+import { isDailyQuotaRejection } from '@rushpoint/shared';
+
 export const CALL_FAILURE_KEYS = [
   'offline',
   'notAllowed',
   'rateLimited',
+  'dailyCapacity',
   'rejected',
   'generic',
 ] as const;
@@ -50,6 +53,11 @@ export interface CallFailure {
 const OUTCOME: Record<CallFailureKey, CallFailure> = {
   offline:     { key: 'offline',     severity: 'warning', retryable: true },
   rateLimited: { key: 'rateLimited', severity: 'warning', retryable: true },
+  // NOT retryable, unlike every other 'warning'. The daily Firestore budget is
+  // gone until it resets; retrying is the one action guaranteed not to help, and
+  // it spends whatever headroom may have freed up. A Retry button here would be
+  // a lie, so the flag suppresses it.
+  dailyCapacity: { key: 'dailyCapacity', severity: 'warning', retryable: false },
   notAllowed:  { key: 'notAllowed',  severity: 'error',   retryable: false },
   rejected:    { key: 'rejected',    severity: 'error',   retryable: false },
   generic:     { key: 'generic',     severity: 'error',   retryable: true },
@@ -93,6 +101,11 @@ const BY_CODE: Record<string, CallFailureKey> = {
  * code always decides on its own.
  */
 export function describeCallFailure(e: unknown, opts?: { online?: boolean }): CallFailure {
+  // Checked BEFORE the code table: the daily-quota rejection arrives AS a
+  // `resource-exhausted`, so the table would otherwise claim it first and tell the
+  // creator to wait a few seconds — advice that cannot work until the quota resets.
+  // The marker is structured (`details.reason`), never message text.
+  if (isDailyQuotaRejection(e)) return OUTCOME.dailyCapacity;
   const mapped = BY_CODE[bareCode(e)];
   if (mapped) return OUTCOME[mapped];
   if (opts?.online === false) return OUTCOME.offline;

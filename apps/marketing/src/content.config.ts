@@ -47,6 +47,32 @@ const metadataDefinition = () =>
     })
     .optional();
 
+/**
+ * A picture or a video, wherever one may appear.
+ *
+ * `src` is a site relative path under /uploads, which is where the CMS puts what
+ * it is given. A video is NOT loaded as an image: `kind` says which it is rather
+ * than the extension being sniffed, because a mis-sniffed video renders as a
+ * broken image with no explanation.
+ */
+const mediaItem = () =>
+  z.object({
+    kind: z.enum(['image', 'video']),
+    src: z.string(),
+    /**
+     * Required for an image, because an image with no alt text is invisible to
+     * anyone using a screen reader and to a search engine. For a video it is the
+     * accessible label.
+     */
+    alt: z.string(),
+    caption: z.string().optional(),
+    /** Shown while a video loads, and as its thumbnail before play. */
+    poster: z.string().optional(),
+  });
+
+/** Media that may be absent. A page without a picture is a page, not an error. */
+const optionalMedia = () => mediaItem().optional();
+
 const postCollection = defineCollection({
   loader: glob({ pattern: ['*.md', '*.mdx'], base: 'src/data/post' }),
   schema: z.object({
@@ -76,8 +102,11 @@ const postCollection = defineCollection({
     title: z.string(),
     excerpt: z.string().optional(),
     image: z.string().optional(),
-    /** A video embed URL for the post body. */
-    video: z.url().optional(),
+    /**
+     * A self-hosted picture or video for the post body, same as the standing
+     * pages: a file the CMS uploaded and we serve, never a third-party embed.
+     */
+    media: optionalMedia(),
 
     category: z.string().optional(),
     tags: z.array(z.string()).optional(),
@@ -87,6 +116,348 @@ const postCollection = defineCollection({
   }),
 });
 
+// ── Pages (change: editable-pages-and-media) ─────────────────────────────────
+//
+// The home, story and contact pages used to be TypeScript modules under
+// src/copy/. That made every word on them a developer task: to change a headline
+// you had to edit code, commit and deploy. They are content, so they live in
+// content files and the CMS can reach them.
+//
+// One file per page PER LANGUAGE (`home.he.json`, `home.en.json`), rather than
+// one file holding both. Two reasons: a language can then be edited without the
+// risk of touching the other, and it matches how the blog posts already work, so
+// there is one mental model rather than two.
+
+const homePages = defineCollection({
+  // The id is DECLARED, not left to the loader. The default generateId
+  // slugifies a filename, so `home.he.json` becomes `home-he`, and every read
+  // that assumed the filename silently found nothing.
+  loader: glob({
+    pattern: 'home.*.json',
+    base: 'src/data/pages',
+    generateId: ({ entry }) => entry.replace(/.json$/, ''),
+  }),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    tagline: z.string(),
+    headline: z.string(),
+    subhead: z.string(),
+    primaryAction: z.string(),
+    secondaryAction: z.string(),
+    ideasAction: z.string(),
+
+    // ── The conversion copy (change: marketing-home-cro-redesign) ────────────
+    //
+    // REQUIRED, not optional, and that is the point. Every other island on this
+    // page is optional so a page without it still renders; these five are the
+    // reasons a visitor does or does not start, and a homepage that quietly
+    // drops the one line saying "no signup, no card" looks completely fine while
+    // asking for more trust than it has earned. A missing key fails the build,
+    // in the language it is missing from.
+    //
+    /** Social proof framed on engagement DEPTH, never on a user count. */
+    heroTrust: z.string(),
+    /** The curiosity gap beside the hero map: a challenge, not a caption. */
+    heroChallenge: z.string(),
+    /** The door for a visitor who came to PLAY, shown under the hero CTAs. */
+    heroJoinPrompt: z.string(),
+    heroJoinAction: z.string(),
+    /** Friction reduction, immediately above the playable mission. */
+    lowFrictionNote: z.string(),
+    /** The heading beside the founder video. */
+    videoLabel: z.string(),
+    /** Two or three lines beside the founder video. */
+    videoBody: z.string(),
+    /** The link from the video section to the full story page. */
+    videoStoryAction: z.string(),
+    /** The video's running time, e.g. `1:35`. Shown as a badge. */
+    videoDuration: z.string(),
+
+    featuresTagline: z.string(),
+    featuresTitle: z.string(),
+    featuresSubtitle: z.string(),
+    features: z.array(z.object({ title: z.string(), description: z.string(), icon: z.string() })),
+    stepsTitle: z.string(),
+    steps: z.array(z.object({ title: z.string(), description: z.string(), icon: z.string() })),
+    ctaTitle: z.string(),
+    ctaSubtitle: z.string(),
+
+    // Media. All optional, so the page keeps working with none of it.
+    hero: optionalMedia(),
+
+    /**
+     * The clip inside the hero's phone frame (change: marketing-home-cro-redesign).
+     *
+     * ABSENT BY DESIGN. With nothing here the frame shows an inline SVG field map
+     * that draws its own route, which costs no request and cannot be the reason
+     * the largest paint on the page is slow. Set it once a real screen capture of
+     * a game exists and the frame plays that instead, muted and looping, with no
+     * code change: a content decision rather than a deploy.
+     */
+    heroClip: optionalMedia(),
+    /**
+     * The mission-taste screen shown in the hero when `heroClip` is absent
+     * (change: brand-any-place). Three real-feeling missions, each tagged with
+     * a different PLACE, so the hero itself makes the "any place" argument
+     * instead of a topographic map that argued the opposite.
+     */
+    heroTaste: z
+      .object({
+        progress: z.string(),
+        clock: z.string(),
+        score: z.string(),
+        missions: z
+          .array(
+            z.object({
+              kind: z.string(),
+              place: z.string(),
+              title: z.string(),
+              prompt: z.string(),
+              points: z.string(),
+              /**
+               * Swaps the generic answer-row mockup for a drawn illustration
+               * (change: hero-photo-reveal). `'crosswalkPhoto'` is the only value:
+               * a grayscale drawn scene that crossfades to color, evoking a
+               * recreate-the-photo mission WITHOUT reproducing any real photograph
+               * — the actual Beatles Abbey Road cover is still under copyright, so
+               * this is an original illustration, never an embedded image. Absent
+               * means the ordinary input-row mockup, unchanged.
+               */
+              visual: z.enum(['crosswalkPhoto']).optional(),
+            }),
+          )
+          .min(1),
+      })
+      .optional(),
+    galleryTitle: z.string().optional(),
+    gallerySubtitle: z.string().optional(),
+    gallery: z.array(mediaItem()).default([]),
+
+    /**
+     * The occasion doors under the hero (change: marketing-home-occasion-doors).
+     *
+     * The hero borrows one image to be understood in a beat, and this row is what buys
+     * the breadth back: four ways in, so a visitor whose reason is not the one the
+     * headline pictured still finds themselves on the page. Each `examples` line ends in
+     * a catch all clause on purpose; four doors have to stand in for an open set.
+     *
+     * OPTIONAL as a whole, like `tryMission` and `missionIdeas`: a content file without
+     * it renders the page exactly as before. That is deliberate, because the premise
+     * here (self selection helps more than the extra click costs) is a hypothesis to be
+     * measured, and removing it should be an edit rather than a deploy.
+     *
+     * `slug` is a URL fragment, not prose, so the no dash standard does not govern it.
+     * It must be a slug the landing page registry generates, which
+     * scripts/test-marketing-home-cro.ts asserts against SUBJECT_SLUGS: a typo here
+     * renders a perfectly good link to a 404 and nothing else on the page would notice.
+     */
+    occasionDoors: z
+      .object({
+        title: z.string(),
+        doors: z
+          .array(
+            z.object({
+              title: z.string(),
+              examples: z.string(),
+              slug: z.string(),
+            }),
+          )
+          .min(1),
+      })
+      .optional(),
+
+    // The playable demo mission (change: try-a-mission). OPTIONAL as a whole: a page with no
+    // `tryMission` renders exactly as it did before, so this is a content decision rather
+    // than a deploy. Every string a visitor can see lives here, in the language's own file,
+    // which is what keeps the Hebrew page from leaking English.
+    tryMission: z
+      .object({
+        tagline: z.string().optional(),
+        title: z.string(),
+        subtitle: z.string(),
+        startBody: z.string(),
+        startAction: z.string(),
+        checkAction: z.string(),
+        resetAction: z.string(),
+        replayAction: z.string(),
+        wrongFeedback: z.string(),
+        // `{n}` and `{total}` / `{score}` are substituted at runtime.
+        progressLabel: z.string(),
+        scoreLabel: z.string(),
+        youLabel: z.string(),
+        doneTitle: z.string(),
+        doneBody: z.string(),
+        doneAction: z.string(),
+        doneScoreLabel: z.string(),
+        doneTimeLabel: z.string(),
+        doneRankLabel: z.string(),
+        boardNote: z.string(),
+        rivals: z.array(z.object({ name: z.string(), score: z.number() })).default([]),
+        missions: z.object({
+          order: z.object({
+            kindLabel: z.string(),
+            title: z.string(),
+            prompt: z.string(),
+            /** Authored in the CORRECT order; the widget scrambles them for display. */
+            items: z.array(z.string()).min(2),
+          }),
+          answer: z.object({
+            kindLabel: z.string(),
+            title: z.string(),
+            prompt: z.string(),
+            hint: z.string().optional(),
+            answers: z.array(z.string()).min(1),
+          }),
+          // The demo's closing question (change: try-mission-occasion). Not a graded mission —
+          // there is no right answer — so the option shape carries no `correct` flag: every
+          // choice is equally valid and simply moves on to the done screen with its strong,
+          // cost-free CTA. Personalizing the closing pitch rather than testing a fourth
+          // mechanic is deliberate: three real mission types are already proven by this point,
+          // and a marketing demo's job here is to learn what THIS visitor wants, not to grade
+          // one more answer.
+          occasion: z.object({
+            kindLabel: z.string(),
+            title: z.string(),
+            prompt: z.string(),
+            options: z.array(z.object({ label: z.string(), emoji: z.string().optional() })).min(2),
+          }),
+        }),
+      })
+      .optional(),
+
+    // The mission idea generator (change: mission-ideas). Optional as a whole, like the demo
+    // above it: a page without it renders exactly as before. The bank is CONTENT so adding an
+    // idea is a CMS edit rather than a deploy, and each language's bank is written in that
+    // language rather than translated from the other.
+    missionIdeas: z
+      .object({
+        tagline: z.string().optional(),
+        title: z.string(),
+        subtitle: z.string(),
+        occasionLabel: z.string(),
+        placeLabel: z.string(),
+        generateAction: z.string(),
+        againAction: z.string(),
+        ctaAction: z.string(),
+        note: z.string(),
+        occasions: z.array(z.object({ id: z.string(), label: z.string() })).min(1),
+        places: z.array(z.object({ id: z.string(), label: z.string() })).min(1),
+        /** At least three, because the generator hands out three at a time. */
+        ideas: z
+          .array(z.object({
+            kindLabel: z.string().optional(),
+            text: z.string(),
+            occasions: z.array(z.string()).default([]),
+            places: z.array(z.string()).default([]),
+          }))
+          .min(3),
+      })
+      .optional(),
+
+    // The station planner (change: game-planner). Optional like the other two islands.
+    // The numeric defaults are content so a creator can point the tool at the kind of event
+    // they actually run, without a deploy.
+    gamePlanner: z
+      .object({
+        tagline: z.string().optional(),
+        title: z.string(),
+        subtitle: z.string(),
+        fieldLabels: z.object({
+          teams: z.string(),
+          minutes: z.string(),
+          missions: z.string(),
+          perMission: z.string(),
+          capacity: z.string(),
+        }),
+        defaultTeams: z.number().int().positive(),
+        defaultMinutes: z.number().int().positive(),
+        defaultMissions: z.number().int().positive(),
+        defaultPerMission: z.number().int().positive(),
+        defaultCapacity: z.number().int().positive(),
+        outputTitle: z.string(),
+        stationsLabel: z.string(),
+        durationLabel: z.string(),
+        throughputLabel: z.string(),
+        verdictOk: z.string(),
+        verdictTight: z.string(),
+        note: z.string(),
+      })
+      .optional(),
+
+    // The questions that stop someone trying this (change: home-faq). Optional, and empty
+    // renders nothing rather than an empty heading.
+    faqTitle: z.string().optional(),
+    faqs: z.array(z.object({ title: z.string(), description: z.string() })).default([]),
+  }),
+});
+
+const storyPages = defineCollection({
+  // The id is DECLARED, not left to the loader. The default generateId
+  // slugifies a filename, so `home.he.json` becomes `home-he`, and every read
+  // that assumed the filename silently found nothing.
+  loader: glob({
+    pattern: 'story.*.json',
+    base: 'src/data/pages',
+    generateId: ({ entry }) => entry.replace(/.json$/, ''),
+  }),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    headline: z.string(),
+    intro: z.string(),
+    sections: z.array(
+      z.object({
+        title: z.string(),
+        body: z.array(z.string()),
+        // A picture belonging to THIS part of the story, so the page can be told
+        // in pictures as well as words instead of stacking them all at the end.
+        media: optionalMedia(),
+      }),
+    ),
+    closing: z.string(),
+    action: z.string(),
+    portrait: optionalMedia(),
+  }),
+});
+
+const contactPages = defineCollection({
+  // The id is DECLARED, not left to the loader. The default generateId
+  // slugifies a filename, so `home.he.json` becomes `home-he`, and every read
+  // that assumed the filename silently found nothing.
+  loader: glob({
+    pattern: 'contact.*.json',
+    base: 'src/data/pages',
+    generateId: ({ entry }) => entry.replace(/.json$/, ''),
+  }),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    headline: z.string(),
+    intro: z.string(),
+    nameLabel: z.string(),
+    emailLabel: z.string(),
+    messageLabel: z.string(),
+    submit: z.string(),
+    sending: z.string(),
+    successTitle: z.string(),
+    successBody: z.string(),
+    errorInvalid: z.string(),
+    errorRateLimited: z.string(),
+    errorOffline: z.string(),
+    errorUnknown: z.string(),
+    otherWaysTitle: z.string(),
+    otherWaysBody: z.string(),
+    // The label above the direct address shown when the form cannot reach the
+    // API. The address itself is configuration (utils/i18n.ts); this is the
+    // sentence around it, which is copy and differs per language.
+    directEmailLabel: z.string().optional(),
+  }),
+});
+
 export const collections = {
   post: postCollection,
+  homePages,
+  storyPages,
+  contactPages,
 };

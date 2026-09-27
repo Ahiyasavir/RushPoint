@@ -25,7 +25,7 @@ function cardClass(on: boolean): string {
     'focus-visible:ring-offset-2 focus-visible:ring-offset-[--surface-1]',
     on
       // border-2 + the check mark are the non-colour half of the signal.
-      ? 'border-2 border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+      ? 'border-2 border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
       : 'border border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]/40',
   ].join(' ');
 }
@@ -123,7 +123,7 @@ export function MultiChoiceCardRow<T extends string>({ label, options, values, o
           );
         })}
       </div>
-      {hint && <p className="text-[11px] text-[--ink-3] mt-1.5">{hint}</p>}
+      {hint && <p className="text-[13px] text-[--ink-3] mt-1.5">{hint}</p>}
     </div>
   );
 }

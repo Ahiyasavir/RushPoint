@@ -17,7 +17,7 @@ export type RunActionId =
   | 'createTrackable' | 'createZone' | 'deleteZone'
   | 'approvePhoto' | 'rejectPhoto' | 'hideFeedPhoto' | 'sendChatReply'
   | 'loadHeatmap' | 'loadAnalytics' | 'exportAnalyticsCsv' | 'refreshSurvey'
-  | 'skipStage' | 'skipTask' | 'adjustTeamScore' | 'finalizeRun';
+  | 'skipStage' | 'skipTask' | 'sendBack' | 'adjustTeamScore' | 'finalizeRun';
 
 export type ActionSeverity = 'routine' | 'cautionary' | 'destructive';
 
@@ -67,10 +67,16 @@ const SEVERITY: Record<RunActionId, ActionSeverity> = {
   // effect (the team keeps playing the stage) but it does take a scoring
   // opportunity away, so it carries the same weight as the whole stage skip.
   skipTask: 'cautionary',
+  // Sends ONE team back to a mission or stage (change: send-team-back). It moves a score and a
+  // route, so it is confirmed with the server's own preview; it undoes a skip rather than
+  // destroying anything, so it is cautionary, not destructive.
+  sendBack: 'cautionary',
   // Reversible, but they take a scoring opportunity away from every team that has
   // not reached the stop yet (change: live-task-pause).
   pauseTask: 'cautionary',
-  closeTask: 'cautionary',
+  // Final for every team already playing (change: live-task-close-rules): the team on it is moved
+  // off with no points and every team's stage shrinks.
+  closeTask: 'destructive',
 
   // Irreversible for the players: the run ends, or a score is rewritten.
   adjustTeamScore: 'destructive',
@@ -147,7 +153,7 @@ const CONSEQUENCE: Record<RunActionId, RunActionConsequence> = {
   activateHotZone: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'activateHotZone' },
   deactivateHotZone: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'deactivateHotZone' },
   pauseTask: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'pauseTask' },
-  closeTask: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'closeTask' },
+  closeTask: { audience: 'allTeams', reversible: false, confirm: true, copyKey: 'closeTask' },
   resumeTask: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'resumeTask' },
   createZone: { audience: 'allTeams', reversible: true, confirm: false, copyKey: 'createZone' },
   deleteZone: { audience: 'allTeams', reversible: false, confirm: true, copyKey: 'deleteZone' },
@@ -165,6 +171,7 @@ const CONSEQUENCE: Record<RunActionId, RunActionConsequence> = {
   clearTeamOutOfBounds: { audience: 'oneTeam', reversible: true, confirm: false, copyKey: 'clearTeamOutOfBounds' },
   skipStage: { audience: 'oneTeam', reversible: false, confirm: true, copyKey: 'skipStage' },
   skipTask: { audience: 'oneTeam', reversible: false, confirm: true, copyKey: 'skipTask' },
+  sendBack: { audience: 'oneTeam', reversible: false, confirm: true, copyKey: 'sendBack' },
   adjustTeamScore: { audience: 'oneTeam', reversible: false, confirm: true, copyKey: 'adjustTeamScore' },
   approvePhoto: { audience: 'oneTeam', reversible: false, confirm: false, copyKey: 'approvePhoto' },
   rejectPhoto: { audience: 'oneTeam', reversible: false, confirm: false, copyKey: 'rejectPhoto' },
@@ -217,7 +224,8 @@ export function runActionNeedsConfirm(id: RunActionId): boolean {
 export type TeamRowActions = { inline: RunActionId[]; overflow: RunActionId[] };
 
 /** Least to most destructive, which is the order the menu renders. */
-const TEAM_ROW_OVERFLOW: RunActionId[] = ['skipTask', 'skipStage', 'adjustTeamScore'];
+// `sendBack` (change: send-team-back) sits after the skips it most often undoes.
+const TEAM_ROW_OVERFLOW: RunActionId[] = ['skipTask', 'skipStage', 'sendBack', 'adjustTeamScore'];
 
 export function teamRowActions(
   team: { outOfBounds?: boolean } | null | undefined,

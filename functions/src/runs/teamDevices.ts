@@ -1,6 +1,10 @@
 import * as functions from 'firebase-functions';
 import { randomInt } from 'node:crypto';
 import type { RunTeam } from '@rushpoint/shared';
+// The per-team device allowance and the attendance arithmetic (change:
+// every-member-plays). Pure and shared, so the backend guard and both apps read one
+// definition of "how many phones may this team have".
+import { TEAM_DEVICE_FLOOR, teamDeviceAllowance } from '@rushpoint/shared';
 
 // The GLOBAL per-run phone ceiling + its decision helper live in @rushpoint/shared
 // (the single knob — see runCapacity.ts) so the backend guard and the creator-web
@@ -19,7 +23,20 @@ export type DeviceRole = 'controller' | 'viewer';
 // Unambiguous alphabet: no 0/O, no 1/I/L — codes are read aloud between phones.
 export const DEVICE_JOIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const DEVICE_JOIN_CODE_LENGTH = 6;
-export const MAX_TEAM_DEVICES = 3;
+/**
+ * Today's fixed per-team ceiling, which is now the FLOOR rather than the ceiling
+ * (change: every-member-plays).
+ *
+ * It used to be the hard limit, and that made "every participant on their own device"
+ * UNSATISFIABLE for any team larger than three: `canAttachDevice` refused the fourth
+ * with 'full'. The six-person teams in run ijI9JMITSf8C9heN1Cwp could not all attach
+ * before anyone tried. The allowance now follows the team's own declared size, and this
+ * constant guarantees no team loses capacity it has today.
+ *
+ * Still exported under its old name because several call sites and tests read it as
+ * "the smallest number of phones any team may have".
+ */
+export const MAX_TEAM_DEVICES = TEAM_DEVICE_FLOOR;
 
 /** Every uid attached to the team; a legacy doc implies just the founding uid. */
 export function attachedDeviceUids(team: RunTeam): string[] {
@@ -73,6 +90,11 @@ export function canAttachDevice(team: RunTeam, uid: string): AttachDecision {
   if (team.status === 'finished') return { ok: false, reason: 'finished' };
   const uids = attachedDeviceUids(team);
   if (uids.includes(uid)) return { ok: false, reason: 'duplicate' };
-  if (uids.length >= MAX_TEAM_DEVICES) return { ok: false, reason: 'full' };
+  // The allowance follows the TEAM, not a constant (change: every-member-plays), so a
+  // team of six can finally put everyone on their own phone. `canAddRunDevice` /
+  // MAX_RUN_DEVICES still decides last and is the authority when the two disagree - a
+  // generous per-team allowance inside a fixed run ceiling reallocates phones between
+  // teams, it does not create new ones, so the run's read budget is unchanged.
+  if (uids.length >= teamDeviceAllowance(team)) return { ok: false, reason: 'full' };
   return { ok: true };
 }

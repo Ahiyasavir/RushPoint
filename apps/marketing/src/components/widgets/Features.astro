@@ -33,22 +33,32 @@ const columnsClass =
   <Headline title={title} subtitle={subtitle} tagline={tagline} classes={classes?.headline as Record<string, string>} />
 
   {
+    /*
+      CARDS, not a bare list (change: marketing-home-cro-redesign). Each feature used
+      to be an icon and two paragraphs floating on the page background, which is
+      readable and completely undifferentiated: six of them in a grid read as one
+      block of text with pictures in it. A hairline, a surface and a tinted icon tile
+      give each claim an edge, which is what lets the eye take them one at a time.
+
+      The icon tile is a rounded SQUARE holding a brand tinted glyph rather than a
+      solid brand circle. Six saturated orange dots in a grid compete with the one
+      orange thing on the page that matters, which is the button.
+    */
     items.length > 0 && (
-      <div class:list={['grid mx-auto gap-8 md:gap-y-12', columnsClass]}>
+      <div class:list={['grid mx-auto gap-5 md:gap-6', columnsClass]}>
         {items.map(({ title: itemTitle, description, icon, callToAction }) => (
-          <div class="intersect-once motion-safe:md:opacity-0 motion-safe:md:intersect:animate-fade">
-            <div class="flex flex-row max-w-md">
+          <div class="rp-feature intersect-once motion-safe:md:opacity-0 motion-safe:md:intersect:animate-fade">
+            <div class="rp-feature-card flex h-full flex-row gap-4 rounded-2xl border border-line bg-page p-5 md:p-6">
               {(icon || defaultIcon) && (
-                <div class="flex justify-center">
-                  <Icon
-                    name={icon || defaultIcon}
-                    class="w-7 h-7 mr-2 rtl:mr-0 rtl:ml-2 text-white bg-primary rounded-full md:w-12 md:h-12 md:p-3 p-2 mr-4 rtl:ml-4 rtl:mr-0"
-                  />
+                <div class="rp-feature-icon grid h-11 w-11 shrink-0 place-items-center rounded-xl md:h-12 md:w-12">
+                  <Icon name={icon || defaultIcon} class="h-6 w-6 text-secondary dark:text-primary" />
                 </div>
               )}
               <div class="mt-0.5">
-                {itemTitle && <h3 class="text-xl md:text-[1.3rem] font-bold">{itemTitle}</h3>}
-                {description && <p class:list={[{ 'mt-3': itemTitle }, 'text-muted']} set:html={description} />}
+                {itemTitle && <h3 class="text-lg font-bold md:text-xl">{itemTitle}</h3>}
+                {description && (
+                  <p class:list={[{ 'mt-2': itemTitle }, 'text-muted leading-relaxed']} set:html={description} />
+                )}
                 {callToAction && (
                   <div class:list={[{ 'mt-3': itemTitle || description }]}>
                     <Button variant="link" {...callToAction} />
@@ -62,3 +72,34 @@ const columnsClass =
     )
   }
 </WidgetWrapper>
+
+<style>
+  .rp-feature-icon {
+    /* A tint of the brand rather than the brand itself. See the note above. */
+    background: rgb(255 87 34 / 11%);
+  }
+  :global(.dark) .rp-feature-icon {
+    background: rgb(255 87 34 / 18%);
+  }
+
+  .rp-feature-card {
+    transition:
+      transform 0.18s ease,
+      box-shadow 0.18s ease,
+      border-color 0.18s ease;
+  }
+  .rp-feature:hover .rp-feature-card {
+    transform: translateY(-3px);
+    border-color: rgb(255 87 34 / 35%);
+    box-shadow: 0 12px 28px -18px rgb(20 17 13 / 55%);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rp-feature-card {
+      transition: none;
+    }
+    .rp-feature:hover .rp-feature-card {
+      transform: none;
+    }
+  }
+</style>

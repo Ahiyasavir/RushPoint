@@ -5,14 +5,27 @@
 import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from './obs/log';
 import { enforceRateLimit } from './rateLimitStore';
-import { db } from './firebase';
+import { db, docCachePolicy } from './firebase';
+import { cachedGetDoc } from './docCache';
+// Ping economy (change: spark-tier-location-load): the pure write verdicts, plus the
+// in-process store that answers "what did we last write for this team" without a read.
+import { lastFixStore, lastFixKey } from './lastFixStore';
+// The movement track lives on the VPS disk when configured (change: vps-track-storage);
+// unset means this is inert and the Firestore path below runs exactly as before.
+import { trackStore } from './trackStore';
 import * as admin from 'firebase-admin';
-import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
+import { chunk, MAX_BATCH_OPS } from './batchUtil';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, hasScheduleGate, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 // The recorded answer sheet (change: post-run-player-report) — every submission,
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
 // added to sanitizeTeamForParticipant's allow-list.
 import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/shared';
+// Undoing an approval and taking the points back with it (change:
+// approval-can-be-undone). Total, and refuses to act on an unreadable award rather
+// than guessing at an amount to subtract from a live scoreboard.
+import { planApprovalReversal, appendScoreLedger, validateRunContacts, contactsFor, matchAnswerOutcome, mediaDurationForRecord, autoApproveLengthVerdict, type AnswerOutcome } from '@rushpoint/shared';
+import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
+import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
 import { storageOriginOpts } from './storageOriginOpts';
 
@@ -54,16 +67,16 @@ async function recordStationCodeAttempt(
   });
 }
 
-/** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
-function generatePin(): string {
-  return String(randomInt(100000, 1000000));
-}
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld } from './runs/index';
+
+import { createRunStaffInvite } from './runs/staffInvite';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
+// Read-only share links for an unpublished game (change: game-share-link).
+export * from './games/share';
 export * from './gallery/index';
 export { updateMyProfile, exportMyData, deleteMyAccount } from './users/index';
 export {
@@ -75,8 +88,22 @@ export { listPlatformUsers, recordEngagement, setUserNote } from './admin/index'
 // UNAUTHENTICATED by necessity and is declared in PUBLIC_CALLABLES with its
 // reason; listContactMessages is admin only and audit logged.
 export { submitContactMessage, listContactMessages } from './contact/index';
+// RushPoint Live team applications (change: rushpoint-live-signup). Same shape and
+// the same reasoning as the contact form above: submitLiveApplication is
+// UNAUTHENTICATED by necessity and declared in PUBLIC_CALLABLES with its reason,
+// while listLiveApplications and getLiveApplicationPhoto are admin only and audit
+// logged. The photo is a separate callable because it is the sensitive half.
+export {
+  submitLiveApplication,
+  listLiveApplications,
+  getLiveApplicationPhoto,
+} from './contact/liveApplication';
 // Admin-managed game templates (change: admin-manage-game-templates).
 export { setGameTemplateFlag, listAdminTemplates, listGameTemplates, createGameFromTemplate } from './admin/templates';
+// Admin edits to the smart-build mission bank (change: admin-editable-mission-bank).
+// The bank content itself stays in creator-web's taskBank.ts; these move only the
+// per-mission override rows the client-side composer merges over it.
+export { listMissionBankOverrides, setMissionBankOverride, clearMissionBankOverride } from './admin/missionBank';
 export {
   getWallet, getWalletStatus, purchaseCredits, subscribePro, claimReferral, stripeWebhook,
 } from './payments/index';
@@ -86,14 +113,15 @@ export {
 // team and keeps them in the same stage (change: skip-single-task).
 // setTeamHold parks/resumes ONE team (its clock stops and it cannot advance);
 // forceAssignTask sends ONE team to a SPECIFIC task in its current stage
-// (change: staff-console-field-ops).
+// (change: staff-console-field-ops). returnTeamTo sends ONE team BACK to a skipped or
+// completed mission, or to an earlier stage (change: send-team-back).
 // listMyRuns + getRunPlayerReport are the run-history and post-run per-player
 // report surfaces (change: post-run-player-report) — the only way back into a run
 // that has already ENDED, since every other post-run callable is keyed by an
 // access code that only the live console holds.
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, skipTaskForTeam, finalizeRun,
-  setTeamHold, forceAssignTask,
+  setTeamHold, forceAssignTask, returnTeamTo, getRunOutline,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks, revealTaskAnswer,
@@ -103,6 +131,7 @@ export {
   startInstantPlay,
   createZone, deleteZone, getRunZones, captureZone,
   joinTeamAsDevice, transferController, claimController,
+  contributeToTask,
   submitRunFeedback, getRunFeedbackSummary,
   getRunSurveyResults,
   requestGuardianConsent, grantGuardianConsent,
@@ -119,7 +148,7 @@ export { onRunFinalized } from './runs/index';
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────
 
-import { requireAuth, assertStaffOrOwner, assertAdmin } from './auth';
+import { requireAuth, assertStaffCan, assertAdmin } from './auth';
 
 // Live-ops actions (announce, flash, ack SOS, review photo, adjust score) are
 // performed by EITHER the game owner running their own console OR a staff member
@@ -135,7 +164,13 @@ import { requireAuth, assertStaffOrOwner, assertAdmin } from './auth';
 // ─── Audit trail ──────────────────────────────────────────────────────────────
 // The writer now lives in obs/audit.ts so the games domain can record destructive
 // actions too (change: recoverable-game-deletion). Behaviour is unchanged.
-import { writeAuditLog, auditBestEffort } from './obs/audit';
+// Media review is a score-moving human judgement and now leaves a durable record
+// too (change: approval-can-be-undone) - hence the three SUBMISSION action types.
+import {
+  writeAuditLog, auditBestEffort,
+  AUDIT_SUBMISSION_APPROVED, AUDIT_SUBMISSION_REJECTED, AUDIT_SUBMISSION_APPROVAL_REVERSED,
+  AUDIT_STAFF_CODE_UPDATED, AUDIT_STAFF_REMOVED,
+} from './obs/audit';
 
 
 // ─── Chat integrations (change: chat-integrations) ─────────────────────────────
@@ -178,12 +213,14 @@ async function mirrorToChat(
 
 export const inviteStaff = loggedCallable('inviteStaff', async (data, context) => {
   const uid = requireAuth(context);
-  const { ownerUid, gameId, runId, name, permissions } = data as {
+  const { ownerUid, gameId, runId, name, capabilities } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     name: string;
-    permissions: string[];
+    // What people on this code may do (change: staff-capabilities). Absent = the game's
+    // `staffDefaults`, and absent there = everything, which is what every code did before.
+    capabilities?: unknown;
   };
 
   // No emulator bypass — anyone who can mint a PIN owns the run's staff surface.
@@ -191,24 +228,20 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
     throw new functions.https.HttpsError('permission-denied', 'Only the game owner can invite staff');
   }
   const cleanName = validate(() => requireString(name, 'name', MAX_MESSAGE_LEN));
+  let caps: StaffCapability[];
+  if (capabilities === undefined || capabilities === null) {
+    const gameSnap = await db.doc(FIRESTORE_PATHS.game(ownerUid, gameId)).get();
+    caps = defaultCodeCapabilities((gameSnap.data() as Game | undefined)?.staffDefaults);
+  } else {
+    const clean = normalizeStaffCapabilities(capabilities);
+    if (!clean) throw new functions.https.HttpsError('invalid-argument', 'Unknown staff capability');
+    caps = clean;
+  }
 
-  const pin = generatePin();
-  const now = new Date().toISOString();
-  const ref = db
-    .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
-    .doc();
-
-  await ref.set({
-    id: ref.id,
-    ownerUid, gameId, runId,
-    name: cleanName,
-    permissions: permissions ?? [],
-    pin,
-    used: false,
-    createdAt: now,
-  });
-
-  return { inviteId: ref.id, pin };
+  // One writer for the invite document, shared with launchSharedRun — see
+  // runs/staffInvite.ts. WHO may mint one is decided above; this only writes it.
+  const result = await createRunStaffInvite({ ownerUid, gameId, runId, name: cleanName, capabilities: caps });
+  return { ...result, capabilities: caps };
 });
 
 
@@ -280,7 +313,23 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     throw new functions.https.HttpsError('not-found', 'Invalid or already-used PIN');
   }
 
-  const invite = inviteSnap.docs[0].data() as { id: string; name: string; permissions: string[] };
+  const invite = inviteSnap.docs[0].data() as {
+    id: string; name: string; permissions?: string[];
+    capabilities?: unknown; multiUse?: boolean; disabled?: boolean; version?: number;
+  };
+  // A disabled code stops NEW sign-ins (change: staff-capabilities); the people already on it keep
+  // working until removed. The PIN was right, so this is not a brute-force attempt: no counter.
+  if (invite.disabled === true) {
+    throw new functions.https.HttpsError('failed-precondition', 'This staff code is closed to new sign ins');
+  }
+  const grantRef = db.doc(FIRESTORE_PATHS.staffGrant(ownerUid, gameId, runId, uid));
+  const priorGrant = await grantRef.get();
+  if (priorGrant.exists && (priorGrant.data() as { removed?: boolean }).removed === true) {
+    // The organizer removed this person. Rejoining with the same identity is refused; a leaked
+    // code is closed by disabling it, which this person cannot get around either.
+    throw new functions.https.HttpsError('permission-denied', 'Removed from this run staff', { reason: STAFF_REFUSAL_REASON.removed });
+  }
+  const multiUse = invite.multiUse === true;
 
   // Single-use consume MUST be atomic: the where('used','==',false) query above is
   // NON-transactional, so N concurrent callers with the same PIN all read used==false
@@ -288,7 +337,8 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   // inside a transaction and let exactly one caller flip used:true; the losers see
   // used==true and get the same not-found the query-miss path returns.
   const inviteRef = inviteSnap.docs[0].ref;
-  await db.runTransaction(async (tx) => {
+  // A multi-use code is never consumed: several marshals share it (change: staff-capabilities).
+  if (!multiUse) await db.runTransaction(async (tx) => {
     const fresh = await tx.get(inviteRef);
     const d = fresh.data() as { used?: boolean } | undefined;
     if (!fresh.exists || d?.used === true) {
@@ -304,6 +354,20 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   // Success (transaction winner only) → reset this caller's failure counter.
   await attemptsRef.set({ count: 0, lastFailedAtMs: 0, updatedAt: new Date().toISOString() }, { merge: true });
 
+  // The person record (change: staff-capabilities): which code they joined with, so the gate can
+  // resolve their capabilities LIVE and the organizer can remove just them. Written for legacy
+  // single-use invites too, so removal works for them; a legacy code (no capabilities) is full.
+  const staffName = (typeof name === 'string' && name.trim() ? name.trim() : invite.name).slice(0, 60);
+  const joinedAt = new Date().toISOString();
+  await grantRef.set(
+    priorGrant.exists
+      ? { codeId: invite.id, name: staffName }
+      : { codeId: invite.id, name: staffName, removed: false, joinedAt },
+    { merge: true },
+  );
+  const access = resolveStaffAccess({ grant: { codeId: invite.id, removed: false }, code: invite });
+  const caps = [...access.capabilities];
+
   let customToken: string;
   try {
     customToken = await admin.auth().createCustomToken(context.auth!.uid, {
@@ -315,8 +379,11 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
       // `ownerUid/gameId/runId` and the single-use PIN, all invite-derived above.
       // Falls back to the invite name when the staffer types nothing. Trimmed and
       // length-capped so a hostile value can't bloat the token or the audit rows.
-      staffName: (typeof name === 'string' && name.trim() ? name.trim() : invite.name).slice(0, 60),
-      permissions: invite.permissions,
+      staffName,
+      // Rules can only see claims: `caps` gates the `teamLocations` read, `codeId` lets the staff
+      // console read its own code. Callables never trust these; they resolve live (assertStaffCan).
+      caps,
+      codeId: invite.id,
       ownerUid,
       gameId,
       runId,
@@ -326,7 +393,212 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     throw new functions.https.HttpsError('internal', 'Could not complete staff sign-in. Please try again.');
   }
 
-  return { customToken, name: invite.name, permissions: invite.permissions };
+  // quick-dial-and-actions 2.5: staff cannot read the run document, so the STAFF-visible contacts
+  // travel with the session.
+  return { customToken, name: invite.name, capabilities: caps, codeId: invite.id, contacts: await staffContacts(ownerUid, gameId, runId) };
+});
+
+
+// ─── Staff codes: edit, remove a person, refresh a session (change: staff-capabilities) ──
+
+/** The run's STAFF-visible contacts (quick-dial-and-actions D2). Never fails a sign in. */
+async function staffContacts(ownerUid: string, gameId: string, runId: string) {
+  try {
+    const snap = await db.doc(FIRESTORE_PATHS.run(ownerUid, gameId, runId)).get();
+    return contactsFor((snap.data() as { contacts?: unknown } | undefined)?.contacts, 'staff');
+  } catch (e) {
+    logBestEffort('staff.contacts', { runId }, e);
+    return [];
+  }
+}
+
+function staffCodeRef(ownerUid: string, gameId: string, runId: string, codeId: string) {
+  return db.doc(FIRESTORE_PATHS.staffInvite(ownerUid, gameId, runId, codeId));
+}
+
+function requireRunIds(data: unknown): { ownerUid: string; gameId: string; runId: string } {
+  const d = (data ?? {}) as { ownerUid?: unknown; gameId?: unknown; runId?: unknown };
+  const ownerUid = validate(() => requireString(d.ownerUid, 'ownerUid', 128));
+  const gameId = validate(() => requireString(d.gameId, 'gameId', 128));
+  const runId = validate(() => requireString(d.runId, 'runId', 128));
+  return { ownerUid, gameId, runId };
+}
+
+function assertOwnerOrAdmin(context: functions.https.CallableContext, ownerUid: string): string {
+  const uid = requireAuth(context);
+  if (uid !== ownerUid && !context.auth?.token.admin) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the game owner can manage staff');
+  }
+  return uid;
+}
+
+/**
+ * Tonight's phone numbers for a run (change: quick-dial-and-actions, D2): "call the organizer"
+ * for players, the HQ line for staff. Owner (or platform admin) only, audited. The whole list is
+ * replaced on every save, so an empty list clears it. A number that does not parse is REFUSED,
+ * never stored: a call button that dials the wrong digits is worse than none.
+ */
+export const setRunContacts = loggedCallable('setRunContacts', async (data, context) => {
+  const d = (data ?? {}) as { ownerUid?: unknown; gameId?: unknown; runId?: unknown; contacts?: unknown };
+  const callerUid = requireAuth(context);
+  const ownerUid = typeof d.ownerUid === 'string' && d.ownerUid ? d.ownerUid : callerUid;
+  const uid = assertOwnerOrAdmin(context, ownerUid);
+  const gameId = validate(() => requireString(d.gameId, 'gameId', 128));
+  const runId = validate(() => requireString(d.runId, 'runId', 128));
+  await enforceRateLimit(uid, 'setRunContacts');
+  const verdict = validateRunContacts(d.contacts);
+  if (!verdict.ok) {
+    const at = verdict.index !== undefined ? ` (contact ${verdict.index + 1})` : '';
+    throw new functions.https.HttpsError('invalid-argument', `Invalid contacts: ${verdict.problem}${at}`);
+  }
+  const runRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`);
+  const before = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+    const prev = (snap.data() as { contacts?: unknown }).contacts;
+    tx.update(runRef, { contacts: verdict.contacts, updatedAt: new Date().toISOString() });
+    return prev;
+  });
+  await writeAuditLog({
+    ownerUid, gameId, runId,
+    operatorId: uid,
+    actionType: 'run_contacts_set',
+    previousValue: JSON.stringify(Array.isArray(before) ? before.length : 0),
+    newValue: JSON.stringify(verdict.contacts.map((c) => ({ label: c.label, visibleTo: c.visibleTo }))),
+  });
+  return { ok: true, count: verdict.contacts.length };
+});
+
+/**
+ * Edit a code during the run: what its people may do, its label, or disable it. Takes effect on
+ * the NEXT staff action (the gate resolves live); `version` is bumped so an open staff console
+ * refreshes its session for the rule-gated reads (the live map). Disabling stops new sign-ins
+ * only: the marshals already standing at stations keep working until removed.
+ */
+export const updateStaffCode = loggedCallable('updateStaffCode', async (data, context) => {
+  const { ownerUid, gameId, runId } = requireRunIds(data);
+  const uid = assertOwnerOrAdmin(context, ownerUid);
+  await enforceRateLimit(uid, 'updateStaffCode');
+  const d = data as { codeId?: unknown; capabilities?: unknown; disabled?: unknown; label?: unknown };
+  const codeId = validate(() => requireString(d.codeId, 'codeId', 128));
+  const patch: Record<string, unknown> = {};
+  if (d.capabilities !== undefined) {
+    const caps = normalizeStaffCapabilities(d.capabilities);
+    if (!caps) throw new functions.https.HttpsError('invalid-argument', 'Unknown staff capability');
+    patch.capabilities = caps;
+  }
+  if (d.disabled !== undefined) {
+    if (typeof d.disabled !== 'boolean') throw new functions.https.HttpsError('invalid-argument', 'disabled must be a boolean');
+    patch.disabled = d.disabled;
+  }
+  if (d.label !== undefined) {
+    patch.label = validate(() => requireString(d.label, 'label', 60));
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'Nothing to change');
+  }
+  const ref = staffCodeRef(ownerUid, gameId, runId, codeId);
+  const before = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Staff code not found');
+    const cur = snap.data() as { capabilities?: unknown; disabled?: boolean; label?: string; version?: number };
+    tx.update(ref, { ...patch, version: (typeof cur.version === 'number' ? cur.version : 1) + 1, updatedAt: new Date().toISOString() });
+    return cur;
+  });
+  await writeAuditLog({
+    ownerUid, gameId, runId,
+    operatorId: uid,
+    actionType: AUDIT_STAFF_CODE_UPDATED,
+    previousValue: JSON.stringify({ capabilities: before.capabilities ?? 'full', disabled: before.disabled ?? false }),
+    newValue: JSON.stringify(patch),
+    codeId,
+  });
+  return { ok: true };
+});
+
+/**
+ * Remove ONE person from the run's staff, or everyone on one code (`codeId` without `staffUid`).
+ * The gate refuses them on their next action; their refresh tokens are revoked so a console left
+ * open also loses its Firestore reads when the ID token expires (at most an hour).
+ */
+export const removeStaffMember = loggedCallable('removeStaffMember', async (data, context) => {
+  const { ownerUid, gameId, runId } = requireRunIds(data);
+  const uid = assertOwnerOrAdmin(context, ownerUid);
+  await enforceRateLimit(uid, 'removeStaffMember');
+  const d = data as { staffUid?: unknown; codeId?: unknown };
+  const grants = db.collection(FIRESTORE_PATHS.staffGrantsCol(ownerUid, gameId, runId));
+  let targets: string[];
+  if (d.staffUid !== undefined) {
+    const staffUid = validate(() => requireString(d.staffUid, 'staffUid', 128));
+    const snap = await grants.doc(staffUid).get();
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Staff member not found');
+    targets = [staffUid];
+  } else if (d.codeId !== undefined) {
+    const codeId = validate(() => requireString(d.codeId, 'codeId', 128));
+    const snap = await grants.where('codeId', '==', codeId).get();
+    targets = snap.docs.filter((x) => (x.data() as { removed?: boolean }).removed !== true).map((x) => x.id);
+  } else {
+    throw new functions.https.HttpsError('invalid-argument', 'staffUid or codeId required');
+  }
+  const removedAt = new Date().toISOString();
+  for (const group of chunk(targets, MAX_BATCH_OPS)) {
+    const batch = db.batch();
+    for (const id of group) batch.set(grants.doc(id), { removed: true, removedAt, removedBy: uid }, { merge: true });
+    await batch.commit();
+  }
+  for (const id of targets) {
+    // Staff sign in ON TOP of the phone's anonymous identity, so on a phone that also PLAYS in this
+    // run (an organizer testing on their own phone) revoking would sign that team out. The grant's
+    // `removed` flag already refuses every staff action; the revoke only shortens a console's
+    // Firestore reads, which is not worth losing a team over.
+    const playsHere = (await db.doc(FIRESTORE_PATHS.team(ownerUid, gameId, runId, id)).get()).exists
+      || !(await db.collection(FIRESTORE_PATHS.teamsCol(ownerUid, gameId, runId))
+        .where('deviceUids', 'array-contains', id).limit(1).get()).empty;
+    if (playsHere) continue;
+    try { await admin.auth().revokeRefreshTokens(id); }
+    catch (e) { functions.logger.warn('removeStaffMember.revoke failed', { runId, staffUid: id, err: String(e) }); }
+  }
+  await writeAuditLog({
+    ownerUid, gameId, runId,
+    operatorId: uid,
+    actionType: AUDIT_STAFF_REMOVED,
+    previousValue: '',
+    newValue: targets.join(','),
+    codeId: typeof d.codeId === 'string' ? d.codeId : '',
+  });
+  return { removed: targets.length };
+});
+
+/**
+ * Re-mint the caller's staff token with the capabilities their code has NOW. Firestore rules can
+ * only see token claims, so after an organizer edits a code the staff console calls this to bring
+ * its live-map access in line. Callables never needed it: they resolve live.
+ */
+export const refreshStaffSession = loggedCallable('refreshStaffSession', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'refreshStaffSession');
+  const { ownerUid, gameId, runId } = requireRunIds(data);
+  const t = context.auth!.token;
+  if (!(t.staff && t.ownerUid === ownerUid && t.gameId === gameId && t.runId === runId)) {
+    throw new functions.https.HttpsError('permission-denied', 'Staff access for this run required');
+  }
+  const grantSnap = await db.doc(FIRESTORE_PATHS.staffGrant(ownerUid, gameId, runId, uid)).get();
+  const grant = grantSnap.exists ? (grantSnap.data() as { codeId?: string; removed?: boolean; name?: string }) : null;
+  const codeSnap = grant?.codeId ? await staffCodeRef(ownerUid, gameId, runId, grant.codeId).get() : null;
+  const access = resolveStaffAccess({
+    grant,
+    code: codeSnap && codeSnap.exists ? (codeSnap.data() as { capabilities?: unknown; disabled?: unknown }) : null,
+  });
+  if (!access.allowed) throw new functions.https.HttpsError('permission-denied', 'Removed from this run staff', { reason: STAFF_REFUSAL_REASON.removed });
+  const caps = [...access.capabilities];
+  const customToken = await admin.auth().createCustomToken(uid, {
+    staff: true,
+    staffName: typeof t.staffName === 'string' ? t.staffName : (grant?.name ?? ''),
+    caps,
+    codeId: grant?.codeId ?? (typeof t.codeId === 'string' ? t.codeId : ''),
+    ownerUid, gameId, runId,
+  });
+  return { customToken, capabilities: caps, contacts: await staffContacts(ownerUid, gameId, runId) };
 });
 
 
@@ -357,38 +629,110 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
 
   // Shared team devices: the team's map pin follows the CONTROLLING phone (the
   // one actually playing) — viewer devices don't ping, so the pin never flickers.
-  const { teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: true });
+  // `team` and `teamRef` are kept, not discarded (change: spark-tier-location-load): this
+  // call ALREADY reads the team document, and the safe-zone block below used to read the
+  // very same document a second time. Measurement caught it — the callable cost 3 reads per
+  // ping where the code appeared to make 2, and the third was this duplicate. Reusing the
+  // snapshot is strictly better than caching it: it needs no cache to be enabled and cannot
+  // be stale, since nothing writes the document between the two points.
+  const { teamId, team: callerTeam, teamRef } = await resolveCallerTeam(
+    uid, { ownerUid, gameId, runId }, { requireController: true },
+  );
 
   const now = new Date().toISOString();
+  const nowMs = Date.parse(now);
   const locationRef = db.doc(
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${teamId}`,
   );
   const accuracy = typeof accuracyMeters === 'number' && Number.isFinite(accuracyMeters) && accuracyMeters >= 0
     ? accuracyMeters
     : null;
-  await locationRef.set({ teamId, lat, lng, accuracyMeters: accuracy, updatedAt: now }, { merge: true });
+
+  // ── Ping economy (change: spark-tier-location-load) ──────────────────────────
+  // MEASURED: this callable cost 3 reads + 2 writes on EVERY ping, and play-web pings every
+  // 20s per controller device. 225 pings x 120 participants projected to 81,000 reads and
+  // 54,000 writes against Spark ceilings of 50,000 / 20,000 — location alone put a run over
+  // BOTH quotas before a single mission was played.
+  //
+  // The reference fix comes from the API's own memory, never from Firestore: reading
+  // `teamLocations` to decide whether to write `teamLocations` would add back exactly the
+  // read being removed. See functions/src/lastFixStore.ts for the single-process
+  // precondition that makes that authoritative.
+  //
+  // ⚠️ NOTE WHAT IS *NOT* CONDITIONAL: everything below this block. The safe-zone evaluation
+  // runs on every ping regardless of the verdict, so suppressing a write can never suppress
+  // a breach. Keep it that way — a stationary team sitting just outside the boundary is
+  // exactly the case where the write is suppressed and the safety check matters most.
+  const fixKey = lastFixKey(runId, teamId);
+  const known = lastFixStore.get(fixKey);
+
+  const pinVerdict = shouldWritePin({
+    fix: { lat, lng, accuracyMeters: accuracy },
+    lastFix: known?.pin,
+    nowMs,
+  });
+  if (pinVerdict.write) {
+    await locationRef.set({ teamId, lat, lng, accuracyMeters: accuracy, updatedAt: now }, { merge: true });
+    lastFixStore.recordPin(fixKey, { lat, lng, atMs: nowMs }, nowMs);
+  }
 
   // Movement heatmap (change: movement-heatmap): retain an append-only GPS track so the
   // creator can see foot-traffic density after the run. teamLocations keeps only the
   // latest point; this keeps history. CF-write-only; pruned with the run's PII at 90 days.
-  await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/locationTrack`)
-    .add({ teamId, lat, lng, at: now })
-    .catch(() => undefined); // track is best-effort; never fail the location update
+  //
+  // Retained by DISTANCE TRAVELLED, not per ping (change: spark-tier-location-load). The
+  // aggregator bins onto a ~55m grid, so a point every 20s was far finer than its own
+  // consumer's resolution — and time-sampling a *movement* heatmap grows a hot cell
+  // wherever teams merely stood still, which is the opposite of what it should show.
+  //
+  // ...UNLESS the track lives on the VPS's own disk (change: vps-track-storage), in which case
+  // the sampling is skipped entirely and EVERY ping is recorded. The distance rule exists only
+  // to bound Firestore WRITE QUOTA; a local append costs nothing against it, so keeping the
+  // compromise there would be throwing away fidelity for no reason. Which mode is active is a
+  // deployment fact (RUSHPOINT_TRACK_DIR), never a per-run one, so a run is recorded wholly in
+  // one mode or wholly in the other and the two are never mixed.
+  if (trackStore.enabled) {
+    // NOT awaited, deliberately. Appends for one run are serialised through a single queue
+    // (see trackStore.ts), so awaiting here would put EVERY team in the run behind whichever
+    // disk write is currently in flight — and the safe-zone evaluation below sits after this
+    // point, so a stalled disk would delay breach detection for the whole field. With
+    // Firestore each team's `.add()` was independent and could not do that. The append is
+    // best-effort analytics that nothing in this response depends on, and `append` catches
+    // internally and never rejects, so letting it drain on its own is strictly safer.
+    // Ordering within the run is preserved by the queue regardless of who awaits it.
+    void trackStore.append({ ownerUid, gameId, runId }, { lat, lng, teamId, at: now });
+  } else {
+    const trackVerdict = shouldRetainTrackPoint({ fix: { lat, lng }, lastRetained: known?.track });
+    if (trackVerdict.retain) {
+      await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/locationTrack`)
+        .add({ teamId, lat, lng, at: now })
+        .catch(() => undefined); // track is best-effort; never fail the location update
+      lastFixStore.recordTrack(fixKey, { lat, lng }, nowMs);
+    }
+  }
 
   // Safe-zone breach detection (safe-zone-boundary): server-side only. On a NEW
   // breach raise an alert + flag the team out-of-bounds; on return inside, clear it.
-  const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
-  const safeZone = (gameSnap.data() as { safeZone?: SafeZone } | undefined)?.safeZone;
+  //
+  // Read through the cache: the game template does not change during a run, so re-reading
+  // it once per ping was pure waste (it was ~1 read x 27,000 pings for a 120-person run).
+  const gameCached = await cachedGetDoc<{ safeZone?: SafeZone }>(
+    db, docCachePolicy, `users/${ownerUid}/games/${gameId}`,
+  );
+  const safeZone = gameCached.data?.safeZone;
   if (!safeZone) return { ok: true, outOfBounds: false };
 
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
-  const teamData = (await teamRef.get()).data() as
+  // Reuse the snapshot `resolveCallerTeam` already fetched rather than re-reading it. See
+  // the note at that call. `teamRef` comes from the same place, so the shared-device path
+  // (where the team is found by `deviceUids` rather than by uid) still writes the right doc.
+  const teamData = callerTeam as
     { outOfBounds?: boolean; outOfBoundsOverrideUntil?: string; lastBreachAlertAt?: string } | undefined;
   const wasOut = teamData?.outOfBounds === true;
   const overrideUntilMs = teamData?.outOfBoundsOverrideUntil
     ? Date.parse(teamData.outOfBoundsOverrideUntil)
     : null;
-  const nowMs = Date.parse(now);
+  // `nowMs` is parsed once, above, and shared with the ping-economy verdict — the two must
+  // reason about the same instant.
 
   // Out-of-bounds recovery: the flag is now decided by the fail-open evaluator, so a
   // low-confidence fix, a malformed one, or a team a human already released can never
@@ -499,7 +843,7 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
 
   // ── Resolve sender role ──────────────────────────────────────────────────────
   // HQ path — owner / platform admin / run-scoped staff. Detect via a non-throwing
-  // probe, then enforce with assertStaffOrOwner (the claims check IS the authz; the
+  // probe, then enforce with assertStaffCan (the capability check IS the authz; the
   // senderName label is display-only). Everyone else is a participant.
   const token = context.auth!.token as { admin?: boolean; staff?: boolean; ownerUid?: string; runId?: string };
   const isHq = uid === ownerUid
@@ -512,7 +856,7 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
   let deviceUids: string[] | undefined;
 
   if (isHq) {
-    assertStaffOrOwner(context, ownerUid, runId);
+    await assertStaffCan(context, ownerUid, runId, 'chat');
     if (rawTeamId === undefined || rawTeamId === '') {
       throw new functions.https.HttpsError('invalid-argument', 'teamId required');
     }
@@ -606,7 +950,7 @@ export const sendStaffChannelMessage = loggedCallable('sendStaffChannelMessage',
   }
   // Authorization FIRST — before any read, so an unauthorized caller learns nothing
   // about whether the run exists.
-  assertStaffOrOwner(context, ownerUid, runId);
+  await assertStaffCan(context, ownerUid, runId, 'staffChannel');
 
   const text = sanitizeChatText((data as { text?: unknown }).text);
   if (text === null) {
@@ -659,7 +1003,7 @@ export const sendStaffChannelMessage = loggedCallable('sendStaffChannelMessage',
 // ─── acknowledgeAlert ─────────────────────────────────────────────────────────
 
 export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'safety');
   const { ownerUid, gameId, runId, alertId } = data as {
     ownerUid: string;
     gameId: string;
@@ -693,7 +1037,7 @@ export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, 
 // the safety signal.
 
 export const clearTeamOutOfBounds = loggedCallable('clearTeamOutOfBounds', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'safety');
   const { ownerUid, gameId, runId, teamId, reason } = data as {
     ownerUid: string;
     gameId: string;
@@ -855,7 +1199,7 @@ async function sweepStaleLiveOps(ownerUid: string, gameId: string, runId: string
 // ─── pushAnnouncement ─────────────────────────────────────────────────────────
 
 export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'broadcast');
   const { ownerUid, gameId, runId, message, messageHe, teamId } = data as {
     ownerUid: string;
     gameId: string;
@@ -919,7 +1263,7 @@ export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, 
 // ─── deactivateAnnouncement ───────────────────────────────────────────────────
 
 export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'broadcast');
   const { ownerUid, gameId, runId, announcementId } = data as {
     ownerUid: string;
     gameId: string;
@@ -938,7 +1282,7 @@ export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', a
 // ─── pushFlashMission ─────────────────────────────────────────────────────────
 
 export const pushFlashMission = loggedCallable('pushFlashMission', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'broadcast');
   const {
     ownerUid, gameId, runId,
     title, titleHe, description, descriptionHe,
@@ -1011,6 +1355,9 @@ async function writeFeedItem(
     // run-media-gallery-and-video-feed: only ever 'video' in practice (a 'photo'
     // caller can simply omit it — absent already means photo on read).
     mediaKind?: MediaKind;
+    // video-upload-speed D7: omitted (never null) when absent.
+    posterUrl?: string;
+    mediaDurationSec?: number;
   },
 ): Promise<void> {
   try {
@@ -1023,6 +1370,8 @@ async function writeFeedItem(
       teamName: entry.teamName,
       photoUrl: entry.photoUrl,
       ...(entry.mediaKind && entry.mediaKind !== 'photo' ? { mediaKind: entry.mediaKind } : {}),
+      ...(entry.posterUrl ? { posterUrl: entry.posterUrl } : {}),
+      ...(entry.mediaDurationSec !== undefined ? { mediaDurationSec: entry.mediaDurationSec } : {}),
       reactions: {},
       reactedBy: {},
       active: true,
@@ -1051,7 +1400,7 @@ async function assertRunMemberOrStaff(
     const { teamId } = await resolveCallerTeam(uid, ctx);
     return teamId;
   } catch {
-    assertStaffOrOwner(context, ctx.ownerUid, ctx.runId);
+    await assertStaffCan(context, ctx.ownerUid, ctx.runId, 'broadcast');
     return undefined;
   }
 }
@@ -1165,7 +1514,7 @@ export const reportFeedItem = loggedCallable('reportFeedItem', async (data, cont
 // reverses an auto-hide (or a staff hide) and disarms future auto-hiding for
 // this item via `reportsCleared` — authz stays identical for both directions.
 export const hideFeedItem = loggedCallable('hideFeedItem', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'feed');
   const { ownerUid, gameId, runId, itemId, restore } = data as {
     ownerUid: string;
     gameId: string;
@@ -1236,7 +1585,12 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
         releaseAt?: string;
         releaseAfterMinutes?: number;
         expiresAfterMinutes?: number;
+        expiresAt?: string;
+        timeLimitMinutes?: number;
         smart?: { secretCode?: string; attemptLimit?: number };
+        type?: string;
+        answerOutcomes?: AnswerOutcome[];
+        unmatchedPoints?: number | null;
       }[];
     }[];
   };
@@ -1256,7 +1610,9 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   // Otherwise a station that expires WHILE a team holds it could still be scored by
   // POSTing the code afterward (or a scheduled station completed before its window).
   // Loads the run once, only when the task actually carries a schedule/expiry gate.
-  if (stationTask.releaseAt || stationTask.releaseAfterMinutes || stationTask.expiresAfterMinutes) {
+  // mission-time-limit: this team's own countdown.
+  assertWithinTimeLimit(team, stationTask);
+  if (hasScheduleGate(stationTask)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
     if (!isReleased(stationTask, launchedAt, Date.now())) {
@@ -1283,7 +1639,15 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
 
   const expectedCode = stationTask.smart?.secretCode;
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
-  if (!expectedCode || expectedCode.trim().toLowerCase() !== code.trim().toLowerCase()) {
+  // answer-scored-question: a station with SEVERAL codes, each worth its own points
+  // (the operator decides which code to hand out). One code keeps today's exact
+  // comparison, so no live station is silently re-graded.
+  const hasOutcomes = Array.isArray(stationTask.answerOutcomes) && stationTask.answerOutcomes.length > 0;
+  const outcome = hasOutcomes ? matchAnswerOutcome({ ...stationTask, type: 'smart_station' }, code) : null;
+  const codeOk = hasOutcomes
+    ? !!outcome && 'outcomeId' in outcome
+    : !!expectedCode && expectedCode.trim().toLowerCase() === code.trim().toLowerCase();
+  if (!codeOk) {
     // Hint auto escalation (change: hint-auto-escalation): a wrong station code
     // is a wrong ATTEMPT — record it (real nested map, never a dotted key in
     // .set({merge})) before rejecting, so a struggling team's free-hint
@@ -1324,34 +1688,52 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
     ownerUid, gameId, runId, resolvedTeamId, taskId, now,
     // post-run-player-report: the accepted code rides the completion transaction
     // that already rewrites this stage — no extra read, no extra transaction.
-    { answerLog: buildAnswerLogEntry({ kind: 'station_code', answer: code, correct: true, at: now }) },
+    {
+      answerLog: buildAnswerLogEntry({ kind: 'station_code', answer: code, correct: true, at: now }),
+      ...(outcome && 'outcomeId' in outcome ? { awardOverride: outcome.points, outcomeId: outcome.outcomeId } : {}),
+    },
   );
+  const outcomeMessage = outcome && 'outcomeId' in outcome ? outcome.message : undefined;
   if (!completed) return { verified: true, already: true, nextTaskId: null };
   // WO Fix 1: the held station slot is released atomically inside completeTaskForTeam.
   const next = await assignNextInActiveStage(ownerUid, gameId, runId, resolvedTeamId, { lat: 0, lng: 0 }, now);
-  return { verified: true, nextTaskId: next.taskId ?? null };
+  return { verified: true, nextTaskId: next.taskId ?? null, ...(outcomeMessage ? { message: outcomeMessage } : {}) };
 });
 
 
 export const submitStationPhoto = loggedCallable('submitStationPhoto', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'submitStationPhoto');
-  const { ownerUid, gameId, runId, teamId, taskId, photoUrl, contentType } = data as {
+  const { ownerUid, gameId, runId, teamId, taskId, photoUrl: rawPhotoUrl, contentType, posterUrl: rawPosterUrl, mediaDurationSec: rawDuration, mediaDeferred: rawDeferred } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     teamId: string;
     taskId: string;
-    photoUrl: string;
+    photoUrl?: string;
+    // background-media-upload D1: approve now, the file follows through attachSubmissionMedia.
+    // Honoured only when the submission would be auto-approved anyway; otherwise nothing is
+    // written and the phone uploads first.
+    mediaDeferred?: boolean | null;
+    // video-upload-speed D7: a poster frame + the clip's length, both optional. null (an older
+    // client, or the callable transport's undefined) is ABSENT, never a refusal.
+    posterUrl?: string | null;
+    mediaDurationSec?: number | null;
     // audio-tasks: the declared blob content-type. Validated against the task's
     // captureKind below. Photo clients that never send it stay accepted.
     contentType?: string;
   };
 
-  // Shared team devices: resolve the caller's team + require the controller role.
+  // Shared team devices (team-phones-simple D2): ANY attached phone may send media, not only the
+  // one answering for the team. A photo is evidence, not a guess, so two phones sending is at worst
+  // two candidates for the organizer (the latest pending one wins). Graded answers stay on one phone:
+  // two phones guessing at once would race the same attempt counter and lockout. resolveCallerTeam
+  // still refuses a phone that is not attached to the team at all.
   const { teamId: resolvedTeamId, team } = await resolveCallerTeam(
-    uid, { ownerUid, gameId, runId }, { requireController: true },
+    uid, { ownerUid, gameId, runId }, { requireController: false },
   );
+  const senderDevice = (team.devices ?? []).find((d) => d.uid === uid);
+  const submittedBy = { uid, name: String(senderDevice?.name ?? (uid === team.id ? team.displayName : '') ?? '').slice(0, 60) };
   // Staff hold (staff-console-field-ops) — a parked team cannot bank a submission.
   assertTeamNotHeld(team);
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
@@ -1368,13 +1750,26 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // the Functions emulator and is absent in deployed functions, so production keeps
   // the exact old accept-set. The runs/{runId}/teams/{uid}/ prefix (the IDOR guard)
   // is enforced in both modes. See docs/wave-c/photo-upload-fix.md.
-  validate(() => requireStorageUrl(photoUrl, runId, uid, storageOriginOpts()));
+  const deferred = rawDeferred === true;
+  if (!deferred) validate(() => requireStorageUrl(rawPhotoUrl, runId, uid, storageOriginOpts()));
+  const photoUrl: string = deferred ? '' : String(rawPhotoUrl);
+  // The poster obeys the SAME folder rule as the media: this run, this phone's own folder.
+  const posterUrl = typeof rawPosterUrl === 'string' && rawPosterUrl.trim() ? rawPosterUrl.trim() : undefined;
+  if (posterUrl && !deferred) validate(() => requireStorageUrl(posterUrl, runId, uid, storageOriginOpts()));
+  // A display hint: out of range is dropped, never refused.
+  const mediaDurationSec = mediaDurationForRecord(rawDuration);
 
   // Check the task's smart config for autoApprove (staffless events). The same
   // snapshot also yields the task title + the photoFeedEnabled gate for the
   // live photo feed (live-photo-feed) — no extra read on this hot path.
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   let autoApprove = false;
+  // Kept separate so the log and the return value can say WHICH rule approved this:
+  // an organizer who turned the run-wide switch on mid-event needs to be able to tell
+  // that from a mission the game itself declared staffless.
+  let perTaskAutoApprove = false;
+  // The mission's clip length range, for the auto-approve length rule below.
+  let taskVideoRange: { videoMinSeconds?: number; videoMaxSeconds?: number } = {};
   let taskTitle = '';
   let feedEnabled = true;
   // wave-f S1: the resolved task's hidden-location flag decides whether its
@@ -1385,27 +1780,67 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   let kind: MediaKind = 'photo';
   // wave-h #3: the task's schedule/expiry gate rides the SAME snapshot too — no
   // extra read on the common (no-gate) path. Undefined when the task can't resolve.
-  let scheduleGate: { releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number } | undefined;
+  let scheduleGate: { releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; expiresAt?: string } | undefined;
+  // mission-time-limit: the per team countdown, from the same snapshot.
+  let timeLimitMinutes: number | undefined;
   if (gameSnap.exists) {
     const game = gameSnap.data() as {
       photoFeedEnabled?: boolean;
-      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind } }[] }[];
+      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; expiresAt?: string; timeLimitMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind; videoMinSeconds?: number; videoMaxSeconds?: number } }[] }[];
     };
     feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
       const task = stage.tasks.find((t) => t.id === taskId);
       if (task) {
         autoApprove = task.smart?.autoApprove === true;
+        perTaskAutoApprove = autoApprove;
+        taskVideoRange = { videoMinSeconds: task.smart?.videoMinSeconds, videoMaxSeconds: task.smart?.videoMaxSeconds };
         taskTitle = task.title ?? '';
         feedTask = { hideLocation: task.hideLocation };
         kind = task.smart?.captureKind === 'audio' || task.smart?.captureKind === 'video'
           ? task.smart.captureKind
           : 'photo';
-        scheduleGate = { releaseAt: task.releaseAt, releaseAfterMinutes: task.releaseAfterMinutes, expiresAfterMinutes: task.expiresAfterMinutes };
+        scheduleGate = { releaseAt: task.releaseAt, releaseAfterMinutes: task.releaseAfterMinutes, expiresAfterMinutes: task.expiresAfterMinutes, expiresAt: task.expiresAt };
+        timeLimitMinutes = task.timeLimitMinutes;
         break;
       }
     }
   }
+
+  // The RUN-wide approval switch (change: late-joiner-autostart). In production run
+  // ijI9JMITSf8C9heN1Cwp every media submission had to be approved by hand, so the
+  // organizer became a full time review queue for a creative-content game and the
+  // players' own feedback was "let the host approve the missions faster".
+  // `smart.autoApprove` already existed and the server already honoured it, but it
+  // is PER TASK — there was no way to say "this run, approve everything".
+  //
+  // Read from the RUN, never from the game, and only when the task did not already
+  // decide: an operational choice written on the template is replayed by every later
+  // run. `cachedGetDoc` because the flag is stamped at launch and cannot change
+  // during the run, so re-reading it on every submission would be pure waste on a
+  // path CLAUDE.md calls out as read-cost sensitive.
+  if (!autoApprove) {
+    const runCached = await cachedGetDoc<{ autoApproveAllMedia?: boolean }>(
+      db, docCachePolicy, FIRESTORE_PATHS.run(ownerUid, gameId, runId),
+    );
+    autoApprove = runCached.data?.autoApproveAllMedia === true;
+  }
+  // Owner (2026-09-26): an auto-approved CLIP must still meet the mission's length range. Outside
+  // it, or with no length to check, it is not approved automatically: it waits for the organizers,
+  // and `lengthHold` tells the phone why. Judged on the length the phone reported; the organizer
+  // sees the clip itself before approving.
+  let lengthHold: 'short' | 'long' | 'unknown' | undefined;
+  if (autoApprove && kind === 'video') {
+    const verdict = autoApproveLengthVerdict(rawDuration, taskVideoRange);
+    if (verdict !== 'ok') {
+      lengthHold = verdict;
+      autoApprove = false;
+      perTaskAutoApprove = false;
+    }
+  }
+  /** Which rule approved this, for the caller and the structured log. */
+  const approvalSource = (): 'task' | 'run' | 'none' =>
+    (perTaskAutoApprove ? 'task' : autoApprove ? 'run' : 'none');
 
   // audio-tasks: the declared content-type must match the task's captureKind. An
   // audio task requires a declared audio type; a photo task rejects an audio type
@@ -1433,7 +1868,9 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // completeTask/verifyStationCode (the shared completeTaskForTeam choke point never
   // carried it). Placed here so the existing stage-active / idempotency / slot
   // guards are untouched; loads the run once, only when the task is actually gated.
-  if (scheduleGate && (scheduleGate.releaseAt || scheduleGate.releaseAfterMinutes || scheduleGate.expiresAfterMinutes)) {
+  // mission-time-limit: judged at SUBMISSION, so a photo sent in time still counts when reviewed later.
+  assertWithinTimeLimit(team, { id: taskId, timeLimitMinutes });
+  if (scheduleGate && hasScheduleGate(scheduleGate)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
     if (!isReleased(scheduleGate, launchedAt, Date.now())) {
@@ -1449,8 +1886,16 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     s.tasks.some((t) => t.taskId === taskId && t.status === 'completed'),
   );
   if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
-    return { submitted: true, autoApproved: autoApprove, already: true };
+    return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), already: true };
   }
+  // background-media-upload D1: a deferral the server would not auto-approve writes NOTHING. The
+  // phone then uploads and submits the ordinary way, so the review path never sees a fileless row.
+  if (deferred && !autoApprove) {
+    return { submitted: false, deferred: false, autoApproved: false, autoApproveSource: approvalSource(), ...(lengthHold ? { lengthHold } : {}) };
+  }
+  // Whether the live feed would receive this item. Decided once, here, from the same snapshot; a
+  // deferred submission stores it as `feedPending` and the feed item is written on attach.
+  const feedEligible = feedEnabled && (kind === 'photo' || kind === 'video') && shouldFeedTask(feedTask);
 
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
@@ -1458,12 +1903,21 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     {
       taskSubmissions: {
         [taskId]: {
-          photoUrl: photoUrl.trim(),
+          // A deferred submission has no file yet; `mediaPending` says so until attach.
+          photoUrl: deferred ? admin.firestore.FieldValue.delete() : photoUrl.trim(),
+          mediaPending: deferred ? true : admin.firestore.FieldValue.delete(),
+          feedPending: deferred && feedEligible ? true : admin.firestore.FieldValue.delete(),
           submittedAt: now,
           status: autoApprove ? 'approved' : 'pending',
           // audio-tasks: server-derived from the task (never client-claimed) so
           // review UIs know whether to render an <img> or an <audio> player.
           mediaKind: kind,
+          // Which phone sent it (team-phones-simple D2), from the team's own device list.
+          submittedBy,
+          // video-upload-speed D7. Only for a video: a photo IS its own poster. A resubmission
+          // without a poster must not keep the previous clip's frame, so the key is deleted.
+          posterUrl: kind === 'video' && posterUrl && !deferred ? posterUrl : admin.firestore.FieldValue.delete(),
+          mediaDurationSec: kind !== 'photo' && mediaDurationSec !== undefined ? mediaDurationSec : admin.firestore.FieldValue.delete(),
         },
       },
     },
@@ -1492,7 +1946,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely — its
     // photo (taken AT the secret spot) would leak the location to teams still
     // hunting it, defeating the wave-D hidden-task gating.
-    if (completed && feedEnabled && (kind === 'photo' || kind === 'video') && shouldFeedTask(feedTask)) {
+    if (completed && feedEligible && !deferred) {
       await writeFeedItem(ownerUid, gameId, runId, {
         taskId,
         taskTitle,
@@ -1500,16 +1954,114 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
         teamName: team.displayName ?? '',
         photoUrl: photoUrl.trim(),
         mediaKind: kind,
+        ...(kind === 'video' && posterUrl ? { posterUrl } : {}),
+        ...(kind !== 'photo' && mediaDurationSec !== undefined ? { mediaDurationSec } : {}),
       });
     }
   }
 
-  return { submitted: true, autoApproved: autoApprove, ...(alreadyCompleted ? { already: true } : {}) };
+  return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), ...(deferred ? { deferred: true } : {}), ...(alreadyCompleted ? { already: true } : {}), ...(lengthHold ? { lengthHold } : {}) };
+});
+
+/**
+ * The file for a DEFERRED submission (change: background-media-upload, D2). Only the phone that
+ * sent the submission may attach, because only it holds the file and the folder rule already ties
+ * the url to the caller. Idempotent: once the file is attached a repeat moves nothing, so a retry
+ * after a lost reply is safe. The feed item is written here, exactly once, when the submission
+ * asked for one and is still approved.
+ */
+export const attachSubmissionMedia = loggedCallable('attachSubmissionMedia', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'attachSubmissionMedia');
+  const { ownerUid, gameId, runId, taskId, photoUrl, contentType, posterUrl: rawPosterUrl } = data as {
+    ownerUid: string; gameId: string; runId: string; taskId: string;
+    photoUrl: string; contentType?: string | null; posterUrl?: string | null;
+  };
+  validate(() => requireStorageUrl(photoUrl, runId, uid, storageOriginOpts()));
+  const posterUrl = typeof rawPosterUrl === 'string' && rawPosterUrl.trim() ? rawPosterUrl.trim() : undefined;
+  if (posterUrl) validate(() => requireStorageUrl(posterUrl, runId, uid, storageOriginOpts()));
+  if (typeof taskId !== 'string' || !taskId) {
+    throw new functions.https.HttpsError('invalid-argument', 'taskId is required');
+  }
+  const { teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: false });
+  type Sub = { status?: string; mediaKind?: MediaKind; mediaPending?: boolean; feedPending?: boolean; photoUrl?: string; submittedBy?: { uid?: string }; mediaDurationSec?: number };
+  const known = (team as { taskSubmissions?: Record<string, Sub> }).taskSubmissions?.[taskId];
+  if (!known) throw new functions.https.HttpsError('not-found', 'No submission for this mission');
+  if (known.submittedBy?.uid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Another phone sent this submission');
+  }
+  const kind: MediaKind = known.mediaKind === 'audio' || known.mediaKind === 'video' ? known.mediaKind : 'photo';
+  validate(() => {
+    if (!isAllowedSubmissionContentType(kind, contentType ?? undefined)) {
+      throw new functions.https.HttpsError('invalid-argument', `Content-type does not match the submission (${kind})`);
+    }
+  });
+
+  const teamRef = db.doc(`${FIRESTORE_PATHS.run(ownerUid, gameId, runId)}/teams/${teamId}`);
+  const cleanUrl = photoUrl.trim();
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    const sub = (snap.data() as { taskSubmissions?: Record<string, Sub> } | undefined)?.taskSubmissions?.[taskId];
+    if (!sub) throw new functions.https.HttpsError('not-found', 'No submission for this mission');
+    if (sub.mediaPending !== true) return { attached: false as const, feed: false, sub };
+    tx.update(teamRef, {
+      [`taskSubmissions.${taskId}.photoUrl`]: cleanUrl,
+      [`taskSubmissions.${taskId}.mediaPending`]: admin.firestore.FieldValue.delete(),
+      [`taskSubmissions.${taskId}.feedPending`]: admin.firestore.FieldValue.delete(),
+      ...(kind === 'video' && posterUrl ? { [`taskSubmissions.${taskId}.posterUrl`]: posterUrl } : {}),
+    });
+    return { attached: true as const, feed: sub.feedPending === true && sub.status === 'approved', sub };
+  });
+  if (!result.attached) return { attached: false, already: true };
+
+  if (result.feed) {
+    let taskTitle = '';
+    const game = await cachedGetDoc<{ stages?: { tasks?: { id: string; title?: string }[] }[] }>(
+      db, docCachePolicy, `users/${ownerUid}/games/${gameId}`,
+    );
+    for (const stage of game.data?.stages ?? []) {
+      const task = (stage.tasks ?? []).find((t) => t.id === taskId);
+      if (task) { taskTitle = task.title ?? ''; break; }
+    }
+    const mediaDurationSec = result.sub.mediaDurationSec;
+    await writeFeedItem(ownerUid, gameId, runId, {
+      taskId,
+      taskTitle,
+      teamId,
+      teamName: team.displayName ?? '',
+      photoUrl: cleanUrl,
+      mediaKind: kind,
+      ...(kind === 'video' && posterUrl ? { posterUrl } : {}),
+      ...(kind !== 'photo' && typeof mediaDurationSec === 'number' ? { mediaDurationSec } : {}),
+    });
+  }
+  return { attached: true };
 });
 
 
+/**
+ * What a team's task record was stamped with for this task (change:
+ * approval-can-be-undone).
+ *
+ * Returns `undefined` when it cannot be found, which `planApprovalReversal` reads as
+ * "unknown award" and refuses to act on. That is deliberate: guessing at an amount and
+ * subtracting it from a live scoreboard is worse than declining, because nobody would
+ * be able to tell it happened.
+ */
+function findTaskRecordScore(
+  stages: { tasks?: { taskId: string; earnedScore?: number }[] }[] | undefined,
+  taskId: string,
+): number | undefined {
+  for (const stage of stages ?? []) {
+    for (const rec of stage.tasks ?? []) {
+      if (rec.taskId === taskId) return rec.earnedScore;
+    }
+  }
+  return undefined;
+}
+
 export const reviewStationSubmission = loggedCallable('reviewStationSubmission', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'review');
   const { ownerUid, gameId, runId, teamId, taskId, approved, note } = data as {
     ownerUid: string;
     gameId: string;
@@ -1532,6 +2084,65 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   if (!teamSnap.exists) {
     throw new functions.https.HttpsError('not-found', 'Team not found');
   }
+  // ── Reversing an approval (change: approval-can-be-undone) ────────────────
+  //
+  // `approved + reject` used to be refused outright, because there was no way to take
+  // the score back and flipping the status alone would have left the submission and
+  // the scoreboard disagreeing. Bank photo missions default to autoApprove and the
+  // alternative BLOCKS the team, so "approved" was effectively "unreviewable" - which
+  // is how a photo of somebody's hand scored full points in run ijI9JMITSf8C9heN1Cwp
+  // with nothing an organizer could do about it.
+  //
+  // The clawback is a TRANSACTION over the team document so a concurrent completion
+  // cannot interleave with it, and `planApprovalReversal` is total and biased hard
+  // toward doing nothing: an unreadable award removes NOTHING rather than guessing at
+  // an amount and silently moving a live scoreboard.
+  let reversal: { outcome: string; scoreDelta: number } | null = null;
+  if (!approved) {
+    reversal = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(teamRef);
+      const team = snap.data() as {
+        score?: number;
+        stages?: { tasks?: { taskId: string; earnedScore?: number; status?: string }[] }[];
+        taskSubmissions?: Record<string, { status?: string }>;
+        scoreLedger?: unknown[];
+      } | undefined;
+      const plan = planApprovalReversal({
+        submissionStatus: team?.taskSubmissions?.[taskId]?.status,
+        earnedScore: findTaskRecordScore(team?.stages, taskId),
+        teamScore: team?.score,
+      });
+      if (plan.outcome !== 'reversed') return { outcome: plan.outcome, scoreDelta: 0 };
+      // The award is removed from the team's total AND zeroed on the task record, so
+      // the live board (which reads `score`) and the final ranking (which sums the
+      // stored records) can never disagree - the live/final parity rule in CLAUDE.md.
+      const stages = (team?.stages ?? []).map((s) => {
+        const tasks = (s.tasks ?? []).map((t) => (t.taskId === taskId ? { ...t, earnedScore: 0 } : t));
+        // Keep the stage total consistent with the tasks under it. Nothing RANKS on
+        // this field - every scorer iterates `stageRec.tasks` and reads the task-level
+        // earnedScore, which is why the stale value never corrupted a leaderboard - but
+        // `runs/helpers.ts` recomputes it as exactly this sum on every completion, so
+        // leaving it high here would make the stored document disagree with itself and
+        // hand a wrong number to the first surface that ever reads it.
+        const earnedScore = tasks.reduce((sum, t) => sum + (t.earnedScore ?? 0), 0);
+        return { ...s, tasks, earnedScore };
+      });
+      // Whole-array rewrite, never a dotted update into an array.
+      tx.update(teamRef, {
+        score: plan.nextTeamScore,
+        stages,
+        // team-dossier-and-search D2: the clawback and the reviewer's note, on the team.
+        scoreLedger: appendScoreLedger(team?.scoreLedger, [{
+          at: now, delta: plan.scoreDelta, kind: 'reversal', taskId,
+          reason: typeof note === 'string' ? note : undefined,
+          by: (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer',
+        }]),
+        updatedAt: now,
+      });
+      return { outcome: plan.outcome, scoreDelta: plan.scoreDelta };
+    });
+  }
+
   // merge:true deep-merges this into the existing submission, preserving
   // photoUrl/submittedAt while updating the review subfields.
   await teamRef.set(
@@ -1575,7 +2186,7 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         }
         const teamData = (await teamRef.get()).data() as {
           displayName?: string;
-          taskSubmissions?: Record<string, { photoUrl?: string; mediaKind?: MediaKind }>;
+          taskSubmissions?: Record<string, { photoUrl?: string; mediaKind?: MediaKind; posterUrl?: string; mediaDurationSec?: number }>;
         } | undefined;
         const submission = teamData?.taskSubmissions?.[taskId];
         const submittedPhotoUrl = submission?.photoUrl;
@@ -1596,6 +2207,8 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
             teamName: teamData?.displayName ?? '',
             photoUrl: submittedPhotoUrl,
             mediaKind: submissionKind,
+            ...(typeof submission?.posterUrl === 'string' && submission.posterUrl ? { posterUrl: submission.posterUrl } : {}),
+            ...(typeof submission?.mediaDurationSec === 'number' ? { mediaDurationSec: submission.mediaDurationSec } : {}),
           });
         }
       }
@@ -1604,14 +2217,56 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
     }
   }
 
-  return { ok: true, approved };
+  // ── The durable record (change: approval-can-be-undone) ───────────────────
+  //
+  // `reviewStationSubmission` wrote NO audit record at all, and it decides whether a
+  // team keeps points: an approval scores the mission, a reversal takes that score
+  // back. Both are a human's privileged judgement on a specific team.
+  //
+  // The REVERSAL is the one that made this mandatory. Bank photo missions default to
+  // autoApprove, so "approved" is where a weak submission lands by default, and
+  // undoing it removes points the team already saw on the board. Without this, the
+  // organizer's own console could not answer "who took those points off, and why" -
+  // which is the same accountability hole that made every manual adjustment read as
+  // the literal 'manual' before live-ops-feedback-loop.
+  //
+  // `auditBestEffort`, never `writeAuditLog`: a failed audit write must not abort the
+  // review the organizer just made, or the accountability fix becomes a new outage.
+  // The score movement is already committed by this point, so the record is written
+  // AFTER it and can only ever be missing, never wrong.
+  const reversed = reversal?.outcome === 'reversed';
+  await auditBestEffort({
+    ownerUid, gameId, runId, teamId,
+    operatorId: context.auth!.uid,
+    actionType: reversed ? AUDIT_SUBMISSION_APPROVAL_REVERSED
+      : approved ? AUDIT_SUBMISSION_APPROVED
+        : AUDIT_SUBMISSION_REJECTED,
+    // The score the team LOST, as a positive number, so a reader does not have to
+    // reason about the sign of a delta. Absent on every path that moved no score.
+    ...(reversed ? { pointsRemoved: Math.abs(reversal?.scoreDelta ?? 0) } : {}),
+    previousValue: reversed ? 'approved' : null,
+    newValue: approved ? 'approved' : 'rejected',
+    reason: validate(() => optionalString(note, 'note', MAX_MESSAGE_LEN)) ?? '',
+    taskId,
+  });
+
+  // A reversal is a privileged act that MOVES A SCORE, so it is reported like one
+  // (change: approval-can-be-undone). `reversal` is null on the approve path and on a
+  // no-op, so an ordinary review returns exactly what it always did.
+  return {
+    ok: true,
+    approved,
+    ...(reversal && reversal.outcome !== 'notApproved'
+      ? { reversal: reversal.outcome, scoreDelta: reversal.scoreDelta }
+      : {}),
+  };
 });
 
 
 // ─── adjustTeamScore ──────────────────────────────────────────────────────────
 
 export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'score');
   const { ownerUid, gameId, runId, teamId, delta, reason } = data as {
     ownerUid: string;
     gameId: string;
@@ -1632,13 +2287,19 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
     throw new functions.https.HttpsError('invalid-argument', 'delta must be a finite number');
   }
 
+  // Validated BEFORE the transaction now, because the reason is also written into
+  // the team's score ledger inside it (team-dossier-and-search D2).
+  const cleanReason = validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '';
+  const operatorName = (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer';
+
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
   // Transactional read-modify-write so a concurrent captureZone / requestTaskHint (both
   // transactional) can't lose this adjustment via a stale bonusPenalty (scoring integrity).
   const { prev, newPenalty } = await db.runTransaction(async (tx) => {
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
-    const teamData = teamSnap.data() as { bonusPenalty?: number; score?: number };
+    const teamData = teamSnap.data() as { bonusPenalty?: number; score?: number; scoreLedger?: unknown[] };
+    const nowIso = new Date().toISOString();
     const p = teamData.bonusPenalty ?? 0;
     const np = nextBonusPenalty(p, delta);
     tx.update(teamRef, {
@@ -1650,12 +2311,15 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
       // double-count on the leaderboard/final board — it only keeps the
       // player's own live score badge from silently freezing until finalizeRun.
       score: (teamData.score ?? 0) + delta,
-      updatedAt: new Date().toISOString(),
+      // WHY the score moved, on the document the organizer's console already streams.
+      // auditLogs is unreadable by clients, so it could never answer that.
+      scoreLedger: appendScoreLedger(teamData.scoreLedger, [
+        { at: nowIso, delta, kind: 'adjust', reason: cleanReason, by: operatorName },
+      ]),
+      updatedAt: nowIso,
     });
     return { prev: p, newPenalty: np };
   });
-
-  const cleanReason = validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '';
 
   await writeAuditLog({
     ownerUid, gameId, runId, teamId,
@@ -1722,7 +2386,7 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
 // filters only, never by the completion path, so a team standing at the station
 // finishes and scores it (D2). The response reports how many teams that is.
 export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'tasks');
   const { ownerUid, gameId, runId, taskId, status, reason, force } = data as {
     ownerUid: string;
     gameId: string;
@@ -1753,7 +2417,7 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
   ]);
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
-  const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[] }[] };
+  const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[]; exclusiveGroups?: { id: string; taskIds: string[] }[] }[] };
   const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides };
 
   const stage = (game.stages ?? []).find((s) => (s.tasks ?? []).some((t) => t?.id === ids.taskId));
@@ -1777,7 +2441,9 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
 
   const plan = planTaskStatusChange({
     taskId: ids.taskId,
-    stage: { tasks: stage.tasks ?? [], requiredTaskCount: stage.requiredTaskCount },
+    // The unlock graph and the exclusive groups ride along (live-task-close-rules): what waits for a
+    // paused mission is unavailable too, and a group yields one completion.
+    stage: { tasks: stage.tasks ?? [], requiredTaskCount: stage.requiredTaskCount, exclusiveGroups: stage.exclusiveGroups },
     overrides: run.taskStatusOverrides,
     next: status,
     teamsHolding,
@@ -1813,6 +2479,14 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     tx.update(runRef, { taskStatusOverrides: overrides, updatedAt: new Date().toISOString() });
   });
 
+  // live-task-close-rules: a CLOSURE takes the mission from every team that has not finished it,
+  // moves the ones standing on it, opens what waited for it and shrinks each team's stage. A pause
+  // stays temporary and touches no team.
+  let teamsMoved = 0;
+  if (status === 'closed' && plan.from !== 'closed') {
+    ({ teamsMoved } = await closeTaskForAllTeams(ownerUid, ids.gameId, ids.runId, ids.taskId, gameSnap.data() as Game));
+  }
+
   // Durable, like adjustTeamScore: taking a task out of play changes what every
   // team in the run can score.
   await writeAuditLog({
@@ -1837,6 +2511,9 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     availableCount: plan.availableAfter,
     requiredCount: plan.requiredCount,
     stageUnwinnable: plan.stageUnwinnable,
+    teamsMoved,
+    dependentsOpened: plan.dependentsOpened,
+    dependentsLocked: plan.dependentsLocked,
   };
 });
 

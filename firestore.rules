@@ -55,8 +55,14 @@ service cloud.firestore {
       //    is the deleteGame callable, which tombstones.
       match /games/{gameId} {
         allow read:   if isOwner(uid);
-        allow create: if isOwner(uid) && !hasTombstone(request.resource.data);
-        allow update: if isOwner(uid) && tombstoneUnchanged();
+        // `sharedLaunch` is SERVER-WRITTEN (change: shared-launch-opens-console): a client may not
+        // create a doc with it, and a LOCKED launch copy (a share link that did not allow copying)
+        // accepts no client write at all, or the lock would be one direct write away.
+        allow create: if isOwner(uid) && !hasTombstone(request.resource.data)
+                      && !request.resource.data.keys().hasAny(['sharedLaunch']);
+        allow update: if isOwner(uid) && tombstoneUnchanged()
+                      && resource.data.get('sharedLaunch', null) == null
+                      && !request.resource.data.keys().hasAny(['sharedLaunch']);
         allow delete: if false;
 
         // ── RUNS ─────────────────────────────────────────────────────────────
@@ -153,8 +159,13 @@ service cloud.firestore {
           // where every team is, which is the same data the owner's desktop map has
           // always shown. Scoped by isStaffForRun, so a staff token still only ever
           // reaches the ONE run it was minted for. Writes stay CF-only (updateLocation).
+          // staff-capabilities: a staff token carries `caps`, and a code without `locations` does
+          // not see the live map. A token minted before that change has no `caps` and keeps the
+          // read, matching the callables' legacy rule.
           match /teamLocations/{docId} {
-            allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
+            allow read:  if isOwner(uid)
+                          || (isStaffForRun(uid, gameId, runId)
+                              && (!('caps' in request.auth.token) || 'locations' in request.auth.token.caps));
             allow write: if false;
           }
           // Retained GPS track for the post-run movement heatmap (movement-heatmap).
@@ -189,8 +200,18 @@ service cloud.firestore {
             allow read:  if isOwner(uid);
             allow write: if false;
           }
+          // A staff member may read their OWN code (staff-capabilities): the console listens to it
+          // to notice an edit. It holds the PIN, which that person already typed.
           match /staffInvites/{docId} {
-            allow read:  if isOwner(uid);
+            allow read:  if isOwner(uid)
+                          || (isStaffForRun(uid, gameId, runId) && request.auth.token.codeId == docId);
+            allow write: if false;
+          }
+          // One document per staff PERSON (staff-capabilities): which code, removed or not.
+          // The organizer's console reads them all; a staff member reads only their own.
+          match /staffGrants/{staffUid} {
+            allow read:  if isOwner(uid)
+                          || (isStaffForRun(uid, gameId, runId) && request.auth.uid == staffUid);
             allow write: if false;
           }
         }
@@ -282,6 +303,26 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── MISSION BANK OVERRIDES ───────────────────────────────────────────────
+    //    Admin edits to the smart-build mission bank (admin-editable-mission-bank).
+    //    One document per mission the admin has edited or deleted; absent for every
+    //    mission still at the content authored in creator-web's taskBank.ts.
+    //
+    //    READ is open to any signed-in user because the composer runs CLIENT-side:
+    //    "compose one for me" merges these rows over the static bank in the browser,
+    //    so every creator has to be able to read them. Nothing here is secret — it is
+    //    the same mission content the composer would hand them anyway.
+    //
+    //    WRITE is closed outright. These rows decide what EVERY creator is offered,
+    //    so they are admin-only through setMissionBankOverride /
+    //    clearMissionBankOverride, which enforce the claim server-side and leave an
+    //    auditLogs record. A rules-level admin check would be a second, weaker copy
+    //    of that boundary.
+    match /missionBankOverrides/{missionKey} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
     // ── RATE-LIMIT COUNTERS ──────────────────────────────────────────────────
     //    Per-uid callable rate-limit windows (callable-rate-limiting, #19).
     //    Server-write-only — clients can neither read nor write them.
@@ -300,6 +341,46 @@ service cloud.firestore {
     //    strangers' contact details. The endpoint that accepts them is
     //    deliberately unauthenticated; the collection they land in must not be.
     match /contactMessages/{messageId} {
+      allow read, write: if false;
+    }
+
+
+    // ── liveApplications/{applicationId} ─────────────────────────────────────
+    //    Team applications for the RushPoint Live event (change:
+    //    rushpoint-live-signup). Written by the unauthenticated
+    //    submitLiveApplication callable, read by the admin-only
+    //    listLiveApplications and getLiveApplicationPhoto, all through the Admin SDK.
+    //
+    //    Closed to clients in BOTH directions, and the read half matters MORE here
+    //    than it does for contactMessages one block up. These documents carry a
+    //    phone number, a home town, an age range and — in the `photo` subcollection
+    //    — a photograph of a group of identifiable people, many of whom will be
+    //    minors. An open read would not leak a message; it would publish a roster.
+    //
+    //    The recursive wildcard is load-bearing: a rule on the parent alone says
+    //    nothing about a subcollection, so photo/{photoId} would fall through to
+    //    whatever the catch-all at the top of this file decides. Naming it here
+    //    means the photo cannot outlive the closure of the record it belongs to.
+    match /liveApplications/{applicationId} {
+      allow read, write: if false;
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+
+    // ── gameShareLinks/{token} ───────────────────────────────────────────────
+    //    Read-only share links for an UNPUBLISHED game (change: game-share-link).
+    //    Written by createGameShareLink / revokeGameShareLink, read by
+    //    getSharedGame — all three through the Admin SDK.
+    //
+    //    Closed to clients in BOTH directions. The document id IS the credential,
+    //    so an open read would let anyone LIST every live share token on the
+    //    platform: one query, and every unpublished game becomes readable. The
+    //    write half is equally load-bearing — a client that could mint a link
+    //    could grant itself access to any game whose id it can guess.
+    match /gameShareLinks/{token} {
       allow read, write: if false;
     }
 

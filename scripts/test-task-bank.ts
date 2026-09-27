@@ -439,6 +439,36 @@ console.log('\n── 13. station capacity matches the mission, on every located
     .filter((e) => e.exclusiveStation === true && !e.tags.includes('locationBased'))
     .map((e) => e.key);
   eq('exclusiveStation is only meaningful on a located mission', exclusiveOnAnywhere, []);
+
+  // ── The same law over the WHOLE bank, not only the located half ────────────
+  //
+  // The three assertions above deliberately scope to `locationBased`, because
+  // routing skips the cap for a locationless task and the value is inert there.
+  // Inert is not the same as harmless. The Builder's `locationChoicePatch` flips
+  // `locationless` to false when a creator drops a pin and never touches
+  // capacity — so eighty composed missions carrying `base()`'s floor of 1 would
+  // each have become a ONE-TEAM STATION the moment somebody placed them, which
+  // is this very section's defect arriving through a door it was not watching.
+  //
+  // `anywhere()` now inherits OPEN_SPACE_CAPACITY, so capacity 1 means exactly
+  // one thing across the entire bank: this mission is built around a single
+  // physical resource. Asserted as a biconditional in both directions.
+  const capOf = (e: TaskBankEntry) => built.get(e.key)?.maxConcurrentTeams;
+  const cappedWithoutReason = TASK_BANK
+    .filter((e) => capOf(e) === 1 && e.exclusiveStation !== true)
+    .map((e) => e.key);
+  eq('no mission caps at 1 without declaring exclusiveStation', cappedWithoutReason, []);
+
+  const reasonWithoutCap = TASK_BANK
+    .filter((e) => e.exclusiveStation === true && capOf(e) !== 1)
+    .map((e) => `${e.key}: ${capOf(e)}`);
+  eq('every exclusiveStation mission really caps at 1, located or not', reasonWithoutCap, []);
+
+  // Anti-vacuity in both directions: the bank must still contain some of each,
+  // or this biconditional is true of an empty set.
+  const scarce = TASK_BANK.filter((e) => e.exclusiveStation === true).length;
+  const open = TASK_BANK.filter((e) => capOf(e) === OPEN_SPACE_CAPACITY).length;
+  ok(`the bank holds both kinds :: ${scarce} scarce, ${open} open-space`, scarce > 0 && open > 0);
 }
 
 console.log('');

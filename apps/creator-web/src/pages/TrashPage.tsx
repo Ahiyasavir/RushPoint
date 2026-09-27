@@ -33,15 +33,25 @@ export default function TrashPage() {
   const restoreAction = useAsyncAction(restore, (g: TrashedGame) => g.id);
   const purgeAction = useAsyncAction(purge, (g: TrashedGame) => g.id);
 
+  // COULD NOT LOAD is not AN EMPTY BIN
+  // (change: failed-load-is-not-an-empty-account). RunHistoryPage already states
+  // this rule in its own catch — "'you have no runs' and 'we could not reach the
+  // server' are opposite messages, and a creator shown the wrong one goes looking
+  // for data they think they lost" — and it had not travelled to here or to the
+  // dashboard. It matters most on THIS page: someone opens the trash precisely to
+  // find out whether a deleted game can still be recovered, and a failed load told
+  // them the bin was empty, which reads as "it is gone for good".
+  const [loadFailed, setLoadFailed] = useState(false);
   async function load() {
     try {
       const res = await listDeletedGames();
       setGames(res.games);
       setRetentionDays(res.retentionDays);
+      setLoadFailed(false);
     } catch (e) {
       console.error('[trash] listDeletedGames failed:', e);
       setGames((prev) => prev ?? []);
-      await dialog.alert(tr.loadFailed);
+      setLoadFailed(true);
     }
   }
   useEffect(() => { void load(); }, []);
@@ -93,7 +103,14 @@ export default function TrashPage() {
         <p className="text-[--ink-3] mt-2 text-sm max-w-xl">{tr.subtitle(retentionDays)}</p>
       </div>
 
-      {games.length === 0 ? (
+      {loadFailed && games.length === 0 ? (
+        <EmptyState
+          icon="⚠️"
+          title={tr.loadFailed}
+          body={tr.loadFailedBody}
+          action={<Button onClick={() => { void load(); }}>{tr.loadFailedRetry}</Button>}
+        />
+      ) : games.length === 0 ? (
         <EmptyState icon="🗑️" title={tr.emptyTitle} body={tr.emptyBody} />
       ) : (
         <div className="space-y-3">
@@ -104,7 +121,7 @@ export default function TrashPage() {
                 <div className="min-w-0 flex-1">
                   <div className="font-brand font-bold text-[--ink-1] text-base truncate" dir="auto">{g.title}</div>
                   <div className="text-xs text-[--ink-3] mt-1">{tr.deletedOn(formatDate(g.deletedAt))}</div>
-                  <div className={`text-xs mt-0.5 font-medium ${left <= 3 ? 'text-rp-alert' : 'text-[--ink-3]'}`}>
+                  <div className={`text-xs mt-0.5 font-medium ${left <= 3 ? 'text-ink-alert' : 'text-[--ink-3]'}`}>
                     {tr.daysLeft(left)}
                   </div>
                 </div>
@@ -174,7 +191,7 @@ function PurgeDialog({ game, busy, onCancel, onConfirm }: {
         className="relative bg-[--surface-0] dark:bg-[--surface-1] border border-rp-alert/30 rounded-2xl w-full max-w-md p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="font-brand font-bold text-rp-alert text-lg mb-1">{tr.purgeDialogTitle}</div>
+        <div className="font-brand font-bold text-ink-alert text-lg mb-1">{tr.purgeDialogTitle}</div>
         <p className="text-xs text-[--ink-2] leading-relaxed mb-4">{untitled ? tr.purgeDialogBodyUntitled : tr.purgeDialogBody(game.title)}</p>
         <Label>{untitled ? tr.purgeDialogHintUntitled : tr.purgeDialogHint}</Label>
         <Input

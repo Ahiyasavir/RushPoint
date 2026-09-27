@@ -33,6 +33,8 @@ function byNewestSubmittedFirst(a: SubmissionRow, b: SubmissionRow): number {
 export function buildRunMediaGallery(teams: readonly SubmissionTeamDoc[]): SubmissionRow[] {
   if (!Array.isArray(teams)) return [];
   return flattenSubmissions(teams)
-    .filter((row) => isRenderableMedia(row.photoUrl))
+    // A row still uploading (background-media-upload) is shown too, as a placeholder: the team
+    // was approved and moved on, and the organizer should see that the file is coming.
+    .filter((row) => isRenderableMedia(row.photoUrl) || row.mediaPending)
     .sort(byNewestSubmittedFirst);
 }

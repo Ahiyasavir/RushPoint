@@ -1,27 +1,68 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { RunTeam } from '@rushpoint/shared';
+// How many of us are not on a phone yet (change: every-member-plays). Returns null
+// rather than a number when the headcount is unknowable, so this renders nothing at
+// all for a game that never asked how many people are in a team.
+import { teamAttendance } from '@rushpoint/shared';
 import { transferController, claimController } from '../services/calls';
 import { useT } from '../i18nContext';
-import { dialog } from './dialog';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { buildDeviceJoinLink } from '../lib/deviceJoinLink';
+import { routeShare } from '../lib/shareLadder';
 
 // Shared team devices (change: shared-team-devices): every attached phone sees
 // the team's device join code (to invite the rest of the team), who is attached,
 // and which phone currently controls. The controller can hand control to any
-// device; a viewer can take control (confirm-gated) so the team is never stuck
-// behind a dead phone. Role changes arrive live via the team-doc snapshot.
-export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
+// device; a viewer can take control so the team is never stuck behind a dead
+// phone. Role changes arrive live via the team-doc snapshot.
+//
+// team-phones-simple (D1, D4): the panel carries a one-scan "add a phone" QR + a
+// shareable link (`?code=<RUN>&join=<DEVICECODE>`), and hand-over / take-over no
+// longer ask for confirmation — the phone that LOST the role gets an undo toast
+// (PlayScreen), which guards the same accidental tap without taxing every real one.
+export default function TeamDevicesPanel({ team, myUid, ctx, onChanged, defaultOpen = false }: {
   team: RunTeam;
   myUid: string;
-  ctx: { ownerUid: string; gameId: string; runId: string };
+  ctx: { ownerUid: string; gameId: string; runId: string; code?: string };
   onChanged: () => void;
+  /** Open on mount: the waiting screen, where teams actually set their phones up. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
+  const [qr, setQr] = useState<string | null>(null);
   const [err, setErr] = useState('');
 
+  const joinLink = team.deviceJoinCode && ctx.code
+    ? buildDeviceJoinLink(window.location.origin, ctx.code, team.deviceJoinCode)
+    : null;
+
+  // The QR library stays out of the entry chunk (bundle:budget): it is imported
+  // only when the panel is open AND there is a link to encode. A failed import just
+  // leaves the typed code and the share button, which carry the same link.
+  useEffect(() => {
+    if (!open || !joinLink) return;
+    let alive = true;
+    void import('qrcode')
+      .then((m) => m.default.toDataURL(joinLink, { margin: 1, width: 320, errorCorrectionLevel: 'M' }))
+      .then((url) => { if (alive) setQr(url); })
+      .catch(() => { /* no QR - the link and code below still work */ });
+    return () => { alive = false; };
+  }, [open, joinLink]);
+
+  async function shareLink() {
+    if (!joinLink) return;
+    const r = await routeShare({ blob: null, filename: 'rushpoint-join.png', text: t.devices.shareText, url: joinLink, title: 'RushPoint' });
+    if (r === 'shared' || r === 'copied') {
+      setShared(true);
+      window.setTimeout(() => setShared(false), 2000);
+    }
+  }
+
   const controllerUid = team.controllerUid ?? team.id;
+  const attendance = teamAttendance(team);
   const isController = controllerUid === myUid;
   const devices = team.devices ?? [{ uid: team.id, name: team.displayName, joinedAt: team.updatedAt }];
 
@@ -34,23 +75,20 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
     } catch { /* clipboard unavailable — the code is still visible on screen */ }
   }
 
-  async function transfer(toUid: string, toName: string) {
-    if (!(await dialog.confirm(t.devices.transferTo({ name: toName }), { confirmLabel: t.devices.transferBtn }))) return;
+  async function transfer(toUid: string, _toName: string) {
     setErr('');
     try { await transferController({ ...ctx, toUid }); onChanged(); }
     catch { setErr(t.devices.actionFailed); }
   }
 
   async function takeControl() {
-    if (!(await dialog.confirm(t.devices.takeControlConfirm, { confirmLabel: t.devices.takeControl }))) return;
     setErr('');
     try { await claimController(ctx); onChanged(); }
     catch { setErr(t.devices.actionFailed); }
   }
 
-  // In-flight guards (change: wave-b/async-action-guard). These also cover the
-  // confirm dialog, so a double tap can no longer stack two confirms — and
-  // handing control twice can't race the team into the wrong controller.
+  // In-flight guards (change: wave-b/async-action-guard): handing control twice
+  // can't race the team into the wrong controller.
   const transferAction = useAsyncAction<[string, string], void>(transfer, (toUid) => toUid);
   const takeControlAction = useAsyncAction(takeControl);
   const busy = transferAction.busy || takeControlAction.busy;
@@ -68,10 +106,38 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
 
       {open && (
         <div className="px-4 pb-4 space-y-3">
+          {/* WHO IS STILL MISSING (change: every-member-plays).
+              The team already sees the join code; what it could never see was whether
+              anyone still needs it. A team of six sharing one phone looked exactly like
+              a solo player on every screen, because memberCount and deviceUids were
+              never compared. Rendered only when the shortfall is KNOWN - `missing` is
+              null for a game that never collected member names, and inventing a number
+              there would be a confident lie. */}
+          {attendance.short && attendance.missing !== null && (
+            <p className="text-[13px] text-ink-warm rounded-lg bg-app-raised px-3 py-2">
+              {t.devices.membersMissing({ n: attendance.missing })}
+            </p>
+          )}
+
+          {joinLink && (
+            <div className="rounded-lg bg-app-raised px-3 py-3 text-center space-y-2" data-testid="add-phone">
+              <p className="text-sm font-semibold text-zinc-200">{t.devices.addPhoneTitle}</p>
+              <p className="text-[13px] text-zinc-500">{t.devices.addPhoneHint}</p>
+              {qr && (
+                <img src={qr} alt={t.devices.addPhoneQrAlt} width={180} height={180}
+                  className="mx-auto rounded-md bg-white p-1" />
+              )}
+              <button onClick={() => void shareLink()}
+                className="w-full min-h-[44px] text-sm font-semibold text-ink-fire border border-accent/30 rounded-lg py-2 hover:bg-accent/5">
+                {shared ? t.devices.copied : t.devices.shareLink}
+              </button>
+            </div>
+          )}
+
           {team.deviceJoinCode && (
             <div className="flex items-center justify-between gap-2 rounded-lg bg-app-raised px-3 py-2">
               <div>
-                <div className="text-[11px] text-zinc-500">{t.devices.inviteHint}</div>
+                <div className="text-[13px] text-zinc-500">{t.devices.inviteHint}</div>
                 <div className="font-mono font-bold text-lg tracking-[0.3em] text-zinc-100">{team.deviceJoinCode}</div>
               </div>
               <button onClick={copyCode} className="inline-flex items-center min-h-[44px] px-2 text-xs font-semibold text-ink-fire hover:underline shrink-0">
@@ -88,7 +154,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                   {d.uid === myUid && <span className="text-zinc-500 text-xs ms-1">{t.devices.youTag}</span>}
                 </span>
                 {d.uid === controllerUid ? (
-                  <span className="shrink-0 text-[11px] font-bold text-ink-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
+                  <span className="shrink-0 text-[13px] font-bold text-ink-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
                     ✏️ {t.devices.controllerBadge}
                   </span>
                 ) : isController ? (

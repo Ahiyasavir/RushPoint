@@ -96,7 +96,13 @@ export interface StaffSession {
   gameId: string;
   runId: string;
   name: string;
-  permissions: string[];
+  /** What this person's code allowed at sign in (staff-capabilities). Absent on a session stored
+   *  before that change, which reads as everything, like the server's legacy rule. The live
+   *  value comes from useStaffAccess; this is only the first paint. */
+  capabilities?: string[];
+  codeId?: string;
+  /** Dead since staff-capabilities; kept so an old stored session still parses. */
+  permissions?: string[];
 }
 
 const STAFF_KEY = 'rushpoint.staff';

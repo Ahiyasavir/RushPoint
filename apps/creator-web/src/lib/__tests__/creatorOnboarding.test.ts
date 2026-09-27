@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ONBOARDING_STEP_ORDER,
   buildOnboardingChecklist,
@@ -6,6 +6,10 @@ import {
   readPreviewedGames,
   skeletonCardCount,
   writePreviewedGames,
+  readStartIntent,
+  markStartIntent,
+  hasStartIntent,
+  consumeStartIntent,
   type OnboardingInput,
 } from '../creatorOnboarding';
 
@@ -140,5 +144,90 @@ describe('creatorOnboarding — loading placeholder matches reality', () => {
     expect(readKnownGameCount('nonsense')).toBeNull();
     expect(readKnownGameCount('-4')).toBeNull();
     expect(skeletonCardCount(null)).toBe(6);
+  });
+});
+
+
+// ── The marketing CTA's "take me straight to building" intent ────────────────
+//
+// `readStartIntent` runs at MODULE LOAD on every page view of the creator app,
+// so the bar for it is not just "parses a query string" — it is "cannot throw,
+// whatever is in the address bar". The storage helpers are the hand-off across
+// the sign-in, which is the part that has to survive a Google redirect.
+
+describe('creatorOnboarding — start intent, parsing', () => {
+  it('recognises the exact instruction, with or without other params', () => {
+    expect(readStartIntent('?start=game')).toBe(true);
+    expect(readStartIntent('start=game')).toBe(true);
+    expect(readStartIntent('?ref=abc&start=game')).toBe(true);
+    expect(readStartIntent('?start=game&ref=abc')).toBe(true);
+  });
+
+  it('ignores anything that is not that instruction', () => {
+    expect(readStartIntent('')).toBe(false);
+    expect(readStartIntent('?start=')).toBe(false);
+    expect(readStartIntent('?start=1')).toBe(false);
+    expect(readStartIntent('?start=GAME')).toBe(false);
+    expect(readStartIntent('?started=game')).toBe(false);
+    expect(readStartIntent('?ref=abc')).toBe(false);
+  });
+
+  // It reads `window.location.search` on a path where a throw would take the
+  // whole app down before it painted, so every junk shape has to be inert.
+  it('is total — junk yields false rather than throwing', () => {
+    for (const junk of [undefined, null, 0, 1, {}, [], true, NaN]) {
+      expect(readStartIntent(junk)).toBe(false);
+    }
+  });
+});
+
+describe('creatorOnboarding — start intent, hand-off across the sign-in', () => {
+  // This suite runs under `environment: 'node'` (vitest.config.ts), which has no
+  // sessionStorage at all — so without a stub every helper below would take its
+  // own catch branch and the round trip would "pass" while testing nothing.
+  // A real store makes the one-shot semantics actually observable.
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    (globalThis as { sessionStorage?: unknown }).sessionStorage = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => { store.set(k, String(v)); },
+      removeItem: (k: string) => { store.delete(k); },
+      clear: () => { store.clear(); },
+    };
+  });
+
+  afterEach(() => {
+    delete (globalThis as { sessionStorage?: unknown }).sessionStorage;
+  });
+
+  // The catch branches are the real production path in a locked-down browser
+  // (private mode, cookies disabled), so they get their own assertion: a creator
+  // whose storage throws must still get a working app, just without the shortcut.
+  it('degrades to "no intent" when storage is unavailable, never throwing', () => {
+    delete (globalThis as { sessionStorage?: unknown }).sessionStorage;
+    expect(() => markStartIntent()).not.toThrow();
+    expect(hasStartIntent()).toBe(false);
+    expect(consumeStartIntent()).toBe(false);
+  });
+
+  it('is absent until something marks it', () => {
+    expect(hasStartIntent()).toBe(false);
+    expect(consumeStartIntent()).toBe(false);
+  });
+
+  // The login screen re-renders on a failed password or a switch to sign-up, and
+  // each of those still needs the bare layout — so READING must not spend it.
+  it('survives repeated reads, because the login screen renders many times', () => {
+    markStartIntent();
+    expect(hasStartIntent()).toBe(true);
+    expect(hasStartIntent()).toBe(true);
+    expect(hasStartIntent()).toBe(true);
+  });
+
+  it('is spent exactly once by the thing that acts on it', () => {
+    markStartIntent();
+    expect(consumeStartIntent()).toBe(true);
+    expect(consumeStartIntent()).toBe(false);
+    expect(hasStartIntent()).toBe(false);
   });
 });

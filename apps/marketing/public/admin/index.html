@@ -10,18 +10,26 @@
     -->
     <meta name="robots" content="noindex, nofollow" />
     <title>RushPoint content</title>
-    <!--
-      The Netlify Identity widget the template shipped is gone: this uses the
-      GitHub backend, so identity comes from GitHub through our own token
-      exchange. Loading a second, unused identity provider would be a third party
-      script on an authenticated surface for no purpose.
-    -->
-    <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
   </head>
   <body>
     <noscript>
       This page is the content editor and needs JavaScript. Every page of the site
       itself works without it.
     </noscript>
+    <!--
+      The Netlify Identity widget the template shipped is gone: this uses the
+      GitHub backend, so identity comes from GitHub through our own token
+      exchange. Loading a second, unused identity provider would be a third party
+      script on an authenticated surface for no purpose.
+
+      LOADED AT THE END OF <body>, NOT IN <head>. Decap mounts itself by
+      appending to document.body as soon as it runs; from <head> that body does
+      not exist yet and the whole editor dies on load with
+      "Cannot read properties of null (reading 'appendChild')" — a blank page
+      whose only symptom is in the browser console. It was in <head> from the day
+      the CMS was added, so the admin page had never once rendered.
+      scripts/test-marketing-cms-config.ts pins the placement.
+    -->
+    <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
   </body>
 </html>

@@ -1,0 +1,34 @@
+{
+  "title": "My story",
+  "description": "Ahiya Savir, 17, from Jerusalem. How selling hummus in a small community bought a first robot, and how that turned into a platform for live mission races.",
+  "headline": "I sold hummus to buy a robot",
+  "intro": "My name is Ahiya Savir, 17, from Jerusalem. RushPoint was not born in some flashy strategy meeting. It happened simply because I wanted to play something that did not exist out in the field.",
+  "sections": [
+    {
+      "title": "Sansana, and hummus for a robot",
+      "body": [
+        "I grew up in Sansana, a small community in the southern Hebron hills. Once you are actually out there, you learn fast that if something is missing, you simply build it. That is how I started working with wood and with my hands. When I wanted to get into robotics, my parents taught me to earn the money myself. I started selling hummus around the community. When I finally could buy one, I found out the part that mattered just as much as building it was the code that runs it. That is how I learned to program."
+      ]
+    },
+    {
+      "title": "Three years in Boston",
+      "body": [
+        "We lived in Boston for three years. I led a robotics team there and learned my first real programming language. It was the first time I built something together with other people, against a tight schedule. Alongside that I got heavily into sports. I ran a half marathon, played basketball, trained in wrestling and started calisthenics. In the end, sports and code carry the same idea: you only find out what actually works once you go out there and try."
+      ]
+    },
+    {
+      "title": "Back to Jerusalem",
+      "body": [
+        "At 15 I moved back to Israel and in with my grandparents in Jerusalem to study at Himmelfarb. I am on the mechatronics track, alongside physics and maths, and I lead the mechanical team on our robotics squad. Alongside that I was a youth leader in Bnei Akiva, and that is where I really felt how hard it is to run a good activity for a large group without everything falling apart."
+      ]
+    },
+    {
+      "title": "Why I built RushPoint",
+      "body": [
+        "When I tried to run a real mission race, I watched everything fall apart fast. Papers that got messy, stations you had to keep walking to and checking every second, and teams just standing around bored. I wanted a simple tool that lets anyone run a smooth field game without needing a production crew. It mattered to me that it would work for everyone: young kids, youth groups and adults alike, because it is the same engine underneath, and only the missions change."
+      ]
+    }
+  ],
+  "closing": "Since I am still in high school, I do most of the work in evenings and on weekends. I try hard to keep my time focused, so every tool that goes into the system exists because someone actually needed it out there. If you are running a game and something is missing, write to me. I read every message.",
+  "action": "Build a game"
+}

@@ -44,6 +44,28 @@
   --rp-go:     #10B981;
   --rp-alert:  #EF4444;
 
+  /* "Ink" text tokens (change: brand-design-system) — darkened, TEXT ONLY
+     variants of the accents above, same idea play-web already shipped
+     (packages/brand/tokens.mjs INK). Every FILL/border/ring/gradient keeps
+     the raw --rp-* colour; only text routes through these, because the raw
+     accents fail WCAG as text on a light surface (--rp-fire is 3.16:1 on
+     white; body text needs 4.5:1).
+     Why these are CSS variables and not a flat tailwind.config.js colour like
+     play-web's: creator-web has a REAL dark mode, and the light-mode fix is
+     the wrong fix there — on this app's near-black surfaces the raw accents
+     already clear AA on their own (5 of 6 do, comfortably), and darkening
+     them further for "text safety" would make them close to unreadable
+     dark-on-dark. A static hex can only be one of those; a variable that
+     the dark-mode block overrides can be both. Values and their worst-surface ratio,
+     scripts/test-creator-a11y-scan.ts asserts every one: */
+  --rp-ink-fire:   #B03A0B; /* 4.87:1 on --rp-card (shared with play-web's ink-fire) */
+  --rp-ink-warm:   #8A4B00; /* 5.46:1 (shared ink-warm) */
+  --rp-ink-amber:  #7A5200; /* 5.55:1 (shared ink-amber) */
+  --rp-ink-alert:  #C21414; /* 4.95:1 (shared ink-alert) */
+  --rp-ink-go:     #0A714F; /* 4.83:1 (shared ink-go) */
+  --rp-ink-plasma: #046D7F; /* 4.81:1 (shared ink-plasma) */
+  --rp-ink-signal: #5D2CB2; /* 6.82:1 (shared ink-signal) */
+
   /* legacy compat */
   --rp-bg: #F6F7FB;
   --rp-bg-elevated: #FFFFFF;
@@ -66,7 +88,11 @@
   --rp-glass-border: rgba(10,12,26,0.08);
   --rp-radius: 14px;
   --rp-radius-lg: 20px;
-  --rp-font-display: 'Space Grotesk', 'Inter', sans-serif;
+  /* Brand display face. Kept in sync with packages/brand/tokens.mjs, which is
+     the single source; Rubik replaced Space Grotesk because Space Grotesk has
+     no Hebrew glyphs and this product is Hebrew first. */
+  --rp-font-display: 'Rubik', system-ui, sans-serif;
+  --rp-font-body: 'Assistant', system-ui, sans-serif;
   --rp-font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
@@ -100,16 +126,72 @@ html.dark {
   --rp-text-muted: #464D6E;
   --rp-glass-bg: rgba(13,14,26,0.70);
   --rp-glass-border: rgba(255,255,255,0.07);
+
+  /* Ink text tokens, dark-mode half. Mostly the RAW accent: on a near-black
+     surface the saturated brand colours already read as light-on-dark and
+     clear AA on their own — darkening them again (the light-mode fix) would
+     push them toward the background instead of away from it. --rp-ink-signal
+     and --rp-ink-alert are the two exceptions: raw --rp-signal is 2.89:1 on
+     --rp-card here, and raw --rp-alert is 4.38:1, both short of 4.5:1 — so
+     those two are LIGHTENED instead, the mirror of what light mode does.
+     Ratios against the worst dark surface (--rp-card, #1B1E30): */
+  --rp-ink-fire:   #FF5722; /* raw, 5.21:1 */
+  --rp-ink-warm:   #FF8A00; /* raw, 6.97:1 */
+  --rp-ink-amber:  #FFB300; /* raw, 9.18:1 */
+  --rp-ink-alert:  #F15656; /* lightened, 4.87:1 (raw --rp-alert is 4.38:1) */
+  --rp-ink-go:     #10B981; /* raw, 6.49:1 */
+  --rp-ink-plasma: #06B6D4; /* raw, 6.78:1 */
+  --rp-ink-signal: #A87CF3; /* lightened, 5.37:1 (raw --rp-signal is 2.89:1) */
 }
 
 /* ── Base ────────────────────────────────────────────────────────────────── */
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Assistant', system-ui, sans-serif;
   background-color: var(--surface-1);
   color: var(--ink-1);
   margin: 0;
   transition: background-color 0.25s, color 0.25s;
   -webkit-font-smoothing: antialiased;
+  /* Stop iOS/Android from auto-inflating text when a block is wider than the
+     viewport (most visibly after a rotation). It scales SOME text and not the
+     rest, so a layout that was tuned at one size silently arrives at another. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* ── iOS focus-zoom floor (change: creator-mobile-mechanics) ─────────────────
+   Mobile Safari zooms the page IN whenever a text field whose computed
+   font-size is under 16px takes focus, and it does NOT zoom back out when the
+   field blurs. Every form control in this console is `text-sm` (14px), and the
+   mission editor asks for the `dense` variant at 13px — so every single tap on
+   a field left the creator inside a magnified viewport, scrolling a page that
+   no longer fit. That is the whole of the reported "the site keeps getting
+   bigger and smaller, and then scrolling becomes complicated".
+
+   Three things about this rule are load-bearing:
+
+   1. `!important`. Tailwind's `.text-sm` is a class (specificity 0,1,0); this
+      is an element selector (0,0,1). Without it the utility wins from any
+      source position, and the rule would sit here looking correct while doing
+      nothing at all — the same shape of defect as the backspace-in-a-regex
+      entry in CLAUDE.md.
+   2. The `max-width` scope. On a pointer device the smaller type is a
+      deliberate density choice and no zoom behaviour applies; 639px is
+      Tailwind's `sm` boundary, which is what every `sm:` variant in this app
+      already branches on.
+   3. Doing it HERE rather than per component. There are raw `<input>` elements
+      in a dozen files outside the ui kit, and a floor that has to be
+      remembered at each call site is a floor that a new component silently
+      skips. This one cannot be bypassed.
+
+   Checkbox/radio/range carry no text, so they keep their own sizing.
+   scripts/test-mobile-form-zoom.ts pins every clause above. */
+@media (max-width: 639px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 /* Builder shell height: 100vh everywhere, upgraded to 100dvh only where the
@@ -379,6 +461,26 @@ html.dark .glass-card {
 }
 @media (prefers-reduced-motion: reduce) {
   .rp-qs-pulse { animation: none; }
+}
+
+/* ── הקמה מהירה: the GUIDED mission editor (change: quick-setup-guided-editor) ──
+   While the flow is running, the editor answers one question at a time: the
+   section holding the current step's control stays, its siblings inside the same
+   `[data-qs-body]` list are hidden.
+
+   Both classes are written by the same effect (TaskWizard), survivor FIRST, so
+   this rule is never live with nothing kept — the failure mode of a subtraction
+   is an empty panel, and lib/guidedEditor exists to make that unreachable. A
+   `:has()`-based rule would have needed no marker class, but it also could not
+   have been ordered that way: the rule would be live from the first paint and a
+   miss would blank the editor.
+
+   `display: none`, not `visibility`/`opacity`: a hidden control must not keep
+   claiming layout inside a bottom sheet on a phone, and must not be reachable by
+   Tab. It is still MOUNTED and still holds its value — hiding never edits (the
+   same guarantee `foldGroupAway` gives the opt-in groups). */
+.rp-guided > :not(.rp-guided-keep) {
+  display: none !important;
 }
 
 /* הקמה מהירה — the finish-line moment (change: quick-setup-wizard).

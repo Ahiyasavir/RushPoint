@@ -137,15 +137,15 @@ function stripMarkup(text: string): string {
   return text.replace(/<[^>]*>/g, ' ');
 }
 
-function assertLanguage(label: string, language: Language, raw: string): void {
+function assertLanguage(label: string, language: Language, raw: string, part = 'C'): void {
   fieldsScanned += 1;
   const text = stripMarkup(raw);
   if (language === 'he') {
     // Hebrew copy leaking English words is the recurring bug the dictionaries
     // have a gate for; this surface needs the same one.
-    check(`C · ${label} is Hebrew without English leaking in`, !hasEnglishWord(text), text.slice(0, 60));
+    check(`${part} · ${label} is Hebrew without English leaking in`, !hasEnglishWord(text), text.slice(0, 60));
   } else {
-    check(`C · ${label} is English without Hebrew leaking in`, !hasHebrew(text), text.slice(0, 60));
+    check(`${part} · ${label} is English without Hebrew leaking in`, !hasHebrew(text), text.slice(0, 60));
   }
 }
 
@@ -180,7 +180,20 @@ for (const file of copyFiles) {
 
     // Single or double quoted string literals, minus the ones that are clearly
     // not prose: css classes, icon names, urls, html fragments.
-    for (const [, literal] of block.matchAll(/'((?:[^'\\]|\\.){4,})'/g)) {
+    // Match EVERY literal and filter by length afterwards, rather than asking the
+    // pattern for 4-or-more directly.
+    //
+    // The length used to be in the pattern, and that quietly desynchronised the
+    // whole scan: a literal too short to match — `value: '10'`, `n: '01'` — cannot
+    // be consumed, so the engine resumes at that literal's CLOSING quote, treats it
+    // as an OPENING one, and pairs it with the next literal's opening quote. Every
+    // literal after the short one is then read off by one, and the checker reports
+    // the punctuation BETWEEN two strings (`, label: `) as English prose inside the
+    // Hebrew block. It does not fail silently, which is the one mercy, but it fails
+    // with fifty findings that all describe nothing, which is nearly as bad: the
+    // real answer is buried and the file looks broken when it is fine.
+    for (const [, literal] of block.matchAll(/'((?:[^'\\]|\\.)*)'/g)) {
+      if (literal.length < 4) continue;
       if (/^(tabler:|https?:|\/|#|[a-z-]+(\s[a-z0-9:-]+)*$)/.test(literal)) continue;
       if (!/[A-Za-z֐-׿]/.test(literal)) continue;
       assertLanguage(`${file} ${language} "${literal.slice(0, 28)}"`, language, literal);
@@ -194,6 +207,112 @@ for (const file of copyFiles) {
 // this the suite reports green over zero files, which is the vacuous pass the
 // landing page drift check hit.
 check('D · the content scan reached a non zero number of fields', fieldsScanned > 0, `${fieldsScanned} field(s)`);
+
+// ── F. The PAGE content files ────────────────────────────────────────────────
+//
+// The home, story and contact pages moved out of src/copy/*.ts into JSON data
+// files so the CMS can edit them (change: editable-pages-and-media). Section C
+// above scans the copy MODULES, and after that move it was scanning a directory
+// the site barely uses: every check stayed green while the words a reader
+// actually sees went unchecked in both languages.
+//
+// This is the same "silence is not coverage" trap the i18n checker had. The
+// language rules follow the content.
+{
+  const beforePages = fieldsScanned;
+  const PAGES_DIR = join(MARKETING, 'src', 'data', 'pages');
+  const pageFiles = existsSync(PAGES_DIR)
+    ? readdirSync(PAGES_DIR).filter((f) => f.endsWith('.json'))
+    : [];
+
+  check('F · page content files were found', pageFiles.length > 0, `${pageFiles.length} file(s)`);
+
+  // Every standing page must exist in BOTH languages, as a file. A missing one
+  // fails the build, but failing here names it before a build has to.
+  for (const page of ['home', 'story', 'contact']) {
+    for (const language of LANGUAGES) {
+      check(
+        `F · ${page} exists in ${language}`,
+        pageFiles.includes(`${page}.${language}.json`),
+        `${page}.${language}.json`,
+      );
+    }
+  }
+
+  /** Every string leaf in a parsed JSON value, with a dotted path. */
+  function leaves(value: unknown, path = ''): Array<[string, string]> {
+    if (typeof value === 'string') return [[path, value]];
+    if (Array.isArray(value)) return value.flatMap((v, i) => leaves(v, `${path}[${i}]`));
+    if (value && typeof value === 'object') {
+      return Object.entries(value).flatMap(([k, v]) => leaves(v, path ? `${path}.${k}` : k));
+    }
+    return [];
+  }
+
+  // Fields that are identifiers rather than prose. `src`, `poster` and `icon`
+  // are paths and icon names: they are Latin by necessity in both languages, and
+  // the standard already exempts file paths.
+  //
+  // `id` and the tag arrays under `ideas` join them for the same reason (change:
+  // mission-ideas): the idea generator filters by tag, so those strings are structural keys
+  // that no visitor ever sees, and they must stay identical across languages or the Hebrew
+  // bank would filter against Hebrew tags while the widget asked for English ones.
+  //
+  // NOTE `kind` is on this list from an earlier change, where it meant 'image' or 'video'.
+  // A user-visible label must therefore NOT be called `kind`, or it silently escapes this
+  // check — which is exactly what happened when the playable demo first shipped its mission
+  // labels under that name. Visible labels are `kindLabel`.
+  //
+  // `visual` joins them for the same reason (change: hero-photo-reveal): it selects which
+  // drawn illustration a hero-taste mission renders (e.g. `crosswalk-photo`) and is never
+  // shown to a visitor as text, so it must stay the same closed-enum value in both languages
+  // rather than being translated.
+  // The `(\[\d+\])?` tail matters: tag arrays are visited element by element, so a path
+  // reads `ideas[0].occasions[0]` and would not match an anchor that expects the key to be
+  // last. Without it the exemption silently covered nothing for exactly the fields it was
+  // added for.
+  //
+  // `slug` joins them (change: marketing-home-occasion-doors): an occasion door carries the
+  // slug of the landing page it opens. It is a URL segment, deliberately Latin in BOTH
+  // languages (SUBJECT_SLUGS in scripts/lib/landingPages.ts explains why: Hebrew has two
+  // valid Unicode encodings and a percent encoded path that mixes them matches nothing,
+  // silently). A Hebrew door pointing at a Hebrew page still carries a Latin slug, so this
+  // check would otherwise read a correct URL as English leaking into Hebrew copy. That the
+  // two languages of one door MUST carry the same slug is asserted instead by
+  // scripts/test-marketing-home-cro.ts, which also checks each slug against the registry.
+  const NOT_PROSE = /(^|\.)(src|poster|icon|kind|id|occasions|places|visual|slug)(\[\d+\])?$/;
+
+  for (const file of pageFiles) {
+    const language = file.split('.')[1] as Language;
+    if (!(LANGUAGES as readonly string[]).includes(language)) {
+      check(`F · ${file} names a known language`, false, language);
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(join(PAGES_DIR, file), 'utf8'));
+    } catch (e) {
+      check(`F · ${file} is valid JSON`, false, (e as Error).message);
+      continue;
+    }
+
+    for (const [path, text] of leaves(parsed)) {
+      if (NOT_PROSE.test(path)) continue;
+      if (!/[A-Za-z\u0590-\u05FF]/.test(text)) continue;
+      assertLanguage(`${file} ${path}`, language, text, 'F');
+    }
+  }
+
+  // Counted, not assumed. Every language check above is a check on a field that
+  // was found; if the leaf walk or the NOT_PROSE filter ever stopped yielding
+  // anything, this section would print nothing but passes.
+  check(
+    'F · the page scan actually reached page fields',
+    fieldsScanned - beforePages > 0,
+    `${fieldsScanned - beforePages} page field(s)`,
+  );
+}
 
 console.log('');
 if (failures > 0) {

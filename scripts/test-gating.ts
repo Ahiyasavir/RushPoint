@@ -1,7 +1,7 @@
 // Pure-logic tests for unlockable tasks (isUnlocked / validateUnlockGraph).
 // Change: unlockable-tasks. Run by scripts/run-unit-tests.mjs via `npm test`.
 // No emulator needed.
-import { isUnlocked, validateUnlockGraph } from '@rushpoint/shared';
+import { isUnlocked, validateUnlockGraph, pruneDanglingPrerequisites } from '@rushpoint/shared';
 
 let passed = 0;
 let failed = 0;
@@ -92,6 +92,34 @@ const task = (id: string, unlockAfterTaskIds?: string[]) => ({
     tasks: [task('a'), task('b', ['a']), task('c', ['b'])], requiredTaskCount: 2,
   });
   ok(r.warnings.length === 0, 'requiredTaskCount within reachable count → no warning');
+}
+
+// ── pruneDanglingPrerequisites ──────────────────────────────────────
+// The repair for the one unlock-graph defect a creator cannot reach from the
+// editor: an id naming no mission of the stage is rendered nowhere and blocks
+// every save of the whole game.
+{
+  const clean = [task('a'), task('b', ['a'])];
+  ok(pruneDanglingPrerequisites(clean).every((t, i) => t === clean[i]),
+    'a healthy stage comes back task-by-task BY REFERENCE (so a caller can skip the write)');
+
+  const pruned = pruneDanglingPrerequisites([task('a'), task('b', ['a', 'ghost'])]);
+  ok(JSON.stringify(pruned[1].unlockAfterTaskIds) === JSON.stringify(['a']),
+    'an id from another stage is dropped and the real prerequisite kept');
+  ok(validateUnlockGraph({ tasks: pruned }).errors.length === 0,
+    'the repaired stage passes the save door that refused the original');
+
+  const emptied = pruneDanglingPrerequisites([task('a', ['ghost'])]);
+  ok(emptied[0].unlockAfterTaskIds === undefined,
+    'a gate left with nothing becomes undefined, never an empty array');
+
+  ok(pruneDanglingPrerequisites([task('a', ['a'])])[0].unlockAfterTaskIds === undefined,
+    'a self-reference is dropped too');
+
+  const weird = [{ id: 'a', unlockAfterTaskIds: 'nope' as unknown as string[] }];
+  ok(pruneDanglingPrerequisites(weird)[0] === weird[0],
+    'a non-array gate is left alone for validation to judge');
+  ok(pruneDanglingPrerequisites(undefined).length === 0, 'nullish input is total, not a throw');
 }
 
 console.log(failed === 0

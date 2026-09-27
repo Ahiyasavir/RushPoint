@@ -83,7 +83,7 @@ export default function RunHistoryPage() {
         <button
           type="button"
           onClick={() => nav('/history')}
-          className="text-xs text-[--ink-3] hover:text-rp-fire mb-4 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+          className="text-xs text-[--ink-3] hover:text-ink-fire mb-4 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
         >
           ← {r.backToAll}
         </button>
@@ -91,7 +91,7 @@ export default function RunHistoryPage() {
 
       {errored && (
         <div className="flex items-center gap-3 mb-4">
-          <p className="text-rp-alert text-sm">{r.loadError}</p>
+          <p className="text-ink-alert text-sm">{r.loadError}</p>
           <Button variant="ghost" onClick={() => void load()}>{r.retry}</Button>
         </div>
       )}

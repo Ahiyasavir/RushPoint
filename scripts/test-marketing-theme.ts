@@ -17,6 +17,7 @@
  * itself while both sides drift.
  */
 import { readFileSync } from 'node:fs';
+import { FONTS, WEB_FONTS, INK } from '@rushpoint/brand';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -24,6 +25,11 @@ const THEME = join(ROOT, 'apps', 'marketing', 'src', 'components', 'CustomStyles
 const CREATOR_TW = join(ROOT, 'apps', 'creator-web', 'tailwind.config.js');
 const PLAY_TW = join(ROOT, 'apps', 'play-web', 'tailwind.config.js');
 const CREATOR_CSS = join(ROOT, 'apps', 'creator-web', 'src', 'index.css');
+// The apps load their faces from a stylesheet link in these documents. That link
+// is where a family without Hebrew would come back in, since the provider serves
+// only the families it is asked for.
+const CREATOR_HTML = join(ROOT, 'apps', 'creator-web', 'index.html');
+const PLAY_HTML = join(ROOT, 'apps', 'play-web', 'index.html');
 
 let failures = 0;
 let checks = 0;
@@ -46,6 +52,8 @@ const theme = readFileSync(THEME, 'utf8')
 const creatorTw = readFileSync(CREATOR_TW, 'utf8');
 const playTw = readFileSync(PLAY_TW, 'utf8');
 const creatorCss = readFileSync(CREATOR_CSS, 'utf8');
+const creatorHtml = readFileSync(CREATOR_HTML, 'utf8');
+const playHtml = readFileSync(PLAY_HTML, 'utf8');
 
 // ── A. Read the brand out of the apps, not out of this file ──────────────────
 
@@ -66,9 +74,12 @@ const plasma = tailwindToken(creatorTw, 'rp-plasma');
 // The darkened variant brand-coloured TEXT is drawn in. play-web introduced this
 // scale with the rule beside it: fills, borders, rings and gradients keep the
 // brand orange, and text uses this, because #FF5722 is 3.16:1 on a light surface.
-// Read from the app rather than restated, for the same reason as everything else
-// here: a second copy is a second opinion waiting to disagree.
-const inkFire = tailwindToken(playTw, 'ink-fire');
+// Read from packages/brand/tokens.mjs — the scale's actual single source since
+// creator-web adopted it too (change: brand-design-system) — rather than
+// regex-scraping play-web's config text, which no longer contains the literal
+// hex: it now spreads `tailwindInkColors()` instead of listing the tokens
+// inline. Still "read from the source, not restated", just one hop closer to it.
+const inkFire = INK.fire.toLowerCase();
 const ink1 = cssToken(creatorCss, '--ink-1');
 const ink3 = cssToken(creatorCss, '--ink-3');
 const warmBg = tailwindToken(playTw, 'app-bg');
@@ -131,29 +142,62 @@ for (const [what, pattern] of TEMPLATE_COLOURS) {
   check(`C · ${what} is gone`, !pattern.test(theme), what);
 }
 
-// ── D. The typefaces are the product's ───────────────────────────────────────
-// Inter for text, Space Grotesk for headings, matching `font-brand` /
-// `--rp-font-display`. A heading face declared but never loaded silently falls
-// back, so the declaration and the load are both asserted.
-check('D · body text uses the product body face', /--aw-font-sans:\s*var\(--font-inter\)/.test(theme), 'Inter');
+// ── D. The typefaces are the product's, and they can set Hebrew ──────────────
+//
+// Read from the brand package rather than restated, so this cannot agree with
+// itself while the real values drift. A face declared but never loaded silently
+// falls back, so the declaration and the load are both asserted.
+//
+// The Hebrew subset assertion is the important one and it is new. Both faces
+// used to be loaded latin-only, and the old display face had no Hebrew glyphs at
+// all, so every Hebrew character on a Hebrew-first product was set in the
+// browser's default font. Nothing failed: the page looked deliberate, and the
+// English half of the interface really did use the brand face.
 check(
-  'D · headings use the product display face',
-  /--aw-font-heading:[^;]*--font-space-grotesk/.test(theme),
-  'Space Grotesk',
+  'D · body text uses the product body face',
+  theme.includes(`var(${FONTS.body.cssVariable})`),
+  FONTS.body.family,
 );
 check(
-  'D · the display face is declared in the apps too',
-  /space grotesk/i.test(creatorTw) && /space grotesk/i.test(creatorCss),
-  'font-brand / --rp-font-display',
+  'D · headings use the product display face',
+  new RegExp(`--aw-font-heading:[^;]*${FONTS.display.cssVariable}`).test(theme),
+  FONTS.display.family,
+);
+check(
+  'D · the apps read their faces from the brand package, not their own copy',
+  /@rushpoint\/brand/.test(creatorTw) && /@rushpoint\/brand/.test(playTw),
+  'tailwindFontFamily()',
 );
 
 const astroConfig = readFileSync(join(ROOT, 'apps', 'marketing', 'astro.config.ts'), 'utf8');
 const layout = readFileSync(join(ROOT, 'apps', 'marketing', 'src', 'layouts', 'Layout.astro'), 'utf8');
 check(
-  'D · the display face is actually loaded, not just named',
-  /--font-space-grotesk/.test(astroConfig) && /--font-space-grotesk/.test(layout),
+  'D · the faces are actually loaded, not just named',
+  /@rushpoint\/brand/.test(astroConfig) && /FONTS\.(body|display)\.cssVariable/.test(layout),
   'astro.config fonts + <Font /> in the layout',
 );
+
+// Every web face must carry Hebrew. This is the assertion that would have caught
+// the original defect, and it is phrased over the package so adding a third face
+// without Hebrew fails too.
+for (const font of WEB_FONTS) {
+  check(
+    `D · ${font.family} is loaded with the Hebrew subset`,
+    font.subsets.includes('hebrew'),
+    font.subsets.join(', '),
+  );
+}
+
+// ...and the apps must request it too. Their stylesheet link is where a family
+// without Hebrew would come back in, and Google serves only what is asked for.
+for (const [app, html] of [['creator-web', creatorHtml], ['play-web', playHtml]] as const) {
+  const link = html.match(/fonts\.googleapis\.com\/css2\?[^"']+/)?.[0] ?? '';
+  check(
+    `D · ${app} requests the brand faces`,
+    link.includes(FONTS.body.family) && link.includes(FONTS.display.family),
+    link ? link.slice(0, 80) : '(no google fonts link)',
+  );
+}
 
 // ── E. The neutral and accent SCALES are remapped, not just the tokens ───────
 //

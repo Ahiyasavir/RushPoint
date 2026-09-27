@@ -34,9 +34,7 @@ this report.
 - **THEN** the response returns at most `limit` entries and sets `truncated: true`
 
 ### Requirement: The Auth scan is bounded regardless of how many participants exist
-
-Because one anonymous account is created per participant session, the account pool grows without
-limit while the creators being reported stay few. The scan SHALL therefore stop as soon as it has
+Because one anonymous account is created per participant session, the account pool grows without limit while the creators being reported stay few. The scan SHALL therefore stop as soon as it has
 enough accounts to answer the request, SHALL never read more than a fixed maximum number of Auth
 pages in one invocation, and SHALL report a list cut short by that maximum as not-everything rather
 than as complete.

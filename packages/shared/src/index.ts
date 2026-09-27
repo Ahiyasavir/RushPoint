@@ -7,6 +7,7 @@ export * from './mapStyle';
 export * from './perfBudget';
 export * from './registration';
 export * from './freeMode';
+export * from './templateVisibility';
 export * from './staffThrottle';
 export * from './rateLimit';
 // Which hostnames report to Google Analytics, and how the tag is hardened
@@ -29,6 +30,7 @@ export * from './answerAttempts';
 // post-run-player-report). Bounded, owner-only by construction (never added to
 // sanitizeTeamForParticipant's allow-list), destroyed after 30 days.
 export * from './answerLog';
+export * from './emergency';
 // What a wrong answer costs (change: wrong-answer-cost) — escalating, capped,
 // preset-aware. Shared by the charge, the participant display and the Builder.
 export * from './wrongAnswerPenalty';
@@ -57,6 +59,7 @@ export * from './runEmailEligibility';
 export * from './runDigest';
 export * from './reactions';
 export * from './schedule';
+export * from './taskTimeLimit';
 export * from './gating';
 export * from './env';
 // Firebase App Check wiring decision (change: app-check-ready) — READY BUT DARK:
@@ -92,9 +95,39 @@ export * from './locationLeak';
 export * from './runCapacity';
 export * from './taskCompletability';
 export * from './mutualExclusion';
+// Benched missions (change: mission-card-actions) — a mission kept in the
+// template that takes no part in the game until it is un-benched.
+export * from './hiddenTask';
 // Skipping ONE mission for ONE team (change: skip-single-task) — the decision that
 // keeps the skip inside the stage and keeps the stage winnable afterwards.
 export * from './taskSkip';
+export * from './skipPreview';
+export * from './teamRewind';
+export * from './scoreLedger';
+export * from './phoneLink';
+export * from './quickActions';
+export * from './runContacts';
+export * from './answerOutcomes';
+export * from './sendBackTargets';
+// Live-ops feedback (change: live-ops-feedback-loop) — "is a team waiting on me
+// right now?" for the review queue, and the one vocabulary a manual score
+// adjustment records itself with.
+export * from './reviewQueueCue';
+// A team that joins a run already in progress (change: late-joiner-autostart).
+export * from './lateJoiner';
+// Is a location fix good enough to PROVE arrival (change: arrival-needs-a-usable-fix)?
+// The mirror of safeZone: there an imprecise fix must not accuse, here it must not prove.
+export * from './arrivalFix';
+// Undoing an approval, and taking the points back with it (change:
+// approval-can-be-undone). The clawback that lets auto-approve mean UNBLOCKING
+// rather than UNREVIEWABLE.
+export * from './approvalReversal';
+// How many of a team's people are actually here, and acting (change:
+// every-member-plays). UNKNOWN is a first-class answer: memberCount is only
+// meaningful when the game collects member names, so a shortfall is null rather
+// than a confident lie.
+export * from './teamParticipation';
+export * from './scoreReasons';
 export * from './templateWizard';
 export * from './videoDuration';
 export * from './playStore';
@@ -130,6 +163,25 @@ export * from './adminUserActivity';
 // createGameFromTemplate (change: guided-new-game-wizard).
 export * from './gamePersonalization';
 export * from './docCachePolicy';
+// Firestore op accounting + the per-run quota projection (change: spark-tier-location-load)
+// — what a run costs in reads/writes, and whether it fits a fixed daily ceiling.
+export * from './firestoreOpBudget';
+// What a location ping is allowed to cost — the pin-write and track-retention verdicts.
+// The ONLY module that can cause a position to go unrecorded, so it fails open.
+export * from './locationPingEconomy';
 // The OWNER-ONLY per-player run report (change: post-run-player-report) — who
 // played, how they did, and mission by mission what they actually answered.
 export * from './runPlayerReport';
+// Telling Firestore's daily-quota refusal apart from our own rate limiter's, so
+// the two can give opposite advice (change: daily-quota-user-message).
+export * from './quotaExhaustion';
+export * from './gameShareLink';
+export * from './sharedGameView';
+// Ask the media route to SAVE rather than display: `download` on an <a> is ignored
+// cross-origin, so only the server's Content-Disposition can do it
+// (change: download-actually-downloads).
+export * from './mediaDownloadUrl';
+// Who on a run's staff may do what: game default, code, person (change: staff-capabilities).
+export * from './staffCapabilities';
+// Has the team's sending phone gone quiet? (change: team-phones-simple)
+export * from './senderQuiet';

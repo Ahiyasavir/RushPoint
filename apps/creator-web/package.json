@@ -30,7 +30,8 @@
     "react-dom": "^18.3.0",
     "react-map-gl": "^7.1.0",
     "react-router-dom": "^6.26.0",
-    "write-excel-file": "^4.1.1"
+    "write-excel-file": "^4.1.1",
+    "@rushpoint/brand": "*"
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6",

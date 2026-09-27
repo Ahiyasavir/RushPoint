@@ -194,6 +194,45 @@ function uploadMediaViaVps(
   });
 }
 
+/**
+ * Ask the SERVER to fetch a picture the creator dragged out of another tab
+ * (change: server-side-url-ingest).
+ *
+ * The browser hands a drop target a URL, never the bytes, and only a
+ * CORS-permissive host lets the page read them itself. The caller tries its own
+ * fetch first and lands here only when that is refused, so the server is asked to
+ * make an outbound request as rarely as possible.
+ *
+ * Returns null when there is no self-hosted API configured (local dev against the
+ * emulator), so the caller can report the honest CORS refusal instead of a second
+ * failure the creator cannot act on.
+ */
+export async function ingestTaskMediaFromUrl(
+  sourceUrl: string,
+  p: { gameId: string; taskId: string },
+): Promise<{ url: string; kind: 'image' | 'video' } | null> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Not signed in');
+  if (!apiOrigin) return null;
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Not signed in');
+  // The extension comes from the SOURCE url only as a hint; the server decides
+  // what it will accept from the response's own content-type.
+  const guessed = (sourceUrl.split('?')[0].split('.').pop() ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const ext = guessed.length >= 2 && guessed.length <= 5 ? guessed : 'jpg';
+  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const path = `gameMedia/${uid}/games/${p.gameId}/${safeTask}-${Date.now()}.${ext}`;
+  const res = await fetch(`${apiOrigin}/ingest-url`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: sourceUrl, path }),
+  });
+  if (!res.ok) throw new Error(`Ingest failed: ${res.status}`);
+  const body = (await res.json()) as { url: string };
+  const kind: 'image' | 'video' = /\.(mp4|webm|mov|m4v)$/i.test(body.url) ? 'video' : 'image';
+  return { url: body.url, kind };
+}
+
 export async function uploadTaskMedia(
   file: File,
   p: { gameId: string; taskId: string },

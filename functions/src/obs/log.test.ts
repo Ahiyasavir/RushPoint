@@ -4,6 +4,7 @@ import {
   __setObsLogger,
   DEFAULT_MAX_INSTANCES,
   logBestEffort,
+  asClientError,
   logCall,
   redact,
   resolveRuntimeOpts,
@@ -142,5 +143,49 @@ describe('resolveRuntimeOpts — every callable is instance-capped', () => {
   test('the default cap is a real bound, not effectively unlimited', () => {
     expect(DEFAULT_MAX_INSTANCES).toBeGreaterThan(0);
     expect(DEFAULT_MAX_INSTANCES).toBeLessThanOrEqual(50);
+  });
+});
+
+describe('asClientError — a quota outage must not look like a bug', () => {
+  // 2026-08-28: the Spark plan's 50k daily reads ran out and Firestore refused
+  // every read with a gRPC ServiceError carrying the NUMBER 8. onCall does not
+  // recognise that as an HttpsError, so clients got a bare `internal` and both
+  // apps rendered "something went wrong" — for hours, with nothing broken.
+  const firestoreQuotaError = Object.assign(new Error('8 RESOURCE_EXHAUSTED: Quota exceeded.'), {
+    code: 8,
+    details: 'Quota exceeded.',
+  });
+
+  test('substitutes a marked resource-exhausted for Firestore quota', () => {
+    const out = asClientError(firestoreQuotaError) as {
+      code?: string;
+      details?: { reason?: string };
+    };
+    // The marker is the whole contract: it is what lets a client tell this apart
+    // from our own rate limiter, which uses the SAME code with opposite advice.
+    expect(out.code).toBe('resource-exhausted');
+    expect(out.details).toEqual({ reason: 'daily-quota' });
+  });
+
+  test('leaves our own rate-limiter refusal untouched', () => {
+    // The load-bearing negative. If this ever starts being converted, every
+    // "slow down for a few seconds" turns into a wrong "come back tomorrow".
+    const limiter = Object.assign(new Error('Too many requests'), { code: 'resource-exhausted' });
+    expect(asClientError(limiter)).toBe(limiter);
+  });
+
+  test('passes every other rejection through by identity', () => {
+    for (const e of [
+      Object.assign(new Error('nope'), { code: 'permission-denied' }),
+      Object.assign(new Error('bad'), { code: 'invalid-argument' }),
+      new Error('plain'),
+      'a thrown string',
+      undefined,
+      null,
+      { code: 7 },
+      { code: '8' },
+    ]) {
+      expect(asClientError(e)).toBe(e);
+    }
   });
 });

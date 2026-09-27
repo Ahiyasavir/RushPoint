@@ -8,13 +8,26 @@
  *
  * Change: marketing-site.
  */
-import { pagePath, otherLanguage, LANGUAGE_NAME, type Language } from './utils/i18n';
+import { pagePath, otherLanguage, LANGUAGE_NAME, PLAYER_ORIGIN, type Language } from './utils/i18n';
 
 /** Where a reader goes to actually use the product. */
 const CREATOR_APP = 'https://creator.rush-point.com';
-/** The participant origin, which also serves the occasion landing pages. */
-const PLAY_ORIGIN = 'https://rush-point.com';
 
+/**
+ * The destination for every "build a game" call to action
+ * (change: marketing-cta-straight-to-build).
+ *
+ * `?start=game` is read by the creator app's AuthGate, which then drops its own
+ * landing page — a second pitch, to somebody who just read this one and clicked
+ * anyway — and shows the sign-in card alone. Once signed in, the dashboard opens
+ * the new-game wizard, whose first step asks what the game is called. So the
+ * link lands exactly where it promises to.
+ *
+ * Exported and used by every CTA rather than typed inline at each one: the param
+ * is the whole contract with the other app, and six copies of a magic string is
+ * six chances for one of them to quietly lose it.
+ */
+export const CREATOR_BUILD_URL = `${CREATOR_APP}/?start=game`;
 /**
  * The occasion landing pages (change: seo-landing-pages). Linking to them is a
  * requirement, not decoration: without it the two page sets are islands that
@@ -22,7 +35,7 @@ const PLAY_ORIGIN = 'https://rush-point.com';
  * link, so a Hebrew reader is not handed an English destination.
  */
 export const landingPageUrl = (language: Language, slug = ''): string =>
-  slug === '' ? `${PLAY_ORIGIN}/${language}/` : `${PLAY_ORIGIN}/${language}/${slug}/`;
+  slug === '' ? `${PLAYER_ORIGIN}/${language}/` : `${PLAYER_ORIGIN}/${language}/${slug}/`;
 
 interface Copy {
   home: string;
@@ -31,6 +44,8 @@ interface Copy {
   contact: string;
   ideas: string;
   startBuilding: string;
+  /** For a visitor who came to PLAY, not to build: a door to the player app. */
+  joinGame: string;
   legal: string;
   terms: string;
   privacy: string;
@@ -47,6 +62,18 @@ interface Copy {
    * it: getting its language wrong is invisible to everyone who would notice.
    */
   skipToContent: string;
+  /**
+   * The founder video's controls (change: marketing-home-front-door).
+   *
+   * Chrome, not marketing copy, which is why they live here beside `toggleMenu`
+   * and not in the CMS: an author asked to translate "turn on sound" is being
+   * asked to maintain a control, and a control they leave blank has no
+   * accessible name at all. The video plays muted on its own; these labels are
+   * the play affordance a reduced motion visitor sees and the unmute button
+   * everyone else does.
+   */
+  playVideo: string;
+  unmuteVideo: string;
 }
 
 const COPY: Record<Language, Copy> = {
@@ -57,15 +84,18 @@ const COPY: Record<Language, Copy> = {
     contact: 'דברו איתנו',
     ideas: 'רעיונות לפי סוג אירוע',
     startBuilding: 'בונים משחק',
+    joinGame: 'יש לי קוד',
     legal: 'מידע משפטי',
     terms: 'תנאי שימוש',
     privacy: 'מדיניות פרטיות',
     product: 'המוצר',
-    footNote: 'RushPoint. המשחק יוצא החוצה.',
+    footNote: 'RushPoint. המירוץ החי שלכם, בכל מקום.',
     toggleMenu: 'פתיחת התפריט',
     toggleTheme: 'מעבר בין מצב בהיר לכהה',
     mainNav: 'ניווט ראשי',
     skipToContent: 'דילוג לתוכן',
+    playVideo: 'הפעלת הסרטון',
+    unmuteVideo: 'הפעלת הקול',
   },
   en: {
     home: 'Home',
@@ -74,17 +104,32 @@ const COPY: Record<Language, Copy> = {
     contact: 'Contact',
     ideas: 'Ideas by occasion',
     startBuilding: 'Build a game',
+    joinGame: 'I have a code',
     legal: 'Legal',
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     product: 'Product',
-    footNote: 'RushPoint. The game goes outside.',
+    footNote: 'RushPoint. Your live race, anywhere.',
     toggleMenu: 'Open the menu',
     toggleTheme: 'Switch between light and dark mode',
     mainNav: 'Main navigation',
     skipToContent: 'Skip to content',
+    playVideo: 'Play the video',
+    unmuteVideo: 'Turn on sound',
   },
 };
+
+/**
+ * Accessible names for interface controls that carry no visible text.
+ *
+ * Same rule as `headerData`: a function of the language, so a page cannot render
+ * one language's chrome on the other language's document by forgetting an
+ * argument.
+ */
+export const mediaLabels = (language: Language) => ({
+  playVideo: COPY[language].playVideo,
+  unmuteVideo: COPY[language].unmuteVideo,
+});
 
 /**
  * @param counterpartHref Where the language switch should go: the SAME page in
@@ -122,7 +167,12 @@ export const headerData = (language: Language, counterpartHref?: string) => {
         href: counterpartHref ?? pagePath(other, ''),
         variant: 'secondary' as const,
       },
-      { text: t.startBuilding, href: CREATOR_APP, target: '_blank' },
+      // Two doors, always both visible. A creator pays and is the reason the
+      // product exists, so "build" is the emphasised one; but a participant who
+      // followed a link here and just wants to enter a code must not have to
+      // read a marketing page to find the way in.
+      { text: t.joinGame, href: `${PLAYER_ORIGIN}/`, variant: 'tertiary' as const, target: '_blank' },
+      { text: t.startBuilding, href: CREATOR_BUILD_URL, target: '_blank' },
     ],
   };
 };
@@ -135,7 +185,7 @@ export const footerData = (language: Language) => {
       {
         title: t.product,
         links: [
-          { text: t.startBuilding, href: CREATOR_APP },
+          { text: t.startBuilding, href: CREATOR_BUILD_URL },
           { text: t.ideas, href: landingPageUrl(language, '') },
           { text: t.blog, href: pagePath(language, 'blog') },
         ],
@@ -143,8 +193,8 @@ export const footerData = (language: Language) => {
       {
         title: t.legal,
         links: [
-          { text: t.terms, href: `${PLAY_ORIGIN}/terms` },
-          { text: t.privacy, href: `${PLAY_ORIGIN}/privacy` },
+          { text: t.terms, href: `${PLAYER_ORIGIN}/terms` },
+          { text: t.privacy, href: `${PLAYER_ORIGIN}/privacy` },
         ],
       },
     ],

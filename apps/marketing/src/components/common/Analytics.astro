@@ -1,21 +1,64 @@
 ---
-import { ANALYTICS } from 'astrowind:config';
-
-const id = ANALYTICS?.vendors?.googleAnalytics?.id ? String(ANALYTICS.vendors.googleAnalytics.id) : '';
-const partytown = !!ANALYTICS?.vendors?.googleAnalytics?.partytown;
-const scriptType = partytown ? 'text/partytown' : undefined;
+// Google tag (gtag.js) for the marketing site (change: marketing-analytics-parity).
+//
+// This site reports to the SAME GA4 properties as play-web and creator-web, on
+// purpose. A visitor's path runs marketing -> creator (build a game) or marketing
+// -> player (join one); splitting that across properties would break every funnel
+// at exactly the handover the site exists to produce. It also keeps the Privacy
+// Policy honest: it names the cookie `_ga_G-89TM5X68RR` to users by name
+// (packages/shared/src/legalContent.ts), and a separate property here would set a
+// cookie that document never mentions.
+//
+// The ids are hardcoded rather than read from `astrowind:config`. They used to come
+// from `analytics.vendors.googleAnalytics.id`, which was `null`, so this site shipped
+// untagged while looking configured. They are public, non-secret identifiers, and
+// scripts/test-analytics-gate.ts asserts these literals equal the shared constants,
+// so the three surfaces cannot drift apart.
+//
+// NOT imported from @rushpoint/shared: this app deliberately carries no dependency on
+// it (see src/utils/i18n.ts), and an inline classic script cannot import from the
+// module graph anyway. The gate is what keeps the duplication honest.
 ---
 
-{id && <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${id}`} type={scriptType} />}
+{
+  /*
+    Loaded IMPERATIVELY, never as a static <script async src>: a static tag fires the
+    request to Google before any JS can decide, so localhost would still be contacted.
+    The early return below is what makes "no request at all on a dev machine" true.
+    This component previously used a static tag and had no host rule at all.
 
-<script is:inline id="ga-init" data-id={id} type={id ? scriptType : undefined}>
-  if (document.getElementById('ga-init').dataset.id) {
-    var d = document.getElementById('ga-init').dataset.id;
+    `is:inline` is load-bearing. Without it Astro processes and bundles the script,
+    which defers it — and a deferred tag both misses the early page and stops the
+    ordering guarantee that <meta charset> wins the document's first 1024 bytes.
+
+    The host rule duplicates shouldLoadAnalytics() in packages/shared/src/analytics.ts
+    because an inline classic script cannot import. It is NOT trusted:
+    scripts/test-analytics-gate.ts extracts this predicate and executes it against the
+    same case table as the shared function, so drift fails `npm test`. Change the rule
+    here => change it there (and in play-web/index.html + creator-web/index.html).
+  */
+}
+<script is:inline>
+  (function () {
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
+    var ID = 'G-89TM5X68RR';
+    var ID_SECONDARY = 'G-4LELMBZWPZ';
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://www.googletagmanager.com/gtag/js?id=' + ID;
+    document.head.appendChild(s);
     window.dataLayer = window.dataLayer || [];
-    window.gtag = function () {
-      dataLayer.push(arguments);
-    };
-    window.gtag('js', new Date());
-    window.gtag('config', d);
-  }
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    gtag('js', new Date());
+    gtag('config', ID, {
+      anonymize_ip: true,
+      allow_google_signals: false,
+      allow_ad_personalization_signals: false
+    });
+    gtag('config', ID_SECONDARY, {
+      anonymize_ip: true,
+      allow_google_signals: false,
+      allow_ad_personalization_signals: false
+    });
+  })();
 </script>

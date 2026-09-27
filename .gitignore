@@ -26,6 +26,18 @@ apps/play-web/dist-playtest/
 # Firebase
 functions/lib/
 functions/serviceAccount.json
+# The SAME credential, at the path this repo's own instructions tell you to use.
+# docker-compose.api.yml says "put your Firebase service-account JSON next to
+# this file as `service-account.json`", and that path was not ignored — so on the
+# VPS the Admin SDK private key sits untracked but STAGEABLE inside a git working
+# tree whose origin is a GitHub repository. One `git add -A` there commits a
+# production credential with write access to Auth and Firestore. Never committed
+# to date (checked: no such path in any ref, and no "BEGIN PRIVATE KEY" in
+# history), and this is what keeps it that way. Both spellings and any directory.
+service-account.json
+**/service-account.json
+serviceAccount.json
+**/serviceAccount.json
 # Note: .firebaserc is committed — it contains project aliases, no secrets.
 # The actual Firebase project ID is also in .env files (gitignored).
 # emulator export/import data directory

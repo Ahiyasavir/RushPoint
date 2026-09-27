@@ -21,13 +21,17 @@
 // winnable, and never below zero.
 
 import { maxCompletableTasks, type ExclusiveGroupLike } from './mutualExclusion';
+import { isUnlocked, satisfiesGate, unreachableTaskIds } from './gating';
 
 /** The per-task progress statuses a team's stage record can hold. */
 export type SkipTaskStatus = 'unassigned' | 'assigned' | 'completed' | 'skipped';
 
-/** The authored stage shape this decision reads (ids + the exclusive groups). */
+/** The authored stage shape this decision reads (ids, unlock gates + the exclusive groups). */
 export interface SkipTaskStage {
-  tasks: { id: string }[];
+  // `unlockAfterTaskIds` (change: skip-keeps-the-stage): without the graph the plan said "the
+  // stage continues" while applyStageCompletion retired the chain and ended it, so the console's
+  // preview and the real outcome disagreed.
+  tasks: { id: string; unlockAfterTaskIds?: string[] }[];
   exclusiveGroups?: ExclusiveGroupLike[];
 }
 
@@ -38,6 +42,8 @@ export interface SkipTaskInput {
   statusByTaskId: Record<string, SkipTaskStatus | undefined>;
   /** The TEAM's stored requirement for that stage. Absent means "every task". */
   requiredTaskCount?: number;
+  /** Why each skipped record was skipped (skip-keeps-the-stage). Absent reads as legacy. */
+  skipCauseByTaskId?: Record<string, unknown>;
 }
 
 /** Why a skip cannot be applied. Reported, never thrown. */
@@ -61,6 +67,11 @@ export interface SkipTaskPlan {
   stageCompletes: boolean;
   /** Tasks this team can still play in this stage after the skip, in stage order. */
   remainingTaskIds: string[];
+  /**
+   * Tasks that were locked behind the skipped one and become playable because of this skip
+   * (skip-keeps-the-stage): the console names them in the confirmation.
+   */
+  dependentsOpened: string[];
 }
 
 function stageTaskIds(stage: SkipTaskStage | undefined): string[] {
@@ -116,21 +127,41 @@ export function planTaskSkip(input: SkipTaskInput, taskId: string): SkipTaskPlan
     requirementLowered: false,
     stageCompletes: false,
     remainingTaskIds: ids.filter((id) => !isTerminal(statusOf(id))),
+    dependentsOpened: [],
   });
 
   if (!ids.includes(taskId)) return refuse('taskNotInStage');
   const status = statusOf(taskId);
   if (isTerminal(status)) return refuse('taskAlreadyTerminal');
 
-  // The world AFTER the skip. Built as a new map — the inputs are never touched.
+  // The world AFTER the skip. Built as new maps — the inputs are never touched.
   const statusAfter = (id: string): SkipTaskStatus => (id === taskId ? 'skipped' : statusOf(id));
+  const causes = input?.skipCauseByTaskId ?? {};
+  const causeAfter = (id: string): unknown => (id === taskId ? 'operator' : causes[id]);
+
+  // What applyStageCompletion will retire as unreachable once this skip is written (the SAME
+  // function it calls), so the plan and the write agree. An operator skip keeps its dependents.
+  const graph = Array.isArray(stage?.tasks) ? stage.tasks.filter((t) => typeof t?.id === 'string' && t.id) : [];
+  const statusMapAfter: Record<string, SkipTaskStatus> = {};
+  const causeMapAfter: Record<string, unknown> = {};
+  for (const id of ids) { statusMapAfter[id] = statusAfter(id); causeMapAfter[id] = causeAfter(id); }
+  const dead = new Set(unreachableTaskIds(graph, statusMapAfter, causeMapAfter));
 
   const attainableAfter = maxCompletableTasks(
     { tasks: ids.map((id) => ({ id })), exclusiveGroups: stage?.exclusiveGroups },
-    { isAvailable: (id) => statusAfter(id) !== 'skipped' },
+    { isAvailable: (id) => statusAfter(id) !== 'skipped' && !dead.has(id) },
   );
   const requiredTaskCount = Math.max(0, Math.min(currentRequired, attainableAfter));
-  const remainingTaskIds = ids.filter((id) => !isTerminal(statusAfter(id)));
+  const remainingTaskIds = ids.filter((id) => !isTerminal(statusAfter(id)) && !dead.has(id));
+
+  // Which waiting tasks this skip opens: locked before, unlocked after, still playable.
+  const satisfiedBefore = ids.filter((id) => satisfiesGate({ status: statusOf(id), skipCause: causes[id] }));
+  const satisfiedAfter = ids.filter((id) => satisfiesGate({ status: statusAfter(id), skipCause: causeAfter(id) }));
+  const dependentsOpened = graph
+    .filter((t) => statusAfter(t.id) === 'unassigned' && !dead.has(t.id)
+      && Array.isArray(t.unlockAfterTaskIds) && t.unlockAfterTaskIds.includes(taskId)
+      && !isUnlocked(t, satisfiedBefore) && isUnlocked(t, satisfiedAfter))
+    .map((t) => t.id);
 
   return {
     ok: true,
@@ -144,5 +175,6 @@ export function planTaskSkip(input: SkipTaskInput, taskId: string): SkipTaskPlan
     // the caller can report the outcome before it writes.
     stageCompletes: completedCount >= requiredTaskCount || remainingTaskIds.length === 0,
     remainingTaskIds,
+    dependentsOpened,
   };
 }

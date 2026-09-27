@@ -58,10 +58,25 @@ Recorded here because it was not written down anywhere and the records are NOT u
 
 | Hostname | Serves | Records | Cloudflare |
 |---|---|---|---|
-| `rush-point.com` | participant app (play-web) | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
+| `rush-point.com` | **marketing site** (`apps/marketing`) | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `www.rush-point.com` | 301 → apex | Cloudflare addresses | proxied |
+| `player.rush-point.com` | **participant app** (play-web) | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `creator.rush-point.com` | creator console | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `api.rush-point.com` | self-hosted API (VPS) | see `deploy/CLOUDFLARE.md` | proxied |
+
+> ⚠️ **The apex and the participant app swapped places** (change: marketing-to-apex).
+> `rush-point.com` served play-web until 2026-09-01; the participant app now answers on
+> `player.rush-point.com`, and the apex is the marketing site. Three things carry the
+> weight of that move and are easy to miss:
+> 1. `player.rush-point.com` must be in **Authentication → Settings → Authorized domains**,
+>    or anonymous sign-in fails and no participant can join. Nothing else reports this.
+> 2. `ALLOWED_ORIGINS` on the VPS must include `https://player.rush-point.com` (§below),
+>    or every callable answers 403 while the app itself looks perfectly healthy.
+> 3. The Play Store TWA (`com.rushpoint.app`) verifies Digital Asset Links against the
+>    host in `twa-manifest.json`. Installed builds older than versionCode 5 still open the
+>    apex, which is why `apps/marketing/public/.well-known/assetlinks.json` exists and why
+>    the marketing layout carries `PlayerDeepLink.astro` — it forwards `?code=`, `?game=`,
+>    `?board=` and `?staff` links to the participant host.
 
 `199.36.158.100` / `2620:0:890::100` are Firebase Hosting's own published custom-domain records,
 so a Firebase-served host should carry **both**.
@@ -440,7 +455,7 @@ invocation · `RUSHPOINT_BACKFILL_PROJECT` as an alternative to `--project` (it 
 
 ---
 
-## 12. Runbook — the marketing site (`www.rush-point.com`)
+## 12. Runbook — the marketing site (`rush-point.com`)
 
 The site at `apps/marketing` is static output on its own Hosting target. Everything in this
 section is **off-site configuration**: it cannot be done from the repository, no gate can
@@ -473,7 +488,9 @@ npm run marketing:build && firebase deploy --only hosting:marketing
 | Step | Where | What stays broken until it is done |
 |---|---|---|
 | A Hosting site named `rushpoint-marketing` exists in the Firebase console | Firebase → Hosting → Add another site | `firebase deploy` fails with a message about **targets**, not about anything you just changed. `.firebaserc` already maps the `marketing` target to that name. |
-| `www.rush-point.com` is added as a custom domain on that site, and its DNS records are in place | Firebase Hosting → custom domain, then the registrar | The site is live only at its `*.web.app` address. Every canonical, every hreflang entry and every sitemap URL says `www.rush-point.com`, so until DNS resolves, a crawler is being pointed at a host that does not answer, and **the site looks perfectly fine to you** because you are visiting the other address. |
+| `rush-point.com` (the APEX) is added as a custom domain on that site, and its DNS records are in place | Firebase Hosting → custom domain, then the registrar | The site is live only at its `*.web.app` address. Every canonical, every hreflang entry and every sitemap URL says `rush-point.com`, so until DNS resolves, a crawler is being pointed at a host that does not answer, and **the site looks perfectly fine to you** because you are visiting the other address. |
+| The apex is **released from the `rushpoint-play` site first** — a custom domain belongs to one Hosting site at a time | Firebase Hosting → the `rushpoint-play` site → remove `rush-point.com` | Firebase refuses to attach the domain here and says it is already in use, naming the other site. Do this only after `player.rush-point.com` is serving play-web, or there is a window with no participant app at all. |
+| `www.rush-point.com` is set to **redirect to the apex** | Firebase Hosting → custom domain → redirect | Two live copies of the same site on two hosts, splitting every search signal between them. |
 
 ### C. The contact form: allow the site's origin on the API ⚠
 
@@ -504,7 +521,7 @@ ssh root@31.70.107.184
 Then edit `ALLOWED_ORIGINS` in the API's environment so it contains, comma separated:
 
 ```
-https://creator.rush-point.com,https://rush-point.com,https://www.rush-point.com
+https://creator.rush-point.com,https://rush-point.com,https://www.rush-point.com,https://player.rush-point.com
 ```
 
 **What stays broken until it is done:** every contact submission comes back `403` with
@@ -538,7 +555,7 @@ values are the same address today: a future change to who receives run-summary e
 should not silently redirect contact form notifications too.
 
 ```
-CONTACT_NOTIFY_TO=spendora.tracker@gmail.com
+CONTACT_NOTIFY_TO=admin.rushpoint@gmail.com
 ```
 
 This is also the fallback address published on the contact page itself
@@ -553,26 +570,70 @@ notification is allowed to be best effort: nothing is lost when an email fails.
 
 ### E. The CMS (`/admin/` on the marketing site)
 
-Decap commits content straight to this repository through GitHub. Two things have to exist
-off-site before anyone can sign in, and **neither of them affects the site itself**: until
-they are done the admin page loads and says it cannot authenticate, while every published
-page, every post and every gate is completely unaffected. Content can still be added by
-editing files in `apps/marketing/src/data/post/` and committing.
+Decap commits content straight to this repository through GitHub. The token that lets it do
+so can only be minted with a client secret, and a secret in a static site is not a secret —
+so the exchange happens on the API. **That endpoint now exists** (`functions/oauthRoute.js`,
+mounted at `/oauth` and `/oauth/callback` by `functions/server.js`); what is left is
+off-site, and **none of it affects the site itself**: until it is done the admin page loads
+and says the editor is not connected to GitHub yet, while every published page, every post
+and every gate is completely unaffected. Content can still be added by editing files in
+`apps/marketing/src/data/post/` and committing.
 
-1. **A GitHub OAuth application.** GitHub → Settings → Developer settings → OAuth Apps →
-   New OAuth App.
-   - Homepage URL: `https://www.rush-point.com`
-   - Authorization callback URL: `https://api.rush-point.com/oauth/callback`
-   - Keep the **Client ID** and generate a **Client secret**. The secret is shown once.
-2. **The token exchange endpoint on the VPS.** Decap's GitHub backend needs a small service
-   at the `base_url` declared in `apps/marketing/public/admin/config.yml`
-   (`https://api.rush-point.com`) serving `/oauth` and `/oauth/callback`. It holds the
-   client secret and swaps GitHub's temporary code for a token; the secret must never be
-   in the built site, which is why this cannot be done in the browser alone.
+**Step 1 — create the GitHub OAuth application.** GitHub → Settings → Developer settings →
+OAuth Apps → New OAuth App. This is the only step that needs a signed-in GitHub session, so
+it is the one that cannot be scripted.
 
-   Set `OAUTH_GITHUB_CLIENT_ID` and `OAUTH_GITHUB_CLIENT_SECRET` in the API's environment
-   and restart. Confirm by opening `https://www.rush-point.com/admin/` and signing in: a
-   successful sign in lands back on the admin page with the post list.
+| Field | Value |
+|---|---|
+| Application name | `RushPoint content` (shown to you on the consent screen, nothing else reads it) |
+| Homepage URL | `https://www.rush-point.com` |
+| Authorization callback URL | `https://api.rush-point.com/oauth/callback` |
+
+The callback URL is compared by GitHub **byte for byte**, including the scheme and the
+absence of a trailing slash. A mismatch is refused by GitHub before our code runs, and the
+popup can only report it vaguely — so if sign in fails with nothing in the API log, this
+field is the first suspect.
+
+Keep the **Client ID** and generate a **Client secret**. The secret is shown once.
+
+**Step 2 — put them on the API.** On the VPS, in `api.env` beside
+`docker-compose.api.yml` (that file is gitignored; `docker-compose.api.yml` is not, which is
+why the secret goes here and not there):
+
+```
+OAUTH_GITHUB_CLIENT_ID=<the client id>
+OAUTH_GITHUB_CLIENT_SECRET=<the client secret>
+```
+
+Then restart the API. This is an environment change, not a code change, so it does not need
+a rebuild:
+
+```bash
+docker compose -f docker-compose.api.yml up -d
+```
+
+`OAUTH_ALLOWED_ORIGINS` is already set in `docker-compose.api.yml` and needs no edit. It is
+deliberately **narrower** than `ALLOWED_ORIGINS`: it lists only the two addresses the admin
+page is served from, because it controls which page may be handed a GitHub token that can
+write to this repository, and the play and creator apps have no business receiving one.
+
+**Step 3 — confirm.** Two checks, in this order, because they fail differently:
+
+```bash
+curl -sI https://api.rush-point.com/oauth | head -1
+```
+
+`302` means configured (it is redirecting to GitHub). `503` means the API still has no
+client id or secret — the restart did not pick up `api.env`. Then open
+`https://rush-point.com/admin/` (or `https://rushpoint-marketing.web.app/admin/` before
+the DNS cutover in §B) and sign in: a successful sign in closes the popup and lands on the
+post list.
+
+What the endpoint guarantees, so it does not have to be re-derived when reading it: the
+`state` is checked against an httpOnly cookie (a CSRF check), the token is posted only to an
+origin named in `OAUTH_ALLOWED_ORIGINS`, the requested scope is narrowed to `public_repo`,
+and every refusal path returns no token. `scripts/test-decap-oauth.ts` pins all of it and
+runs in `npm test`.
 
 Two facts worth keeping in mind while configuring it:
 
@@ -605,8 +666,8 @@ should not be confused with each other: the runbook above is config, this list i
 | ✅ | `CONTACT_NOTIFY_TO` set (§D) |
 | ❌ | **18 commits of `topographic-maps` deployed to the VPS.** It is on `main`, which predates the marketing site, the contact form, and everything in this file past section 11. `submitContactMessage` 404s: the callable does not exist yet on the running server. |
 | ❌ | `firestore.rules` deployed. `main`'s copy has no `contactMessages` rule at all — not open, not closed, simply absent, which Firestore treats as denied by default, but it is untested drift rather than the deliberate `allow read, write: if false` this repository ships. |
-| ❌ | The `rushpoint-marketing` Hosting site + `www.rush-point.com` DNS (§B) — not checked in this pass. |
-| ❌ | The GitHub OAuth app + token exchange endpoint for the CMS (§E) — optional, site works without it. |
+| ❌ | The `rushpoint-marketing` Hosting site + the apex DNS (§B) — not checked in this pass. |
+| ❌ | The GitHub OAuth **app** for the CMS, and its two values in `api.env` (§E). The token exchange **endpoint** is now in the repository and ships with the deploy above; what remains is one GitHub form and one restart. Optional — the site works without it. |
 
 To close the code gap: merge or fast-forward `main` to `topographic-maps` (or deploy
 directly from the branch — this repository has done both before, see the merge commits in
@@ -615,3 +676,54 @@ up -d --build` (rebuild this time — code changed, not just env), `firebase dep
 firestore:rules`, and `npm run deploy:hosting` for the three Hosting targets. This is a real
 production release and was deliberately NOT done automatically while investigating the
 config — see the session note for 2026-08-27.
+
+### H. Publishing automatically after a CMS commit
+
+`.github/workflows/deploy-marketing.yml` builds and publishes the site whenever anything
+under `apps/marketing/` changes on `topographic-maps` — which is exactly what Decap writes
+when an author presses Publish (`src/data/post/` for posts, `public/uploads/` for media).
+
+Without it, "Publish" in the CMS means *a file changed in git* and nothing more: the site is
+static output, so the post is not on the site until someone builds and deploys. The author
+gets no error and no hint, which is the worst kind of broken — it looks like it worked.
+
+The build is a **gate**, not just a step. A post is validated by the Astro content schema
+during the build and by `scripts/check-marketing-output.ts` afterwards (language
+correctness, the no-dashes rule, alt text, canonicals). A bad post therefore fails in CI and
+**the previous site stays live**, instead of a broken page replacing a good one.
+
+**The one thing that must be set up by hand: a deploy credential.**
+
+The workflow reads a Google service-account key from the repository secret
+`FIREBASE_SERVICE_ACCOUNT_MARKETING`. Until it exists, the workflow runs, builds, checks —
+and then fails at the deploy step with a message pointing here, which is deliberate: a
+pipeline that silently skips its own deploy is indistinguishable from one that worked.
+
+Create a **dedicated, least-privilege** account rather than reusing an existing key:
+
+1. [Google Cloud Console → Service accounts](https://console.cloud.google.com/iam-admin/serviceaccounts?project=rushpoint-pwa-7daaa)
+   → **Create service account**. Name it `github-deploy-marketing`.
+2. Grant it exactly two roles, and no others:
+   - **Firebase Hosting Admin** (`roles/firebasehosting.admin`) — publish releases.
+   - **Firebase Viewer** (`roles/firebase.viewer`) — read the project and resolve the
+     `marketing` Hosting target.
+3. Open the account → **Keys** → **Add key** → **Create new key** → **JSON**. Downloads once.
+4. Put the whole file contents in the repository secret:
+
+```bash
+gh secret set FIREBASE_SERVICE_ACCOUNT_MARKETING --repo Ahiyasavir/RushPoint < ~/Downloads/<the-key>.json
+```
+
+**Do NOT reuse `service-account.json` from the VPS for this.** That is the Admin SDK
+credential: it carries full read/write access to Firestore and Auth, and putting it in a
+GitHub secret would hand the entire database to any workflow — and to anyone able to land a
+workflow file. Hosting deploy needs neither of those permissions.
+
+**Confirm it works:** Actions → *Deploy marketing site* → **Run workflow**. A green run ends
+with a Hosting release; check the site afterwards rather than trusting the green tick,
+because a deploy that publishes the wrong directory also reports success (§12B's base-path
+story is the same class of failure).
+
+**If the deployed branch ever changes**, change it in three places in the same commit: this
+workflow's `branches:` filter, `backend.branch` in `apps/marketing/public/admin/config.yml`,
+and the assertion in `scripts/test-marketing-cms-config.ts` that pins it.

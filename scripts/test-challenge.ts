@@ -6,6 +6,7 @@ import {
   matchesTaskAnswer,
 } from '@rushpoint/shared';
 import type { Task } from '@rushpoint/shared';
+import { challengeVerdict } from '../packages/shared/src/challenge';
 
 let passed = 0;
 let failed = 0;
@@ -56,6 +57,21 @@ ok(matchesTaskAnswer(negNum, '-3.5'), 'numeric: negative decimal still matches')
 const zeroNum = { type: 'numeric', numericAnswer: 0, numericTolerance: 0 } as unknown as Task;
 ok(!matchesTaskAnswer(zeroNum, ''), 'numeric: empty string does NOT match 0 (Number("") guard)');
 ok(matchesTaskAnswer(zeroNum, '0'), 'numeric: "0" matches 0');
+
+// answer-scored-question: a question graded BY ANSWER has no `answers` list, so the teaser used to
+// call every guess wrong. Any named outcome is a real answer the creator wrote; the catch-all
+// ("anything else earns N") and an unmatched guess are not.
+{
+  const byAnswer = { type: 'quiz', answerOutcomes: [
+    { id: 'a', label: 'זעתר', points: 50 }, { id: 'b', label: 'מרווה', points: 100 },
+  ], unmatchedPoints: 5 } as unknown as Task;
+  ok(challengeVerdict(byAnswer, 'זעתר'), 'outcomes: a named outcome is correct');
+  ok(challengeVerdict(byAnswer, ' מרווה '), 'outcomes: padding still matches');
+  ok(!challengeVerdict(byAnswer, 'נענע'), 'outcomes: the catch-all is NOT a correct teaser answer');
+  ok(!challengeVerdict(byAnswer, ''), 'outcomes: empty is not correct');
+  const plain = { type: 'quiz', answers: ['Paris'] } as unknown as Task;
+  ok(challengeVerdict(plain, 'paris') && !challengeVerdict(plain, 'lyon'), 'plain quizzes are unchanged');
+}
 
 console.log(failed === 0
   ? `\n✅ ALL CHALLENGE TESTS PASSED (${passed})`

@@ -615,15 +615,25 @@ check('H · the language scan actually reached the copy', copyScanned >= 100,
   // The other direction. The marketing site's navigation is the surface that
   // carries it; reading the built output would make this test depend on that
   // build having run, which the pure lane cannot assume.
+  //
+  // Two files, because the site names the participant origin ONCE (in utils/i18n,
+  // beside SITE_ORIGIN and API_ORIGIN) and navigation imports it. Asserting the
+  // literal sits in navigation.ts would be asserting a duplication we deliberately
+  // removed, and would fail the moment the origin is centralised — which is what it
+  // did when the participant app moved off the apex (change: marketing-to-apex).
   const navSource = join(ROOT, 'apps', 'marketing', 'src', 'navigation.ts');
-  if (existsSync(navSource)) {
+  const originSource = join(ROOT, 'apps', 'marketing', 'src', 'utils', 'i18n.ts');
+  if (existsSync(navSource) && existsSync(originSource)) {
     const nav = readFileSync(navSource, 'utf8');
+    const origins = readFileSync(originSource, 'utf8');
+    check('L · the marketing site declares the landing origin',
+      origins.includes(LANDING_ORIGIN), LANDING_ORIGIN);
     check('L · the marketing site links back to the landing pages',
-      nav.includes(LANDING_ORIGIN) && /landingPageUrl/.test(nav),
-      LANDING_ORIGIN);
+      /landingPageUrl/.test(nav) && /PLAYER_ORIGIN/.test(nav),
+      'navigation.ts builds landingPageUrl from PLAYER_ORIGIN');
   } else {
     check('L · the marketing site links back to the landing pages', false,
-      `${navSource} is absent`);
+      `${navSource} or ${originSource} is absent`);
   }
 }
 
@@ -717,6 +727,67 @@ function contrastRatio(a: string, b: string): number {
         );
       }
     }
+  }
+}
+
+// ── N — EVERY HOMEPAGE DOOR HAS A PAGE, AND NO PAGE ARGUES AGAINST THE PRODUCT ──
+//
+// (change: marketing-home-occasion-doors)
+//
+// The marketing homepage now opens four doors, and a door is only a door if it leads
+// somewhere that can be linked to and found in search. Two of the four had no page at all
+// when the strip was designed. This asserts the registry covers them.
+//
+// The second half is subtler and is the reason this part exists at all. This registry was
+// written while the product was described as a field game that "goes outside", and that
+// framing survived here after it was retired everywhere else: the GENERAL page still led
+// with going outdoors, and the birthday page was headlined "a birthday that leaves the
+// living room" — on a site that now invites people to play a birthday IN the living room.
+// Nothing was broken. Both pages built, ranked and rendered perfectly while contradicting
+// the page linking to them.
+
+const OUTDOOR_ONLY: readonly RegExp[] = [
+  /יוצא החוצה/,
+  /משחק שדה/,
+  /בשטח/,
+  /outdoor/i,
+  /goes outside/i,
+  /in the field\b/i,
+];
+const LEAVES_HOME: readonly RegExp[] = [/מהסלון/, /living room/i];
+
+for (const needed of ['home-activities', 'education']) {
+  check(
+    `N · the registry covers the ${needed} door`,
+    (LANDING_SUBJECTS as readonly string[]).includes(needed),
+    `subjects: ${LANDING_SUBJECTS.join(', ')}`,
+  );
+}
+
+// The prose of a page, as one string, so a rule is applied to everything a reader sees
+// rather than to whichever field someone remembered to check.
+const prose = (p: LandingPage): string =>
+  [p.title, p.description, p.headline, p.intro, p.ctaLabel]
+    .concat(p.sections.flatMap((s) => [s.heading, ...s.paragraphs]))
+    .join('  |  ');
+
+for (const page of pages) {
+  if (page.subject === HOME_SUBJECT) {
+    const hit = OUTDOOR_ONLY.find((re) => re.test(prose(page)));
+    check(
+      `N · the general ${page.language} page is not outdoor only`,
+      hit === undefined,
+      hit ? `matched ${hit}` : 'general',
+    );
+  }
+
+  if (page.subject === 'birthday') {
+    const hit = LEAVES_HOME.find((re) => re.test(prose(page)));
+    check(
+      `N · the ${page.language} birthday page admits an indoor birthday`,
+      hit === undefined,
+      hit ? `matched ${hit}` : 'birthday',
+    );
   }
 }
 

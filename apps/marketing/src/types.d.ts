@@ -249,3 +249,110 @@ export interface Content extends Omit<Headline, 'classes'>, Widget {
 }
 
 export interface Contact extends Omit<Headline, 'classes'>, Form, Widget {}
+
+/**
+ * The playable demo mission (change: try-a-mission). The widget takes its entire visible
+ * surface as `content`, so the component holds no copy of its own and cannot leak the wrong
+ * language onto a page. The shape is validated at build time by the `homePages` schema in
+ * src/content.config.ts; this interface is the same contract for the component's props.
+ */
+export interface TryMissionContent {
+  tagline?: string;
+  title: string;
+  subtitle: string;
+  startBody: string;
+  startAction: string;
+  checkAction: string;
+  resetAction: string;
+  replayAction: string;
+  wrongFeedback: string;
+  /** Carries `{n}` and `{total}` placeholders. */
+  progressLabel: string;
+  /** Carries a `{score}` placeholder. */
+  scoreLabel: string;
+  youLabel: string;
+  doneTitle: string;
+  doneBody: string;
+  doneAction: string;
+  doneScoreLabel: string;
+  doneTimeLabel: string;
+  doneRankLabel: string;
+  boardNote: string;
+  rivals: { name: string; score: number }[];
+  missions: {
+    order: { kindLabel: string; title: string; prompt: string; items: string[] };
+    answer: { kindLabel: string; title: string; prompt: string; hint?: string; answers: string[] };
+    /** The closing question — not graded, no `correct` flag (change: try-mission-occasion). */
+    occasion: {
+      kindLabel: string;
+      title: string;
+      prompt: string;
+      options: { label: string; emoji?: string }[];
+    };
+  };
+}
+
+export interface TryMission {
+  content: TryMissionContent;
+  id?: string;
+}
+
+/**
+ * The mission idea generator (change: mission-ideas). Like TryMission, the widget takes its
+ * whole visible surface as `content` so it holds no copy of its own. `occasions` and `places`
+ * are the tag vocabulary; each idea declares which of them it belongs to, and the generator
+ * widens its filter rather than ever returning an empty result.
+ */
+export interface MissionIdeasContent {
+  tagline?: string;
+  title: string;
+  subtitle: string;
+  occasionLabel: string;
+  placeLabel: string;
+  generateAction: string;
+  againAction: string;
+  ctaAction: string;
+  note: string;
+  occasions: { id: string; label: string }[];
+  places: { id: string; label: string }[];
+  ideas: { kindLabel?: string; text: string; occasions: string[]; places: string[] }[];
+}
+
+export interface MissionIdeas {
+  content: MissionIdeasContent;
+  id?: string;
+}
+
+/**
+ * The station planner (change: game-planner). The numeric defaults are content so the tool can
+ * be pointed at the kind of event a given site actually runs.
+ */
+export interface GamePlannerContent {
+  tagline?: string;
+  title: string;
+  subtitle: string;
+  fieldLabels: {
+    teams: string;
+    minutes: string;
+    missions: string;
+    perMission: string;
+    capacity: string;
+  };
+  defaultTeams: number;
+  defaultMinutes: number;
+  defaultMissions: number;
+  defaultPerMission: number;
+  defaultCapacity: number;
+  outputTitle: string;
+  stationsLabel: string;
+  durationLabel: string;
+  throughputLabel: string;
+  verdictOk: string;
+  verdictTight: string;
+  note: string;
+}
+
+export interface GamePlanner {
+  content: GamePlannerContent;
+  id?: string;
+}

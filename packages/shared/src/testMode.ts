@@ -82,12 +82,25 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
       copy(out, r, 'taskId');
       copy(out, r, 'taskIndex');
       copy(out, r, 'status');
+      // skip-keeps-the-stage: WHY a record is skipped. Not a secret (an operational fact about the
+      // team's own progress), and the locked-mission list needs it: a mission opened by an
+      // organizer's skip must stop reading "locked" on the player's phone.
+      copy(out, r, 'skipCause');
+      // live-task-close-rules: the organizers closed this mission (not the team's doing).
+      copy(out, r, 'closedByOrganizer');
       copy(out, r, 'startedAt');
       copy(out, r, 'completedAt');
       copy(out, r, 'actualMinutes');
       // The hidden-task arrival latch: dropping it would re-seal a task the
       // player has already walked to.
       copy(out, r, 'arrivedAt');
+      // NOT `arrivalUnverified` (change: arrival-needs-a-usable-fix), and this is a
+      // decision rather than an oversight: it is the organizer's record that a team
+      // was let through on a fix which could not prove it. Telling the PLAYER would
+      // publish the way through the gate the flag exists to detect - 'press, wait ten
+      // seconds, press again' becomes a documented move. Withheld by construction
+      // here, like `submittedAnswer` above: never allow-listed, not conditionally
+      // stripped.
       copy(out, r, 'verificationOutcome');
       copy(out, r, 'photoUrl');
       // Their own survey answer — not secret to its own team.
@@ -153,6 +166,11 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
   copy(out, t, 'outOfBoundsOverrideUntil');
   copy(out, t, 'evacuatedFrom');
   copy(out, t, 'guardianConsent');
+  // live-task-close-rules: why the phone was moved off a mission. Without it a team sees its
+  // mission vanish with no explanation.
+  copy(out, t, 'closedTaskNotice');
+  // mission-time-limit: why the phone was moved off a mission whose countdown ran out.
+  copy(out, t, 'timeUpNotice');
 
   // ── Sealed by test mode ─────────────────────────────────────────────────────
   // Each of these is a scoring or correctness signal. `taskAttempts` and

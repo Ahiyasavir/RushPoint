@@ -5,7 +5,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
+import { resolveMapStyle, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
+import { resolveInitialView, isPlacedCoord, type LatLng } from '../lib/mapAnchor';
 import { geocodePlaces, type GeoResult } from '../lib/geocode';
 import MapModeToggle from './MapModeToggle';
 import { Input } from './ui';
@@ -18,21 +19,29 @@ ensureRtlTextPlugin(maplibregl);
 // tiles (via resolveMapStyle) + the OpenStreetMap Nominatim geocoder. That is the
 // supported default for self-run games, so we don't nag about a missing key.
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
-// Sensible default view when a task has no coordinates yet (central Israel).
-const DEFAULT_CENTER: [number, number] = [35.21, 31.77];
 
 // Search itself lives in lib/geocode.ts — including WHY the geocoder is chosen
 // independently of the tile key (MapTiler's Hebrew address coverage lost a real
 // Jerusalem street to four wrong towns).
 
 export default function LocationPicker({
-  lat, lng, onChange, className = '', fill = false, cornerControl,
+  lat, lng, onChange, className = '', fill = false, cornerControl, anchors,
+  cooperativeGestures = false,
 }: {
   lat: number;
   lng: number;
   onChange: (lat: number, lng: number) => void;
   className?: string;
   fill?: boolean;
+  /**
+   * Where the SURROUNDING game is already placed (change: location-picker-game-anchor)
+   * — every mission of it that carries real coordinates. Used only to choose the
+   * view this map OPENS on when the edited mission has no pin of its own, so a
+   * creator adding their second mission lands on the first one's neighbourhood
+   * instead of on a zoom-8 view of the whole country. Never a constraint on where
+   * a pin may be dropped, and read once at construction: see lib/mapAnchor.
+   */
+  anchors?: readonly (LatLng | null | undefined)[];
   /**
    * Rendered at the map's bottom-END corner, in the SAME coordinate space as
    * MapModeToggle (change: builder-ux-round-2). A caller cannot position this
@@ -42,12 +51,29 @@ export default function LocationPicker({
    * of which happened. Only in here does "the corner of the map" mean the map.
    */
   cornerControl?: ReactNode;
+  /**
+   * Let a plain wheel scroll pass THROUGH to the page (change:
+   * quick-setup-one-card).
+   *
+   * A map inside a scrolling panel eats the wheel: the creator scrolls to bring
+   * the rest of the map into view, the pointer is over the map, and the map zooms
+   * instead — so the panel never moves and the map ends up at a zoom nobody asked
+   * for. Their words: scrolling to see the whole map is "super uncomfortable".
+   * MapLibre's own answer is `cooperativeGestures`: wheel zooms only with
+   * ctrl/⌘ held, touch pans only with two fingers, and it draws its own hint when
+   * a gesture is refused.
+   *
+   * OFF by default, and deliberately off for the enlarged map: there the map IS
+   * the page, nothing is behind it to scroll, and making a full-screen map demand
+   * a modifier key to zoom would be the same mistake in the other direction.
+   */
+  cooperativeGestures?: boolean;
 }) {
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
-  const [mode, setMode] = useState<MapMode>('topo');
+  const [mode, setMode] = useState<MapMode>(DEFAULT_MAP_MODE);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -59,16 +85,36 @@ export default function LocationPicker({
   const [activeIndex, setActiveIndex] = useState(-1);
   useEffect(() => { setActiveIndex(-1); }, [results]);
 
-  const hasCoord = isValidCoord(lat, lng) && (lat !== 0 || lng !== 0);
+  const hasCoord = isPlacedCoord({ lat, lng });
+  // The anchors as of MOUNT. Deliberately not reactive: the Builder autosaves ~1.5s
+  // after every edit, so this array changes while the creator is aiming, and a
+  // camera that re-fitted itself mid-aim would be worse than the bug being fixed.
+  const anchorsAtMount = useRef(anchors);
 
   useEffect(() => {
     if (!ref.current || map.current) return;
+    // Decided ONCE, here, and handed to the constructor rather than applied as a
+    // post-load fitBounds — which would paint the default view for a frame and
+    // then jump. The container is laid out by now, so its shorter side is the
+    // honest viewport for the "~100m" promise (lib/mapAnchor.neighbourhoodZoom);
+    // an unmeasurable container falls back inside that helper.
+    const box = ref.current.getBoundingClientRect();
+    const view = resolveInitialView({
+      self: hasCoord ? { lat, lng } : null,
+      anchors: anchorsAtMount.current,
+      viewportPx: Math.min(box.width, box.height),
+    });
     map.current = new maplibregl.Map({
       container: ref.current,
       style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
-      center: hasCoord ? [lng, lat] : DEFAULT_CENTER,
-      zoom: hasCoord ? 14 : 8,
+      ...(view.kind === 'point'
+        ? { center: view.center, zoom: view.zoom }
+        : {
+            bounds: view.bounds as maplibregl.LngLatBoundsLike,
+            fitBoundsOptions: { maxZoom: view.maxZoom, padding: view.padding },
+          }),
       attributionControl: { compact: true },
+      cooperativeGestures,
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
@@ -127,7 +173,9 @@ export default function LocationPicker({
     try {
       // Bias to what the creator is looking at: the pin if the task has one, else
       // wherever the map is centred. "הכותל המערבי" returns three Be'er Sheva
-      // streets before the actual Kotel without it.
+      // streets before the actual Kotel without it. Since the anchored view centres
+      // an unplaced mission on the rest of the game, this bias now inherits the
+      // game's neighbourhood too, instead of biasing to the middle of the country.
       const c = map.current?.getCenter();
       const bias = hasCoord ? { lat, lng } : c ? { lat: c.lat, lng: c.lng } : undefined;
       const r = await geocodePlaces(query, { key: KEY, bias });
@@ -174,7 +222,7 @@ export default function LocationPicker({
             {searching ? '…' : b.searchBtn}
           </button>
         </div>
-        {searchErr && <p className="text-rp-alert text-xs mt-1">{searchErr}</p>}
+        {searchErr && <p className="text-ink-alert text-xs mt-1">{searchErr}</p>}
         {/* Result rows use the app's --ink/--surface tokens, NOT `text-zinc-700`.
             creator-web REVERSES the zinc scale (tailwind.config.js) so that class
             resolves to #d6d3d1 — pale grey on the beige `app-raised` panel, about
@@ -193,7 +241,7 @@ export default function LocationPicker({
                   className={`w-full text-start px-3 py-2.5 min-h-[44px] border-b border-[--rp-border] last:border-b-0 transition-colors ${i === activeIndex ? 'bg-rp-fire/10' : 'hover:bg-[--surface-2]'}`}
                 >
                   <span className="block text-sm text-[--ink-1] font-medium">📍 {r.label}</span>
-                  {r.detail && <span className="block text-[11px] text-[--ink-3] mt-0.5">{r.detail}</span>}
+                  {r.detail && <span className="block text-[13px] text-[--ink-3] mt-0.5">{r.detail}</span>}
                 </button>
               </li>
             ))}

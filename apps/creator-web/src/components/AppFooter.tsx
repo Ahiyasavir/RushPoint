@@ -1,5 +1,15 @@
 import { Link } from 'react-router-dom';
+import { resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT, useLanguage } from './LanguageContext';
+
+// Where the participant app lives, resolved exactly as the Builder, Dashboard and
+// Run Console resolve it. It used to be a literal here, which is how this link
+// kept pointing at the apex after the participant app moved off it
+// (change: marketing-to-apex): the apex now serves the marketing site, so the
+// literal silently became a link to a different product.
+const PLAY_URL = import.meta.env.DEV
+  ? resolvePlayOrigin(window.location.origin)
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
 
 /**
  * Persistent app-chrome footer carrying the legal documents.
@@ -34,7 +44,7 @@ export default function AppFooter() {
           language, so the console never sends a Hebrew speaking creator to English copy.
         */}
         <a
-          href={`https://rush-point.com/${lang}/`}
+          href={`${PLAY_URL}/${lang}/`}
           className={linkClass}
           target="_blank"
           rel="noreferrer"

@@ -84,6 +84,10 @@ export interface ReportAnswerRow {
   status: string;
   attempts: number;
   earnedScore: number;
+  /** answer-scored-question: which outcome the team hit ('unmatched' = the catch-all), '' if none. */
+  outcomeId: string;
+  /** That outcome's text as authored; '' for the catch-all, none, or an outcome since deleted. */
+  outcomeLabel: string;
   hintUsed: boolean;
   /** Minutes the mission took, from the stored record. `null` when unknown. */
   minutes: number | null;
@@ -224,6 +228,14 @@ export function answerChannelForTask(task: Task | null | undefined): ReportAnswe
 /** The answer key as a human-readable string. OWNER-ONLY — never sanitized out here. */
 function expectedAnswerText(task: Task | null | undefined): string {
   const t = obj(task);
+  // answer-scored-question: every outcome with its points; the catch-all as `*` (language-neutral:
+  // the report is also read by English creators).
+  const outcomes = arr<Record<string, unknown>>(t.answerOutcomes).filter((o) => o && typeof o === 'object');
+  if (outcomes.length > 0) {
+    const parts = outcomes.map((o) => `${outcomeText(o)} ${num(o.points)}`.trim());
+    if (typeof t.unmatchedPoints === 'number' && Number.isFinite(t.unmatchedPoints)) parts.push(`* ${t.unmatchedPoints}`);
+    return parts.join(' · ');
+  }
   const answers = arr<unknown>(t.answers).filter((x) => typeof x === 'string') as string[];
   if (answers.length > 0) return answers.join(' / ');
   const order = arr<unknown>(t.orderItems).filter((x) => typeof x === 'string') as string[];
@@ -240,6 +252,17 @@ function expectedAnswerText(task: Task | null | undefined): string {
   if (code) return code;
   const choices = arr<unknown>(t.surveyChoices).filter((x) => typeof x === 'string') as string[];
   if (choices.length > 0) return choices.join(' / ');
+  return '';
+}
+
+/** An outcome's display text: its label, else its first accepted text, else a numeric range. */
+function outcomeText(o: Record<string, unknown>): string {
+  const label = str(o.label);
+  if (label) return label;
+  const first = arr<unknown>(o.accepts).find((x) => typeof x === 'string' && x.trim());
+  if (typeof first === 'string') return first;
+  const r = obj(o.range);
+  if (typeof r.min === 'number' && typeof r.max === 'number') return `${r.min}-${r.max}`;
   return '';
 }
 
@@ -397,6 +420,12 @@ export function buildRunPlayerReport(input: RunPlayerReportInput): RunPlayerRepo
           status,
           attempts: num(attemptsByTask[taskId]),
           earnedScore: num(rec.earnedScore),
+          outcomeId: str(rec.outcomeId),
+          outcomeLabel: (() => {
+            const id = str(rec.outcomeId);
+            const hit = id ? arr<Record<string, unknown>>(obj(task).answerOutcomes).find((o) => o && o.id === id) : undefined;
+            return hit ? outcomeText(hit) : '';
+          })(),
           hintUsed: hintsUsed.includes(taskId),
           minutes: typeof rec.actualMinutes === 'number' && Number.isFinite(rec.actualMinutes)
             ? rec.actualMinutes

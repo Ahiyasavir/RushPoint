@@ -92,7 +92,21 @@ export function sanitizeTaskForParticipant(
   // passed through: a survey has no right answer, so the options are not a secret —
   // the participant needs them to render the choice buttons. Listed in the e2e
   // ALLOWED_TASK_KEYS allowlist.
-  const { smart, hint, answers, numericAnswer, steps, orderItems, ...rest } = task;
+  // answer-scored-question: answerOutcomes (accepted texts/codes and their points) and
+  // unmatchedPoints are the answer key; revealOutcomePoints is authoring config.
+  const { smart, hint, answers, numericAnswer, steps, orderItems, answerOutcomes, unmatchedPoints: _unmatched, revealOutcomePoints, ...rest } = task;
+  void _unmatched;
+  // A question graded by answer renders its outcome LABELS as buttons. A station's
+  // codes are handed out by the operator, so a station ships none.
+  const outcomeChoices = task.type === 'quiz' && Array.isArray(answerOutcomes) && answerOutcomes.length > 0
+    && answerOutcomes.every((o) => typeof o?.label === 'string' && o.label.trim())
+    ? answerOutcomes.map((o) => (o.label as string).trim())
+    : undefined;
+  // Points on the buttons ONLY when the creator chose to show them (D4), as a list parallel to
+  // `choices`. Never the accepted alternates, never the catch-all.
+  const choicePoints = outcomeChoices && revealOutcomePoints === true
+    ? answerOutcomes!.map((o) => (typeof o.points === 'number' && Number.isFinite(o.points) ? o.points : 0))
+    : undefined;
 
   // Ordering quiz: with a seed, emit a deterministic per-team shuffle (stable
   // across reloads/polls, so it can't be diffed to recover the order); without
@@ -117,11 +131,22 @@ export function sanitizeTaskForParticipant(
 
   return {
     ...rest,
+    ...(outcomeChoices ? { choices: outcomeChoices } : {}),
+    ...(choicePoints ? { choicePoints } : {}),
     ...(shuffledOrderItems ? { orderItems: shuffledOrderItems } : {}),
     ...(hidden ? { locationHidden: true as const } : {}),
     hasHint: !!hint && hint.trim().length > 0,
     hintPenalty: task.hintPenalty ?? 25,
-    steps: steps?.map((s) => ({ id: s.id, prompt: s.prompt })),
+    // The step ANSWER stays server-secret, but whether a step HAS one is not a
+    // secret and the client cannot function without it: a step with no answer key
+    // is a tap-to-confirm beat, and asking the player to "leave it blank to
+    // confirm" is an instruction to guess at the creator's authoring. `hasAnswer`
+    // lets the runner render a plain confirm button instead.
+    steps: steps?.map((s) => ({
+      id: s.id,
+      prompt: s.prompt,
+      hasAnswer: typeof s.answer === 'string' && s.answer.trim().length > 0,
+    })),
     smart: smart
       ? {
           enabled: smart.enabled,
@@ -147,6 +172,8 @@ export function sanitizeTaskForParticipant(
           captureKind: smart.captureKind,
           videoMinSeconds: smart.videoMinSeconds,
           videoMaxSeconds: smart.videoMaxSeconds,
+          // camera-switch: which camera opens first. Not a secret.
+          preferredCamera: smart.preferredCamera,
           attemptLimit: smart.attemptLimit,
           // secretCode intentionally omitted
         }

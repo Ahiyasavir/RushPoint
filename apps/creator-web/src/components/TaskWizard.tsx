@@ -8,7 +8,8 @@
 // gate, placement is last and never blocks. Validation messages are withheld
 // until the creator dirties the field group they concern or presses the finish
 // control, so a brand new task is never greeted by its own errors.
-import { useEffect, useRef, useState, type ReactNode, type ChangeEvent } from 'react';
+import { isoToLocalInput, localInputToIso } from '../lib/timeWindowInput';
+import { useEffect, useRef, useState, type ReactNode, type ChangeEvent, type DragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Task, TaskStep, TaskType, TaskMedia } from '@rushpoint/shared';
 import {
@@ -19,19 +20,27 @@ import {
   locationLeakWarnings,
   // task-duration-defaults: the per-interaction derived estimate the editor suggests.
   defaultExpectedDurationMinutes, TASK_DURATION_MAX_MINUTES,
+  // The most devices one team may ever hold, so a contributor requirement cannot be
+  // authored above what any team could satisfy (change: every-member-plays).
+  TEAM_DEVICE_HARD_CAP,
   // visible-time-estimates: the WALK INCLUSIVE estimate the scoring sigmoid reads.
   defaultEstimatedMinutes, TASK_ESTIMATE_MAX_MINUTES,
   normalizeTags,
   // video-submission-task: the SAME range verdict the server's save guard reads.
   VIDEO_DURATION_LIMITS, videoDurationProblem,
+  // mission-time-limit: the per team countdown's ceiling, the same one the server checks.
+  TIME_LIMIT_MAX_MINUTES,
 } from '@rushpoint/shared';
 import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
+import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
 import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
-import { uploadTaskMedia } from '../services/firebase';
+import { uploadTaskMedia, ingestTaskMediaFromUrl } from '../services/firebase';
 import { useT } from './LanguageContext';
+import { useIsMobile } from '../hooks/useMediaQuery';
+import { OverflowMenu } from './OverflowMenu';
 import LocationStep from './LocationStep';
 import RichTooltip from './RichTooltip';
 import QuizChoicesEditor from './QuizChoicesEditor';
@@ -50,14 +59,22 @@ import {
   type RevealState, type ValidationField,
   initialRevealState, markTouched, shouldReveal, nextFinishAction, taskRevealBlockers,
 } from '../lib/taskValidationGating';
+import OutcomesEditor from './OutcomesEditor';
+import { enableOutcomes, disableOutcomes } from '../lib/outcomeEditor';
 import {
   type TaskSample, type SampleOverwriteField, applySample, samplesForType, sampleWouldOverwrite,
 } from '../lib/taskTemplates';
 // The 2-option location picker's pure decisions (change: task-location-mode-consolidation).
 import {
-  type LocationChoice, TIGHT_RADIUS_M, DEFAULT_RADIUS_M, CHOICE_ICON_MODE,
+  type LocationChoice, TIGHT_PRESET_M, DEFAULT_RADIUS_M, CHOICE_ICON_MODE,
+  radiusBelowFloor, enforcedRadiusM,
   locationChoiceOf, skipsGpsCheck, locationChoicePatch, radiusPatch, skipGpsPatch,
 } from '../lib/locationPicker';
+// הקמה מהירה, guided mode (change: quick-setup-guided-editor): what this editor
+// shows while the flow is driving it. The decisions are all THERE; here we obey.
+import {
+  guidedEditorView, guidedLocationView, GUIDED_BODY_CLASS, GUIDED_KEEP_CLASS,
+} from '../lib/guidedEditor';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -85,9 +102,15 @@ const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[]
 
 export default function TaskWizard({
   task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings, revealAll,
-  focusTab, focusGroup, focusNonce,
+  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors, onRegenerate,
 }: {
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
+  /**
+   * Swap this mission for the closest one in the bank (change: mission-regenerate).
+   * Offered here as well as on the card, because the editor is where a creator is
+   * looking when they decide they do not want this mission.
+   */
+  onRegenerate?: () => void;
   onClose: () => void; closeLabel: string; gameId?: string;
   // The other tasks of the SAME stage (change: unlockable-tasks) — the
   // prerequisite multi-select offers exactly these, so cross-stage/unknown ids
@@ -105,9 +128,29 @@ export default function TaskWizard({
   focusTab?: 'location' | 'details' | 'execution' | null;
   focusGroup?: OptInGroupKey | 'locationAdvanced' | null;
   focusNonce?: number;
+  // GUIDED MODE (change: quick-setup-guided-editor). True while הקמה מהירה is on
+  // screen: the editor then answers ONE question — the control `guidedAnchor`
+  // names — and everything the template already decided (which kind of mission
+  // this is, its samples, the tab strip, delete, the editor's own next/back) is
+  // withheld until the creator leaves the flow. `onExitGuided` IS that exit, and
+  // it is offered inside the strip so "I want to change something else" is never
+  // a dead end. Every unknown falls back to the full editor — see lib/guidedEditor.
+  guided?: boolean;
+  guidedAnchor?: string | null;
+  onExitGuided?: () => void;
+  // Every PLACED mission of the WHOLE game (change: location-picker-game-anchor)
+  // — not `siblings`, which is this stage only, and a creator's second mission is
+  // routinely in a different stage from the first. Decides the view the map opens
+  // on when THIS mission has no pin yet, so mission two starts on mission one's
+  // street instead of on a zoom-8 view of the country.
+  gameAnchors?: readonly { lat: number; lng: number }[];
 }) {
   const t = useT();
   const b = t.builder;
+  // Phone width: the step tabs collapse to their numerals except the active one
+  // (change: builder-mobile-simplification). Declared with the other top-level
+  // hooks, above every conditional in this component.
+  const isMobile = useIsMobile();
   const [step, setStep] = useState<WizardStep>(1);
   // Which validation messages may be shown. Lives here and resets on mount (the
   // panel is keyed by task id), because the persistent, game wide record of what
@@ -161,6 +204,63 @@ export default function TaskWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
 
+  // What this editor renders right now. Every branch below reads `view`; nothing
+  // below re-derives "are we guided?" for itself.
+  const view = guidedEditorView({ guided, anchor: guidedAnchor });
+
+  // ── Guided isolation (change: quick-setup-guided-editor) ────────────────────
+  // Find the section that HOLDS the current step's control, mark it, and only
+  // THEN let the hiding rule apply to its siblings. Survivor first is the whole
+  // safety argument: the CSS is scoped to `.rp-guided`, which is added last, so a
+  // control that never appears leaves the editor untouched rather than empty.
+  //
+  // A DOM query rather than a prop threaded through every section: the anchors
+  // already exist (they are what Quick Setup's focus ring aims at) and there are
+  // two dozen of them spread across three step bodies and a dozen sub-components.
+  // Wrapping each one by hand would mean a new field silently opting OUT of
+  // isolation, which is the failure this codebase keeps re-learning; here a field
+  // with no anchor simply isolates nothing. Same retry budget and the same
+  // tolerance as `useQuickSetupFocus` in QuickSetup.tsx, and for the same reason:
+  // the tab switch above lands a render or two later.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const clear = (): void => {
+      root.querySelectorAll(`.${GUIDED_BODY_CLASS}`).forEach((el) => el.classList.remove(GUIDED_BODY_CLASS));
+      root.querySelectorAll(`.${GUIDED_KEEP_CLASS}`).forEach((el) => el.classList.remove(GUIDED_KEEP_CLASS));
+    };
+    clear();
+    const anchor = view.isolateAnchor;
+    if (!anchor) return undefined;
+    let poll: number | undefined;
+    const deadline = performance.now() + 3000;
+    const apply = (): void => {
+      const target = root.querySelector(`[data-qs-field="${CSS.escape(anchor)}"]`);
+      if (!target) {
+        if (performance.now() < deadline) poll = window.setTimeout(apply, 60);
+        return;
+      }
+      const body = target.closest('[data-qs-body]');
+      // No list to isolate within, or the anchor IS the whole list (the location
+      // step marks its own root `coordinates`): there is nothing to subtract, and
+      // subtracting nothing is the correct answer, not a retry.
+      if (!body || body === target) return;
+      let keeper: Element = target;
+      while (keeper.parentElement && keeper.parentElement !== body) keeper = keeper.parentElement;
+      if (keeper.parentElement !== body) return;
+      keeper.classList.add(GUIDED_KEEP_CLASS);
+      body.classList.add(GUIDED_BODY_CLASS);
+    };
+    poll = window.setTimeout(apply, 0);
+    return () => {
+      if (poll) window.clearTimeout(poll);
+      clear();
+    };
+    // `step` and `task.type` both change WHICH sections exist, so the marks have
+    // to be recomputed; `focusNonce` re-runs it when the same step is re-activated.
+  }, [view.isolateAnchor, step, task.type, focusNonce]);
+
   // Each step body derives the location state it needs for itself: the Location
   // step reasons in the creator's two choices (lib/locationPicker), the
   // interaction step in "does this task have a GPS gate" (for the pause-clock
@@ -186,61 +286,206 @@ export default function TaskWizard({
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* Step tabs (single line) + close — one compact row, no separate title bar. */}
+    <div className="flex flex-col h-full min-h-0" ref={rootRef}>
+      {/* Step tabs (single line) + close — one compact row, no separate title bar.
+          On a phone only the ACTIVE step spells its name (change:
+          builder-mobile-simplification): three equal thirds of a 390px row left
+          each label ~70px, so the third step read "…ביצוע ותו" — a truncated tab is
+          a tab that has stopped naming anything. The other two collapse to their
+          number, which is what the row was already using as their primary mark,
+          and the active one takes the space they give up. */}
+      {/* Skipped entirely in guided mode. Hiding the tabs and the ⋯ menu left this
+          row holding a single unlabelled ✕ against 44px of empty width — a stray
+          glyph on its own line, above a header that was about to draw its own
+          box. The close control moves INTO that header instead, which is also
+          where it stops being nameless. */}
+      {!view.showContextStrip && (
       <div className="flex items-center gap-1.5 pb-2 shrink-0">
+        {/* Hidden in guided mode: the flow chooses the tab, so a tab strip is
+            three controls that can only take the creator away from the one thing
+            they were just asked for. The guided header below takes its place. */}
+        {view.showTabs ? (
         <div role="tablist" className="flex gap-1.5 flex-1 min-w-0">
         {/* Tabs and bodies both read WIZARD_STEP_ORDER, so a tab and the body
             under it can never disagree. */}
         {WIZARD_STEP_ORDER.map((key, i) => {
           const s = (i + 1) as WizardStep;
           const active = s === step; const done = s < step;
-          return (
+            // The label is always in the accessible name, so collapsing the
+            // inactive tabs to a numeral never costs a screen-reader user the
+            // step's identity.
+            const nameOnly = isMobile && !active;
+            return (
             <button key={key} role="tab" aria-selected={active} onClick={() => setStep(s)}
-              className={`flex-1 min-w-0 rounded-lg border px-2 py-1.5 flex items-center justify-center gap-1.5 transition-colors ${
-                active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire'
-                  : done ? 'border-rp-go/40 text-rp-go' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
-              <span className="text-[10px] font-semibold shrink-0">{done ? '✓' : s}</span>
-              <span className="text-[12px] font-medium truncate">{STEP_LABEL[key]}</span>
+              aria-label={nameOnly ? STEP_LABEL[key] : undefined}
+              className={`min-w-0 rounded-lg border px-2 py-1.5 flex items-center justify-center gap-1.5 transition-colors ${
+                nameOnly ? 'shrink-0 w-11' : 'flex-1'} ${
+                active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire'
+                  : done ? 'border-rp-go/40 text-ink-go' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+              <span className="text-[12px] font-semibold shrink-0">{done ? '✓' : s}</span>
+              {!nameOnly && <span className="text-[12px] font-medium truncate">{STEP_LABEL[key]}</span>}
             </button>
           );
         })}
         </div>
+        ) : <span className="flex-1 min-w-0" />}
+        {/* Destructive and meta actions live HERE, away from the navigation row
+            (change: builder-mobile-simplification) — the same move the stage's
+            ✕ made into its settings pane. Rendered only when the task can be
+            deleted at all (the stage's last mission cannot), so a menu never
+            opens onto nothing. */}
+        {(onRemove || onRegenerate) && view.showTaskMenu && (
+          <div className="shrink-0">
+            <OverflowMenu
+              label="⋯" // i18n-ignore universal overflow glyph, named by ariaLabel
+              ariaLabel={b.taskMoreMenuAria}
+              triggerClassName="w-11 h-11 justify-center rounded-lg text-lg leading-none text-[--ink-3]"
+            >
+              {/* Regenerate sits ABOVE delete and outside its danger styling: it is
+                  the repeatable action, delete is the terminal one, and a menu that
+                  puts them side by side in the same colour invites the wrong press
+                  (change: mission-regenerate). */}
+              {onRegenerate && (
+                <button
+                  role="menuitem"
+                  onClick={onRegenerate}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-[--ink-1] rounded-lg hover:bg-[--surface-2] transition-colors"
+                >
+                  {b.regenerateTask}
+                </button>
+              )}
+              {onRemove && (
+                <button
+                  role="menuitem"
+                  onClick={onRemove}
+                  className="w-full text-start px-3 py-2.5 text-[13px] text-ink-alert rounded-lg hover:bg-rp-alert/10 transition-colors"
+                >
+                  {b.deleteTask}
+                </button>
+              )}
+            </OverflowMenu>
+          </div>
+        )}
         <button onClick={onClose} aria-label={closeLabel}
-          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+          className={`${TAP_TARGET} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}>
           ✕
         </button>
       </div>
+      )}
+
+      {/* ── The guided header (change: quick-setup-guided-editor) ───────────────
+          While the flow is driving, this REPLACES the editor's tab row. It is one
+          line, and it answers only what the card above it does not:
+
+            • WHAT KIND of mission this is — read-only by design. The kind is the
+              template's decision and no Quick Setup step can target `task.type`
+              (it is not in QUICK_SETUP_FIELDS), so offering the picker here would
+              be offering to undo work nobody asked about. It is LABELLED rather
+              than left as a bare chip: an unlabelled chip beside a title looks
+              exactly like the pickable chips two steps away, and a creator who
+              taps it and gets nothing has been told the screen is broken.
+            • the way OUT, because "hidden until you leave the flow" is only fair
+              if leaving is one tap;
+            • the editor's own close, moved here from the tab row — hiding the tabs
+              and the ⋯ menu left that row holding a single unlabelled ✕ against
+              44px of empty width.
+
+          It does NOT name the mission. It used to, with the mission's summary
+          under it, and then the step card directly above grew the same two lines
+          when the flow's two cards were merged into one (change:
+          quick-setup-one-card) — so the mission was being named twice, an inch
+          apart. The card is the one that says it, because that is the message the
+          creator is meant to read. */}
+      {view.showContextStrip && (
+        <div role="group" aria-label={b.guidedGroupAria} className="shrink-0 mb-2.5 pb-1.5 flex items-center gap-2 border-b border-[--rp-border]">
+          <span className="inline-flex items-center gap-1.5 min-w-0 rounded-full bg-[--surface-2] border border-[--rp-border] ps-2 pe-2.5 py-1 text-[13px] text-[--ink-2]">
+            <span className="text-[--ink-3] shrink-0">{b.guidedTypeLabel}</span>
+            <BuilderIcon name={TYPE_ICON_NAME[task.type]} className="w-3.5 h-3.5 shrink-0" />
+            <span className="font-medium text-[--ink-1] truncate">{typeMetaOf(b)[task.type].label}</span>
+          </span>
+          {onExitGuided && (
+            /* A REAL 44px target (lib/interaction's lesson, applied here by hand):
+               styled down to inline text this is line-height tall, and it is the
+               only door out of guided mode inside the editor. Given a border rather
+               than an underline for the same reason the chip is labelled — it is
+               the one thing on this row that DOES something. */
+            <button
+              type="button"
+              onClick={onExitGuided}
+              className="ms-auto shrink-0 min-h-[44px] px-2.5 rounded-lg border border-[--rp-border] text-[13px] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+            >
+              {b.guidedEditEverything}
+            </button>
+          )}
+          <button onClick={onClose} aria-label={closeLabel}
+            className={`${TAP_TARGET} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none${onExitGuided ? '' : ' ms-auto'}`}>
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Step body. Pure flexbox column (no height:100% hops) so step 1's map can
           grow to fill; the other steps scroll only inside themselves if ever
           needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
-        {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} advOpen={locAdvOpen} setAdvOpen={setLocAdvOpen} />}
-        {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} /></div>}
-        {stepKey === 'execution' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} /></div>}
+        {/* The location step is one tall control, not a list of sections, so the
+            `[data-qs-body]` rule cannot reach inside it — `guidedLocationView` is
+            its own subtraction. */}
+        {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} advOpen={locAdvOpen} setAdvOpen={setLocAdvOpen} gameAnchors={gameAnchors}
+          guided={guidedLocationView({ guided, anchor: view.isolateAnchor, choice: locationChoiceOf(task) })} />}
+        {/* `overscroll-contain` on each step body (change: creator-mobile-mechanics):
+            this editor is a bottom sheet on a phone, sitting over a Builder that
+            is itself a stack of scrollers. Without containment, reaching the end
+            of a step hands the gesture straight to whatever is behind the sheet,
+            which reads as the sheet sticking while the page rubber-bands under
+            it. The two gallery modals already do this; the Builder's own
+            containers never got it. */}
+        {/* `data-qs-body` marks the LIST guided isolation subtracts within — the
+            direct children of these wrappers are the sections a step can keep. */}
+        {stepKey === 'details' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} showTypePicker={view.showTypePicker} /></div>}
+        {stepKey === 'execution' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} /></div>}
       </div>
 
       {/* Footer. The "this task cannot be completed" line is a response to an
           edit or to a finish attempt, never a greeting on a brand new task. */}
       {stepKey === 'execution' && !isTaskInteractionValid(task) && blockers.some(revealed) && (
-        <p className="text-[11px] text-rp-fire leading-snug pt-1 shrink-0">{b.interactionIncomplete}</p>
+        <p className="text-[13px] text-ink-fire leading-snug pt-1 shrink-0">{b.interactionIncomplete}</p>
       )}
+      {/* Footer: NAVIGATION ONLY, and exactly one primary (change:
+          builder-mobile-simplification). It used to carry four controls — back,
+          a bare red "delete mission" link, next AND done — of which two were
+          near-duplicates and one was destructive. On a phone that is four targets
+          in a 44px row, with the delete sitting between the two the thumb is
+          actually aiming for.
+          • Delete moved to the ⋯ menu in the header, and now asks first.
+          • "Done" is gone from steps 1 and 2. It closed the sheet, which is
+            exactly what the header's ✕ does, so the creator was being asked to
+            choose between two buttons with the same outcome and no way to tell
+            them apart. It stays as the LAST step's primary, where it is the real
+            end of the flow and still runs the blocker reveal.
+          Leaving early from any step is unchanged: ✕ (and Esc) close, and the
+          draft is flushed on unmount. The persistent record of what is still
+          broken is the readiness surface, not this footer. */}
+      {/* Hidden in guided mode: the flow owns "what next" and shows its own bar in
+          this very sheet, so a second next/done pair here is two primaries with
+          different meanings a step apart. ✕ still closes the editor. */}
+      {view.showFooterNav && (
       <div className="flex items-center gap-2 pt-2 shrink-0 border-t border-[--rp-border] mt-2">
         {canGoBack(step) ? (
           <Button variant="ghost" onClick={() => setStep((s) => (s - 1) as WizardStep)}>← {b.back}</Button>
         ) : <span />}
-        {onRemove && <button onClick={onRemove} className="text-neon-red text-xs hover:underline">{b.deleteTask}</button>}
-        {/* Finish is reachable from EVERY step and is never disabled: the first
-            press reveals every unrevealed blocker and keeps the editor open (it
-            lands on the offending step), the next one closes. */}
         <div className="ms-auto flex items-center gap-2">
-          {step < lastStep && (
+          {step < lastStep ? (
             <Button disabled={!canGoNext(stepKey, task)} onClick={() => setStep((s) => (s + 1) as WizardStep)}>{b.next} →</Button>
+          ) : (
+            /* Never disabled: the first press reveals every unrevealed blocker and
+               keeps the editor open (landing on the offending step), the next
+               closes. */
+            <Button onClick={finish}>{b.done}</Button>
           )}
-          <Button variant={step < lastStep ? 'ghost' : undefined} onClick={finish}>{b.done}</Button>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -272,7 +517,7 @@ function OptInChip({ label, count, onClick, b }: {
       <span aria-hidden className="text-[--ink-3]">+</span>
       <span>{label}</span>
       {count > 0 && (
-        <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(count)}</span>
+        <span className="rounded-full bg-rp-fire/10 text-ink-fire px-1.5 py-px text-[12px]">{b.sectionSetCount(count)}</span>
       )}
     </button>
   );
@@ -292,7 +537,7 @@ function OptInGroup({ title, onHide, hideLabel, children }: {
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-[--ink-3] uppercase tracking-wider">{title}</span>
         <button type="button" onClick={onHide} aria-label={hideLabel} title={hideLabel}
-          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] leading-none">
+          className={`${TAP_INLINE} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] leading-none`}>
           ✕
         </button>
       </div>
@@ -316,7 +561,7 @@ function OptInGroup({ title, onHide, hideLabel, children }: {
 // describe this as server-enforced until a save/launch door actually calls it.
 function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
   if (skipsGpsCheck(task)) {
-    return <p className="text-[11px] text-[--ink-3] leading-snug">{b.locHideNeedsGps}</p>;
+    return <p className="text-[13px] text-[--ink-3] leading-snug">{b.locHideNeedsGps}</p>;
   }
   return (
     <div>
@@ -327,7 +572,7 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
             : { hideLocation: undefined, locationClue: undefined, locationClueHe: undefined })} />
         <span>
           <span className="text-[13px] font-medium text-[--ink-1]">{b.hideLocation}</span>
-          <span className="block text-[11px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
+          <span className="block text-[13px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
         </span>
       </label>
       {task.hideLocation && (
@@ -339,9 +584,9 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
             // A hidden task is still a located task — the placement step's
             // "not placed yet" state and the readiness surface are what
             // guarantee real coordinates exist before the run launches.
-            <p className="text-[11px] text-rp-fire mt-1">{b.hideLocationNeedsCoords}</p>
+            <p className="text-[13px] text-ink-fire mt-1">{b.hideLocationNeedsCoords}</p>
           ) : !task.locationClue?.trim() && (
-            <p className="text-[11px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
+            <p className="text-[13px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
           )}
           {/* Leak guard (change: hidden-location-leak-guard): title/description
               still ship to players, so warn if they name the place. Advisory only. */}
@@ -349,7 +594,7 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
             const leaks = locationLeakWarnings(task);
             if (leaks.length === 0) return null;
             return (
-              <p className="text-[11px] text-rp-fire mt-1">
+              <p className="text-[13px] text-ink-fire mt-1">
                 {leaks.length === 2 ? b.hideLocationLeakBoth
                   : leaks[0] === 'title' ? b.hideLocationLeakTitle
                   : b.hideLocationLeakDesc}
@@ -370,8 +615,14 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
 // 40 m arrival check. The four stored `TriggerMode` values are unchanged: see
 // lib/locationPicker for why 'instant' stays a LOCATED task rather than being
 // folded into 'anywhere'.
-function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
+function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guided }: {
   task: Task; set: (p: Partial<Task>) => void; b: B;
+  // What a הקמה מהירה step leaves on screen here (change:
+  // quick-setup-guided-editor). DISPLAY only — the stored placement is untouched,
+  // and both flags are true whenever the flow is not driving this step.
+  guided?: { showModeChooser: boolean; showAdvanced: boolean };
+  /** See TaskWizard's prop of the same name. */
+  gameAnchors?: readonly { lat: number; lng: number }[];
   // Lifted to TaskWizard (change: quick-setup-mobile-visibility) so a הקמה מהירה
   // step targeting the radius / skip-GPS / hide-location clue can open this panel
   // the same way a step targets an execution-tab chip.
@@ -386,6 +637,16 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
     { choice: 'anywhere', label: b.locAnywhere, sub: b.locAnywhereSub, desc: b.locAnywhereDesc },
     { choice: 'specific', label: b.locSpecific, sub: b.locSpecificSub, desc: b.locSpecificDesc },
   ];
+  // Escape closes the advanced dialog. Bound while it is open only, so the wizard's
+  // own Escape handling is untouched the rest of the time.
+  useEffect(() => {
+    if (!advOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setAdvOpen(() => false); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [advOpen, setAdvOpen]);
+  const showModeChooser = guided?.showModeChooser !== false;
+  const showAdvanced = guided?.showAdvanced !== false;
   const radius = task.geofenceRadiusMeters ?? DEFAULT_RADIUS_M;
   const skipGps = skipsGpsCheck(task);
   const onChange = (lat: number, lng: number) => set({ coordinates: { lat, lng } });
@@ -394,79 +655,143 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
     // layout strategy: on any normal panel everything fits and no scrollbar appears.
     // It only engages on a viewport too short for a usable map, where scrolling to a
     // real map beats staring at a clipped one.
-    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto" data-qs-field="coordinates">
+    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto overscroll-contain" data-qs-field="coordinates">
+      {showModeChooser && (
       <div className="shrink-0">
         <Label>{b.fireQuestion}</Label>
-        {/* The two location choices lead (bigger, primary — this is the actual
-            decision), with "Advanced options" as a square toggle trailing them
-            (change: builder-location-step-polish). It used to be a small gear pill
-            squeezed onto the question row, easy to miss and cramped against the
-            question text; a full-height square with its own icon and label is both
-            more visible and reads as what it is — a secondary, optional control
-            beside the primary choice, not a peer of it. `items-stretch` (the flex
-            default) makes it match the choice row's height with no fixed number to
-            keep in sync. DOM order, not left/right classes, decides which SIDE it
-            lands on: RTL puts the first child on the right, so this naturally
-            mirrors correctly in LTR too. */}
+        {/* ── The answers, a partition, and the settings tile ───────────────────
+            Third revision, and the two failures before it are why this shape is
+            what it is. It began as a card INSIDE this row, which read as a third
+            answer to "where can this be done?" (d4be1fd measured it: same height,
+            same border, same icon-over-label). The fix demoted it to a small
+            underlined link, which cured that and made it invisible - Ahiya could
+            not find the settings at all.
+
+            So it is back in the row at full size, with a literal PARTITION between
+            it and the answers, which is what he asked for. The line is the whole
+            argument: the two choices live to one side of it and are a closed set,
+            and what is past it is plainly not a member of that set. The tile is
+            also a different SHAPE (a fixed square, not a flexing half) and carries
+            sliders rather than the pin/globe vocabulary.
+
+            And it no longer opens an accordion. An accordion pushed the map down
+            and put the settings in a 45%-tall scroll box, which is how the radius
+            note ended up wrapping to three lines. It opens its own dialog now:
+            nothing moves, and the settings get a full-width surface. */}
         <div className="flex items-stretch gap-2 mt-1.5">
-          <div className="flex-1 grid grid-cols-2 gap-2">
+          {/* `min-w-0` lets the two answers SHRINK. Without it a grid column refuses
+              to go below its content width, so on a narrow panel the pair stayed wide
+              and pushed the settings tile into the margin (reported: "they are too
+              wide and then advanced options goes into the edge"). The tile beside
+              them is `shrink-0`, so it keeps its size and the answers give up the
+              space instead - which is the right way round, because the tile is
+              already the smallest thing in the row. */}
+          <div className="grid grid-cols-2 gap-2 flex-1 min-w-0 [&>button]:min-w-0">
             {CHOICES.map((c) => {
               const active = choice === c.choice;
               return (
                 <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
                   className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-4 px-2 transition-colors ${
                     active
-                      ? 'border-rp-fire bg-rp-fire/10 text-rp-fire shadow-soft'
+                      ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
                       : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
                   <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-7 h-7" />
                   <span className="text-[14px] font-semibold leading-tight text-center">{c.label}</span>
-                  <span className="text-[11px] leading-tight text-center opacity-70">{c.sub}</span>
+                  <span className="text-[13px] leading-tight text-center opacity-70">{c.sub}</span>
                 </button>
               );
             })}
           </div>
-          {choice === 'specific' && (
-            <button type="button" onClick={() => setAdvOpen((o) => !o)} aria-expanded={advOpen}
-              title={b.locAdvanced}
-              className={`shrink-0 w-20 sm:w-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 px-1.5 transition-colors ${
-                advOpen
-                  ? 'border-rp-fire bg-rp-fire/10 text-rp-fire shadow-soft'
-                  : 'border-[--rp-border] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
-              <span aria-hidden className="text-xl leading-none">⚙</span>
-              <span className="text-[11px] font-medium leading-tight text-center">{b.locAdvancedShort}</span>
-            </button>
+
+          {showAdvanced && choice === 'specific' && (
+            <>
+              {/* THE PARTITION. Not decoration - it is the thing that stops the
+                  tile beside it being read as a third answer. */}
+              <div aria-hidden className="w-px self-stretch bg-[--rp-border]" />
+              <button
+                type="button"
+                onClick={() => setAdvOpen(() => true)}
+                title={b.locAdvanced}
+                aria-haspopup="dialog"
+                data-qs-field="locationAdvanced"
+                className="shrink-0 w-[76px] flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed
+                  border-[--rp-border] bg-[--surface-2] text-[--ink-2] py-4 px-1.5 transition-colors
+                  hover:border-[--ink-3] hover:bg-[--surface-3] hover:text-[--ink-1]"
+              >
+                <BuilderIcon name="tune" className="w-6 h-6" />
+                <span className="text-[12px] font-semibold leading-tight text-center">{b.locAdvancedShort}</span>
+              </button>
+            </>
           )}
         </div>
-        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">
+        <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">
           {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
         </p>
       </div>
+      )}
 
-      {/* Advanced settings: in flow, but ONLY while open (change:
-          builder-step1-full-height-map, revised). Collapsed it is not here at all —
-          its trigger is the gear on the question row above, so the old always-present
-          accordion header is gone. Opening it is a deliberate act, so briefly trading
-          map height for the settings the creator just asked for is the expected
-          behaviour; capped and scrollable so it can never eat the whole step. The
-          previous attempt floated this over the map and made the map unreadable. */}
-      {choice === 'specific' && advOpen && (
-        <div className="shrink-0 max-h-[45%] overflow-y-auto rounded-lg border border-[--rp-border] bg-[--surface-2] p-2.5">
-          <div className="space-y-3">
+      {/* ── Advanced settings, in their OWN window ─────────────────────────────
+          It used to be an accordion in the flow. Two costs, both reported: opening
+          it shoved the map down the screen, and it squeezed the settings into a
+          45%-tall scroll box - which is why the radius explanation wrapped onto
+          three lines. Ahiya: "I cannot stand this scrolling and accordion, it
+          complicates things too much ... I want a real window of its own."
+
+          A dialog answers both at once: nothing in the step moves, and the content
+          gets a full-width surface where the prose fits on one or two lines. It is
+          portalled to the body so `fixed inset-0` resolves against the VIEWPORT and
+          not against the wizard's own scroll container. */}
+      {showAdvanced && choice === 'specific' && advOpen && createPortal(
+        // The backdrop is deliberately NOT click-to-dismiss: that needs an onClick on a
+        // non-interactive div, and scripts/test-creator-a11y-scan.ts holds a baseline for
+        // those which "ratchets DOWN only - never raise it". Closing is covered three ways
+        // that are all real controls: the labelled ✕, the Done button, and Escape.
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={b.locAdvanced}
+            className="w-full max-w-lg max-h-[85vh] overflow-y-auto overscroll-contain rounded-xl
+              border border-[--rp-border] bg-[--surface-1] shadow-2xl"
+          >
+            <div className="flex items-start gap-3 px-4 pt-4 pb-2">
+              <div className="min-w-0 text-start">
+                <h2 className="text-sm font-semibold text-[--ink-1]">{b.locAdvanced}</h2>
+                <p className="mt-1 text-xs text-[--ink-3]">{b.locAdvancedHint}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdvOpen(() => false)}
+                aria-label={b.exclusiveClose}
+                title={b.exclusiveClose}
+                className={`${TAP_TARGET} ms-auto -me-2 shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]`}
+              >✕</button>
+            </div>
+            <div className="px-4 pb-4 space-y-4">
               <div>
                 <Label dense>{b.locRadiusLabel}</Label>
-                <div className="flex items-center gap-1.5" data-qs-field="geofenceRadiusMeters">
+                <div className="flex items-center gap-1.5 flex-wrap" data-qs-field="geofenceRadiusMeters">
                   <Input dense type="number" min={1} className="w-24" value={radius}
                     onChange={(e) => set(radiusPatch(task, Math.max(1, parseInt(e.target.value) || DEFAULT_RADIUS_M)))} />
-                  <span className="text-[11px] text-[--ink-3]">{b.metersShort}</span>
+                  <span className="text-[13px] text-[--ink-3]">{b.metersShort}</span>
                   {/* The two old top-level buttons, demoted to one-tap presets. */}
                   <div className="flex gap-1 ms-auto">
-                    <Button variant="ghost" className="text-[11px] px-2 py-1"
-                      onClick={() => set(radiusPatch(task, TIGHT_RADIUS_M))}>{b.locRadiusPresetTight}</Button>
-                    <Button variant="ghost" className="text-[11px] px-2 py-1"
+                    <Button variant="ghost" className="text-[13px] px-2 py-1"
+                      onClick={() => set(radiusPatch(task, TIGHT_PRESET_M))}>{b.locRadiusPresetTight({ m: TIGHT_PRESET_M })}</Button>
+                    <Button variant="ghost" className="text-[13px] px-2 py-1"
                       onClick={() => set(radiusPatch(task, DEFAULT_RADIUS_M))}>{b.locRadiusPresetDefault}</Button>
                   </div>
                 </div>
-                <p className="text-[11px] text-[--ink-3] leading-snug mt-1">{b.locRadiusHelp}</p>
+                <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.locRadiusHelp}</p>
+                {/* A radius under the floor is not a stricter mission, it is one the
+                    server cannot honour literally. Say what will actually happen,
+                    rather than letting a creator discover it by failing to check in
+                    at their own mission. */}
+                {radiusBelowFloor(radius) && (
+                  <p className="text-[13px] text-[--ink-3] leading-snug mt-1">
+                    {b.locRadiusFloorNote({ m: enforcedRadiusM(radius) })}
+                  </p>
+                )}
               </div>
 
               <label className="flex items-start gap-2 cursor-pointer">
@@ -474,15 +799,21 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
                   onChange={(e) => set(skipGpsPatch(task, e.target.checked))} />
                 <span>
                   <span className="text-[13px] font-medium text-[--ink-1]">{b.locSkipGps}</span>
-                  <span className="block text-[11px] text-[--ink-3] leading-snug">{b.locSkipGpsDesc}</span>
+                  <span className="block text-[13px] text-[--ink-3] leading-snug">{b.locSkipGpsDesc}</span>
                 </span>
               </label>
 
-            {/* Hide location moved here from the old, disconnected `rules`
-                section: it only ever applied to a located task. */}
-            <HideLocationField task={task} set={set} b={b} />
+              {/* Hide location moved here from the old, disconnected `rules`
+                  section: it only ever applied to a located task. */}
+              <HideLocationField task={task} set={set} b={b} />
+
+              <div className="pt-1">
+                <Button onClick={() => setAdvOpen(() => false)}>{b.done}</Button>
+              </div>
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* "Not placed yet" (change: builder-first-task-flow). A located task that
@@ -498,8 +829,8 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
       {choice === 'specific' && taskPlacementState(task) === 'unplaced' && (
         <div className="shrink-0 flex items-center gap-2 rounded-lg bg-[--surface-2] px-2.5 py-1.5">
           <span aria-hidden className="text-xs leading-none">📍</span>
-          <p className="text-[11px] text-[--ink-2] min-w-0 flex-1 truncate">{b.notPlacedTitle}</p>
-          <Button variant="ghost" className="text-[11px] shrink-0 px-2 py-0.5" onClick={() => setExpanded(true)}>{b.notPlacedAction}</Button>
+          <p className="text-[13px] text-[--ink-2] min-w-0 flex-1 truncate">{b.notPlacedTitle}</p>
+          <Button variant="ghost" className="text-[13px] shrink-0 px-2 py-0.5" onClick={() => setExpanded(true)}>{b.notPlacedAction}</Button>
         </div>
       )}
 
@@ -525,12 +856,26 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
               button on the search button (top) and then on the coordinates input
               (bottom) — two bugs from the same wrong assumption. `cornerControl`
               places it in the map's own coordinate space, beside MapModeToggle. */}
-          <LocationStep coordinates={task.coordinates} onChange={onChange} fill
+          {/* `cooperativeGestures`: a wheel scroll over this map now scrolls the
+              PANEL, and zooms only with ctrl/⌘ held. This map lives inside a
+              scrolling step, so it used to swallow every scroll aimed at bringing
+              the rest of itself into view — the creator's "super uncomfortable"
+              (change: quick-setup-one-card). Which makes the enlarge control the
+              real answer to "let me see all of it", so it stops being a 28px
+              translucent glyph. */}
+          <LocationStep coordinates={task.coordinates} onChange={onChange} fill anchors={gameAnchors} cooperativeGestures
             cornerControl={(
+              /* A LABELLED, opaque, 44px control. It was a `w-7 h-7` ⛶ on a
+                 `bg-[--surface-1]/90` wash over map tiles: 28px against the house
+                 minimum of 44 (lib/interaction), no text, and an icon that reads as
+                 a decoration at that size over a busy topo map. The creator's
+                 verdict was that it is "almost invisible" — and it is the control
+                 that answers their other complaint, so it has to be findable. */
               <button type="button" onClick={() => setExpanded(true)}
-                aria-label={b.enlargeMap} title={b.enlargeMap}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-[--rp-border] bg-[--surface-1]/90 backdrop-blur text-[--ink-2] hover:text-[--ink-1] shadow-soft">
-                <span className="text-sm leading-none">⛶</span>
+                title={b.enlargeMap}
+                className="min-h-[44px] px-3 flex items-center gap-1.5 rounded-xl border border-[--rp-border] bg-[--surface-1] text-[13px] font-medium text-[--ink-1] hover:bg-[--surface-2] shadow-soft">
+                <span aria-hidden className="text-sm leading-none">⛶</span>
+                <span>{b.enlargeMap}</span>
               </button>
             )} />
         </div>
@@ -548,10 +893,10 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
             <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-[--rp-border]">
               <span className="font-medium text-sm text-[--ink-1]">{b.mapModalTitle}</span>
               <button onClick={() => setExpanded(false)} aria-label={b.closePanel}
-                className="w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">✕</button>
+                className={`${TAP_TARGET} rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}>✕</button>
             </div>
             <div className="flex-1 min-h-0 p-3 flex flex-col">
-              <LocationStep coordinates={task.coordinates} onChange={onChange} fill />
+              <LocationStep coordinates={task.coordinates} onChange={onChange} fill anchors={gameAnchors} />
             </div>
           </div>
         </div>,
@@ -590,7 +935,7 @@ function QuizModeSection({ task, set, b, revealed, touch }: {
             onClick={() => void switchMode(mode)}
             className={`flex-1 rounded-lg border py-1.5 text-xs transition-colors ${
               ordering === mode
-                ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                 : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
             {mode ? b.quizModeOrdering : b.quizModeChoices}
           </button>
@@ -654,17 +999,17 @@ function OrderingItemsEditor({ task, set, b, revealError, onTouch }: {
       <Label dense>{b.orderingItemsLead}</Label>
       <div className="space-y-1">
         {rows.map((row, i) => (
-          <div key={row.id} className="flex items-center gap-1.5">
-            <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
+          <div key={row.id} className="flex items-center gap-2">
+            <span className="text-[13px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
             <Input dense value={row.text} dir="auto" className="flex-1 min-w-0"
               onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
             <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={`${b.mediaMoveUp} ${i + 1}`}
-              className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[--surface-2] text-xs">↑</button>
+              className={`${TAP_CLUSTER} text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 rounded hover:bg-[--surface-2] disabled:hover:bg-transparent text-xs`}>↑</button>
             <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label={`${b.mediaMoveDown} ${i + 1}`}
-              className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[--surface-2] text-xs">↓</button>
+              className={`${TAP_CLUSTER} text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 rounded hover:bg-[--surface-2] disabled:hover:bg-transparent text-xs`}>↓</button>
             <button onClick={() => apply(rows.filter((r) => r.id !== row.id))} disabled={rows.length <= 1}
               aria-label={`${b.deleteTask} ${i + 1}`}
-              className="text-neon-red shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs">✕</button>
+              className={`${TAP_CLUSTER} text-neon-red shrink-0 rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>✕</button>
           </div>
         ))}
       </div>
@@ -672,8 +1017,8 @@ function OrderingItemsEditor({ task, set, b, revealError, onTouch }: {
         onClick={() => apply([...rows, { id: uuid(), text: '' }])}>
         + {b.orderingAddItem}
       </Button>
-      <span className="text-[11px] text-[--ink-3] ms-2">{clean.length}/{ORDER_ITEMS_MAX}</span>
-      {error && <p className="text-[11px] text-rp-amber">{error}</p>}
+      <span className="text-[13px] text-[--ink-3] ms-2">{clean.length}/{ORDER_ITEMS_MAX}</span>
+      {error && <p className="text-[13px] text-ink-amber">{error}</p>}
     </div>
   );
 }
@@ -706,7 +1051,7 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
 
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-[--ink-3] leading-snug">{b.surveyLead}</p>
+      <p className="text-[13px] text-[--ink-3] leading-snug">{b.surveyLead}</p>
       <div className="flex gap-1.5" role="tablist">
         {([false, true] as const).map((mode) => (
           <button key={String(mode)} role="tab" aria-selected={choices === mode}
@@ -717,7 +1062,7 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
             }}
             className={`flex-1 rounded-lg border py-1.5 text-xs transition-colors ${
               choices === mode
-                ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                 : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
             {mode ? b.surveyModeChoices : b.surveyModeText}
           </button>
@@ -729,13 +1074,13 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
           <div className="space-y-1">
             {rows.map((row, i) => (
               <div key={row.id} className="flex items-center gap-1.5">
-                <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
+                <span className="text-[13px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
                 <Input dense value={row.text} dir="auto" className="flex-1 min-w-0"
                   placeholder={b.surveyChoicePlaceholder(i + 1)}
                   onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
                 <button onClick={() => apply(rows.filter((r) => r.id !== row.id))} disabled={rows.length <= SURVEY_CHOICES_MIN}
                   aria-label={`${b.deleteTask} ${i + 1}`}
-                  className="text-neon-red shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs">✕</button>
+                  className={`${TAP_INLINE} text-neon-red shrink-0 rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>✕</button>
               </div>
             ))}
           </div>
@@ -743,8 +1088,8 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
             onClick={() => apply([...rows, { id: uuid(), text: '' }])}>
             + {b.surveyAddChoice}
           </Button>
-          <span className="text-[11px] text-[--ink-3] ms-2">{clean.length}/{SURVEY_CHOICES_MAX}</span>
-          {error && revealError && <p className="text-[11px] text-rp-amber">{b.surveyChoicesError}</p>}
+          <span className="text-[13px] text-[--ink-3] ms-2">{clean.length}/{SURVEY_CHOICES_MAX}</span>
+          {error && revealError && <p className="text-[13px] text-ink-amber">{b.surveyChoicesError}</p>}
         </div>
       )}
     </div>
@@ -781,11 +1126,16 @@ function typeMetaOf(b: B): Record<TaskType, { label: string; short: string; desc
 // on step 3, beside the point value it actually interacts with; every other
 // optional field became a chip there too. This step is the one a creator must
 // answer, so it asks nothing else.
-function DetailsStepBody({ task, set, b, replace, gameId }: {
+function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true }: {
   task: Task; set: (p: Partial<Task>) => void; b: B; replace: (t: Task) => void;
   // Media is authored here now (change: task-media-durability), and the upload path
   // needs the game id to build its storage prefix.
   gameId?: string;
+  // Guided mode hides "how do teams complete this?" — the flow is pointing at a
+  // mission that already HAS a kind, and re-deciding that mid-step is the one
+  // choice it is not asking for (lib/guidedEditor). DISPLAY only, per that
+  // module's rule 2: nothing here is written, so the type is untouched.
+  showTypePicker?: boolean;
 }) {
   // Which type's sample list is open (only for a type that offers more than one).
   const [samplePickerFor, setSamplePickerFor] = useState<TaskType | null>(null);
@@ -823,7 +1173,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
         {/* The naming gate is the wizard's ONLY forward gate, so it states its
             reason beside the field. Calm register: this is a hint, not an error. */}
         {task.title.trim() === '' && (
-          <p className="text-[11px] text-[--ink-3] leading-snug mt-1">{b.titleRequiredHint}</p>
+          <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.titleRequiredHint}</p>
         )}
       </div>
       <div>
@@ -842,11 +1192,20 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
         <MediaSection task={task} set={set} b={b} gameId={gameId} replace={replace} />
       </div>
 
+      {showTypePicker && (
       <div>
         <Label dense>{b.howComplete}</Label>
         {/* Compact type picker: icon + label grid, with a one-line description for
-            the active type below. */}
-        <div className="grid grid-cols-3 gap-1.5">
+            the active type below.
+            TWO columns on a phone (change: builder-mobile-simplification). At
+            three, a tile inside the mission sheet is ~110px wide and `pe-12`
+            already reserves 48px of that for the ✨ and the tooltip, leaving
+            ~35px of text — every label rendered as "…מ" and the creator was being
+            asked to choose between nine options they could not read. Two columns
+            cost about 70px of height and buy back the whole label. Same lesson the
+            new-game path cards learned (see NewGameWizard): never truncate a
+            choice. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
           {TYPE_PICKER_ORDER.map((ty) => {
             const active = task.type === ty;
             return (
@@ -859,9 +1218,9 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                       : { type: ty },
                   )}
                   className={`w-full flex items-center gap-1.5 rounded-lg border px-2 pe-12 py-1.5 text-start transition-colors ${
-                    active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
+                    active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
                   <BuilderIcon name={TYPE_ICON_NAME[ty]} className="w-4 h-4 shrink-0" />
-                  <span className="text-[11px] font-medium truncate">{TYPE_META[ty].label}</span>
+                  <span className="text-[13px] font-medium truncate">{TYPE_META[ty].label}</span>
                 </button>
                 <span className="absolute top-1/2 -translate-y-1/2 end-1 z-10 flex items-center gap-0.5">
                   {/* Load an authored, immediately completable example of this
@@ -869,7 +1228,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                   <button type="button" onClick={() => onSampleClick(ty)}
                     aria-label={b.loadSampleFor(TYPE_META[ty].label)} title={b.loadSampleFor(TYPE_META[ty].label)}
                     aria-expanded={samplePickerFor === ty}
-                    className="w-6 h-6 rounded-full bg-[--surface-2] text-[--ink-3] text-[11px] leading-none flex items-center justify-center hover:text-rp-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
+                    className="w-6 h-6 rounded-full bg-[--surface-2] text-[--ink-3] text-[13px] leading-none flex items-center justify-center hover:text-ink-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
                     ✨
                   </button>
                   <RichTooltip title={TYPE_META[ty].label} body={TYPE_META[ty].desc} svg={TYPE_ANIM[ty]} />
@@ -877,11 +1236,11 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                 {/* A type with several samples offers its labelled list. */}
                 {samplePickerFor === ty && (
                   <div className="absolute z-20 top-full mt-1 start-0 min-w-full w-max max-w-[15rem] rounded-lg border border-[--rp-border] bg-[--surface-1] shadow-soft p-1">
-                    <p className="px-1.5 py-1 text-[10px] text-[--ink-3]">{b.samplePickTitle(TYPE_META[ty].label)}</p>
+                    <p className="px-1.5 py-1 text-[12px] text-[--ink-3]">{b.samplePickTitle(TYPE_META[ty].label)}</p>
                     {samplesForType(ty).map((sample) => (
                       <button key={sample.label} type="button" dir="auto"
                         onClick={() => void applyTypeSample(ty, sample)}
-                        className="w-full text-start rounded px-1.5 py-1 text-[11px] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] truncate">
+                        className="w-full text-start rounded px-1.5 py-1 text-[13px] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] truncate">
                         {sample.label}
                       </button>
                     ))}
@@ -893,8 +1252,9 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
         </div>
         {/* The CAPTION takes the short form; the tooltip above and Step 3's note
             keep the full sentence (change: builder-ux-round-2). */}
-        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">{TYPE_META[task.type].short}</p>
+        <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">{TYPE_META[task.type].short}</p>
       </div>
+      )}
     </>
   );
 }
@@ -927,9 +1287,9 @@ function UnlockSection({ task, siblings, set, b }: {
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] text-[--ink-3] leading-snug">{b.unlockAfterHint}</p>
+      <p className="text-[13px] text-[--ink-3] leading-snug">{b.unlockAfterHint}</p>
       {others.length === 0 ? (
-        <p className="text-[11px] text-[--ink-3]">{b.unlockAfterNone}</p>
+        <p className="text-[13px] text-[--ink-3]">{b.unlockAfterNone}</p>
       ) : (
         <div className="space-y-1">
           {others.map((s) => {
@@ -987,12 +1347,21 @@ function MediaSection({ task, set, b, gameId, replace }: {
   // parallel uploads. A ref is the only thing here that is current at await-resolution.
   const latest = useRef(task);
   latest.current = task;
+  const [dragOver, setDragOver] = useState(false);
+  // A boolean, not a one-member string union: there is exactly one way this can
+  // fail from the creator's side (the source site would not release the picture),
+  // and a literal like 'blocked' in a .tsx reads to the i18n scanner as UI copy
+  // that bypasses the dictionary. It was right to flag it.
+  const [dropBlocked, setDropBlocked] = useState(false);
 
-  const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-picking the same file
-    if (!file) return;
+  // ONE ingest path for every source (change: drop-media-onto-the-editor). The
+  // file picker, a file dragged from the desktop and a picture dragged out of
+  // another browser tab all end here, so the durability rules below — the
+  // server's own accept predicate, and reading `latest.current` rather than the
+  // render closure — cannot apply to one route and not another.
+  const ingestFile = async (file: File) => {
     setUploadError(false);
+    setDropBlocked(false);
     setUploadPct(0);
     try {
       const { url, kind } = await uploadTaskMedia(file, { gameId: gameId ?? 'draft', taskId: task.id }, setUploadPct);
@@ -1008,6 +1377,90 @@ function MediaSection({ task, set, b, gameId, replace }: {
     } catch {
       setUploadError(true);
     } finally {
+      setUploadPct(null);
+    }
+  };
+
+  const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    await ingestFile(file);
+  };
+
+  // ── Drop ────────────────────────────────────────────────────────────────────
+  //
+  // Two different things arrive on a drop, and conflating them is what makes this
+  // feature feel broken:
+  //
+  //   A FILE — dragged from the desktop, Photos, Finder/Explorer. `files` is
+  //   populated and this is exactly the picker's path. Always works.
+  //
+  //   A URL — dragged out of another browser TAB. The browser hands over
+  //   `text/uri-list` (and `text/html`) and `files` is EMPTY: the page never gives
+  //   up the bytes. So the picture has to be fetched, and a cross-origin image is
+  //   only readable if its host sends CORS headers. Wikimedia and Unsplash do;
+  //   Google Images thumbnails do not. That is a property of the SOURCE, not of
+  //   this code, so the failure is reported as what it is rather than as a generic
+  //   upload error — and `mediaDropBlocked` tells the creator the one thing that
+  //   always works instead.
+  //
+  // Storing the foreign URL directly is not an option worth considering: the
+  // server's accept-set is compiled to our own upload origins, so it would save
+  // "successfully" and then be dropped on a later autosave — the exact silent
+  // data loss `normalizeStagesMedia` exists to prevent.
+  const dropUrlFrom = (dt: DataTransfer): string | null => {
+    const uri = dt.getData('text/uri-list') || dt.getData('text/plain') || '';
+    const direct = uri.split('\n').map((l) => l.trim()).find((l) => /^https?:\/\//i.test(l));
+    if (direct) return direct;
+    // Some sources only offer the dragged element's markup.
+    const html = dt.getData('text/html') || '';
+    const m = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+    return m && /^https?:\/\//i.test(m[1]) ? m[1] : null;
+  };
+
+  const onDrop = async (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (uploadPct !== null) return;
+    const dt = e.dataTransfer;
+    const file = dt.files?.[0];
+    if (file) { await ingestFile(file); return; }
+    const url = dropUrlFrom(dt);
+    if (!url) return;
+    setDropBlocked(false);
+    setUploadError(false);
+    setUploadPct(0);
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) throw new Error('fetch failed');
+      const blob = await res.blob();
+      if (!/^(image|video)\//.test(blob.type)) { setDropBlocked(true); setUploadPct(null); return; }
+      const name = (url.split('/').pop() || 'image').split('?')[0] || 'image';
+      setUploadPct(null);
+      await ingestFile(new File([blob], name, { type: blob.type }));
+    } catch {
+      // The browser could not read it — almost always CORS. Before giving up, ask
+      // the SERVER to fetch it (change: server-side-url-ingest): it is not bound by
+      // the browser's same-origin rules, so this is what makes a drag from Google
+      // Images work at all. Second, not first, so the server is asked to make an
+      // outbound request only when the browser genuinely cannot.
+      try {
+        const viaServer = await ingestTaskMediaFromUrl(url, { gameId: gameId ?? 'draft', taskId: task.id });
+        if (viaServer && isTaskMediaValid(viaServer)) {
+          const current = latest.current;
+          const next = [...(current.media ?? []), { id: uuid(), ...viaServer } as TaskMedia];
+          if (replace) replace({ ...current, media: next });
+          else commit(next);
+          setUploadPct(null);
+          return;
+        }
+        // `null` means there is no self-hosted API here (local dev), so the honest
+        // answer is still the CORS refusal rather than inventing a second one.
+        setDropBlocked(true);
+      } catch {
+        setDropBlocked(true);
+      }
       setUploadPct(null);
     }
   };
@@ -1049,33 +1502,51 @@ function MediaSection({ task, set, b, gameId, replace }: {
                     : <span className="text-2xl" aria-hidden>▶</span>}
               </div>
               <div className="flex-1 min-w-0 space-y-1">
-                <div className="text-[11px] text-[--ink-3] truncate">
+                <div className="text-[13px] text-[--ink-3] truncate">
                   {m.kind === 'youtube' ? b.mediaKindYouTube : m.kind === 'video' ? b.mediaKindVideo : b.mediaKindImage}
                 </div>
                 <Input dense value={m.caption ?? ''} onChange={(e) => setCaption(i, e.target.value)}
                   placeholder={b.mediaCaptionPlaceholder} dir="auto" />
               </div>
-              <div className="flex flex-col gap-1 shrink-0">
+              {/* Three ADJACENT glyph controls, so TAP_CLUSTER (36px) not the 44px
+                  box: stacked 44s would make this row taller than the thumbnail it
+                  belongs to, and `gap-2` keeps the mandated 8px between them so
+                  "reorder" and "delete this picture" can't merge into one strip. */}
+              <div className="flex flex-col gap-2 shrink-0">
                 <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={b.mediaMoveUp}
-                  className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 text-xs">↑</button>
+                  className={`${TAP_CLUSTER} rounded text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>↑</button>
                 <button onClick={() => move(i, 1)} disabled={i === media.length - 1} aria-label={b.mediaMoveDown}
-                  className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 text-xs">↓</button>
+                  className={`${TAP_CLUSTER} rounded text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] disabled:opacity-30 disabled:hover:bg-transparent text-xs`}>↓</button>
                 <button onClick={() => removeAt(i)} aria-label={b.mediaRemove}
-                  className="text-neon-red hover:opacity-70 text-xs">✕</button>
+                  className={`${TAP_CLUSTER} rounded text-neon-red hover:bg-neon-red/10 text-xs`}>✕</button>
               </div>
             </li>
           ))}
         </ul>
       )}
 
-      {/* Upload from computer */}
-      <div className="flex items-center gap-2">
-        <label className="cursor-pointer self-start text-xs text-rp-fire hover:underline">
-          + {b.mediaUpload}
-          <input type="file" accept="image/*,video/*" className="hidden" onChange={onPickFile} disabled={uploadPct !== null} />
-        </label>
-        {uploadPct !== null && <span className="text-[11px] text-[--ink-3]">{uploadPct}%</span>}
-        {uploadError && <span className="text-[11px] text-neon-red">{b.mediaUploadError}</span>}
+      {/* Upload from computer, or DROP onto this zone (change:
+          drop-media-onto-the-editor). The whole box is the target, not the link:
+          a drop target the size of a text link is one a creator misses. */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        className={`rounded-xl border-2 border-dashed px-3 py-3 transition-colors ${
+          dragOver ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="cursor-pointer text-xs text-ink-fire hover:underline">
+            + {b.mediaUpload}
+            <input type="file" accept="image/*,video/*" className="hidden" onChange={onPickFile} disabled={uploadPct !== null} />
+          </label>
+          <span className="text-[13px] text-[--ink-3]">{b.mediaDropHint}</span>
+          {uploadPct !== null && <span className="text-[13px] text-[--ink-3]">{uploadPct}%</span>}
+          {uploadError && <span className="text-[13px] text-neon-red">{b.mediaUploadError}</span>}
+        </div>
+        {dropBlocked && (
+          <p className="text-[13px] text-neon-red mt-1.5">{b.mediaDropBlocked}</p>
+        )}
       </div>
 
       {/* YouTube link */}
@@ -1085,7 +1556,7 @@ function MediaSection({ task, set, b, gameId, replace }: {
             placeholder={b.mediaYouTubePlaceholder} dir="ltr" className="flex-1 min-w-0" />
           <Button variant="ghost" onClick={addYouTube} disabled={!ytUrl.trim()}>{b.mediaAddYouTube}</Button>
         </div>
-        {ytError && <span className="text-[11px] text-neon-red">{b.mediaYouTubeError}</span>}
+        {ytError && <span className="text-[13px] text-neon-red">{b.mediaYouTubeError}</span>}
       </div>
     </OptInGroup>
   );
@@ -1246,7 +1717,6 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
   const TYPE_META = typeMetaOf(b);
   const siblingCount = siblings?.length ?? 1;
   const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
-  void replace;
 
   const GROUP_TITLE: Record<OptInGroupKey, string> = {
     hint: b.hintField, timerPoints: b.groupTimerPoints, rules: b.groupRules,
@@ -1268,13 +1738,26 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
     <>
       <div className="space-y-2">
         {task.type === 'smart_station' && (
-          <div>
-            <Label dense>{b.secretCode}</Label>
-            <Input dense data-qs-field="smart.secretCode" value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
-              onChange={(e) => {
-                touch('stationCode');
-                setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true });
-              }} />
+          <div className="space-y-2">
+            {/* answer-scored-question: ONE code, or several codes each with its own
+                points (the operator decides which code to hand out). */}
+            <label className="flex items-center gap-2 text-xs text-[--ink-2]">
+              <input type="checkbox" checked={(task.answerOutcomes?.length ?? 0) > 0}
+                onChange={(e) => { touch('stationCode'); replace(e.target.checked ? enableOutcomes(task) : disableOutcomes(task)); }} />
+              {b.outcomes.severalCodes}
+            </label>
+            {(task.answerOutcomes?.length ?? 0) > 0 ? (
+              <OutcomesEditor task={task} replace={replace} kind="codes" />
+            ) : (
+              <div>
+                <Label dense>{b.secretCode}</Label>
+                <Input dense data-qs-field="smart.secretCode" value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
+                  onChange={(e) => {
+                    touch('stationCode');
+                    setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true });
+                  }} />
+              </div>
+            )}
           </div>
         )}
         {task.type === 'photo' && (
@@ -1294,7 +1777,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                     <button key={k} type="button"
                       onClick={() => setSmart({ verificationType: 'photo_upload', captureKind: k })}
                       className={`px-3 py-1.5 rounded-lg text-sm border ${active
-                        ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                        ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                         : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
                       {label}
                     </button>
@@ -1353,6 +1836,16 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                 </div>
               )}
             </div>
+            {/* camera-switch D4: a selfie mission opens the players' camera on the
+                FRONT side. Photo and video only (a recording has no camera). Unticked
+                ⇒ undefined, which buildSavePayload drops, so it arrives ABSENT. */}
+            {(task.smart?.captureKind ?? 'photo') !== 'audio' && (
+              <label className="flex items-center gap-2 text-xs text-[--ink-2]">
+                <input data-qs-field="smart.preferredCamera" type="checkbox" checked={task.smart?.preferredCamera === 'front'}
+                  onChange={(e) => setSmart({ verificationType: 'photo_upload', preferredCamera: e.target.checked ? 'front' : undefined })} />
+                {b.selfieCamera}
+              </label>
+            )}
             <label className="flex items-center gap-2 text-xs text-[--ink-2]">
               <input data-qs-field="smart.autoApprove" type="checkbox" checked={task.smart?.autoApprove ?? false}
                 onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
@@ -1365,8 +1858,19 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           </div>
         )}
         {task.type === 'quiz' && (
-          <div data-qs-field="answers">
-            <QuizModeSection task={task} set={set} b={b} revealed={revealed} touch={touch} />
+          <div data-qs-field="answers" className="space-y-2">
+            {/* answer-scored-question: points by answer. Each row's text is a button
+                the players tap, and its points replace the mission's points. */}
+            {!(task.orderItems && task.orderItems.length > 0) && (
+              <label className="flex items-center gap-2 text-xs text-[--ink-2]">
+                <input type="checkbox" checked={(task.answerOutcomes?.length ?? 0) > 0}
+                  onChange={(e) => { touch('quizChoices'); replace(e.target.checked ? enableOutcomes(task) : disableOutcomes(task)); }} />
+                {b.outcomes.pointsByAnswer}
+              </label>
+            )}
+            {(task.answerOutcomes?.length ?? 0) > 0
+              ? <OutcomesEditor task={task} replace={replace} kind="answers" />
+              : <QuizModeSection task={task} set={set} b={b} revealed={revealed} touch={touch} />}
           </div>
         )}
         {task.type === 'numeric' && (
@@ -1458,6 +1962,29 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           (change: task-media-durability) — it is no longer an opt-in group here. */}
       {shown('rules') && (
         <OptInGroup title={GROUP_TITLE.rules} hideLabel={b.hideSection} onHide={() => groups.hideGroup('rules')}>
+          {/* How many teammates must each do their part (change: every-member-plays).
+              Lives HERE and not under time-and-scoring: it is a LIMIT on when the
+              mission may be completed, not a duration or a point value. Absent or 0
+              means none, which is every mission that exists today. The server reduces
+              it to the devices a team actually has, so authoring 4 for a team of two is
+              never unwinnable, and the help text says so rather than letting a creator
+              believe they have locked something they have not. */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
+            <InlineLabel>{b.requiredContributorsLabel}</InlineLabel>
+            <Input dense type="number" min={0} max={TEAM_DEVICE_HARD_CAP} className="w-20"
+              data-qs-field="requiredContributors"
+              value={task.requiredContributors ?? ''}
+              placeholder="0" aria-label={b.requiredContributorsLabel}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10);
+                set({
+                  requiredContributors: Number.isFinite(n) && n > 1
+                    ? Math.min(TEAM_DEVICE_HARD_CAP, n)
+                    : undefined,
+                });
+              }} />
+          </div>
+          <p className="text-[13px] text-[--ink-3] mb-2" dir="auto">{b.requiredContributorsHelp}</p>
           {/* Prerequisites need siblings to point at, so a one-task stage is
               offered the rest of the group without them. */}
           {siblingCount > 1 && (
@@ -1474,7 +2001,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                 onChange={(e) => set({ requirePresence: e.target.checked || undefined })} />
               <span>
                 <span className="text-[13px] font-medium text-[--ink-1]">{b.requirePresence}</span>
-                <span className="block text-[11px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
+                <span className="block text-[13px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
               </span>
             </label>
           )}
@@ -1518,7 +2045,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               return (
                 <button key={d.key} onClick={() => set({ difficulty: d.value })}
                   className={`flex-1 min-w-0 rounded-lg border py-1 text-[13px] transition-colors ${
-                    active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+                    active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
                   {DIFF_LABEL[d.key]}
                 </button>
               );
@@ -1567,7 +2094,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                   </button>
                 )}
               </div>
-              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
+              <p className="text-[13px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
             </div>
           );
         })()}
@@ -1608,7 +2135,8 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                     });
                   }} />
               </div>
-              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
+              <p className="text-[13px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
+
             </div>
           );
         })()}
@@ -1628,21 +2156,36 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
             <span>{b.expiryAfterUnit}</span>
           </div>
           {validateAvailabilityWindow(task) !== null && (
-            <p className="text-[11px] text-rp-fire mt-1">{b.expiryWindowError}</p>
+            <p className="text-[13px] text-ink-fire mt-1">{b.expiryWindowError}</p>
           )}
-          {/* Scheduled release disclosure (change: builder-first-task-flow).
-              `releaseAt` / `releaseAfterMinutes` are honored by the server but the
-              Builder has no editor for them; a task can still carry either through
-              duplication, import or a seed script. Read only, and unconditional on
-              any expiry, so a task is never gated shut at a time nothing in the
-              interface mentions. The advanced badge counts them too. */}
-          {task.releaseAt && (
-            <p className="text-[11px] text-[--ink-3] mt-1">
-              🕒 {b.expiryReleaseAtWarn(new Date(task.releaseAt).toLocaleString())}
-            </p>
+          {/* mission-time-limit: a clock window for everyone. `releaseAt` had no editor before
+              (it was only disclosed); `expiresAt` is new. Clearing an input stores ABSENT. */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3] mt-2">
+            <InlineLabel>🕒 {b.windowOpensAt}</InlineLabel>
+            <Input dense type="datetime-local" className="w-auto" value={isoToLocalInput(task.releaseAt)}
+              aria-label={b.windowOpensAt} data-testid="task-opens-at"
+              onChange={(e) => set({ releaseAt: localInputToIso(e.target.value) })} />
+            <InlineLabel>{b.windowClosesAt}</InlineLabel>
+            <Input dense type="datetime-local" className="w-auto" value={isoToLocalInput(task.expiresAt)}
+              aria-label={b.windowClosesAt} data-testid="task-closes-at"
+              onChange={(e) => set({ expiresAt: localInputToIso(e.target.value) })} />
+          </div>
+          {/* mission-time-limit: a countdown PER TEAM from the moment it gets the mission. */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3] mt-2">
+            <InlineLabel>⏱️ {b.timeLimitLead}</InlineLabel>
+            <Input dense type="number" min={0} max={TIME_LIMIT_MAX_MINUTES} step="0.5" className="w-20" value={task.timeLimitMinutes ?? ''}
+              placeholder="0" aria-label={b.timeLimitLead} data-testid="task-time-limit"
+              onChange={(e) => {
+                const n = parseFloat(e.target.value);
+                set({ timeLimitMinutes: Number.isFinite(n) && n > 0 ? Math.min(TIME_LIMIT_MAX_MINUTES, n) : undefined });
+              }} />
+            <span>{b.timeLimitUnit}</span>
+          </div>
+          {typeof task.timeLimitMinutes === 'number' && task.timeLimitMinutes > 0 && (
+            <p className="text-[13px] text-[--ink-3] mt-1" dir="auto">{b.timeLimitHelp}</p>
           )}
           {typeof task.releaseAfterMinutes === 'number' && task.releaseAfterMinutes > 0 && (
-            <p className="text-[11px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>
+            <p className="text-[13px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>
           )}
         </div>
 
@@ -1665,11 +2208,11 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               <span className="ms-1.5 align-middle text-[9px] font-semibold text-[--ink-3] uppercase tracking-wider">
                 {b.advancedTag}
               </span>
-              <span className="block text-[11px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
+              <span className="block text-[13px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
             </span>
           </label>
           {task.pausesTimer && located && (
-            <p className="text-[11px] text-rp-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
+            <p className="text-[13px] text-ink-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
           )}
         </div>
         </OptInGroup>
@@ -1719,7 +2262,7 @@ function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) =
       <TagChips tags={task.tags} className="mt-1.5" more={b.moreTags} max={20} />
       {suggestions.length > 0 && (
         <div className="mt-2">
-          <p className="text-[11px] text-[--ink-3] mb-1">{b.popularTags}</p>
+          <p className="text-[13px] text-[--ink-3] mb-1">{b.popularTags}</p>
           <div className="flex flex-wrap items-center gap-1">
             {suggestions.map((tag) => (
               <button
@@ -1727,7 +2270,7 @@ function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) =
                 type="button"
                 dir="auto"
                 onClick={() => set({ tags: normalizeTags([...current, tag]) })}
-                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-rp-fire hover:bg-rp-fire/10"
+                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[13px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-ink-fire hover:bg-rp-fire/10"
               >
                 + {tag}
               </button>
@@ -1735,7 +2278,7 @@ function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) =
           </div>
         </div>
       )}
-      <p className="text-[11px] text-[--ink-3] mt-1">{b.tagsHelp}</p>
+      <p className="text-[13px] text-[--ink-3] mt-1">{b.tagsHelp}</p>
     </div>
   );
 }
@@ -1752,7 +2295,8 @@ function StepsEditor({ steps, onChange, b }: { steps: TaskStep[]; onChange: (s: 
             <Input dense value={s.prompt} onChange={(e) => update(i, { prompt: e.target.value })} placeholder={b.stepPrompt} dir="auto" />
             <Input dense value={s.answer ?? ''} onChange={(e) => update(i, { answer: e.target.value })} placeholder={b.stepAnswer} dir="auto" />
           </div>
-          <button className="text-neon-red text-sm mt-2.5" aria-label={`${b.deleteTask} ${i + 1}`} onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
+          <button className={`${TAP_INLINE} shrink-0 rounded text-neon-red hover:bg-neon-red/10 text-sm mt-1.5`}
+            aria-label={`${b.deleteTask} ${i + 1}`} onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
       <Button variant="ghost" className="text-xs" onClick={() => onChange([...steps, { id: uuid(), prompt: '', answer: '' }])}>

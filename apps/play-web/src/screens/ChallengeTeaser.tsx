@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, type PublicTask, type PublicGame, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, type PublicTask, type PublicGame } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { checkChallengeAnswer } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
@@ -8,10 +8,8 @@ import { Spinner } from '../components/Spinner';
 import { useT } from '../i18nContext';
 import { shareChallenge } from '../lib/challengeCard';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
+import { creatorUrl } from '../lib/creatorUrl';
 
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 const COUNTDOWN = 30;
 
@@ -126,7 +124,7 @@ export default function ChallengeTeaser({
     <Screen>
       <div className="flex-1 flex flex-col animate-race-in gap-4">
         <div className="text-center">
-          <div className="inline-block text-[11px] font-semibold uppercase tracking-widest text-ink-fire bg-rp-fire/10 rounded-full px-3 py-1">
+          <div className="inline-block text-[13px] font-semibold uppercase tracking-widest text-ink-fire bg-rp-fire/10 rounded-full px-3 py-1">
             {t.challenge.badge}
           </div>
           <p className="text-zinc-500 text-sm mt-2">{t.challenge.tagline}</p>
@@ -181,12 +179,12 @@ export default function ChallengeTeaser({
         <Card className="p-4 mt-auto text-center">
           <p className="text-sm text-zinc-300 mb-3">{t.challenge.ctaTitle}</p>
           <Button className="w-full" onClick={onJoin}>{t.challenge.ctaJoin}</Button>
-          <a href={CREATOR_URL} target="_blank" rel="noreferrer"
-            className="block mt-2 text-sm font-semibold text-ink-fire hover:text-ink-amber">
+          <a href={creatorUrl()} target="_blank" rel="noreferrer"
+            className="flex items-center justify-center min-h-[44px] mt-2 text-sm font-semibold text-ink-fire hover:text-ink-amber">
             {t.challenge.ctaBuild}
           </a>
           <button onClick={share} disabled={busy}
-            className="mt-3 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50">
+            className="inline-flex items-center justify-center min-h-[44px] px-3 mt-1 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50">
             {t.challenge.shareBtn}
           </button>
           {shareNote && (

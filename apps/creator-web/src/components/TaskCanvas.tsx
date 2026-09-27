@@ -62,7 +62,8 @@ function SortableTask({ task, stageId, style: outerStyle, measureRef, index, chi
 }
 
 export default function TaskCanvas({
-  tasks, activeTaskId, onSelect, stageId, moveTargets, onMoveToStage, groupOf,
+  tasks, activeTaskId, onSelect, stageId, moveTargets, onMoveToStage,
+  onDuplicate, onRegenerate, onToggleHidden, onDelete, groupOf, footer,
 }: {
   tasks: Task[];
   activeTaskId?: string;
@@ -72,11 +73,33 @@ export default function TaskCanvas({
   stageId: string;
   /** Other stages, offered as the non-drag "move to stage" fallback. */
   moveTargets?: MoveTarget[];
+  /** The rest of the card's ⋯ menu (change: mission-card-actions). See TaskCard. */
+  onDuplicate?: (taskId: string) => void;
+  onRegenerate?: (taskId: string) => void;
+  onToggleHidden?: (taskId: string) => void;
+  onDelete?: (taskId: string) => void;
   onMoveToStage?: (taskId: string, toStageId: string) => void;
   /** Exclusive-group membership per task, precomputed by BuilderPage from the
    *  shared `effectiveExclusiveGroups`, so the badge shows exactly what the
    *  server enforces (including "a 1-member group does nothing"). */
   groupOf?: (taskId: string) => TaskGroupBadge | undefined;
+  /**
+   * Rendered at the END OF THE LIST, inside this component's scroll box
+   * (change: add-a-mission-follows-the-missions).
+   *
+   * The "add a mission" tiles used to be a sibling BELOW this canvas, which
+   * is `flex-1` — so on a stage with one mission they sat 380px under it, on
+   * an 812px phone. Nearly half the screen separated the list from the
+   * button that adds to it, and the void looked like the end of the page.
+   *
+   * They belong to the list, so they live in the list: they follow the last
+   * mission at both sizes and scroll with it. The consequence is deliberate
+   * and worth naming — on a long stage the tiles are no longer permanently
+   * on screen, you reach them by scrolling to the end, which is where you
+   * are adding. One render site rather than a pinned copy and a flowing one,
+   * because two copies of the same control drift.
+   */
+  footer?: ReactNode;
 }) {
   const t = useT();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -95,6 +118,10 @@ export default function TaskCanvas({
       group={groupOf?.(t.id)}
       handleProps={handleProps}
       moveTargets={moveTargets}
+      onDuplicate={onDuplicate ? () => onDuplicate(t.id) : undefined}
+      onRegenerate={onRegenerate ? () => onRegenerate(t.id) : undefined}
+      onToggleHidden={onToggleHidden ? () => onToggleHidden(t.id) : undefined}
+      onDelete={onDelete ? () => onDelete(t.id) : undefined}
       onMoveToStage={onMoveToStage ? (toStageId) => onMoveToStage(t.id, toStageId) : undefined}
       onClick={() => onSelect(t.id)}
     />
@@ -106,8 +133,15 @@ export default function TaskCanvas({
   // rendering below is completely unchanged for the tasks.length > 0 case.
   if (tasks.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-center px-4">
+      // The footer renders HERE TOO, and that is the whole point of putting it in
+      // this component: an empty stage is exactly when "add a mission" matters
+      // most, and an early return that forgot it would delete the only way to add
+      // the first one. `justify-center` becomes a centred column so the hint and
+      // the tiles read as one invitation rather than a sentence with a stray row
+      // under it.
+      <div className="h-full flex flex-col items-center justify-center gap-4 text-center px-4">
         <p className="text-sm text-[--ink-2] max-w-xs">{t.builder.emptyStageHint}</p>
+        {footer}
       </div>
     );
   }
@@ -121,7 +155,11 @@ export default function TaskCanvas({
   // only needs the ordering, and `useSortable` registers just the mounted rows.
   const itemIds = tasks.map((t) => t.id);
   return (
-    <div ref={parentRef} className="h-full overflow-y-auto -mx-1 px-1">
+    // `overscroll-contain` (change: creator-mobile-mechanics): the Builder shell
+    // never scrolls the page, so without containment a flick that reaches the end
+    // of the mission list is handed to the shell behind it and iOS rubber-bands
+    // the whole workspace.
+    <div ref={parentRef} className="h-full overflow-y-auto overscroll-contain -mx-1 px-1">
       <SortableContext items={itemIds} strategy={small ? rectSortingStrategy : verticalListSortingStrategy}>
         {small ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 content-start">
@@ -151,6 +189,7 @@ export default function TaskCanvas({
           </div>
         )}
       </SortableContext>
+      {footer}
     </div>
   );
 }

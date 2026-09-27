@@ -13,12 +13,13 @@
 // publish/unpublish visibility decision, never the wiring.
 
 export type DashboardCardActionId =
-  | 'edit' | 'launch' | 'testRun' | 'history' | 'publish' | 'unpublish' | 'share' | 'delete';
+  | 'edit' | 'launch' | 'testRun' | 'history' | 'publish' | 'unpublish'
+  | 'shareLink' | 'delete';
 
 export interface DashboardCardActions {
   /** Always ['edit', 'launch']. */
   inline: DashboardCardActionId[];
-  /** Always [testRun, history, <publish|unpublish>, share, delete] — delete last. */
+  /** Always [testRun, history, <publish|unpublish>, shareLink, delete] — delete last. */
   overflow: DashboardCardActionId[];
 }
 
@@ -39,6 +40,12 @@ export function dashboardCardActions(
   const publishToggle: DashboardCardActionId = isPublic ? 'unpublish' : 'publish';
   return {
     inline: [...CARD_INLINE],
-    overflow: ['testRun', 'history', publishToggle, 'share', 'delete'],
+    // ONE share verb, and it is the read-only link to the game itself
+    // (change: game-share-link). It replaced the public promo link, which was
+    // the wrong thing behind a button called "share": that URL only works once
+    // the game is PUBLISHED, and on a published game with instant play it drops
+    // the reader into a solo demo run instead of showing them the game. Sharing
+    // must not depend on publishing — that is the whole point of the link.
+    overflow: ['testRun', 'history', publishToggle, 'shareLink', 'delete'],
   };
 }

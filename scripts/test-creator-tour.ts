@@ -22,6 +22,8 @@ import {
   shouldAutoStartTour,
   resolveTourAnchoring,
   tourStepTarget,
+  tourNavIntent,
+  nextReachableTourIndex,
   tourCardPosition,
   ONBOARDING_DISMISSED_KEY,
   KNOWN_GAME_COUNT_KEY,
@@ -298,6 +300,51 @@ console.log('\n── 11. card position clamping ──────────�
   });
   ok('a card larger than the viewport is pinned to the origin, never negative',
     Number.isFinite(tiny.top) && Number.isFinite(tiny.left) && tiny.top >= 0 && tiny.left >= 0);
+}
+
+// ── A blocked RUN of steps is ONE situation, not seven ───────────────────────
+// (change: tour-skip-blocked-run)
+//
+// Observed live on a brand-new account: the tour auto-starts on an empty
+// dashboard, and steps 4 through 10 — every Builder step — all rendered the
+// SAME 👆 prompt ("create your first game to continue"), all pointing at the same
+// button, none able to show what they described. And the prompt was false: Next
+// continued regardless. Seven cards, one instruction, zero teaching.
+{
+  const steps = buildTourSteps({ paymentsEnabled: false });
+  const noGame = { firstGameId: null, liveRunPath: null };
+
+  const blocked = steps
+    .map((s, i) => [i, tourNavIntent(s, noGame, '/').kind] as const)
+    .filter(([, kind]) => kind === 'awaitAction')
+    .map(([i]) => i);
+  ok('a creator with no game really does have a RUN of consecutive blocked steps (the thing this guards)',
+    blocked.length >= 2 && blocked.every((v, k) => k === 0 || v === blocked[k - 1] + 1));
+
+  const first = blocked[0]!;
+  const landed = nextReachableTourIndex(steps, first, noGame, '/');
+  ok('Next from the first blocked step clears the ENTIRE blocked run in one press',
+    landed > blocked[blocked.length - 1]!);
+  ok('and lands on a step the creator can actually reach',
+    tourNavIntent(steps[landed]!, noGame, '/').kind !== 'awaitAction');
+  ok('so a creator with no game is never shown the same prompt twice',
+    landed - first > 1);
+
+  // Once the game exists, nothing is blocked and the tour walks normally.
+  const withGame = { firstGameId: 'g1', liveRunPath: null };
+  ok('with a game, no Builder step is blocked at all — the skip never engages',
+    steps.every((s) => s.surface !== 'builder' || tourNavIntent(s, withGame, '/').kind !== 'awaitAction'));
+
+  // Totality: the skip must never strand the tour or return a bad index.
+  ok('nothing reachable ahead ⇒ the LAST index, so Next still finishes the tour',
+    nextReachableTourIndex(steps, steps.length - 1, noGame, '/') === steps.length - 1);
+  ok('an empty step list yields 0 rather than -1',
+    nextReachableTourIndex([], 0, noGame, '/') === 0);
+  for (const junk of [-5, 999, NaN, 1.7]) {
+    const r = nextReachableTourIndex(steps, junk as number, noGame, '/');
+    ok(`index ${String(junk)} still yields an in-range index`,
+      Number.isInteger(r) && r >= 0 && r <= steps.length - 1);
+  }
 }
 
 console.log('');

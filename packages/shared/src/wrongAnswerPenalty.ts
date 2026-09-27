@@ -303,18 +303,58 @@ export function hashAnswerForReplay(answer: string | string[]): string {
   const normalized = Array.isArray(answer)
     ? ` [${answer.map((s) => String(s).trim().toLowerCase()).join(' ')}]`
     : String(answer).trim().toLowerCase();
-  // TWO independent 32-bit rolls concatenated (~64 bits). A single 32-bit hash
-  // collides often enough across a few hundred answers to matter here, and a
-  // collision has a real consequence: a DIFFERENT wrong answer would be mistaken
-  // for a replay and go uncharged. Two rolls make that vanishingly unlikely.
-  let h1 = 5381;
+  // TWO independent 32-bit rolls concatenated (~64 bits), each properly mixed
+  // (change: replay-hash-short-answer-collisions).
+  //
+  // The previous rolls were djb2 (`h1*33 ^ c`) and a Bernstein-ish (`h2*31 + c`),
+  // and both fold the character into the LOW bits only. That is linear enough
+  // that a difference in an early character can be exactly cancelled by a
+  // difference in a later one, so SHORT answers collided structurally rather than
+  // by chance: `31*c₁ + c₂` is equal whenever c₁ moves by 1 and c₂ by −31, which
+  // is why "1p"/"32", "1q"/"33" and "1t"/"36" all hashed the same. Measured over
+  // the 100,000 shortest base36 strings the old pair produced **4,572 collisions**
+  // — against a doc comment promising "vanishingly unlikely". Long, wordy answers
+  // were fine, which is exactly why nothing ever noticed: numeric and short-code
+  // answers are the ones that collide, and they are common.
+  //
+  // What a collision costs: `submitTaskAnswer` compares this hash against the
+  // team's stored `lastHash` to recognise a replay, and a match returns early with
+  // "no attempt recorded, no points charged, no cooldown". So two DIFFERENT wrong
+  // answers in a row that collide hand the player a free wrong guess, and weaken
+  // the attempt cap that the replay guard's own comment leans on when it says a
+  // brute-forcer "submits DIFFERENT answers by definition".
+  //
+  // Now: FNV-1a for h1 and a murmur3-style round for h2 (both multiply the WHOLE
+  // word each step, so one bit avalanches), then a murmur fmix finalizer keyed on
+  // the length. Zero collisions across every space measured — the 100k short
+  // base36 strings, all 1- and 2-character strings, 200k plain integers and 300k
+  // wordy answers. Output is fixed-width 14 chars.
+  //
+  // NOTE: this changes the hash of every answer, so a `lastHash` written by the
+  // previous build never matches after the deploy. The only effect is that one
+  // in-flight replay window per team is lost — a genuine double tap landing
+  // exactly across the deploy is charged once more. Nothing is stored long-term
+  // that reads this value.
+  const rotl = (x: number, r: number): number => ((x << r) | (x >>> (32 - r))) >>> 0;
+  const fmix = (h0: number): number => {
+    let h = h0;
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0;
+    h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35) >>> 0;
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+  let h1 = 0x811c9dc5;
   let h2 = 52711;
   for (let i = 0; i < normalized.length; i++) {
     const c = normalized.charCodeAt(i);
-    h1 = (((h1 << 5) + h1) ^ c) >>> 0;
-    h2 = (Math.imul(h2, 31) + c) >>> 0;
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(rotl(h2 ^ (Math.imul(c, 0xcc9e2d51) >>> 0), 15), 0x1b873593) >>> 0;
   }
-  return `${h1.toString(36)}${h2.toString(36)}`;
+  h1 = fmix(h1 ^ normalized.length);
+  h2 = fmix(h2 ^ normalized.length);
+  // Padded so the two halves cannot bleed into each other: without it a short h1
+  // beside a long h2 could produce the same string as a long h1 beside a short one.
+  return `${h1.toString(36).padStart(7, '0')}${h2.toString(36).padStart(7, '0')}`;
 }
 
 export interface AnswerCostDisplay {

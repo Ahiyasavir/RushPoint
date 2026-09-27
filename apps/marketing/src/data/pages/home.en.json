@@ -1,0 +1,614 @@
+{
+  "title": "Build a live race, anywhere",
+  "description": "A platform for building live mission races with real stations, navigation on the phone and automatic scoring. Outdoors, at home or at a party. No judges, no paper, no chasing everyone around.",
+  "tagline": "A live race for any group",
+  "headline": "Give any group their own <span class=\"text-primary\">Amazing Race</span>",
+  "subhead": "Without all the hassle it usually takes.",
+  "primaryAction": "Build your first race in 5 minutes",
+  "secondaryAction": "Play a real mission now",
+  "ideasAction": "Ideas by occasion",
+  "heroTrust": "100% of players stayed active across the first games. Nobody sat it out.",
+  "heroChallenge": "Would your team have found this station in 60 seconds?",
+  "heroJoinPrompt": "Here to join a game?",
+  "heroJoinAction": "Enter with a code",
+  "lowFrictionNote": "No signup, no card. A live try in 30 seconds.",
+  "videoLabel": "Who built this, and why",
+  "videoBody": "I am Ahiya, 17, from Jerusalem. I built RushPoint after trying to run a real mission race and watching how fast it fell apart. Ninety seconds and you will get the idea.",
+  "videoStoryAction": "The full story",
+  "videoDuration": "1:35",
+  "hero": {
+    "kind": "video",
+    "src": "/uploads/rushpoint-explainer.mp4",
+    "alt": "Ahiya Savir explains what RushPoint is and how to build a mission race with it",
+    "poster": "/uploads/rushpoint-explainer-poster.jpg",
+    "caption": "Ninety seconds: how RushPoint turns any space, from a living room to a neighbourhood, into a live race"
+  },
+  "heroTaste": {
+    "progress": "Mission 2 of 6",
+    "clock": "04:12",
+    "score": "186 pts",
+    "missions": [
+      {
+        "kind": "Navigation mission",
+        "place": "In the neighbourhood",
+        "title": "The tree worth the most points",
+        "prompt": "Find the tree marked on your map, and get the whole team in frame beside it.",
+        "points": "+30"
+      },
+      {
+        "kind": "Cracking mission",
+        "place": "In the living room",
+        "title": "The treasure in the house",
+        "prompt": "Each clue leads to the next room. The last one hides under something soft.",
+        "points": "+45"
+      },
+      {
+        "kind": "Photo mission",
+        "place": "On the street",
+        "title": "The Beatles",
+        "prompt": "Recreate the Beatles crosswalk photo.",
+        "points": "+35",
+        "visual": "crosswalkPhoto"
+      }
+    ]
+  },
+  "occasionDoors": {
+    "title": "Pick where to start",
+    "doors": [
+      {
+        "title": "A birthday party",
+        "examples": "A bar mitzvah, an end of year party, and any celebration you want remembered",
+        "slug": "yom-huledet"
+      },
+      {
+        "title": "Team bonding",
+        "examples": "Work, the army, and any group that wants to know itself better",
+        "slug": "gibush-tzevet"
+      },
+      {
+        "title": "Activities at home",
+        "examples": "Chores for the kids, a family evening, a night in for two, and any thing that happens indoors",
+        "slug": "pe-ilut-babayit"
+      },
+      {
+        "title": "Education",
+        "examples": "A school, a university, a youth movement, and any setting that wants to teach differently",
+        "slug": "chinuch"
+      }
+    ]
+  },
+  "featuresTagline": "Why it works",
+  "featuresTitle": "The hard parts now happen on their own",
+  "featuresSubtitle": "Almost every team race that falls apart falls apart on logistics rather than on the idea. Everything I learned the hard way is already solved here.",
+  "features": [
+    {
+      "title": "Automatic scoring",
+      "description": "Answers are checked on the server the moment they are sent. Nobody has to stand at a station, and nobody argues afterwards about who got what.",
+      "icon": "tabler:trophy"
+    },
+    {
+      "title": "With a map or without one",
+      "description": "A mission can be tied to a place, where arriving is verified against the device GPS, or free of one and solvable from anywhere. The same race works in a neighbourhood and in a living room.",
+      "icon": "tabler:map-pin"
+    },
+    {
+      "title": "Smart routing between teams",
+      "description": "Each team is sent to a station that is free and close to it. Instead of a queue at one stop, everyone keeps moving.",
+      "icon": "tabler:route"
+    },
+    {
+      "title": "Survives a bad signal",
+      "description": "The app is built for open ground: it holds its state, keeps working, and syncs when reception comes back.",
+      "icon": "tabler:wifi-off"
+    },
+    {
+      "title": "Live control while you run it",
+      "description": "One console shows where every team is, who is stuck and who is ahead. Send a message, close a station or adjust a score without stopping the game.",
+      "icon": "tabler:device-desktop-analytics"
+    },
+    {
+      "title": "Joining takes no install",
+      "description": "Players open a link and type a code. Nothing to download, nothing to sign up for, no passwords forgotten at the worst moment.",
+      "icon": "tabler:qrcode"
+    }
+  ],
+  "stepsTitle": "From an idea to teams racing",
+  "steps": [
+    {
+      "title": "Design the route",
+      "description": "Drop stations on the map and write a task for each one. Start from a ready made game and change it, or let the system compose one for the occasion.",
+      "icon": "tabler:map-2"
+    },
+    {
+      "title": "Launch and share a code",
+      "description": "Press launch and you get a join code. Send it to the group and that is the setup done.",
+      "icon": "tabler:send"
+    },
+    {
+      "title": "Watch it happen",
+      "description": "Teams start moving, scores update themselves, and you follow all of it on one screen until the finish.",
+      "icon": "tabler:eye"
+    }
+  ],
+  "ctaTitle": "Your first game is about half an hour away",
+  "ctaSubtitle": "No card needed. Start from a ready made game and change it, and if something is missing, write to me.",
+  "tryMission": {
+    "tagline": "No signup, no download",
+    "title": "Actually, play it yourself",
+    "subtitle": "Three real missions, exactly the kinds your teams get in a race. The clock runs, the scoring happens on its own, and at the end you see the screen your players see.",
+    "startBody": "Three missions. Most people finish in about a minute. The faster you solve them, the more points you get, exactly like the real thing.",
+    "startAction": "Start the run",
+    "checkAction": "Check my answer",
+    "resetAction": "Start over",
+    "replayAction": "Play again",
+    "wrongFeedback": "Not quite. Try again. A wrong answer costs you time, not points.",
+    "progressLabel": "Mission {n} of {total}",
+    "scoreLabel": "{score} pts",
+    "youLabel": "You",
+    "doneTitle": "That is the whole course",
+    "doneBody": "This is exactly what a team sees when they finish: score, time, and where they landed. Nobody sat there with a clipboard. Your next game can be built and run completely for free.",
+    "doneAction": "Let's build you a game for free",
+    "doneScoreLabel": "Score",
+    "doneTimeLabel": "Time",
+    "doneRankLabel": "Place",
+    "boardNote": "The other teams on this board are illustrative. Your score and your time are entirely real.",
+    "rivals": [
+      {
+        "name": "Desert Tigers",
+        "score": 421
+      },
+      {
+        "name": "The Pomegranate Crew",
+        "score": 388
+      },
+      {
+        "name": "Team Seven",
+        "score": 274
+      },
+      {
+        "name": "Wizards of Vine Street",
+        "score": 219
+      }
+    ],
+    "missions": {
+      "order": {
+        "title": "Reconstruct the case",
+        "prompt": "The diamond vanished from the gallery. Put what actually happened in the right order.",
+        "items": [
+          "The lights went out",
+          "The alarm rang",
+          "The guard found an empty case",
+          "A car fled the garage"
+        ],
+        "kindLabel": "Investigation mission"
+      },
+      "answer": {
+        "title": "The badge the suspect dropped",
+        "prompt": "The suspect dropped a badge with scrambled letters: N O D A I D M. Which word is hiding there?",
+        "hint": "Hint: it's exactly what vanished from the gallery.",
+        "answers": [
+          "diamond"
+        ],
+        "kindLabel": "Cracking mission"
+      },
+      "occasion": {
+        "title": "What are you building a game for?",
+        "prompt": "So we know how to help you. Pick whatever fits best.",
+        "options": [
+          {
+            "label": "An educational activity",
+            "emoji": "📚"
+          },
+          {
+            "label": "A team building day",
+            "emoji": "🤝"
+          },
+          {
+            "label": "A birthday",
+            "emoji": "🎂"
+          },
+          {
+            "label": "A youth movement",
+            "emoji": "🏕️"
+          },
+          {
+            "label": "Playing with friends",
+            "emoji": "👯"
+          },
+          {
+            "label": "Something else",
+            "emoji": "✨"
+          }
+        ],
+        "kindLabel": "One last question"
+      }
+    }
+  },
+  "missionIdeas": {
+    "tagline": "Free ideas, no signup",
+    "title": "Not sure what your teams would do? Start here",
+    "subtitle": "The hard part is not the software, it is the blank page. Pick the occasion and the place, and get three real missions you can use exactly as they are.",
+    "occasionLabel": "What is the occasion?",
+    "placeLabel": "Where is it happening?",
+    "generateAction": "Give me three missions",
+    "againAction": "Three more",
+    "ctaAction": "Turn this into a game",
+    "note": "Take these and run a game on paper if you like. They are yours.",
+    "occasions": [
+      {
+        "id": "bar",
+        "label": "Bar or bat mitzvah"
+      },
+      {
+        "id": "school",
+        "label": "School trip"
+      },
+      {
+        "id": "work",
+        "label": "Team day at work"
+      },
+      {
+        "id": "youth",
+        "label": "Youth group"
+      },
+      {
+        "id": "birthday",
+        "label": "Birthday"
+      }
+    ],
+    "places": [
+      {
+        "id": "city",
+        "label": "City centre"
+      },
+      {
+        "id": "park",
+        "label": "Park or nature"
+      },
+      {
+        "id": "campus",
+        "label": "Campus or closed venue"
+      },
+      {
+        "id": "hood",
+        "label": "A neighbourhood"
+      },
+      {
+        "id": "home",
+        "label": "Inside the house"
+      }
+    ],
+    "ideas": [
+      {
+        "text": "Find five things in the house that are the same colour and line them up. Photograph the row from the side.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Photo mission"
+      },
+      {
+        "text": "Build an obstacle course in the living room out of cushions and books, then talk one blindfolded teammate through it using only your voices.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Movement mission"
+      },
+      {
+        "text": "How many drawers are there in this house? Send a number. There is a tolerance.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Counting mission"
+      },
+      {
+        "text": "Hide a small object in one room. The other team gets three clues and three minutes to find it.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Riddle mission"
+      },
+      {
+        "text": "Everyone brings one object from the house that says something about them. Photograph them together and pick one to explain.",
+        "occasions": ["bar", "school", "work", "youth", "birthday"],
+        "places": ["home"],
+        "kindLabel": "Creative mission"
+      },
+      {
+        "text": "Recreate an old photo of the guest of honour, same pose, whole team in frame.",
+        "occasions": [
+          "bar",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Photo mission"
+      },
+      {
+        "text": "Letters are hidden on the sign at the entrance. Arrange them into one word and send it.",
+        "occasions": [
+          "school",
+          "youth",
+          "work"
+        ],
+        "places": [
+          "city",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Cipher mission"
+      },
+      {
+        "text": "Find the oldest tree in the park and send your estimate of its age. Closest wins.",
+        "occasions": [
+          "school",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "park"
+        ],
+        "kindLabel": "Field mission"
+      },
+      {
+        "text": "Find someone who has lived here over twenty years and ask for one story about the street. Record it.",
+        "occasions": [
+          "school",
+          "work",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Interview mission"
+      },
+      {
+        "text": "Put the five places on the list in the order they were built, earliest first.",
+        "occasions": [
+          "school",
+          "work"
+        ],
+        "places": [
+          "city",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Ordering mission"
+      },
+      {
+        "text": "Shoot a twenty second advert for the spot you are standing in. Everyone appears in it.",
+        "occasions": [
+          "work",
+          "birthday",
+          "bar"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Video mission"
+      },
+      {
+        "text": "How many steps are in the main staircase? Send a number. There is a tolerance.",
+        "occasions": [
+          "school",
+          "youth",
+          "work"
+        ],
+        "places": [
+          "campus",
+          "city"
+        ],
+        "kindLabel": "Counting mission"
+      },
+      {
+        "text": "Buy something sweet nobody on the team has tried before, and film the first bite.",
+        "occasions": [
+          "birthday",
+          "bar",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Taste mission"
+      },
+      {
+        "text": "Who is this street named after, and in what year? Two answers, both must be right.",
+        "occasions": [
+          "school",
+          "work",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Quiz mission"
+      },
+      {
+        "text": "Build a tower from things you find on the ground, buying nothing. Photograph it standing.",
+        "occasions": [
+          "school",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "park",
+          "campus"
+        ],
+        "kindLabel": "Making mission"
+      },
+      {
+        "text": "Get the whole team across the square without stepping on the paving lines. Film the attempt.",
+        "occasions": [
+          "birthday",
+          "youth",
+          "bar"
+        ],
+        "places": [
+          "city",
+          "campus"
+        ],
+        "kindLabel": "Movement mission"
+      },
+      {
+        "text": "Stand still for one minute and record. Then list three sounds you identified.",
+        "occasions": [
+          "school",
+          "work"
+        ],
+        "places": [
+          "park",
+          "hood"
+        ],
+        "kindLabel": "Listening mission"
+      },
+      {
+        "text": "Get to the point marked on the map. There is no clue beyond the location itself.",
+        "occasions": [
+          "bar",
+          "school",
+          "work",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Location mission"
+      },
+      {
+        "text": "Find one stranger willing to be photographed with you, holding your team sign.",
+        "occasions": [
+          "work",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Together mission"
+      },
+      {
+        "text": "Study the shop window for thirty seconds, walk away, and list every item you remember.",
+        "occasions": [
+          "school",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Memory mission"
+      },
+      {
+        "text": "Another team is near you. Photograph both teams together. You both score.",
+        "occasions": [
+          "bar",
+          "birthday",
+          "youth"
+        ],
+        "places": [
+          "park",
+          "campus"
+        ],
+        "kindLabel": "Meeting mission"
+      },
+      {
+        "text": "The code for the next station is written on something green within fifty metres. Find it.",
+        "occasions": [
+          "school",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Riddle mission"
+      },
+      {
+        "text": "One of you gives a thirty second toast to the guest of honour, in public. Film it.",
+        "occasions": [
+          "bar",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Speech mission"
+      }
+    ]
+  },
+  "gamePlanner": {
+    "tagline": "The sum nobody does in advance",
+    "title": "How many stations do you actually need?",
+    "subtitle": "A team race’s ceiling is not the software, it is how many teams can be at a mission at once. Move the sliders and see.",
+    "fieldLabels": {
+      "teams": "How many teams",
+      "minutes": "How long you have (minutes)",
+      "missions": "Missions each team completes",
+      "perMission": "Minutes per mission",
+      "capacity": "Teams at one station at once"
+    },
+    "defaultTeams": 60,
+    "defaultMinutes": 120,
+    "defaultMissions": 8,
+    "defaultPerMission": 8,
+    "defaultCapacity": 3,
+    "outputTitle": "What that gives you",
+    "stationsLabel": "separate stations needed to finish in time",
+    "durationLabel": "minutes in practice",
+    "throughputLabel": "teams per minute",
+    "verdictOk": "This works. The number of stations is reasonable next to the number of missions you planned.",
+    "verdictTight": "This is tight. You need more stations than is reasonable to build. Add time, cut missions per team, or let more teams share a station.",
+    "note": "A plain capacity sum: each station clears its team count divided by the mission length. A real game also has walking between stations, so treat this as a floor rather than a ceiling."
+  },
+  "faqTitle": "The questions people ask before they start",
+  "faqs": [
+    {
+      "title": "Do players need to install an app?",
+      "description": "No. Players open a link in their phone browser and start. No app store, no signup, no password. Anyone who wants to can add it to their home screen, but nobody has to."
+    },
+    {
+      "title": "What happens where there is no signal?",
+      "description": "The app keeps working. It holds the state on the device, shows that the connection is gone, and syncs the moment it returns. Missions that do not need a location can be solved offline."
+    },
+    {
+      "title": "What does it cost?",
+      "description": "Playing is free. You can run a real game with real teams without paying and without leaving payment details."
+    },
+    {
+      "title": "How many teams can I run?",
+      "description": "A free run is capped at one hundred participants. If you are planning more than that, it is worth checking in advance rather than on the day."
+    },
+    {
+      "title": "Who scores the missions?",
+      "description": "The server. Time, location and answers are checked automatically and the board updates within seconds. Photo and video missions are the only ones that wait for a person, and you can set those to approve themselves too."
+    },
+    {
+      "title": "How do I know where the teams are?",
+      "description": "There is a live console with a map, a table, distress alerts and a chat with each team. You can pause a station mid game, award a bonus, or skip one mission for one team without touching anyone else."
+    },
+    {
+      "title": "What about safety with children?",
+      "description": "You can draw an allowed area and the system flags a team that leaves it. There is a distress button that reaches staff with the location attached. There is also a guardian consent step for groups that need one."
+    },
+    {
+      "title": "How long does it take to build a game?",
+      "description": "A sensible first game takes about half an hour. You can also start from a ready template and edit it, or answer a few questions about your event and let the system assemble one for you."
+    }
+  ]
+}

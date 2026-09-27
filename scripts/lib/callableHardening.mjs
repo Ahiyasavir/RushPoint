@@ -44,6 +44,26 @@ export const PUBLIC_CALLABLES = {
     + 'bound, and a rate limit keyed on the CONNECTION rather than on anything the caller sends. '
     + 'It returns only { ok }, never a document id, and the collection it writes is closed to '
     + 'clients in both directions.',
+  submitLiveApplication:
+    'The RushPoint Live application form on the marketing site (change: rushpoint-live-signup). '
+    + 'The applicant is a group of friends putting themselves forward for one event, who by '
+    + 'definition have no account and are not signing up for one — requiring authentication would '
+    + 'mean only existing creators could apply, which is the opposite of the point. What '
+    + 'authentication would normally carry is carried by field validation naming the field it '
+    + 'refused, a hard cap on the photo that keeps the body inside the JSON parser\'s own limit, '
+    + 'and TWO rate budgets keyed on the CONNECTION rather than on anything the caller sends. It '
+    + 'returns only { ok }, never a document id, and the collection it writes is closed to clients '
+    + 'in both directions — these records carry phone numbers and a photograph of identifiable '
+    + 'people, so the read half matters more here than it does for the contact form.',
+  getSharedGame:
+    'A share link for an unpublished game (change: game-share-link). The recipient is by '
+    + 'definition someone the creator wants to show a game to, which is very often somebody '
+    + 'who has no account yet — requiring one would defeat the point of sending a link. What '
+    + 'authentication would normally carry is carried by a 128-bit unguessable token that IS '
+    + 'the address of the link document, a rate limit keyed on the CONNECTION rather than on '
+    + 'anything the caller sends, and a projection that copies fields out by name so no server '
+    + 'secret can reach the response by default. It returns a read-only view and never the '
+    + 'owner uid; taking a COPY is a different callable and does require an account.',
 };
 
 /**
@@ -59,14 +79,13 @@ export const PUBLIC_CALLABLES = {
  * Deliberately ABSENT, with reasons:
  *   • deleteMyAccount        — a durable, admin-readable record of a user
  *                              exercising erasure works against the request.
- *   • reviewStationSubmission— already persists reviewedBy/reviewedAt/reviewNote
- *                              on the submission itself, so the question is
- *                              already answerable; a second record is cost with
- *                              no new fact.
  *   • updateLocation & co.   — high-frequency participant pings; one audit row per
  *                              call would be a cost bug, not accountability.
  */
 export const PRIVILEGED_CALLABLES = {
+  setRunContacts:
+    'Publishes phone numbers to every player and marshal of a live run. A wrong or swapped number '
+    + 'sends a player in trouble to a stranger, so "who set which numbers, when" must stay answerable.',
   deleteGame: 'Removes a creator\'s game from every surface and revokes its join codes.',
   restoreGame: 'Reverses a deletion and reinstates join codes — the counterpart of deleteGame.',
   purgeGameNow: 'Irreversible destruction of a game and everything beneath it.',
@@ -76,10 +95,23 @@ export const PRIVILEGED_CALLABLES = {
     + 'run, and can lower that team\'s stage requirement. "Who skipped this, for whom, and why" '
     + 'must stay answerable after the event, exactly like adjustTeamScore.',
   clearTeamOutOfBounds: 'Staff override that releases a team from a safety-zone block.',
+  reviewStationSubmission:
+    'Staff verdict on a participant submission, and the only one of these that can move a score in BOTH directions: approving awards the points of the mission, and undoing an approval takes them back off the team and its stage. The participant is not present when it happens and sees only the number change, so "who judged this, which way, and whether it was later reversed" has to stay answerable after the event, exactly like adjustTeamScore.',
   setTeamHold:
     'Staff override that stops ONE identified team from advancing at all and pauses its race '
     + 'clock. Both directions change that team\'s standing (held time is excluded from scoring), '
     + 'so "who parked this team, when, and why" must stay answerable after the event.',
+  updateStaffCode:
+    'Changes what every person on one staff code may do during a live run (score, route, review...), '
+    + 'or closes the code to new sign-ins. "Who gave the marshals the power to add points, and when" '
+    + 'must stay answerable after the event (staff-capabilities).',
+  removeStaffMember:
+    'Removes one person, or everyone on a code, from a live run\'s staff and revokes their session. '
+    + 'The trail is how an organizer later tells who was locked out and by whom (staff-capabilities).',
+  returnTeamTo:
+    'Sends ONE identified team back to a skipped or completed mission, or to an earlier stage: '
+    + 'it reopens records, removes the points they carried and can re-lock later stages. The trail '
+    + 'is how an organizer later tells a deliberate rewind from a scoring anomaly (send-team-back).',
   forceAssignTask:
     'Staff override that sends ONE identified team to a SPECIFIC mission, displacing whatever it '
     + 'was on. The override variant additionally bypasses an unlock / scheduled-release / expiry '
@@ -95,6 +127,36 @@ export const PRIVILEGED_CALLABLES = {
     + 'lets an operator purge the whole trash immediately.',
   backfillPublicTaskCoordinatesNow:
     'Bulk-rewrites documents in the world-readable publicTasks collection.',
+  setMissionBankOverride:
+    'Rewrites one mission of the smart-build bank for EVERY creator on the platform, or takes it '
+    + 'out of the pool entirely. It is a platform-wide content change made by one person outside '
+    + 'any review, and the previous content is gone the moment it is overwritten — the audit row '
+    + 'carrying the before/after state is the only way "who changed this mission, when, and from '
+    + 'what" stays answerable.',
+  clearMissionBankOverride:
+    'The counterpart of setMissionBankOverride: discards an edit and returns a mission to its '
+    + 'authored content, platform-wide. Reverting an edit somebody else made has to leave a trail '
+    + 'for '
+    + 'the same reason making it did.',
+  createGameShareLink:
+    'Mints a credential that lets anybody holding it read an UNPUBLISHED game in full. That is '
+    + 'a disclosure of private content, and the only way to answer "who opened this game up, '
+    + 'when, and with which permissions" after the fact is a durable record — the link document '
+    + 'itself is deletable by the same owner.',
+  launchSharedRun:
+    'Copies a game the caller does not own into their account and starts a run of it, on the '
+    + 'strength of a link the owner handed out (change: shared-launch-opens-console). The owner is '
+    + 'not present when it happens and the link may refuse copying (the copy is then locked), so '
+    + '"who took a run of my game, when, and through which link" has to stay answerable afterwards.',
+  updateGameShareLink:
+    'Widens what a link somebody ALREADY HOLDS is allowed to do — up to and including '
+    + 'letting them start runs in the owner account. The grant is invisible from the outside '
+    + '(the URL does not change), so the record of who widened which link, and when, is the '
+    + 'only account of it that exists.',
+  revokeGameShareLink:
+    'The counterpart of createGameShareLink: it withdraws read access somebody may be relying '
+    + 'on. Both ends of a disclosure decision belong in the same trail, or the trail only ever '
+    + 'shows access being granted.',
   listContactMessages:
     'Reads a list of names, email addresses and free text belonging to people who are NOT users '
     + 'of the platform and never agreed to anything beyond "I am sending you a question". They '
@@ -104,7 +166,7 @@ export const PRIVILEGED_CALLABLES = {
 
 // ── Markers ──────────────────────────────────────────────────────────────────
 
-const AUTH_MARKERS = /\b(requireAuth|assertAdmin|assertStaffOrOwner|assertOwner|assertRunStaff|assertController)\s*\(/;
+const AUTH_MARKERS = /\b(requireAuth|assertAdmin|assertStaffOrOwner|assertStaffCan|assertOwner|assertRunStaff|assertController)\s*\(/;
 // The older inline idiom, still used verbatim in ~20 call sites; equivalent to
 // requireAuth and must count as conformant, not as a gap to be churned.
 const INLINE_AUTH = /if\s*\(\s*!\s*context\.auth\s*\)[\s\S]{0,200}?['"]unauthenticated['"]/;

@@ -206,7 +206,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **ניידות נתונים:** לבקשה, נספק ייצוא של המידע שלך בפורמט מובנה.
 
-לממש זכויות אלה: **privacy@rushpoint.app** · spendora.tracker@gmail.com
+לממש זכויות אלה: **privacy@rushpoint.app** · admin.rushpoint@gmail.com
 
 ## 9. עוגיות ועקיבה
 
@@ -274,7 +274,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 לכל שאלה, בקשה לעיון, תיקון, ו/או מחיקה:
 
-**דוא"ל:** privacy@rushpoint.app · spendora.tracker@gmail.com
+**דוא"ל:** privacy@rushpoint.app · admin.rushpoint@gmail.com
 **נושא הפנייה:** יש לציין "פנייה לפי חוק הפרטיות"
 
 החברה תשיב לפניות בתוך 30 יום.
@@ -457,7 +457,7 @@ Under Israel's Protection of Privacy Law, 5741-1981, you have the following righ
 
 **Data portability:** upon request, we will provide an export of your data in a structured format.
 
-To exercise these rights: **privacy@rushpoint.app** · spendora.tracker@gmail.com
+To exercise these rights: **privacy@rushpoint.app** · admin.rushpoint@gmail.com
 
 ## 9. Cookies and Tracking
 
@@ -525,7 +525,7 @@ For material changes, we will notify users via an in-platform notice at least 14
 
 For any question, access request, correction, or deletion request:
 
-**Email:** privacy@rushpoint.app · spendora.tracker@gmail.com
+**Email:** privacy@rushpoint.app · admin.rushpoint@gmail.com
 **Subject:** please include "Privacy Rights Request"
 
 The Company will respond to requests within 30 days.
@@ -710,7 +710,7 @@ The Company will respond to requests within 30 days.
 - כל העסקאות מעובדות ע"י ספק הסליקה המאושר שלנו; פרטי כרטיס האשראי אינם מאוחסנים בשרתינו
 - מחירים מוצגים בשקלים חדשים (₪) וכוללים מע"מ כנדרש בחוק הישראלי
 - קבלות אלקטרוניות נשלחות לכתובת הדואר האלקטרוני של החשבון
-- לשאלות חיוב: spendora.tracker@gmail.com
+- לשאלות חיוב: admin.rushpoint@gmail.com
 
 ### 7.5 ריצה חינמית כבונוס הפניה
 
@@ -786,7 +786,7 @@ The Company will respond to requests within 30 days.
 
 לכל שאלה, הבהרה, ו/או פנייה משפטית:
 
-**דוא"ל:** legal@rushpoint.app · spendora.tracker@gmail.com
+**דוא"ל:** legal@rushpoint.app · admin.rushpoint@gmail.com
       `,
     },
     en: {
@@ -965,7 +965,7 @@ Every new account receives lifetime free runs of up to 5 participants each. Free
 - All transactions are processed by our authorized payment processor; card details are not stored on our servers
 - Prices are displayed in New Israeli Shekels (NIS) and include VAT as required by Israeli law
 - Electronic receipts are sent to the account's email address
-- For billing inquiries: spendora.tracker@gmail.com
+- For billing inquiries: admin.rushpoint@gmail.com
 
 ### 7.5 Referral Free-Run Bonus
 
@@ -1041,7 +1041,7 @@ The parties waive jurisdiction of foreign courts and the application of foreign 
 
 For any question, clarification, and/or legal inquiry:
 
-**Email:** legal@rushpoint.app · spendora.tracker@gmail.com
+**Email:** legal@rushpoint.app · admin.rushpoint@gmail.com
       `,
     },
   },

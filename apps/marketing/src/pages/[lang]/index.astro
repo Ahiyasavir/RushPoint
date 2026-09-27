@@ -1,20 +1,44 @@
 ---
 import PageLayout from '~/layouts/PageLayout.astro';
-import Hero from '~/components/widgets/Hero.astro';
+import HeroField from '~/components/widgets/HeroField.astro';
 import Features from '~/components/widgets/Features.astro';
 import Steps from '~/components/widgets/Steps.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
+import TryMission from '~/components/widgets/TryMission.astro';
+import OccasionDoors from '~/components/widgets/OccasionDoors.astro';
+import MissionIdeas from '~/components/widgets/MissionIdeas.astro';
+import GamePlanner from '~/components/widgets/GamePlanner.astro';
+import FAQs from '~/components/widgets/FAQs.astro';
+import { Icon } from 'astro-icon/components';
 
-import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
-import { landingPageUrl } from '~/navigation';
-import { homeCopy } from '~/copy/home';
+import LiveEventBanner from '~/components/widgets/LiveEventBanner.astro';
+
+import {
+  LANGUAGES,
+  liveEventPath,
+  alternatesFor,
+  pageUrl,
+  pagePath,
+  OG_LOCALE,
+  PLAYER_ORIGIN,
+  type Language,
+} from '~/utils/i18n';
+import { landingPageUrl, mediaLabels, CREATOR_BUILD_URL } from '~/navigation';
+import { pageContent } from '~/utils/pages';
+import Media from '~/components/Media.astro';
+import FounderVideo from '~/components/FounderVideo.astro';
+import TopoBackdrop from '~/components/TopoBackdrop.astro';
 
 export function getStaticPaths() {
   return LANGUAGES.map((lang) => ({ params: { lang } }));
 }
 
 const language = Astro.params.lang as Language;
-const t = homeCopy[language];
+const t = await pageContent('homePages', 'home', language);
+const chrome = mediaLabels(language);
+
+/** Where the hero's second action goes. See the note on the section order below. */
+const TRY_MISSION_ID = 'try-mission';
 
 const metadata = {
   title: t.title,
@@ -24,35 +48,217 @@ const metadata = {
 };
 ---
 
-<PageLayout metadata={metadata} language={language} alternates={alternatesFor('')}>
-  <Hero
-    tagline={t.tagline}
-    actions={[
-      { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
-      { text: t.secondaryAction, href: pagePath(language, 'story') },
-    ]}
-  >
-    <Fragment slot="title" set:html={t.headline} />
-    <Fragment slot="subtitle" set:html={t.subhead} />
-  </Hero>
+{/*
+  SECTION ORDER IS THE ARGUMENT (change: marketing-home-cro-redesign).
 
-  <Features
-    id="what-it-is"
-    tagline={t.featuresTagline}
-    title={t.featuresTitle}
-    subtitle={t.featuresSubtitle}
-    items={t.features}
+  It used to be: hero, video, features, steps, THEN the playable mission. Which
+  is to say a visitor read six claims about what a field game feels like before
+  being allowed to feel one, and the single thing on this page that can settle
+  the question in thirty seconds was below four screens of prose.
+
+  Now: hero, play it, then watch how it is built, then the claims. Someone who
+  has already solved a mission reads the feature list as confirmation; someone
+  who has not reads it as advertising. That is the whole change.
+
+  The hero's second action points AT the playable mission rather than at the
+  story page, for the same reason: the cheapest possible next step is the one
+  that costs nothing and proves the most.
+
+  Backgrounds alternate between the page surface and the warm tint, which is what
+  gives a long page a rhythm instead of a scroll. The tint is one step off the
+  page colour on purpose; see the token in CustomStyles.astro.
+*/}
+
+<PageLayout metadata={metadata} language={language} alternates={alternatesFor('')}>
+  <HeroField
+    tagline={t.tagline}
+    headline={t.headline}
+    subhead={t.subhead}
+    trust={t.heroTrust}
+    challenge={t.heroChallenge}
+    join={{ prompt: t.heroJoinPrompt, action: t.heroJoinAction, href: `${PLAYER_ORIGIN}/` }}
+    clip={t.heroClip}
+    taste={t.heroTaste}
+    actions={[
+      { variant: 'primary', text: t.primaryAction, href: CREATOR_BUILD_URL, target: '_blank' },
+      { text: t.secondaryAction, href: `#${TRY_MISSION_ID}` },
+    ]}
   />
+
+  {
+    /*
+      The one dated, scarce offer on a page that is otherwise evergreen
+      (change: rushpoint-live-signup). Directly under the hero because that is
+      where a time-bound announcement has to be to do its job, and ABOVE the
+      occasion doors because those are four evergreen ways in and this is a
+      deadline.
+
+      BOTH languages now (change: rushpoint-live-english). It used to render on
+      the Hebrew page only, which shut out the large part of Israel that reads
+      English first. The English band carries `israelOnly`, so it reveals itself
+      only where there is no positive evidence the reader is somewhere else; the
+      Hebrew one is unconditional, because that page's readers are in Israel
+      essentially by definition.
+    */
+  }
+  <LiveEventBanner href={liveEventPath(language)} language={language} israelOnly={language === 'en'} />
+
+  {
+    /*
+      Four ways in, directly under the hero (change: marketing-home-occasion-doors).
+
+      The headline above borrows ONE image so a stranger gets it in a beat, which is
+      worth doing and is also narrowing: whoever came about a family evening indoors
+      does not see themselves in a race. This row pays that back, and each door leads
+      to a real landing page so it can be shared and found in search on its own.
+
+      ADDITIVE, NEVER A GATE. Ignoring this row must cost a visitor nothing: every
+      section below still renders, in order, with nothing over it. Do not make it a
+      dialog and do not preselect a door.
+    */
+    t.occasionDoors && (
+      <OccasionDoors
+        title={t.occasionDoors.title}
+        doors={t.occasionDoors.doors.map((door) => ({
+          title: door.title,
+          examples: door.examples,
+          href: landingPageUrl(language, door.slug),
+        }))}
+      />
+    )
+  }
+
+  {
+    /*
+      A mission the visitor can actually play (change: try-a-mission), now the
+      first thing after the hero. Optional content, so a page without it renders
+      exactly as it did before, friction line included.
+    */
+    t.tryMission && (
+      <div class="relative overflow-hidden bg-surface-tint">
+        <TopoBackdrop />
+        <div class="relative">
+          {/* Friction reduction, immediately above the thing it unlocks. Everything
+              a visitor is afraid this will cost, answered before they scroll into it. */}
+          <p class="mx-auto mt-16 flex w-fit items-center gap-2 rounded-full border border-line bg-page px-5 py-2.5 text-sm font-semibold text-default shadow-sm">
+            <Icon name="tabler:bolt" class="h-5 w-5 shrink-0 text-secondary dark:text-primary" />
+            <span>{t.lowFrictionNote}</span>
+          </p>
+          <TryMission content={t.tryMission} id={TRY_MISSION_ID} />
+        </div>
+      </div>
+    )
+  }
+
+  {
+    /*
+      Meet the person who built it. The video plays muted on its own once it is
+      on screen; there is no modal and no poster to press. Beside it, on a wide
+      screen, the short version in words and a link to the whole story, so a tall
+      portrait video is not a lonely column. Optional: with no `hero` media set,
+      the page renders exactly as it did before.
+    */
+    t.hero && (
+      <section class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
+        <div class="grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_19rem] lg:gap-14">
+          <div class="text-center lg:text-start">
+            <h2 class="mb-4 font-heading text-3xl font-bold tracking-tight text-heading md:text-4xl">
+              {t.videoLabel}
+            </h2>
+            <p class="mx-auto mb-5 max-w-xl text-lg leading-relaxed text-muted lg:mx-0">{t.videoBody}</p>
+            <a
+              class="inline-flex items-center min-h-11 -my-1 font-semibold text-secondary underline decoration-2 underline-offset-2 hover:text-primary dark:text-primary"
+              href={pagePath(language, 'story')}
+            >
+              {t.videoStoryAction}
+            </a>
+          </div>
+          <FounderVideo media={t.hero} duration={t.videoDuration} labels={chrome} />
+        </div>
+      </section>
+    )
+  }
+
+  <div class="bg-surface-tint">
+    <Features
+      id="what-it-is"
+      tagline={t.featuresTagline}
+      title={t.featuresTitle}
+      subtitle={t.featuresSubtitle}
+      items={t.features}
+    />
+  </div>
 
   <Steps title={t.stepsTitle} items={t.steps} isReversed />
 
-  <CallToAction
-    actions={[
-      { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
-      { text: t.ideasAction, href: landingPageUrl(language) },
-    ]}
-  >
-    <Fragment slot="title" set:html={t.ctaTitle} />
-    <Fragment slot="subtitle" set:html={t.ctaSubtitle} />
-  </CallToAction>
+  {
+    /*
+      Having felt what playing is like, the visitor's next question is what they would have to
+      WRITE. This answers it with ideas they can use as they are, signed up or not.
+    */
+    t.missionIdeas && (
+      <div class="bg-surface-tint">
+        <MissionIdeas content={t.missionIdeas} />
+      </div>
+    )
+  }
+
+  {
+    /*
+      And the question that decides whether the day works at all: how many stations. Same
+      capacity model scripts/preflight-game.ts runs against a real game before an event.
+    */
+    t.gamePlanner && <GamePlanner content={t.gamePlanner} />
+  }
+
+  {
+    /*
+      Objections, answered plainly. Where there is a real limit (a free run caps at a hundred
+      participants) the limit is stated rather than dodged: someone who finds it out on the day
+      of their event is a worse outcome than someone who reads it here and plans around it.
+    */
+    t.faqs.length > 0 && (
+      <div class="bg-surface-tint">
+        <FAQs title={t.faqTitle} items={t.faqs} columns={2} />
+      </div>
+    )
+  }
+
+  {
+    /*
+      The gallery. This is the section that shows what a game actually looks
+      like, which no amount of description does. It renders only when there is
+      something in it: an empty gallery is not an empty section with a heading
+      over it, it is absent.
+    */
+    t.gallery.length > 0 && (
+      <section class="px-4 py-12 sm:px-6 mx-auto max-w-6xl lg:px-8">
+        {t.galleryTitle && (
+          <h2 class="mb-3 text-3xl font-bold tracking-tight text-center">{t.galleryTitle}</h2>
+        )}
+        {t.gallerySubtitle && (
+          <p class="mb-10 text-lg text-muted dark:text-slate-400 text-center max-w-2xl mx-auto">
+            {t.gallerySubtitle}
+          </p>
+        )}
+        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {t.gallery.map((item) => (
+            <Media media={item} />
+          ))}
+        </div>
+      </section>
+    )
+  }
+
+  <div class="bg-surface-tint">
+    <CallToAction
+      actions={[
+        { variant: 'primary', text: t.primaryAction, href: CREATOR_BUILD_URL, target: '_blank' },
+        { text: t.ideasAction, href: landingPageUrl(language) },
+      ]}
+    >
+      <Fragment slot="title" set:html={t.ctaTitle} />
+      <Fragment slot="subtitle" set:html={t.ctaSubtitle} />
+    </CallToAction>
+  </div>
 </PageLayout>

@@ -114,6 +114,9 @@ async function main() {
     // (or disturb) the fixture the tombstone-forge assertions use.
     await setDoc(doc(db, `users/${OWNER}/games/TRASHED-GAME-2`),
       { title: 'Trashed 2', deletedAt: '2026-07-02T00:00:00.000Z', deletedBy: OWNER });
+    // shared-launch-opens-console: a launch copy from a share link that did NOT allow copying.
+    await setDoc(doc(db, `users/${OWNER}/games/LOCKED-COPY`),
+      { title: 'Locked', sharedLaunch: { locked: true, fromToken: 'abc123' } });
   });
 
   const owner = testEnv.authenticatedContext(OWNER).firestore();
@@ -164,6 +167,14 @@ async function main() {
       { title: 'G', deletedAt: '2026-07-22T00:00:00.000Z' })));
   await check('owner CANNOT clear a deletedAt tombstone (undelete by client write)',
     assertFails(setDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { title: 'Trashed' })));
+  // [shared-launch-opens-console] The lock on a launch copy is server-written; a client can neither
+  // edit a locked copy directly nor forge/strip the marker (the callables' lock would be moot).
+  await check('owner CANNOT write to a LOCKED shared-launch copy',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/LOCKED-COPY`), { title: 'Mine now' })));
+  await check('owner CANNOT create a game carrying sharedLaunch',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/FORGED-LAUNCH`), { title: 'F', sharedLaunch: { locked: false } })));
+  await check('owner CAN still read a locked copy (the Run Console needs it)',
+    assertSucceeds(getDoc(doc(owner, `users/${OWNER}/games/LOCKED-COPY`))));
   await check('owner CAN still write an ordinary (tombstone-free) game doc',
     assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'G' })));
   // [firestore-rules-coverage] Destroying a game is a FIVE-system act — the game
@@ -237,6 +248,32 @@ async function main() {
     assertFails(getDoc(doc(foreignStaff, `${runPath}/teams/${TEAM}`))));
   await check('staff of a DIFFERENT OWNER CANNOT read this run\'s alerts',
     assertFails(getDoc(doc(foreignStaff, `${runPath}/alerts/a1`))));
+
+  console.log('\n── Staff capabilities: own grant, own code, the live map needs `locations` ──');
+  // change: staff-capabilities. Rules only see token claims: `caps` and `codeId` are minted by
+  // staffSignIn / refreshStaffSession. A token from before that change has no `caps` and keeps the
+  // map (the callables' legacy rule); a token WITH caps and without `locations` does not.
+  const capsStaff = testEnv
+    .authenticatedContext('caps-staff', { staff: true, ownerUid: OWNER, gameId: GAME, runId: RUN, caps: ['chat', 'safety'], codeId: 'code-a' })
+    .firestore();
+  const mapStaff = testEnv
+    .authenticatedContext('map-staff', { staff: true, ownerUid: OWNER, gameId: GAME, runId: RUN, caps: ['locations'], codeId: 'code-a' })
+    .firestore();
+  await check('staff WITHOUT locations CANNOT read the live map',
+    assertFails(getDoc(doc(capsStaff, `${runPath}/teamLocations/${TEAM}`))));
+  await check('staff WITH locations CAN read the live map',
+    assertSucceeds(getDoc(doc(mapStaff, `${runPath}/teamLocations/${TEAM}`))));
+  await check('a pre-change staff token (no caps) keeps the live map',
+    assertSucceeds(getDoc(doc(staff, `${runPath}/teamLocations/${TEAM}`))));
+  await check('staff CAN read their OWN grant', assertSucceeds(getDoc(doc(capsStaff, `${runPath}/staffGrants/caps-staff`))));
+  await check('staff CANNOT read someone else\'s grant', assertFails(getDoc(doc(capsStaff, `${runPath}/staffGrants/map-staff`))));
+  await check('staff CAN read their OWN code', assertSucceeds(getDoc(doc(capsStaff, `${runPath}/staffInvites/code-a`))));
+  await check('staff CANNOT read another code (its PIN)', assertFails(getDoc(doc(capsStaff, `${runPath}/staffInvites/code-b`))));
+  await check('staff for another run CANNOT read a grant here', assertFails(getDoc(doc(wrongStaff, `${runPath}/staffGrants/staff2`))));
+  await check('a participant CANNOT read staff grants', assertFails(getDoc(doc(team, `${runPath}/staffGrants/caps-staff`))));
+  await check('the owner CAN read every grant (the codes panel)', assertSucceeds(getDoc(doc(owner, `${runPath}/staffGrants/caps-staff`))));
+  await check('nobody writes a grant from a client', assertFails(setDoc(doc(owner, `${runPath}/staffGrants/x`), { removed: false })));
+  await check('staff cannot un-remove themselves', assertFails(setDoc(doc(capsStaff, `${runPath}/staffGrants/caps-staff`), { removed: false })));
 
   console.log('\n── Team ↔ HQ chat: read surface mirrors the team doc; writes CF-only ──');
   const device = testEnv.authenticatedContext(DEVICE).firestore();
@@ -354,6 +391,23 @@ async function main() {
       assertFails(getDocs(collection(ctx, 'contactMessages'))));
     await check(`${who} CANNOT write a contact message directly`,
       assertFails(setDoc(doc(ctx, 'contactMessages/forged'), { name: 'x', email: 'x@y.z', message: 'x' })));
+  }
+
+  // ── Game share links (change: game-share-link) ───────────────────────
+  //    The document ID *is* the credential. An open READ would let anyone LIST
+  //    every live share token on the platform — one query, and every unpublished
+  //    game becomes readable. An open WRITE would let a client mint itself a link
+  //    to any game whose id it can guess. The OWNER is asserted too: even the
+  //    creator of the game reaches these only through the callables, because a
+  //    client-written link would skip the audit record entirely.
+  console.log('\n── Game share links: closed to clients in both directions ──');
+  for (const [who, ctx] of [['anon', anon], ['the game owner', owner], ['a participant', team]]) {
+    await check(`${who} CANNOT read a share link`,
+      assertFails(getDoc(doc(ctx, 'gameShareLinks/tok1'))));
+    await check(`${who} CANNOT list share links`,
+      assertFails(getDocs(collection(ctx, 'gameShareLinks'))));
+    await check(`${who} CANNOT mint a share link directly`,
+      assertFails(setDoc(doc(ctx, 'gameShareLinks/forged'), { ownerUid: OWNER, gameId: GAME, allowCopy: true })));
   }
 
   console.log('\n── Storage: photo uploads are owner+type+size gated ──');

@@ -45,7 +45,8 @@ contribute any consolation award.
 The skipped mission SHALL NOT be assignable to that team again, for the remainder of the run.
 
 Skipping SHALL NOT change the team's total score, and SHALL NOT alter the team's start time, finish
-time, or any excluded time. The live standings and the final standings SHALL therefore continue to be
+time, or any excluded time. The live standings and the final standings SHALL therefore continue to
+be
 computed from the same stored team document and SHALL NOT diverge because of a skip.
 
 #### Scenario: The skip pays nothing
@@ -63,11 +64,11 @@ computed from the same stored team document and SHALL NOT diverge because of a s
 - **AND** neither introduces a value derived from the current time or from the game template
 
 ### Requirement: A skip never strands a team in an unfinishable stage
-When a stage requires a number of completed missions that the skip puts out of reach, the team's own
-requirement for that stage SHALL be lowered to the largest number of missions that team can still
+When a stage requires a number of completed missions that the skip puts out of reach, the team's own requirement for that stage SHALL be lowered to the largest number of missions that team can still
 complete in it, and SHALL NOT be lowered further.
 
-The ceiling on completions SHALL be computed with the platform's single definition of that ceiling, so
+The ceiling on completions SHALL be computed with the platform's single definition of that ceiling,
+so
 that a set of mutually exclusive alternatives contributes at most one completion.
 
 The lowered requirement SHALL be stored on that team's own record of the stage and SHALL NOT be

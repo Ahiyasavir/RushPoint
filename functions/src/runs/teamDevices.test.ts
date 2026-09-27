@@ -144,10 +144,41 @@ describe('canAttachDevice', () => {
     expect(canAttachDevice(baseTeam(), 'uid-founder')).toEqual({ ok: false, reason: 'duplicate' });
   });
 
-  test('rejects when the team already carries MAX_TEAM_DEVICES devices', () => {
+  test('rejects when a team of unknown size already carries MAX_TEAM_DEVICES devices', () => {
     const uids = Array.from({ length: MAX_TEAM_DEVICES }, (_, i) => `uid-${i}`);
     const team = multiDeviceTeam({ deviceUids: uids, controllerUid: 'uid-0' });
     expect(canAttachDevice(team, 'uid-new')).toEqual({ ok: false, reason: 'full' });
+  });
+
+  // change: every-member-plays. MAX_TEAM_DEVICES used to be the hard ceiling, which made
+  // "every participant on their own device" UNSATISFIABLE for any team larger than
+  // three - the six-person teams in run ijI9JMITSf8C9heN1Cwp could not all attach before
+  // anyone tried. The allowance now follows the team's own declared size.
+  test('a team that declared six members may attach six devices', () => {
+    const uids = Array.from({ length: MAX_TEAM_DEVICES }, (_, i) => `uid-${i}`);
+    const team = multiDeviceTeam({ deviceUids: uids, controllerUid: 'uid-0', memberCount: 6 });
+    expect(canAttachDevice(team, 'uid-4')).toEqual({ ok: true });
+
+    const six = multiDeviceTeam({
+      deviceUids: Array.from({ length: 6 }, (_, i) => `uid-${i}`),
+      controllerUid: 'uid-0',
+      memberCount: 6,
+    });
+    expect(canAttachDevice(six, 'uid-7')).toEqual({ ok: false, reason: 'full' });
+  });
+
+  // No team loses capacity it has today: the old constant is now the FLOOR.
+  test('a small or unknown headcount keeps exactly the old allowance', () => {
+    const atFloor = Array.from({ length: MAX_TEAM_DEVICES }, (_, i) => `uid-${i}`);
+    for (const memberCount of [undefined, 1, 2]) {
+      const team = multiDeviceTeam({ deviceUids: atFloor, controllerUid: 'uid-0', memberCount });
+      expect(canAttachDevice(team, 'uid-new'), String(memberCount))
+        .toEqual({ ok: false, reason: 'full' });
+    }
+    const belowFloor = multiDeviceTeam({
+      deviceUids: ['uid-0'], controllerUid: 'uid-0', memberCount: 1,
+    });
+    expect(canAttachDevice(belowFloor, 'uid-1')).toEqual({ ok: true });
   });
 
   test('rejects attaching to a finished team', () => {
@@ -161,8 +192,15 @@ describe('canAttachDevice', () => {
 describe('canAddRunDevice (global per-run phone ceiling)', () => {
   // Pinned on purpose: the ceiling is a capacity claim about the server, so
   // moving it must be a deliberate edit here too, never a silent drift.
-  test('MAX_RUN_DEVICES is 100', () => {
-    expect(MAX_RUN_DEVICES).toBe(100);
+  //
+  // 100 -> 150 on 2026-08-28 (change: hot-path-read-cost). The claim behind the new number was
+  // MEASURED rather than assumed: against production with the Firestore op counter enabled, a
+  // 120 team, 75 minute run projects to ~34,250 reads of a 50,000 daily ceiling and ~15,600
+  // writes of 20,000, and the VPS sat at load 0.14 with 2.8 GB free through a 100 team
+  // rehearsal. Note that DEVICES, not teams, is what the read budget scales with, because every
+  // extra phone polls team state on its own.
+  test('MAX_RUN_DEVICES is 150', () => {
+    expect(MAX_RUN_DEVICES).toBe(150);
   });
 
   test('admits a phone while the run is below the ceiling', () => {

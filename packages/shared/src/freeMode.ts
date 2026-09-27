@@ -27,8 +27,15 @@ export const PAYMENTS_ENABLED = false;
  *
  * Stamped onto `run.maxParticipants` at launch, so a change only affects runs
  * launched afterwards — already-live runs keep the ceiling they launched with.
+ * That is the trap worth remembering: raising this DURING an event does nothing
+ * for the run already in flight.
+ *
+ * RAISED 100 -> 150 (change: hot-path-read-cost, 2026-08-28), in step with
+ * MAX_RUN_DEVICES and for the same measured reason. A 100 team event had exactly
+ * zero headroom against a cap of 100: one extra phone and a real participant was
+ * turned away with `resource-exhausted`.
  */
-export const FREE_MODE_MAX_PARTICIPANTS = 100;
+export const FREE_MODE_MAX_PARTICIPANTS = 150;
 
 /**
  * Participant ceiling for a test-drive (rehearsal) run: the creator plus one

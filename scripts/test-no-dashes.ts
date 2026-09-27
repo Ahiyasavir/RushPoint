@@ -22,6 +22,10 @@
 //            bypasses the dictionary. Same UI-text-position detection as
 //            scripts/check-i18n.ts → no className/import false positives. Suppress
 //            a deliberate literal with a trailing `// i18n-ignore`.
+//   PART G — the mission bank (apps/creator-web/src/taskBank.ts), the largest
+//            body of user-facing Hebrew in the product and, until 2026-09-06,
+//            invisible to every part above: it is neither a `t.*` dictionary nor
+//            a JSX literal, so the standard did not reach it.
 //   npx tsx scripts/test-no-dashes.ts
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative, basename } from 'node:path';
@@ -30,6 +34,7 @@ import ts from 'typescript';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
 import { LANDING_PAGES } from './lib/landingPages';
+import { TASK_BANK } from '../apps/creator-web/src/taskBank';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -400,6 +405,55 @@ if (existsSync(MARKETING_POST_DIR)) {
   }
 }
 
+// The PAGE content files. The standing pages moved out of `src/copy/*.ts` into
+// JSON (change: editable-pages-and-media), and this part was left scanning the
+// directory they came from. The reach assertion below is what caught it: the
+// field count fell from 226 to 95 while every offender check stayed green,
+// because there was almost nothing left to find.
+const MARKETING_PAGES_DIR = join(ROOT, 'apps', 'marketing', 'src', 'data', 'pages');
+
+if (existsSync(MARKETING_PAGES_DIR)) {
+  // Identifiers, not prose: media paths, icon names and the media discriminator
+  // are Latin by necessity in both languages, and the standard already exempts
+  // file paths.
+  //
+  // `slug` joins them (change: marketing-home-occasion-doors): an occasion door names the
+  // landing page it opens, and those slugs are Latin and hyphenated BY DESIGN. See
+  // SUBJECT_SLUGS in scripts/lib/landingPages.ts, which explains why they are Latin in
+  // both languages and states that the no dash standard governs prose and exempts URLs.
+  // Renaming a slug to satisfy this scan would break the URL, not fix the copy.
+  const NOT_PROSE_KEY = /(^|\.)(src|poster|icon|kind|slug)$/;
+
+  const leavesOf = (value: unknown, path: string, out: Array<[string, string]>): Array<[string, string]> => {
+    if (typeof value === 'string') {
+      out.push([path, value]);
+      return out;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((v, i) => leavesOf(v, `${path}[${i}]`, out));
+      return out;
+    }
+    if (value && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value)) leavesOf(v, path ? `${path}.${k}` : k, out);
+    }
+    return out;
+  };
+
+  for (const file of readdirSync(MARKETING_PAGES_DIR).filter((f) => f.endsWith('.json'))) {
+    const parsed: unknown = JSON.parse(readFileSync(join(MARKETING_PAGES_DIR, file), 'utf8'));
+    for (const [path, text] of leavesOf(parsed, '', [])) {
+      if (NOT_PROSE_KEY.test(path)) continue;
+      if (!/[A-Za-z֐-׿]/.test(text)) continue;
+      marketingScanned++;
+      // Markup inside prose is not prose, same as the copy modules above.
+      const prose = text.replace(/<[^>]*>/g, ' ');
+      if (BANNED_DASH.test(prose)) {
+        marketingOffenders.push(`${file} ${path} → "${prose.trim().slice(0, 60)}"`);
+      }
+    }
+  }
+}
+
 check('E · no hyphen or dash in marketing site content',
   marketingOffenders.length === 0, marketingOffenders.slice(0, 6).join(' | '));
 
@@ -407,6 +461,175 @@ check('E · no hyphen or dash in marketing site content',
 // an empty input set satisfies every one of them.
 check('E · the marketing content scan actually reached the copy', marketingScanned >= 100,
   `${marketingScanned} field(s)`);
+
+// ── PART F — NO COLON IN A SHIPPED PAGE TITLE ────────────────────────────────
+// A different rule from the dash standard above, deliberately much narrower, and the
+// narrowness is the whole design. A colon INSIDE A SENTENCE is ordinary punctuation and
+// this product's descriptions and paragraphs use it correctly in a dozen places; banning
+// it everywhere would either fail correct copy or collect exemptions until it meant
+// nothing. What is actually wrong is a colon in a NAME.
+//
+// Every title we shipped read `RushPoint: build your own real world field game`. In a
+// search result that spends the first eleven characters, the ones a reader scans hardest,
+// on the brand, and pushes the words they were actually searching for to the right of a
+// piece of punctuation doing the work of a sentence. The house pattern was already decided
+// and written down for the marketing site (apps/marketing/src/config.yaml: "A COMMA, not
+// an em dash", applied as `%s, RushPoint`); the applications and the landing pages simply
+// predate it.
+//
+// VALUES ONLY, never whole tags. `<meta property="og:title" ...>` carries a colon in its
+// KEY on every page ever written, so a rule applied to tag text would fail universally and
+// be deleted within the day. Same reason URLs, times and codes are not scanned: a colon is
+// only a defect where a human reads a name.
+const BANNED_TITLE_SEPARATOR = /:/;
+/** The metadata whose value Google prints AS the link. Not descriptions. */
+const HTML_TITLE_META = new Set(['og:title', 'twitter:title']);
+const MANIFEST_TITLE_KEYS = new Set(['name', 'short_name']);
+
+const titleOffenders: string[] = [];
+let titlesScanned = 0;
+
+for (const app of ['creator-web', 'play-web']) {
+  const htmlRel = `apps/${app}/index.html`;
+  const html = stripComments(readFileSync(join(ROOT, htmlRel), 'utf8'));
+
+  const title = /<title>([\s\S]*?)<\/title>/.exec(html);
+  if (title) {
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(title[1])) {
+      titleOffenders.push(`${htmlRel} <title> → "${title[1].trim()}"`);
+    }
+  }
+
+  const metaRe = /<meta\s+(?:name|property)=["']([^"']+)["']\s+content=["']([^"']*)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = metaRe.exec(html))) {
+    const [, key, value] = m;
+    // `key` is matched against the set and then DISCARDED. Only `value` is tested, which is
+    // what keeps `og:title` from reporting itself.
+    if (!HTML_TITLE_META.has(key)) continue;
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(value)) {
+      titleOffenders.push(`${htmlRel} ${key} → "${value.trim()}"`);
+    }
+  }
+
+  const manRel = `apps/${app}/public/manifest.webmanifest`;
+  const manifest = JSON.parse(readFileSync(join(ROOT, manRel), 'utf8')) as Record<string, unknown>;
+  for (const key of MANIFEST_TITLE_KEYS) {
+    const v = manifest[key];
+    if (typeof v !== 'string') continue;
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(v)) titleOffenders.push(`${manRel} ${key} → "${v}"`);
+  }
+}
+
+for (const page of LANDING_PAGES) {
+  titlesScanned++;
+  if (BANNED_TITLE_SEPARATOR.test(page.title)) {
+    titleOffenders.push(`${page.language}/${page.subject}.title → "${page.title}"`);
+  }
+}
+
+// The MARKETING site's titles. PART F was written for the two applications and the
+// landing pages, and skipped the apex entirely — which is the surface the rule was
+// actually about. `%s, RushPoint` is declared in apps/marketing/src/config.yaml with a
+// comment saying "A COMMA, not an em dash", but a comment is not a gate: the template,
+// the default title, every standing page's title and every post's title are all free to
+// grow a colon, and the apex title is the single most read line this product publishes.
+const MARKETING_ROOT = join(ROOT, 'apps', 'marketing');
+const MARKETING_CONFIG = join(MARKETING_ROOT, 'src', 'config.yaml');
+
+if (existsSync(MARKETING_CONFIG)) {
+  const yaml = readFileSync(MARKETING_CONFIG, 'utf8');
+  // The two title fields under `metadata.title`, read by their own keys rather than by
+  // parsing the document: a dependency free regex cannot go stale against a YAML parser
+  // version, and a key that is renamed away simply stops contributing — which the reach
+  // assertion below then catches.
+  for (const key of ['default', 'template']) {
+    const m = new RegExp(`^\\s{4}${key}:\\s*(.+)$`, 'm').exec(yaml);
+    if (!m) continue;
+    const value = m[1].trim().replace(/^['"]|['"]$/g, '');
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(value)) {
+      titleOffenders.push(`marketing config.yaml metadata.title.${key} → "${value}"`);
+    }
+  }
+}
+
+// Every standing page, both languages. `title` is what the template wraps and what
+// Google prints as the link.
+if (existsSync(MARKETING_PAGES_DIR)) {
+  for (const file of readdirSync(MARKETING_PAGES_DIR).filter((f) => f.endsWith('.json'))) {
+    const parsed = JSON.parse(readFileSync(join(MARKETING_PAGES_DIR, file), 'utf8')) as Record<string, unknown>;
+    const title = parsed.title;
+    if (typeof title !== 'string') continue;
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(title)) {
+      titleOffenders.push(`marketing ${file} title → "${title}"`);
+    }
+  }
+}
+
+// Blog posts. Only the frontmatter `title`, for the same reason as everywhere else in
+// this part: a colon inside the body is ordinary punctuation and is not scanned.
+if (existsSync(MARKETING_POST_DIR)) {
+  for (const file of readdirSync(MARKETING_POST_DIR).filter((f) => /\.mdx?$/.test(f))) {
+    const raw = readFileSync(join(MARKETING_POST_DIR, file), 'utf8').replace(/\r\n/g, '\n');
+    const fm = /^---\n([\s\S]*?)\n---/.exec(raw);
+    if (!fm) continue;
+    const m = /^title:\s*(.+)$/m.exec(fm[1]);
+    if (!m) continue;
+    const value = m[1].trim().replace(/^['"]|['"]$/g, '');
+    titlesScanned++;
+    if (BANNED_TITLE_SEPARATOR.test(value)) {
+      titleOffenders.push(`marketing ${file} frontmatter.title → "${value}"`);
+    }
+  }
+}
+
+check('F · no colon in a shipped page title', titleOffenders.length === 0, titleOffenders.join(' | '));
+
+// The same reach assertion PARTS C, D and E carry, for the same reason: this part is a set
+// of absences, and an empty input set satisfies every one of them. Two apps contribute a
+// title, two title meta fields and two manifest keys each, plus twelve landing pages,
+// plus the marketing site's two config fields and six standing page titles.
+check('F · the title scan actually reached the titles', titlesScanned >= 28, `${titlesScanned} title(s)`);
+
+// ── PART G — the mission bank ────────────────────────────────────────────────
+//
+// The single largest body of user-facing Hebrew in the product, and until
+// 2026-09-06 no part of this gate could see a character of it. A bank mission's
+// `title`, `description` and `hint` are read by a player on a phone mid game;
+// its `setup[].prompt` is read by a creator in Quick Setup. None of it flows
+// through `t.*` (PART A) and none of it is a JSX literal (PART B), so the
+// standard simply did not apply where most of the copy lives. A register pass
+// over the bank put eight em dashes into player copy and every gate stayed
+// green, which is how this hole was found. `title`/`description`/`hint` are
+// player text and `prompt` is creator text; both are user facing.
+{
+  const offenders: string[] = [];
+  let bankScanned = 0;
+  const scan = (where: string, value: string | undefined): void => {
+    if (!value) return;
+    bankScanned++;
+    if (BANNED_DASH.test(value)) offenders.push(`${where} → "${value.slice(0, 60)}"`);
+  };
+  for (const entry of TASK_BANK) {
+    const task = entry.build();
+    scan(`${entry.key}.title`, task.title);
+    scan(`${entry.key}.description`, task.description);
+    scan(`${entry.key}.hint`, task.hint);
+    for (const step of task.steps ?? []) scan(`${entry.key}.step`, step.prompt);
+    for (const [i, sp] of (entry.setup ?? []).entries()) scan(`${entry.key}.setup[${i}]`, sp.prompt);
+  }
+  check('G · no hyphen or dash in mission bank copy', offenders.length === 0,
+    offenders.slice(0, 6).join(' | '));
+  // Same anti-vacuity assertion the other parts carry: a scan that reached
+  // nothing satisfies "no offenders" perfectly.
+  check('G · the mission bank scan actually reached the copy', bankScanned >= 200,
+    `${bankScanned} string(s) across ${TASK_BANK.length} missions`);
+}
 
 console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

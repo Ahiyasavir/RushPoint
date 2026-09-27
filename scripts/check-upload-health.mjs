@@ -34,7 +34,7 @@ const argOf = (name, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 const ORIGIN = (argOf('--origin', 'https://api.rush-point.com')).replace(/\/$/, '');
-const WEB_ORIGIN = argOf('--web-origin', 'https://rush-point.com');
+const WEB_ORIGIN = argOf('--web-origin', 'https://player.rush-point.com');
 const SKIP_AUTH = args.includes('--skip-auth');
 
 let passed = 0;

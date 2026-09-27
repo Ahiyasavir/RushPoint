@@ -16,13 +16,14 @@
 // Splitting readiness into blocking issues and non blocking advisories would
 // change what can launch, and is deliberately left to a follow up.
 import type { Game, Stage, Task } from '@rushpoint/shared';
-import { validateUnlockGraph, requiredTaskCountProblem } from '@rushpoint/shared';
+import { validateUnlockGraph, requiredTaskCountProblem, playableTasks } from '@rushpoint/shared';
 import { isTaskInteractionValid, isTaskLocationValid } from './wizardLogic';
 
 export type ReadinessCode =
   | 'stageHasNoTask'      // a stage with no tasks (or a game with no stages)
   | 'taskNotCompletable'  // a quiz/numeric/station/sequence task with no answer key
   | 'taskNotPlaced'       // a located task still on the {0,0} sentinel
+  | 'taskNotNamed'        // a task whose title is still empty (change: readiness-requires-a-name)
   | 'stageUnwinnable';    // requiredTaskCount above what the stage can yield
 
 export interface ReadinessIssue {
@@ -54,7 +55,12 @@ export function computeGameReadiness(game: ReadableGame): ReadinessIssue[] {
   for (const stage of stages) {
     const stageId = stage.id;
     const stageTitle = stage.title ?? '';
-    const tasks: Task[] = stage.tasks ?? [];
+    // BENCHED MISSIONS ARE NOT PART OF THE GAME (change: mission-card-actions), so
+    // readiness must not demand a name, an answer key or a pin for one — the whole
+    // point of benching a half-written mission is to launch without finishing it.
+    // A stage whose every mission is benched has nothing to hand out and is
+    // reported as empty, which is exactly what it is once the run is built.
+    const tasks: Task[] = playableTasks(stage) as Task[];
 
     if (tasks.length === 0) {
       issues.push({ code: 'stageHasNoTask', stageId, stageTitle });
@@ -65,6 +71,26 @@ export function computeGameReadiness(game: ReadableGame): ReadinessIssue[] {
     for (const task of tasks) {
       const taskId = task.id;
       const taskTitle = task.title ?? '';
+      // An UNNAMED mission (change: readiness-requires-a-name).
+      //
+      // The Builder used to contradict itself here. `canGoNext('details', task)`
+      // (lib/wizardLogic.ts) refuses to advance past the mission editor's first
+      // step while the title is empty — the product's own position is that a
+      // mission must be named — but readiness never checked, so closing that
+      // editor with ✕ left an untitled task and the panel announced
+      // "everything is ready to launch".
+      //
+      // Reproduced on a brand-new account: create a game, close the auto-opened
+      // mission editor, and the Builder declares an untitled mission inside an
+      // untitled game launch-ready. Nothing downstream repairs it — the player's
+      // mission card renders `task.title` verbatim, so the team is handed a
+      // mission with a blank heading and no idea what it is asking.
+      //
+      // Whitespace counts as empty, exactly as the wizard's own gate does, so the
+      // two cannot disagree about what "named" means.
+      if (taskTitle.trim() === '') {
+        issues.push({ code: 'taskNotNamed', stageId, stageTitle, taskId, taskTitle });
+      }
       if (!isTaskInteractionValid(task)) {
         issues.push({ code: 'taskNotCompletable', stageId, stageTitle, taskId, taskTitle });
       }
@@ -102,6 +128,10 @@ export function canLaunchGame(game: ReadableGame): boolean {
  * never be offered past these — the server would reject the launch — so they stay
  * a hard refusal even for a test drive.
  */
+// `taskNotNamed` is deliberately NOT here: launchRun accepts an untitled task, so
+// a rehearsal of one is a rough rehearsal, not an impossible one. Rehearsing is
+// exactly when a creator is still naming things, and refusing the rehearsal that
+// would SHOW them the blank heading would be the wrong way round.
 const TEST_DRIVE_HARD_CODES: readonly ReadinessCode[] = ['stageHasNoTask', 'taskNotCompletable'];
 
 /**

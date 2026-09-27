@@ -1,8 +1,20 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSeconds, resolveVideoDuration } from '@rushpoint/shared';
+import {
+  haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSeconds, resolveVideoDuration,
+  // How long the server holds a coarse fix before letting it through anyway, so the
+  // app can press again for the player at the right moment rather than guessing
+  // (change: arrival-needs-a-usable-fix).
+  COARSE_FIX_GRACE_MS,
+} from '@rushpoint/shared';
+// Reduced to the devices this team actually has, the same way the server reduces it at
+// submit time, so the two never disagree about what the team is waiting for
+// (change: every-member-plays).
+import { effectiveContributorRequirement, normalizeContentType, autoApproveLengthVerdict } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
+  // The ONLY mutation a non-controller device may make (change: every-member-plays).
+  contributeToTask,
   submitTaskAnswer, submitSequenceStep, triggerSOS, revealTaskAnswer,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
@@ -11,13 +23,33 @@ import {
 // which secondary actions belong behind the overflow.
 import { selectMissionNotice, type MissionNotice } from '../lib/missionNotice';
 import MissionExtras from './MissionExtras';
-import { uploadTaskPhoto, uploadTaskAudio, uploadTaskVideo } from '../services/firebase';
+import { uploadTaskMedia, uploadTaskPoster, createVideoStream, finishVideoStream, uid } from '../services/firebase';
+import type { StreamUpload } from '../lib/streamUpload';
+import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
+import type { BgKind } from '../lib/backgroundMedia';
+import { countdownLeftMs, countdownUrgent, formatCountdown } from '../lib/timeLimitCountdown';
+import { backgroundMedia } from '../services/backgroundMedia';
 import { compressImageWithReport } from '../lib/imageResize';
+import {
+  canSwitchCamera, initialFacing, planCameraSwitch, readCameraChoice, shouldMirror, writeCameraChoice,
+  type Facing,
+} from '../lib/cameraChoice';
 import {
   getUploadProgress, subscribeUploadProgress,
   getUploadRetrying, subscribeUploadRetrying,
 } from '../lib/uploadResiliency';
 import { withLocation } from '../utils/withLocation';
+// What the organizer decided about this team's own submission, and why
+// (change: rejection-tells-the-player). Total; silent on anything malformed.
+import { submissionVerdict } from '../lib/submissionVerdict';
+// One truthful status per media mission, from the SERVER record (change: submission-status-truth).
+import {
+  submissionPhase, pickSubmissionRecord, submissionStands,
+  type SubmissionPhase, type SubmissionServerRecord, type SubmissionFailReason,
+} from '../lib/submissionStatus';
+// A cancelled camera must never destroy the photo already in hand
+// (change: camera-capture-never-eats-a-photo).
+import { pickedFileVerdict } from '../lib/capturePick';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
@@ -27,6 +59,10 @@ import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import { Working } from './Working';
+import { capturePosterFrame, posterTaskId } from '../lib/posterFrame';
+import PhotoViewfinder from './PhotoViewfinder';
+import { estimateUploadEta, etaLabel, readUplinkSample, uplinkPrior, type EtaLabel } from '../lib/uploadEta';
+import { currentPrior, localStorageOrNull, useUploadEta } from '../hooks/useUploadEta';
 import { LoadingView } from './LoadingView';
 import { feedback } from '../lib/sound';
 import { resolveCardExit } from '../lib/cardExit';
@@ -35,9 +71,14 @@ import {
   canCompleteWithoutLocation,
 } from '../lib/stuckGuards';
 import {
-  VIDEO_BITS_PER_SECOND, AUDIO_BITS_PER_SECOND, videoTypeFromName, pickedClipVerdict,
+  CAMERA_OPEN_DEADLINE_MS, withCameraDeadline, captureProfileFor, type CaptureProfile,
+  MAX_PARTICIPANT_VIDEO_BYTES, recorderTimesliceFor, recorderEngineFromUserAgent,
+  videoTypeFromName, pickedClipVerdict,
   recordedClipVerdict,
 } from '../lib/videoCapture';
+
+// A media mission with nothing in flight on this device (change: submission-status-truth).
+const IDLE_MEDIA_STAGE = { taskId: null, stage: 'idle', failed: null } as const;
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
 // lazyWithRetry so a stale-shell chunk 404 self-heals instead of hanging the
@@ -73,13 +114,23 @@ function TaskMediaGallery({ media }: { media: TaskMedia[] }) {
   );
 }
 
-export default function TaskRunner({ session, state, stage, onChanged, readOnly = false }: {
+export default function TaskRunner({ session, state, stage, onChanged, role = 'sender', senderName, onTakeOver, onOpenChat }: {
   session: Session; state: MyTeamState; stage: RunStageRecord; onChanged: () => void;
-  // Shared team devices: viewer phones render the task read-only — inputs and
-  // submits disabled (the server also rejects them; this is the friendly layer).
-  readOnly?: boolean;
+  /** Opens the team↔organizer chat, when the run has one (change: submission-status-truth). */
+  onOpenChat?: () => void;
+  // Shared team devices (change: team-phones-simple, D3). ONE phone answers for the team; the
+  // others are viewers. A viewer may still SEND MEDIA (a photo or clip is evidence, not a guess,
+  // and the server accepts it from any attached phone), so on a media mission it gets the normal
+  // capture controls. On any other mission its controls are replaced by ONE card that says who is
+  // answering and offers "send from my phone": never a screen of greyed-out buttons.
+  role?: 'sender' | 'viewer';
+  /** The answering phone's name, for the viewer card. */
+  senderName?: string;
+  /** Take the answering role on this phone (claimController), from the viewer card. */
+  onTakeOver?: () => void;
 }) {
   const { t } = useT();
+  const isViewer = role === 'viewer';
   const ctx = useMemo(
     () => ({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId }),
     [session.ownerUid, session.gameId, session.runId],
@@ -190,7 +241,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // Viewer phones never request routing — the controller drives assignment and
   // the team-doc snapshot brings the result here.
   useEffect(() => {
-    if (readOnly) return;
+    if (isViewer) return;
     if (assignedRec || unassigned.length === 0) return;
     if (routingInFlight.current) return; // don't stampede a slow request
     routingInFlight.current = true;
@@ -236,7 +287,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       () => { void requestRouting(undefined); },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignedRec, unassigned.length, routingAttempt, readOnly]);
+  }, [assignedRec, unassigned.length, routingAttempt, isViewer]);
 
   // Routing wait (change: play-no-silent-failures): "finding your next task" used
   // to be a motionless sentence with no spinner and no escape, able to sit for the
@@ -255,8 +306,36 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     ? state.activeStageTasks.find((t) => t.id === assignedRec.taskId)
     : undefined;
 
+  // ── The automatic second press (change: arrival-needs-a-usable-fix) ─────────
+  //
+  // The server refuses a fix too coarse to prove arrival and asks the player to hold
+  // still; COARSE_FIX_GRACE_MS later it accepts regardless. Without this, the player
+  // has to work that out and press again themselves — and the message does not say
+  // "press again in ten seconds", because putting a number on it would document the
+  // way through the gate.
+  //
+  // So the app presses for them, exactly ONCE per mission. One press, a short "hold
+  // still", and it resolves itself. A second refusal is left alone: by then the
+  // window has passed and anything still refusing is a real problem the player needs
+  // to see, not something more waiting will fix.
+  const coarseRetryRef = useRef<number | null>(null);
+  const coarseRetriedFor = useRef<string | null>(null);
+  // TaskRunner does NOT remount between missions (see the keying note on the entry
+  // components), so a pending retry from the previous mission would fire against the
+  // next one. Cancel on every task change, and on unmount.
+  useEffect(() => () => {
+    if (coarseRetryRef.current !== null) {
+      window.clearTimeout(coarseRetryRef.current);
+      coarseRetryRef.current = null;
+    }
+  }, [assignedRec?.taskId]);
+
   // Clear a revealed hint / message when the assigned task changes.
-  useEffect(() => { setHint(null); setMsg(null); setFieldGpsFailed(false); }, [assignedRec?.taskId]);
+  useEffect(() => {
+    setHint(null); setMsg(null); setFieldGpsFailed(false);
+    setJustSent(null); setReplacingFor(null);
+    setMediaStage(IDLE_MEDIA_STAGE);
+  }, [assignedRec?.taskId]);
 
   // Wrong-answer cost (change: wrong-answer-cost): what a wrong answer just cost,
   // and the retry lockout it started. The SERVER is the only authority (it
@@ -346,7 +425,198 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   // Every interactive element freezes for viewers; a submission that loses a
   // race with a mid-flight control transfer maps to a friendly localized message.
+  // ── One submission per press, not per press-until-routing (live run 2026-09-17) ──
+  //
+  // "After I pressed send on the video it DID submit, but it still let me submit it
+  // again, and that wastes memory." Exactly right: `end()` clears `busy` the moment the
+  // callable resolves, while the mission stays on screen until routing hands back the
+  // next one. In that window the control is live with the clip still loaded, so one
+  // more press re-uploads the whole file - 4.6MB in that run.
+  //
+  // ── The submission's truth (change: submission-status-truth) ──────────────────
+  //
+  // That window used to be closed by a `sentFor` latch folded into `frozen`. It closed
+  // the window, and it also produced the three worst screens of the 2026-09-25 report,
+  // reproduced in the running app: an upload bar reading "starting upload" plus a button
+  // stuck on "working" for the WHOLE review wait (UploadProgress rendered on `busy`,
+  // and `busy` was `frozen`); a rejection card saying "try again" above controls the
+  // latch kept disabled (it only cleared on a task change, and a rejection keeps the
+  // task); and a pending submission that vanished on reload (it lived only in `msg`).
+  //
+  // Now the SERVER record drives the screen (lib/submissionStatus.ts), and `justSent`
+  // bridges the gap until the team snapshot carries it: that is what still closes the
+  // double-send window. `mediaStage` is this device's own in-flight step.
+  const [justSent, setJustSent] = useState<
+    { taskId: string; status: 'pending' | 'approved'; submittedAt: string; photoUrl: string } | null
+  >(null);
+  const [mediaStage, setMediaStage] = useState<
+    { taskId: string | null; stage: 'idle' | 'uploading' | 'saving'; failed: SubmissionFailReason | null }
+  >(IDLE_MEDIA_STAGE);
+  // "Send a different one" while waiting for approval re-opens the capture controls.
+  const [replacingFor, setReplacingFor] = useState<string | null>(null);
+  const upload = useUploadStore();
+
+  // Photo, audio and video missions are all `type: 'photo'` (audio/video carry smart.captureKind).
+  // Stated positively, so a mission type added later is never mistaken for a media mission.
+  const isMediaMission = task?.type === 'photo';
+  // The UI is frozen only for a viewer on a NON-media mission (team-phones-simple D3); a viewer
+  // may send media. Routing and answers stay with the answering phone via `isViewer`.
+  const readOnly = isViewer && !isMediaMission;
   const frozen = busy || readOnly;
+  const submissionRecord = task
+    ? pickSubmissionRecord(
+      (state.team as { taskSubmissions?: Record<string, SubmissionServerRecord> }).taskSubmissions?.[task.id],
+      justSent && justSent.taskId === task.id ? justSent : null,
+    )
+    : null;
+  const stageHere = task && mediaStage.taskId === task.id ? mediaStage : { stage: 'idle' as const, failed: null };
+  const phase: SubmissionPhase = submissionPhase({
+    local: {
+      preparing: false,
+      uploading: stageHere.stage === 'uploading',
+      uploadPct: upload.pct,
+      retrying: stageHere.stage === 'uploading' && upload.retrying,
+      saving: stageHere.stage === 'saving',
+      failed: stageHere.failed,
+    },
+    server: submissionRecord,
+  });
+  const showWaitingCard = isMediaMission && !!task && submissionStands(phase) && replacingFor !== task.id;
+
+  // ── Everyone does their part (change: every-member-plays) ──────────────────
+  //
+  // `requiredContributors` is reduced HERE to the devices actually attached, the same
+  // way the server reduces it at submit time, so the two never disagree about what the
+  // team is waiting for. A mission authored for four contributors and played by a team
+  // of two shows "0 of 2", not an impossible "0 of 4".
+  // The organizer's verdict on THIS mission's submission (change:
+  // rejection-tells-the-player). `task` is undefined while routing hands back the
+  // next mission, and the helper is silent on that, so no notice can flash between
+  // missions.
+  // ── A captured photo must outlive a remount (change: photo-survives-a-remount) ──
+  //
+  // Diagnosed from the live run of 2026-09-17, run A20PW01e22Uim8p7XEVK. The player
+  // submitted on סחר חליפין, the picture vanished and they were back on the capture
+  // screen; they shot it again and it went through. The server logs show exactly that:
+  // the upload SUCCEEDED (83KB written to disk at 08:29:41) and no submitStationPhoto
+  // ever followed it. Two independent faults compounded.
+  //
+  // 1. The capture lived only in PhotoEntry's own useState. `task` is null whenever
+  //    routing has not handed back a mission, and TaskRunner early-returns then - so a
+  //    routing round-trip, a reconnect or any refresh unmounted PhotoEntry and took the
+  //    photo with it.
+  // 2. A successful upload was thrown away when the submit that followed it failed, so
+  //    the retry re-uploaded the same picture. That is why the run left an orphan file
+  //    on disk with no submission attached.
+  //
+  // Keyed by task id, like PhotoEntry's own `key`, so a photo can never cross into the
+  // next mission - the failure that `key` was added to prevent. Cleared on success.
+  const capturedRef = useRef<Map<string, { file: File }>>(new Map());
+
+  // The capture-time upload (change: media-upload-reliability, D1/D4). Every kind starts uploading
+  // the moment its capture exists, so the transfer overlaps the player looking at their own photo
+  // or clip, and send only awaits it (usually already landed) and saves. A retake aborts the old
+  // transfer; a failed SUBMIT reuses the landed upload instead of sending every byte again.
+  // One instance for the life of TaskRunner (it is not remounted between missions); entries are
+  // keyed by task id so a mission can never be handed another mission's upload.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const [, setUploadsVersion] = useState(0);
+  const pendingRef = useRef<PendingUploads<{ url: string; contentType: string }> | null>(null);
+  if (!pendingRef.current) {
+    pendingRef.current = createPendingUploads(
+      (blob, contentType, signal, taskId) => (
+        contentType.startsWith('image/') || contentType.startsWith('audio/')
+          ? uploadTaskMedia(contentType.startsWith('image/') ? 'photo' : 'audio', blob, { runId: sessionRef.current.runId, taskId, contentType, signal })
+          : uploadVideoRef.current(blob, contentType, signal, taskId)
+      ),
+      () => setUploadsVersion((v) => v + 1),
+    );
+  }
+  const pending = pendingRef.current;
+
+  // Resumable clip streams, one per task (video-upload-speed D4). A recorded take streams while it
+  // is filmed; anything else (a picked file, a WebKit one-blob recording) gets a stream at send, so
+  // every clip resumes from the server's offset instead of restarting. Where there is no session
+  // route (emulator lane, or an older server) it falls back to the plain upload.
+  const streamsRef = useRef(new Map<string, StreamUpload>());
+  function dropStream(taskId: string) {
+    const s = streamsRef.current.get(taskId);
+    if (s) { s.abort(); streamsRef.current.delete(taskId); }
+  }
+  function startStream(taskId: string, contentType: string) {
+    dropStream(taskId);
+    const s = createVideoStream({ runId: sessionRef.current.runId, taskId, contentType });
+    if (s) streamsRef.current.set(taskId, s);
+  }
+  async function uploadVideo(blob: Blob, contentType: string, signal: AbortSignal, taskId: string): Promise<{ url: string; contentType: string }> {
+    let s = streamsRef.current.get(taskId);
+    if (!s || !s.matches(blob)) {
+      dropStream(taskId);
+      s = createVideoStream({ runId: sessionRef.current.runId, taskId, contentType }) ?? undefined;
+      if (s) { s.append(blob); streamsRef.current.set(taskId, s); }
+    }
+    if (s) {
+      try {
+        const url = await finishVideoStream(s, blob, signal);
+        streamsRef.current.delete(taskId);
+        return { url, contentType: normalizeContentType(contentType) };
+      } catch (e) {
+        const code = String((e as { code?: unknown })?.code ?? '');
+        if (code !== 'session/unsupported' && code !== 'session/mismatch') throw e;
+        streamsRef.current.delete(taskId);
+      }
+    }
+    return uploadTaskMedia('video', blob, { runId: sessionRef.current.runId, taskId, contentType, signal });
+  }
+  // The pending-upload starter is created once; it reaches the current uploadVideo through a ref.
+  const uploadVideoRef = useRef(uploadVideo);
+  uploadVideoRef.current = uploadVideo;
+
+  // A video's poster frame (video-upload-speed D7), started the moment the clip exists so it rides
+  // along with the capture-time upload. One per task; a retake replaces it. Resolves to a URL or
+  // undefined, never rejects.
+  const posterRef = useRef<{ taskId: string; blob: Blob; promise: Promise<string | undefined> } | null>(null);
+  function posterFor(taskId: string, blob: Blob): Promise<string | undefined> {
+    const cur = posterRef.current;
+    if (cur && cur.taskId === taskId && cur.blob === blob) return cur.promise;
+    const runId = sessionRef.current.runId;
+    const promise = (async () => {
+      try {
+        const frame = await capturePosterFrame(blob);
+        if (!frame) return undefined;
+        return await uploadTaskPoster(frame, { runId, taskId: posterTaskId(taskId) });
+      } catch {
+        return undefined;
+      }
+    })();
+    posterRef.current = { taskId, blob, promise };
+    return promise;
+  }
+
+  const verdict = submissionVerdict(state.team, task?.id);
+  const attachedDevices = Math.max(1, new Set(state.team.deviceUids ?? [state.team.id]).size);
+  const contributorsNeeded = effectiveContributorRequirement(
+    task?.requiredContributors, attachedDevices,
+  );
+  const contributedUids = (task && state.team.taskContributions?.[task.id]) || [];
+  const contributorsDone = new Set(contributedUids).size;
+  const myUid = uid();
+  const iContributed = !!myUid && contributedUids.includes(myUid);
+  const [contributing, setContributing] = useState(false);
+  async function contribute() {
+    if (!task || contributing) return;
+    setContributing(true);
+    try {
+      await contributeToTask({ ...ctx, taskId: task.id });
+      onChanged();
+    } catch (e) {
+      // A contribution is additive and idempotent, so a failure costs nothing and the
+      // player can simply tap again - but it must still SAY so. CLAUDE.md records a
+      // safety callable whose silent catch left a stuck player with no feedback.
+      setMsg(submitError(e, t.task.failed));
+    } finally { setContributing(false); }
+  }
   // The GRADED answer controls additionally freeze during a wrong-answer retry
   // lockout. Deliberately narrower than `frozen`: a cooling-down team can still
   // reveal a hint, call for help, or trigger SOS.
@@ -363,6 +633,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // a rejection, so it is always the 'error' tone. Callers pass it to setMsg.
   function submitError(e: unknown, fallback: string): TaskMessage {
     const raw = e instanceof Error ? e.message : '';
+    // attached-phone-uploads: the upload route refused this device's folder. Its own sentence,
+    // because a generic "upload failed" is what hid the second-phone bug for months.
+    if ((e as { code?: unknown } | null)?.code === 'storage/not-your-folder') {
+      return { text: t.task.uploadNotAllowedHere, tone: 'error' };
+    }
     if (raw.includes('not-controller')) return { text: t.devices.controlMoved, tone: 'error' };
     // The common server rejections are stable English `failed-precondition`
     // messages — localize them (keeping the distance number) instead of leaking
@@ -539,16 +814,62 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       await triggerSOS({ ...ctx, ...coords });
       // Scoped to the situation it was raised for — a later task re-arms the button.
       setHelpSentFor(forId);
-    } catch { /* let the player tap again; nothing persisted */ }
+    } catch {
+      // This calls triggerSOS — the SAFETY path. PlayScreen's own SOS button has
+      // always surfaced a failure (`dialog.alert(t.play.sosFailed)`); this second
+      // entry point to the SAME callable swallowed it, so a stuck player tapped
+      // "send help", nothing was sent, and nothing on screen said so — the button
+      // did not even change state, because `setHelpSentFor` is only reached on
+      // success. Reuses the existing copy, which already says what to do instead.
+      showError(t.play.sosFailed);
+    }
   }
 
   // Submit a check-in through completeTask (field / self_report / geofence all use
   // it). Sends REAL coords when the argument is present, OMITS them when not — never
   // synthetic at-the-spot coords (that would leak a hidden task's secret location and
   // pollute the movement heatmap). Callers decide when omission is allowed.
-  async function submitCheckIn(coords?: { lat: number; lng: number }) {
+  async function submitCheckIn(coords?: { lat: number; lng: number; accuracyMeters?: number }) {
     try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); feedback('task'); advanceWithCardExit(); }
-    catch (e) { setMsg(submitError(e, t.task.failed)); }
+    catch (e) {
+      // A fix too coarse to prove arrival comes back as `unavailable`, NOT as
+      // `failed-precondition` (change: arrival-needs-a-usable-fix). The two need
+      // different advice: "you are not there" means walk, "we cannot see you well
+      // enough" means stand still for a moment. Telling a player at the right spot to
+      // walk somewhere is how a check-in becomes a dead end.
+      const code = (e && typeof e === 'object' && 'code' in e
+        ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
+      // 'progress' and not 'error': the player is probably standing in the right
+      // place and the phone simply does not know it yet, so this reads as "nearly
+      // there" rather than as a rejection.
+      if (code === 'unavailable') {
+        setMsg({ text: t.task.fixTooCoarse, tone: 'progress' });
+        // Press again for them once the server's grace window has opened — see the
+        // note on `coarseRetryRef`. `+1500` clears the window with room for clock
+        // skew between this phone and the server, which is the only reason to be
+        // generous here: arriving early just gets the same "hold still" back.
+        const forTask = task?.id ?? null;
+        if (forTask && coarseRetriedFor.current !== forTask && coords) {
+          coarseRetriedFor.current = forTask;
+          coarseRetryRef.current = window.setTimeout(() => {
+            coarseRetryRef.current = null;
+            // The mission may have changed while we waited (a staff skip, a
+            // force-assign). Re-read it rather than trusting the closure.
+            if (!task || task.id !== forTask) return;
+            // A FRESH fix, not the stale one that was just refused: ten seconds is
+            // usually exactly what a cold GPS needed, so re-sending the old reading
+            // would throw away the whole point of waiting.
+            withLocation(
+              (lat, lng, accuracyMeters) => { void submitCheckIn({ lat, lng, accuracyMeters }); },
+              // No fix at all on the retry: leave the "hold still" message standing.
+              // The player can still press the button themselves.
+              () => undefined,
+            );
+          }, COARSE_FIX_GRACE_MS + 1500);
+        }
+      }
+      else { setMsg(submitError(e, t.task.failed)); }
+    }
     finally { end(); }
   }
 
@@ -557,7 +878,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (!begin()) return;
     clearMsg();
     withLocation(
-      (lat, lng) => { void submitCheckIn({ lat, lng }); },
+      // The accuracy rides along so the server can judge whether this fix is good
+      // enough to PROVE arrival (change: arrival-needs-a-usable-fix).
+      (lat, lng, accuracyMeters) => { void submitCheckIn({ lat, lng, accuracyMeters }); },
       () => {
         // Test run (server-authoritative run.isTestDrive, tied to the TEST RUN banner):
         // accept the check-in from anywhere so the creator can rehearse from their desk.
@@ -586,7 +909,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (!begin()) return;
     clearMsg();
     withLocation(
-      (lat, lng) => { void submitCheckIn({ lat, lng }); },
+      // The accuracy rides along so the server can judge whether this fix is good
+      // enough to PROVE arrival (change: arrival-needs-a-usable-fix).
+      (lat, lng, accuracyMeters) => { void submitCheckIn({ lat, lng, accuracyMeters }); },
       () => { void submitCheckIn(); },
     );
   }
@@ -672,6 +997,44 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } finally { end(); }
   }
 
+  // Approve first, upload in the background (change: background-media-upload). When the mission, or
+  // the whole run, approves media automatically, nobody needs to see the file before the team goes
+  // on: the server approves on the spot (`mediaDeferred`), the team is routed on, and the upload
+  // already in flight is handed to the background queue, which attaches the file when it lands.
+  // The server makes the call: when it would NOT approve (a clip outside its length range, or the
+  // switch changed), it writes nothing and this returns the reply so the caller uploads first.
+  // Returns true when the submission is done.
+  async function sendDeferred(
+    kind: BgKind, blob: Blob, contentType: string, lengthSeconds?: number,
+  ): Promise<{ done: true } | { done: false; lengthHold?: 'short' | 'long' | 'unknown' }> {
+    const tk = task!;
+    if (tk.smart?.autoApprove !== true && state.run.autoApproveAllMedia !== true) return { done: false };
+    const taskId = tk.id;
+    setMediaStage({ taskId, stage: 'saving', failed: null });
+    const duration = typeof lengthSeconds === 'number' && Number.isFinite(lengthSeconds) && lengthSeconds > 0 ? lengthSeconds : undefined;
+    const res = await submitStationPhoto({
+      ...ctx, teamId: state.team.id, taskId, mediaDeferred: true, contentType,
+      ...(duration !== undefined ? { mediaDurationSec: duration } : {}),
+    });
+    if (!res.deferred) return { done: false, lengthHold: res.lengthHold };
+    // The capture-time upload keeps going; the queue owns it now. A clip's poster rides along and
+    // never holds the clip (it resolves to undefined on any failure).
+    const upload = pending.handOff(taskId, blob, contentType);
+    const poster = kind === 'video' ? posterFor(taskId, blob) : Promise.resolve(undefined);
+    const firstTry = Promise.all([upload, poster]).then(([up, posterUrl]) => ({ ...up, ...(posterUrl ? { posterUrl } : {}) }));
+    if (kind === 'video') posterRef.current = null;
+    await backgroundMedia.enqueue({
+      id: `${taskId}-${Date.now()}`, ctx, taskId, kind, contentType, blob,
+      ...(duration !== undefined ? { durationSec: duration } : {}), createdAt: Date.now(),
+    }, firstTry);
+    if (kind === 'photo') capturedRef.current.delete(taskId);
+    setJustSent({ taskId, status: 'approved', submittedAt: new Date().toISOString(), photoUrl: '' });
+    setMediaStage({ taskId, stage: 'idle', failed: null });
+    setReplacingFor(null);
+    onChanged();
+    return { done: true };
+  }
+
   // Camera capture → compressed upload → submit (change: fix-photo-camera-capture).
   // No pasted-URL path any more, so the "own team folder" storage-path rejection
   // can't be reached by a normal player; the guard maps any residual storage-path
@@ -680,13 +1043,25 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (blockedOffline()) return;
     if (!begin()) return;
     clearMsg();
+    const taskId = task!.id;
     try {
-      showProgress(t.task.uploadingPhoto);
-      const url = await uploadTaskPhoto(file, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
+      if ((await sendDeferred('photo', file, 'image/jpeg')).done) return;
+      // The upload began when the photo was taken (pendingUpload). If it already landed, or
+      // the SUBMIT failed last time, the bytes are on the server and are reused, never re-sent.
+      if (!pending.ready(taskId, file)) setMediaStage({ taskId, stage: 'uploading', failed: null });
+      const { url } = await pending.take(taskId, file, 'image/jpeg');
+      setMediaStage({ taskId, stage: 'saving', failed: null });
       const res = await submitStationPhoto({ ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url });
-      showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
+      // Landed. Keep the picture, forget its upload: a rejection then shows the player what
+      // they sent, and a new send can never quietly re-submit the rejected file.
+      pending.forget(taskId);
+      capturedRef.current.set(task!.id, { file });
+      setJustSent({ taskId: task!.id, status: res.autoApproved ? 'approved' : 'pending', submittedAt: new Date().toISOString(), photoUrl: url });
+      setMediaStage({ taskId, stage: 'idle', failed: null });
+      setReplacingFor(null);
       onChanged();
     } catch (e) {
+      setMediaStage({ taskId, stage: 'idle', failed: 'unknown' });
       if (isStoragePathError(e)) showError(t.task.photoSaveRetry); else setMsg(submitError(e, t.task.uploadFailed));
     } finally { end(); }
   }
@@ -698,37 +1073,57 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (blockedOffline()) return;
     if (!begin()) return;
     clearMsg();
+    const taskId = task!.id;
     try {
-      showProgress(t.task.uploadingAudio);
-      const up = await uploadTaskAudio(blob, {
-        runId: session.runId, teamId: state.team.id, taskId: task!.id, contentType,
-      });
+      if ((await sendDeferred('audio', blob, contentType)).done) return;
+      if (!pending.ready(taskId, blob)) setMediaStage({ taskId, stage: 'uploading', failed: null });
+      const up = await pending.take(taskId, blob, contentType);
+      setMediaStage({ taskId, stage: 'saving', failed: null });
       const res = await submitStationPhoto({
         ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
       });
-      showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
+      pending.forget(taskId);
+      setJustSent({ taskId: task!.id, status: res.autoApproved ? 'approved' : 'pending', submittedAt: new Date().toISOString(), photoUrl: up.url });
+      setMediaStage({ taskId, stage: 'idle', failed: null });
+      setReplacingFor(null);
       onChanged();
     } catch (e) {
+      setMediaStage({ taskId, stage: 'idle', failed: 'unknown' });
       setMsg(submitError(e, t.task.uploadFailed));
     } finally { end(); }
   }
 
   // video-submission-task: a recorded clip rides the SAME pipeline as photo/audio.
-  async function video(blob: Blob | File, contentType: string) {
+  async function video(blob: Blob | File, contentType: string, lengthSeconds?: number) {
     if (blockedOffline()) return;
     if (!begin()) return;
     clearMsg();
+    const taskId = task!.id;
     try {
-      showProgress(t.task.uploadingVideo);
-      const up = await uploadTaskVideo(blob, {
-        runId: session.runId, teamId: state.team.id, taskId: task!.id, contentType,
-      });
+      if ((await sendDeferred('video', blob, contentType, lengthSeconds)).done) return;
+      if (!pending.ready(taskId, blob)) setMediaStage({ taskId, stage: 'uploading', failed: null });
+      const poster = posterFor(taskId, blob);
+      const up = await pending.take(taskId, blob, contentType);
+      setMediaStage({ taskId, stage: 'saving', failed: null });
+      // The poster had the whole clip upload to finish; it gets at most POSTER_WAIT_MS more and is
+      // otherwise simply left out (video-upload-speed D7: a poster never delays a submission).
+      const posterUrl = await Promise.race([poster, new Promise<undefined>((r) => setTimeout(() => r(undefined), POSTER_WAIT_MS))]);
       const res = await submitStationPhoto({
         ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
+        // Omitted, never null, when absent (the undefined-to-null transport rule).
+        ...(posterUrl ? { posterUrl } : {}),
+        ...(typeof lengthSeconds === 'number' && Number.isFinite(lengthSeconds) && lengthSeconds > 0 ? { mediaDurationSec: lengthSeconds } : {}),
       });
-      showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
+      posterRef.current = null;
+      // Owner rule (2026-09-26): a clip outside the length range is not approved automatically.
+      if (res.lengthHold) setMsg({ text: t.task.videoHeldForLength, tone: 'progress' });
+      pending.forget(taskId);
+      setJustSent({ taskId: task!.id, status: res.autoApproved ? 'approved' : 'pending', submittedAt: new Date().toISOString(), photoUrl: up.url });
+      setMediaStage({ taskId, stage: 'idle', failed: null });
+      setReplacingFor(null);
       onChanged();
     } catch (e) {
+      setMediaStage({ taskId, stage: 'idle', failed: 'unknown' });
       setMsg(submitError(e, t.task.uploadFailed));
     } finally { end(); }
   }
@@ -845,7 +1240,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // on a failed arrival (change: nightly geofence-latch fix) — otherwise a single
   // transient/rejected completeTask would freeze auto check-in for good.
   function geofenceArrive(la: number, ln: number): Promise<boolean> {
-    if (readOnly || blockedOffline()) return Promise.resolve(false);
+    if (isViewer || blockedOffline()) return Promise.resolve(false);
     // A check-in is already in flight (the watcher fired again before the first
     // resolved) — report "arrived" so GeofenceAuto stays latched and lets the
     // in-flight call decide; it un-latches itself on a genuine failure.
@@ -906,7 +1301,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       <span aria-hidden="true" className="shrink-0">🧪</span>
       {/* min-w keeps the text from collapsing into a one-word column; below it
           the button wraps instead. */}
-      <span className="text-[11px] text-ink-warm flex-1 min-w-[7rem] leading-snug">{t.task.rehearseHelp}</span>
+      <span className="text-[13px] text-ink-warm flex-1 min-w-[7rem] leading-snug">{t.task.rehearseHelp}</span>
       <button
         type="button"
         disabled={rehearsing || frozen}
@@ -946,16 +1341,58 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
               {task.locationClueHe || task.locationClue}
             </p>
           )}
-          <p className="text-[11px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
+          <p className="text-[13px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
         </div>
 
         {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
 
-        <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
+        {/* Viewer mode is `pointer-events-none` ONLY. It used to also carry
+            `opacity-60`, which is the same mistake the Button variant map (ui.tsx)
+            already documents for its disabled skin: opacity composites the element
+            toward the page, so it dims the LABEL as hard as the fill. Measured
+            against the primary CTA on this card, white on the gradient falls from
+            5.18:1 to 2.62:1 — under AA, and under even the 3:1 large-text floor —
+            while the mission text drops from 17.49:1 to 4.58:1. No alpha fixes it:
+            at 0.85, still readable-looking, the CTA label is 4.05:1.
+
+            And the tradeoff is upside down. A disabled control may be low contrast
+            (WCAG 1.4.3 exempts inactive components), but a viewer phone is not
+            looking at a disabled control — it is looking at the MISSION, which is
+            the whole reason a teammate is holding a phone at all. Most of a team
+            is viewers, reading this outdoors, in sun.
+
+            Nothing is lost by dropping it: `pointer-events-none` still refuses the
+            tap, `aria-disabled` still announces it, and the run already renders an
+            explicit "👀 {name} is playing" banner above the mission (PlayScreen),
+            which says in words what the dimming only hinted at. */}
+        {/* EVERY entry component below is keyed by `task.id`.
+          (change: entry-state-must-not-outlive-its-mission)
+
+          TaskRunner does NOT remount when routing hands out the next mission —
+          the parent resets its own state with an effect on `assignedRec?.taskId`,
+          which is proof the instance survives. So when two consecutive missions
+          use the SAME entry component, React reuses the instance and every piece
+          of local state crosses the boundary with it: the number typed for the
+          previous numeric task, the station code, the half-finished sequence
+          answer — and, worst of all, PhotoEntry's captured `file` and `preview`.
+          A player who photographed mission A and was then routed to mission B
+          (a staff skip, or a partial-completion stage auto-skipping the rest)
+          found mission B already holding mission A's photo, primed to submit,
+          with nothing on screen suggesting it was stale.
+
+          Two of these were already keyed, each with a comment explaining this
+          exact failure for its own case. The rule simply never travelled to the
+          other seven. It is a property of the BRANCH, not of any one component:
+          a new task type added here needs the key too. */}
+      {readOnly ? (
+        <ViewerCard senderName={senderName} onTakeOver={onTakeOver} />
+      ) : (
+        <div className="mt-5">
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
             {t.task.checkArrival}
           </Button>
         </div>
+      )}
 
         {task.hasHint && !hint && (
           <div className="mt-3">
@@ -988,7 +1425,19 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
       {task.smart?.longInstructions && <p dir="auto" className="text-zinc-300 text-base mb-3">{task.smart.longInstructions}</p>}
 
-      <ExpiryCountdown key={task.id} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
+      {/* Prefixed key (change: duplicate-sibling-keys). Both this and
+          <MissionExtras> below are direct children of the SAME <Card> and both
+          keyed to force a per-mission remount — so keying both to a bare
+          `task.id` gave one parent two children with the identical key. React
+          logged "Encountered two children with the same key … the behavior is
+          unsupported and could change", and under a duplicate key reconciliation
+          is undefined: it may match the wrong element or drop one. That voids the
+          exact guarantee both keys were added for — a countdown or an open
+          overflow menu surviving into the next mission. Keys need only be unique
+          among SIBLINGS, so a per-component prefix keeps the remount and removes
+          the collision. */}
+      <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
+      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} onTimeUp={onChanged} />
 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
@@ -999,7 +1448,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           {(task.locationClueHe || task.locationClue) && (
             <p dir="auto" className="text-sm text-zinc-200">{task.locationClueHe || task.locationClue}</p>
           )}
-          <p className="text-[11px] text-zinc-500 mt-1">{t.task.hiddenHelp}</p>
+          <p className="text-[13px] text-zinc-500 mt-1">{t.task.hiddenHelp}</p>
         </div>
       ) : (
         // Distance stays PRIMARY: on a located mission it is the one number that
@@ -1022,7 +1471,82 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         })}
       />
 
-      <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
+      {/* EVERYONE DOES THEIR PART (change: every-member-plays).
+          Rendered OUTSIDE the action wrapper below, which is `pointer-events-none` for a
+          non-controller - and a non-controller is exactly who this control is for.
+          Contributing is the only mutation their device may make, so putting it inside a
+          container that swallows pointer events would have shipped a button nobody could
+          press.
+
+          The controller sees the progress line too: they are the one who will be refused
+          at submit time, so they need to know who they are waiting for. */}
+      {contributorsNeeded > 0 && (
+        <div className="mt-4 rounded-xl border border-glass-border bg-app-raised px-3 py-2.5">
+          <p className="text-[13px] text-ink-warm">
+            {t.task.contributorsProgress({ done: contributorsDone, need: contributorsNeeded })}
+          </p>
+          {!iContributed && (
+            <Button
+              className="mt-2"
+              loading={contributing}
+              onClick={() => { void contribute(); }}
+              data-testid="task-contribute"
+            >
+              {t.task.contributeCta}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* ── The organizer rejected this, and the team used to be told NOTHING ──
+          (change: rejection-tells-the-player)
+
+          The verdict and the organizer's words have always reached this device:
+          the server writes them onto `taskSubmissions`, and the participant
+          sanitizer allow-lists that field. No screen had ever read it, so pressing
+          reject changed the team's display by nothing at all and the players stood
+          waiting for an approval that was not coming.
+
+          Placed directly ABOVE the entry controls, because the only useful response
+          to it is to submit again and that is what sits underneath. A rejection with
+          no reason still renders as a decision: an organizer mid-run must be able to
+          turn down a photo of somebody's hand without composing a sentence, so the
+          empty-note case is the common one, not the degenerate one. */}
+      {verdict.rejected && (
+        <div
+          role="status"
+          className="rp-reject-card mt-5 flex items-start gap-3 rounded-xl border border-rp-alert/40 bg-rp-alert/10 px-3 py-3"
+          data-testid="submission-rejected"
+        >
+          {/* The stamp. A verdict that simply appears reads as chrome; one that lands
+              reads as something that happened to you. It animates once. */}
+          <span
+            aria-hidden
+            className="rp-reject-stamp mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center
+              rounded-full border-2 border-rp-alert text-rp-alert"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}
+              strokeLinecap="round" className="h-5 w-5">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-ink-alert">{t.task.rejectedTitle}</p>
+            {verdict.reason ? (
+              // The organizer's own words, so `dir="auto"`: the run may be Hebrew and
+              // the note English, or the other way round.
+              <p dir="auto" className="mt-1 text-sm text-zinc-200">{verdict.reason}</p>
+            ) : (
+              <p className="mt-1 text-sm text-zinc-200">{t.task.rejectedNoReason}</p>
+            )}
+            {/* What to DO. The notice sits directly above the capture controls, so
+                this points at the thing immediately underneath it. */}
+            <p className="mt-1.5 text-[13px] font-medium text-ink-warm">{t.task.rejectedTryAgain}</p>
+          </div>
+        </div>
+      )}
+      {readOnly && <ViewerCard senderName={senderName} onTakeOver={onTakeOver} />}
+      {!readOnly && <div className="mt-5">
         {task.type === 'field' || task.type === 'self_report' ? (
           <>
             <Button disabled={frozen} loading={busy} onClick={field} data-testid="task-field-checkin">
@@ -1043,7 +1567,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
             )}
           </>
         ) : task.type === 'smart_station' ? (
-          <CodeEntry busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode}
+          <CodeEntry key={task.id} busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode}
             prefill={fillFor(task.id)} onSubmit={verify} />
         ) : task.type === 'quiz' ? (
           task.orderItems && task.orderItems.length > 0
@@ -1051,10 +1575,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
             // key by task id so a new task reseeds the local arrangement.
             ? <OrderingEntry key={task.id} items={task.orderItems} busy={answerFrozen}
                 prefillOrder={rehearsal?.taskId === task.id ? rehearsal.order : undefined} onSubmit={submitOrdered} />
-            : <QuizEntry task={task} busy={answerFrozen} wrongSoFar={wrongAttempts[task.id] ?? 0}
+            : <QuizEntry key={task.id} task={task} busy={answerFrozen} wrongSoFar={wrongAttempts[task.id] ?? 0}
                 prefill={fillFor(task.id)} onSubmit={answer} />
         ) : task.type === 'numeric' ? (
-          <NumericEntry busy={answerFrozen} prefill={fillFor(task.id)} onSubmit={answer} />
+          <NumericEntry key={task.id} busy={answerFrozen} prefill={fillFor(task.id)} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <>
             {/* Key by task id: every piece of this watcher's state (the `fired`
@@ -1067,18 +1591,67 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
               helpSent={helpAlreadySent(helpSentFor, task.id)} />
           </>
         ) : task.type === 'sequence' ? (
-          <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen}
+          <SequenceRunner key={task.id} task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen}
             prefill={fillFor(task.id)} onSubmit={sequenceStep} />
         ) : task.type === 'survey' ? (
-          <SurveyEntry task={task} busy={frozen} onSubmit={answer} />
+          <SurveyEntry key={task.id} task={task} busy={frozen} onSubmit={answer} />
+        ) : showWaitingCard ? (
+          // The submission stands (waiting for the organizer, or approved a moment before
+          // routing moves on). It REPLACES the capture controls instead of disabling them,
+          // and it comes from the server record, so it survives a reload
+          // (change: submission-status-truth).
+          <SubmissionWaitingCard
+            key={task.id}
+            phase={phase}
+            mediaKind={task.smart?.captureKind === 'audio' ? 'audio' : task.smart?.captureKind === 'video' ? 'video' : 'photo'}
+            canReplace={!readOnly}
+            onReplace={() => setReplacingFor(task.id)}
+            // A viewing phone renders this inside a pointer-events-none wrapper, so a chat
+            // button there would look alive and do nothing. Offer it only where it works.
+            onOpenChat={readOnly ? undefined : onOpenChat}
+          />
         ) : task.smart?.captureKind === 'audio' ? (
-          <AudioEntry busy={frozen} onSubmit={audio} />
+          <AudioEntry key={task.id} busy={frozen} working={busy} onSubmit={audio}
+            onCaptured={(b, type) => { if (b) pending.begin(task.id, b, type); else pending.forget(task.id); }} />
         ) : task.smart?.captureKind === 'video' ? (
-          <VideoEntry smart={task.smart} busy={frozen} onSubmit={video} />
+          <VideoEntry key={task.id} smart={task.smart} runId={session.runId} busy={frozen} working={busy} onSubmit={video}
+            onCaptured={(b, type) => {
+              if (b) { pending.begin(task.id, b, type); void posterFor(task.id, b); } else { pending.forget(task.id); posterRef.current = null; dropStream(task.id); }
+            }}
+            onStreamStart={(type) => startStream(task.id, type)}
+            onStreamChunk={(chunk) => streamsRef.current.get(task.id)?.append(chunk)}
+            onStreamDiscard={() => dropStream(task.id)}
+            isUploaded={(clip) => pending.ready(task.id, clip)} />
         ) : (
-          <PhotoEntry busy={frozen} onSubmit={photo} />
+          <PhotoEntry
+            key={task.id}
+            selfie={task.smart?.preferredCamera === 'front'}
+            runId={session.runId}
+            busy={frozen}
+            working={busy}
+            onSubmit={photo}
+            // Keyed by task id on BOTH sides, so mission B can never be handed
+            // mission A's picture - the failure the `key` above exists to prevent.
+            restored={capturedRef.current.get(task.id)?.file ?? null}
+            onCaptured={(f) => {
+              if (f) { capturedRef.current.set(task.id, { file: f }); pending.begin(task.id, f, 'image/jpeg'); }
+              else { capturedRef.current.delete(task.id); pending.forget(task.id); }
+            }}
+          />
         )}
-      </div>
+        {/* A transfer is running for this mission (it starts at capture). iOS pauses network work
+            in a hidden tab, so the honest instruction is to stay (design D6). */}
+        {pending.inFlight(task.id) && !readOnly && (
+          <p className="mt-2 text-xs text-zinc-400" role="status" aria-live="polite" data-testid="upload-keep-open">
+            {t.task.keepAppOpen}
+          </p>
+        )}
+        {isMediaMission && phase.kind === 'saving' && (
+          <p className="mt-2 text-xs text-zinc-400" role="status" aria-live="polite" data-testid="submission-saving">
+            {t.task.phase.saving}
+          </p>
+        )}
+      </div>}
 
 
       {/* The revealed hint is CONTENT and stays inline; so does a FREE hint offer,
@@ -1104,15 +1677,16 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           (no key at its PlayScreen call site — everything here resets via effects
           keyed on taskId instead). Without this key, a menu left open on one
           mission would still be open the instant the poll reassigns the next one.
-          Same pattern as ExpiryCountdown/OrderingEntry above. */}
+          Same pattern as ExpiryCountdown/OrderingEntry above — note the key is
+          PREFIXED, because ExpiryCountdown is a sibling under the same <Card>. */}
       <MissionExtras
-        key={task.id}
+        key={`extras-${task.id}`}
         hasLocation={!!navigationTarget(task)}
         hasHint={!!task.hasHint && !hint}
         hintFree={!!task.hintFreeNow}
         canRequestHelp={fieldGpsFailed}
         helpSent={helpAlreadySent(helpSentFor, task.id)}
-        readOnly={readOnly}
+        readOnly={isViewer}
         disabled={frozen}
         navigate={<NavigateHereLink task={task} />}
         onHint={revealHint}
@@ -1176,6 +1750,45 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
   );
 }
 
+// mission-time-limit: this team's own countdown. The server sends the time LEFT; it is counted down
+// from when it arrived (lib/timeLimitCountdown.ts), and at zero the state is refreshed so the
+// server's sweep can move the team on.
+function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTimeUp: () => void }) {
+  const { t } = useT();
+  // Re-anchored every time a fresh value arrives (each poll), which keeps the display honest.
+  // Derived state, adjusted during render (React's documented pattern for "reset on prop change").
+  const [anchor, setAnchor] = useState(() => ({ leftMs, at: Date.now() }));
+  if (anchor.leftMs !== leftMs) setAnchor({ leftMs, at: Date.now() });
+  const [now, setNow] = useState(() => Date.now());
+  const fired = useRef(false);
+  const left = countdownLeftMs(anchor.leftMs, anchor.at, now);
+  const running = left !== null && left > 0;
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+  useEffect(() => {
+    if (left === 0 && !fired.current) {
+      fired.current = true;
+      // A beat later, so the server's clock has passed the limit too.
+      const id = setTimeout(onTimeUp, 1500);
+      return () => clearTimeout(id);
+    }
+  }, [left, onTimeUp]);
+  if (left === null) return null;
+  if (left <= 0) {
+    return <p className="mt-2 text-sm text-ink-alert font-medium" data-testid="time-limit-up">⌛ {t.task.timeLimitUpNotice}</p>;
+  }
+  return (
+    <div data-testid="time-limit-countdown" className={countdownUrgent(left)
+      ? 'mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-ink-alert tabular-nums'
+      : 'mt-2 inline-flex items-center gap-1.5 rounded-full bg-app-card border border-glass-border px-3 py-1 text-xs font-bold text-zinc-200 tabular-nums'}>
+      ⏱️ {t.task.timeLimitLeft({ time: formatCountdown(left) })}
+    </div>
+  );
+}
+
 function DistanceBadge({ task }: { task: SafeTask }) {
   const { t } = useT();
   const [dist, setDist] = useState<number | null>(null);
@@ -1232,7 +1845,7 @@ function NavigateHereLink({ task }: { task: SafeTask }) {
         target="_blank"
         rel="noreferrer"
         data-testid="task-navigate-waze"
-        className="inline-flex items-center min-h-[44px] px-2 py-2 rounded-lg text-[11px] text-zinc-500 hover:underline"
+        className="inline-flex items-center min-h-[44px] px-2 py-2 rounded-lg text-[13px] text-zinc-500 hover:underline"
       >
         {t.task.navigateMaps}
       </a>
@@ -1368,8 +1981,10 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
     // server-side and the UI had nowhere to put it.
     return (
       <div className="space-y-2">
-        {task.choices.map((c) => {
+        {task.choices.map((c, i) => {
           const isAnswer = !!prefill && c === prefill;
+          // answer-scored-question D4: the creator chose to show what each answer is worth.
+          const worth = Array.isArray(task.choicePoints) && typeof task.choicePoints[i] === 'number' ? task.choicePoints[i] : null;
           const isPicked = selected === c;
           // The picked option overrides the disabled skin with `!` — the disabled
           // rules in ui.tsx are plain declarations, so importance is what wins,
@@ -1389,6 +2004,9 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
               data-testid="quiz-choice" data-choice={c} data-picked={isPicked || undefined}
               data-rehearsal-answer={isAnswer || undefined}>
               <span dir="auto">{c}</span>
+              {worth !== null && (
+                <span className="ms-2 text-xs font-semibold opacity-80" data-testid="quiz-choice-points">{t.task.choicePoints({ n: worth })}</span>
+              )}
               {isAnswer && !isPicked && <span className="ms-2" aria-label={t.task.rehearseCorrect} title={t.task.rehearseCorrect}>✅</span>}
             </Button>
           );
@@ -1485,10 +2103,10 @@ function OrderingEntry({ items, busy, prefillOrder, onSubmit }: {
             <span dir="auto" className="flex-1 min-w-0 text-sm text-zinc-100">{item}</span>
             <button onClick={() => move(i, -1)} disabled={busy || i === 0}
               aria-label={`${t.task.orderingMoveUp} ${i + 1}`} data-testid="ordering-up" data-item={item}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app-card border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
             <button onClick={() => move(i, 1)} disabled={busy || i === arranged.length - 1}
               aria-label={`${t.task.orderingMoveDown} ${i + 1}`} data-testid="ordering-down" data-item={item}
-              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app-card border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
           </li>
         ))}
       </ol>
@@ -1670,14 +2288,23 @@ function SequenceRunner({ task, stepsDone, busy, prefill, onSubmit }: {
     void Promise.resolve(onSubmit(idx, val)).then((ok) => { if (ok) setVal(''); });
   }
   if (!step) return null;
+  // A step the creator authored with no answer key is a tap-to-confirm beat, not a
+  // question. Telling the player to "leave it blank to confirm" asked them to infer
+  // the creator's authoring from an empty box; the server accepts an absent answer
+  // either way, so this is purely how the step is PRESENTED.
+  const confirmOnly = step.hasAnswer === false;
   return (
     <div className="space-y-3">
       <Progress done={stepsDone} total={steps.length} />
       <div className="text-xs text-zinc-500">{t.task.stepOf({ step: idx + 1, total: steps.length })}</div>
       <p dir="auto" className="text-sm text-zinc-200" data-testid="sequence-prompt">{step.prompt}</p>
-      <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submitStep(); }} data-testid="sequence-input" />
-      <Button disabled={busy} onClick={submitStep} data-testid="sequence-submit">{t.task.submitStep}</Button>
+      {!confirmOnly && (
+        <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submitStep(); }} data-testid="sequence-input" />
+      )}
+      <Button disabled={busy} onClick={submitStep} data-testid="sequence-submit">
+        {confirmOnly ? t.task.confirmStep : t.task.submitStep}
+      </Button>
     </div>
   );
 }
@@ -1689,18 +2316,27 @@ const MAX_PHOTO_BYTES = 12 * 1024 * 1024; // 12 MB — the cap on the COMPRESSED
 // this only rejects genuinely absurd inputs early.
 const MAX_RAW_PHOTO_BYTES = 40 * 1024 * 1024; // 40 MB
 
-function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) => void }) {
-  const { t } = useT();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [fileErr, setFileErr] = useState('');
-  // A full-size fallback (compression failed) is the difference between a 400 KB
-  // and a 5 MB upload — tell the player instead of letting it look like a freeze.
-  const [warn, setWarn] = useState('');
-  // Live upload progress, published by uploadResilient() in services/firebase.ts.
-  // A store rather than a prop because the upload is kicked off by TaskRunner's
-  // photo() several components away. See docs/wave-a/upload-resiliency.md.
+// ─── Upload feedback, shared by every media entry ────────────────────────────
+// This used to live INLINE inside PhotoEntry only, so a 20 MB video on a weak
+// uplink — the slowest upload in the product, with a 45 s stall detector and a
+// 180 s per-attempt ceiling behind it — rendered NOTHING at all and read as a
+// frozen app. The progress/retrying values were already published globally by
+// uploadResilient() in services/firebase.ts; audio and video simply never
+// subscribed. Extracted rather than copied twice so the next media type cannot
+// repeat the omission.
+//
+// It renders whenever `busy`, not only once a percentage exists: on a slow link
+// the first progress event can be seconds away, and that gap was itself part of
+// the freeze.
+// The one upload in flight, as published by uploadResilient() in services/firebase.ts.
+// `pct === null` means NOTHING is uploading (the store is cleared in its `finally`), which is
+// the fact the bar must follow (change: submission-status-truth). It used to render on the
+// entry's `busy`, i.e. on `frozen`, which a post-submit latch and the viewer gate held true
+// long after the last byte, so the screen said "starting upload" through a whole review wait.
+// How long a submission waits for its poster once the clip itself is up (video-upload-speed D7).
+const POSTER_WAIT_MS = 1500;
+
+function useUploadStore(): { pct: number | null; retrying: boolean } {
   const [pct, setPct] = useState<number | null>(getUploadProgress());
   const [retrying, setRetrying] = useState(getUploadRetrying());
   useEffect(() => {
@@ -1708,6 +2344,181 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
     const un2 = subscribeUploadRetrying(setRetrying);
     return () => { un1(); un2(); };
   }, []);
+  return { pct, retrying };
+}
+
+// The label as words (change: video-upload-speed, D5). `live` = time LEFT during an upload;
+// otherwise the review screen's "how long sending will take".
+function etaText(t: ReturnType<typeof useT>['t'], label: EtaLabel, live: boolean): string {
+  switch (label.kind) {
+    case 'seconds': return live ? t.task.etaSeconds : t.task.sendEstimateSeconds;
+    case 'about': return live ? t.task.etaAbout({ seconds: label.seconds }) : t.task.sendEstimateAbout({ seconds: label.seconds });
+    case 'range': return live
+      ? t.task.etaRange({ low: label.lowMinutes, high: label.highMinutes })
+      : t.task.sendEstimateRange({ low: label.lowMinutes, high: label.highMinutes });
+    case 'stalled': return t.task.etaStalled;
+    case 'almost-done': return t.task.etaAlmostDone;
+  }
+}
+
+// Before sending: the clip's REAL size over this phone's best prior (its own last upload, the
+// browser's hint, or a pessimistic default). Hidden once an upload is in flight, because the live
+// bar below then carries a measured estimate instead.
+function SendEstimate({ bytes }: { bytes: number }) {
+  const { t } = useT();
+  const { pct, retrying } = useUploadStore();
+  const label = useMemo(() => {
+    const now = Date.now();
+    return etaLabel(estimateUploadEta({ totalBytes: bytes, sentBytes: 0, meter: null, prior: currentPrior(now), nowMs: now }));
+  }, [bytes]);
+  if (pct !== null || retrying) return null;
+  return (
+    <p className="text-xs text-zinc-400" dir="auto" data-testid="send-estimate">
+      {t.task.sendEstimate({ eta: etaText(t, label, false) })}
+    </p>
+  );
+}
+
+function UploadProgress() {
+  const { t } = useT();
+  const { pct, retrying } = useUploadStore();
+  const eta = useUploadEta();
+  if (pct === null && !retrying) return null;
+  const known = pct !== null && pct > 0;
+  return (
+    <div className="space-y-1" data-testid="upload-progress">
+      <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+        <div
+          className={known ? 'h-full bg-rp-fire transition-all duration-200' : 'h-full w-1/3 bg-rp-fire rp-indeterminate'}
+          style={known ? { width: `${pct}%` } : undefined}
+        />
+      </div>
+      <p className="text-xs text-zinc-400" dir="auto" aria-live="polite">
+        {retrying ? t.task.uploadRetrying : known ? t.task.uploadingPercent({ pct: pct as number }) : t.task.uploadStarting}
+        {!retrying && eta && <span data-testid="upload-eta"> · {etaText(t, eta, true)}</span>}
+      </p>
+    </div>
+  );
+}
+
+// What a team sees while its submission stands (change: submission-status-truth): sent and
+// waiting for the organizer, or approved a moment before routing moves on. It REPLACES the
+// capture controls rather than greying them, it is built from the server record so a reload
+// shows the same thing, and it offers the two useful moves: send a different one, or write to
+// the organizer. It names only what really happens; there is no "analysing" step to show.
+// The viewing phone's mission area (change: team-phones-simple, D3). Replaces the controls
+// instead of greying them out: the field report was "one phone has grey buttons", and a disabled
+// control explains nothing. Says WHO is answering and offers the one thing this phone can do
+// about it. A media mission never reaches here, because a viewer may send media.
+function ViewerCard({ senderName, onTakeOver }: { senderName?: string; onTakeOver?: () => void }) {
+  const { t } = useT();
+  const name = senderName || t.devices.deviceFallbackName;
+  return (
+    <div className="mt-5 rounded-2xl border border-glass-border bg-app-raised p-4 text-center" data-testid="viewer-card">
+      <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-accent/15 text-lg font-bold text-ink-fire" aria-hidden="true">
+        {name.trim().charAt(0).toUpperCase() || '📱'}
+      </div>
+      <p dir="auto" className="text-sm font-semibold text-zinc-100">{t.devices.viewerSending({ name })}</p>
+      <p className="mt-1 text-xs text-zinc-400">{t.devices.viewerHint}</p>
+      {onTakeOver && (
+        <Button className="mt-3" onClick={onTakeOver} data-testid="viewer-take-over">{t.devices.sendFromMyPhone}</Button>
+      )}
+    </div>
+  );
+}
+
+function SubmissionWaitingCard({ phase, mediaKind, canReplace, onReplace, onOpenChat }: {
+  phase: SubmissionPhase;
+  mediaKind: 'photo' | 'audio' | 'video';
+  canReplace: boolean;
+  onReplace: () => void;
+  onOpenChat?: () => void;
+}) {
+  const { t, lang } = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  if (phase.kind === 'approved') {
+    return (
+      <div role="status" className="rounded-xl border border-rp-go/40 bg-rp-go/10 px-3 py-3 text-sm font-semibold text-ink-go" data-testid="submission-approved">
+        ✅ {t.task.phase.approved}
+      </div>
+    );
+  }
+  if (phase.kind !== 'waitingForApproval') return null;
+  const waitedMin = phase.sentAtMs !== null ? Math.floor((now - phase.sentAtMs) / 60_000) : 0;
+  const sentAt = phase.sentAtMs !== null
+    ? new Date(phase.sentAtMs).toLocaleTimeString(lang === 'he' ? 'he-IL' : 'en-GB', { hour: '2-digit', minute: '2-digit' })
+    : null;
+  return (
+    <div className="space-y-3 rounded-xl border border-glass-border bg-app-raised px-3 py-3" data-testid="submission-waiting">
+      <div role="status" aria-live="polite">
+        <p className="text-sm font-bold text-zinc-100">📨 {t.task.phase.waitingTitle}</p>
+        <p className="mt-1 text-[13px] text-zinc-400">{t.task.phase.waitingBody}</p>
+        {sentAt && (
+          <p className="mt-1 text-xs text-zinc-500">
+            {t.task.phase.sentAt({ time: sentAt })}
+            {waitedMin >= 3 ? ` · ${t.task.phase.waitedFor({ min: waitedMin })}` : ''}
+          </p>
+        )}
+      </div>
+      {phase.mediaUrl && (
+        mediaKind === 'photo' ? (
+          <img src={phase.mediaUrl} alt={t.task.phase.whatYouSent} className="w-full max-h-48 rounded-lg object-cover" />
+        ) : mediaKind === 'video' ? (
+          <video src={phase.mediaUrl} controls preload="metadata" playsInline className="w-full max-h-56 rounded-lg bg-black" />
+        ) : (
+          <audio src={phase.mediaUrl} controls preload="none" className="w-full" />
+        )
+      )}
+      <div className="flex flex-wrap gap-2">
+        {canReplace && (
+          <Button variant="ghost" onClick={onReplace} data-testid="submission-replace">{t.task.phase.sendDifferent}</Button>
+        )}
+        {onOpenChat && (
+          <Button variant="ghost" onClick={onOpenChat} data-testid="submission-chat">{t.task.phase.messageOrganizer}</Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = false, runId = '' }: {
+  /** Keys the remembered camera side to this run (camera-switch D4). */
+  runId?: string;
+  /** A "selfie" mission (smart.preferredCamera 'front'): ask the phone camera to open
+   *  facing the players. It is only a hint, and the phone's camera app keeps its own
+   *  flip button either way (camera-switch D4). */
+  selfie?: boolean;
+  busy: boolean;
+  /** Something is really in flight (not merely a disabled viewer). Drives the "working" label. */
+  working: boolean;
+  onSubmit: (file: File) => void;
+  /**
+   * A photo already captured for THIS mission, handed back after a remount.
+   *
+   * Without it the picture died with the component. `task` is null whenever routing
+   * has not yet handed back a mission (see the note on the early returns above), and
+   * TaskRunner returns early then - so a routing round-trip, a reconnect or any state
+   * refresh unmounted PhotoEntry and took the capture with it. Observed in the live
+   * run of 2026-09-17: the file reached the server (83KB on disk, complete) and the
+   * player was looking at an empty capture screen, so they shot it again. The orphan
+   * is still there with no submission attached to it.
+   */
+  restored: File | null;
+  /** Report every capture up, so the copy that survives a remount stays current. */
+  onCaptured: (file: File | null) => void;
+}) {
+  const { t } = useT();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(restored);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [fileErr, setFileErr] = useState('');
+  // A full-size fallback (compression failed) is the difference between a 400 KB
+  // and a 5 MB upload — tell the player instead of letting it look like a freeze.
+  const [warn, setWarn] = useState('');
   // Track the live object URL so we can revoke the previous one (and clean up on
   // unmount) — otherwise each re-pick leaks a blob URL.
   const prevPreviewRef = useRef<string | null>(null);
@@ -1718,58 +2529,175 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
     setPreview(next);
   }
   useEffect(() => () => { if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current); }, []);
+  // A blob: URL does not survive the unmount that revoked it, so a restored photo
+  // needs a fresh one. Runs once per mount, only when something was handed back.
+  useEffect(() => {
+    if (restored) setPreviewUrl(URL.createObjectURL(restored));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Camera-capture only (change: fix-photo-camera-capture): a hidden
   // `capture="environment"` input opens the camera; there is no gallery picker and
   // no paste-a-URL field. The captured image is downscaled + JPEG-compressed in the
   // browser BEFORE upload so it doesn't burn mobile data.
+  //
+  // ── FOUR WAYS THIS USED TO EAT A PHOTO (change: camera-capture-never-eats-a-photo)
+  //
+  // Reported from the field: "it does not save it, and after I press OK it puts me
+  // back on 'take a photo' instead of 'send photo' ... it is as if it deletes it."
+  // There was no error on screen, so every one of these was silent:
+  //
+  //   1. A CANCELLED camera reports an empty `change`, and this cleared the photo
+  //      already in hand. That is the literal "it deletes it": back out of the camera
+  //      and the picture you just took is gone. `pickedFileVerdict` now answers
+  //      "nothing arrived ⇒ change nothing".
+  //   2. An EMPTY MIME type - which several Android pickers send - failed
+  //      `f.type.startsWith('image/')` and was refused as "not an image".
+  //   3. Nothing was wrapped in try/catch. `compressImageWithReport` is written not to
+  //      throw, but `URL.createObjectURL`, `new File([...])` and an out-of-memory
+  //      canvas all can, and any of them left the component silently empty.
+  //   4. `display: none` on a capture input is a known Android quirk where `change`
+  //      can fail to fire at all after the camera returns. It is now visually hidden
+  //      while still being laid out and focusable.
+  //
+  // And it says so out loud now: one `[rp:photo]` breadcrumb per change event, so the
+  // next report can distinguish "the event never fired" from "it fired and we lost it"
+  // instead of guessing between them.
+  // The in-app camera (camera-switch 2.4) and the phone's own camera. `nativeOnly` once the in-app
+  // camera could not open: then the phone camera is the main button, with a note saying why.
+  const [viewfinder, setViewfinder] = useState(false);
+  const [nativeOnly, setNativeOnly] = useState(false);
+
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    setFileErr(''); setWarn('');
     const f = e.target.files?.[0] ?? null;
     e.target.value = ''; // allow re-selecting the same capture
-    if (!f) { setFile(null); setPreviewUrl(null); return; }
-    if (!f.type.startsWith('image/')) { setFileErr(t.task.chooseImage); setFile(null); setPreviewUrl(null); return; }
-    // Reject only genuinely absurd RAW inputs here — the real 12 MB cap is enforced
-    // on the COMPRESSED output below, so a valid high-MP capture (often >12 MB raw,
-    // ~400 KB compressed) is no longer wrongly rejected as "too large".
-    if (f.size > MAX_RAW_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
-    // compressImageWithReport reports WHY it fell back instead of silently
-    // handing back the full-size capture (Task 11).
-    const report = await compressImageWithReport(f);
-    // Enforce the 12 MB ceiling on the COMPRESSED result. Only fails when
-    // compression couldn't get under the cap (e.g. it fell back to a still-huge
-    // full-size blob), not on the raw capture size.
-    if (report.blob.size > MAX_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
-    if (!report.compressed) setWarn(t.task.photoNotCompressed);
-    const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
-    setFile(compressed);
-    setPreviewUrl(URL.createObjectURL(compressed));
+    console.info('[rp:photo] change', f ? { name: f.name, type: f.type, size: f.size } : 'no file');
+    await acceptPhoto(f);
   }
 
-  const canSubmit = !busy && !fileErr && !!file;
+  // ONE pipeline for every capture, in-app or native: the same size checks, compression, preview
+  // and error wording, so the in-app camera cannot reintroduce a way to lose a photo.
+  async function acceptPhoto(f: File | null) {
+    const verdict = pickedFileVerdict(f, MAX_RAW_PHOTO_BYTES);
+    // NOTHING ARRIVED. Keep the photo, keep the preview, say nothing: the player
+    // backed out of the camera, which is not a request to throw their work away.
+    if (verdict.action === 'keep') return;
+
+    setFileErr(''); setWarn('');
+    if (verdict.action === 'reject') {
+      // Refused - but STILL keeps whatever was already captured, for the same reason.
+      setFileErr(verdict.reason === 'notAnImage'
+        ? t.task.chooseImage
+        : t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) }));
+      return;
+    }
+
+    try {
+      // compressImageWithReport reports WHY it fell back instead of silently
+      // handing back the full-size capture (Task 11).
+      const report = await compressImageWithReport(f!);
+      // Enforce the 12 MB ceiling on the COMPRESSED result. Only fails when
+      // compression couldn't get under the cap (e.g. it fell back to a still-huge
+      // full-size blob), not on the raw capture size.
+      if (report.blob.size > MAX_PHOTO_BYTES) {
+        setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) }));
+        return;
+      }
+      if (!report.compressed) setWarn(t.task.photoNotCompressed);
+      const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
+      setFile(compressed);
+      // Hand it up BEFORE anything else can unmount this component. A NEW capture also
+      // invalidates any upload already made for this mission, which is what stops a
+      // retry from submitting the picture the player just replaced.
+      onCaptured(compressed);
+      setPreviewUrl(URL.createObjectURL(compressed));
+      console.info('[rp:photo] ready', { bytes: compressed.size, compressed: report.compressed });
+    } catch (err) {
+      // A throw here used to leave the component looking untouched, which is
+      // indistinguishable from "the camera did nothing". Say it failed.
+      console.error('[rp:photo] capture failed', err);
+      setFileErr(t.task.photoCaptureFailed);
+    }
+  }
+
+  // ── An ANSWERING button, not a dead one ────────────────────────────────────
+  //
+  // Reported: "on the second photo it does upload the picture but does not let me
+  // send it, something very strange there." A greyed-out submit cannot say which of
+  // its three preconditions is missing, so the player is left guessing and so is
+  // whoever reads the report - which is exactly the trap CLAUDE.md records for the
+  // join screen: "a disabled primary button explains nothing, cannot fire, and
+  // therefore cannot tell the user what it wants."
+  //
+  // It stays enabled and ANSWERS. The server re-validates everything anyway, so the
+  // worst a press can do is produce a sentence naming what is missing.
+  const submitBlocker: '' | 'busy' | 'fileErr' | 'noFile' =
+    busy ? 'busy' : fileErr ? 'fileErr' : !file ? 'noFile' : '';
   return (
     <div className="space-y-3">
-      <input ref={inputRef} type="file" accept="image/*" capture="environment" onChange={pickFile}
-        data-testid="photo-file" className="hidden" />
-      <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
-        {file ? t.task.retakePhoto : t.task.takePhoto}
-      </Button>
+      {/* Visually hidden, NOT `display:none`: on Android a `display:none` capture
+          input can fail to fire `change` at all when the camera returns, which is
+          one of the four ways this screen used to lose a photo in silence. */}
+      <input ref={inputRef} type="file" accept="image/*" capture={selfie ? 'user' : 'environment'} onChange={pickFile}
+        data-testid="photo-file" tabIndex={-1} aria-hidden="true"
+        className="absolute w-px h-px opacity-0 pointer-events-none -z-10" />
+      {nativeOnly || !canUseInAppCamera() ? (
+        <>
+          <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
+            {file ? t.task.retakePhoto : t.task.takePhoto}
+          </Button>
+          {nativeOnly && <p className="text-xs text-zinc-400" data-testid="photo-native-note">{t.task.inAppCameraUnavailable}</p>}
+        </>
+      ) : (
+        <>
+          <Button variant="ghost" disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
+            {file ? t.task.retakePhoto : t.task.takePhoto}
+          </Button>
+          {/* The phone's own camera stays one tap away (camera-switch D1). */}
+          <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-native"
+            className={`${TAP_TARGET} w-full text-center text-[13px] font-medium text-zinc-400 underline underline-offset-2`}>
+            {t.task.usePhoneCamera}
+          </button>
+        </>
+      )}
+      {viewfinder && (
+        <PhotoViewfinder selfie={selfie} runId={runId}
+          onShot={(file) => { setViewfinder(false); void acceptPhoto(file); }}
+          onClose={() => setViewfinder(false)}
+          onFallback={() => { setViewfinder(false); setNativeOnly(true); }} />
+      )}
       {fileErr && <p className="text-ink-alert text-sm">{fileErr}</p>}
       {!fileErr && warn && <p className="text-sm text-zinc-400" data-testid="photo-warn">{warn}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
-      {/* Determinate progress: a slow upload must never look like a frozen app. */}
-      {busy && pct !== null && (
-        <div className="space-y-1" data-testid="photo-progress">
-          <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
-            <div className="h-full bg-rp-fire transition-all duration-200" style={{ width: `${pct}%` }} />
-          </div>
-          <p className="text-xs text-zinc-400" dir="auto">
-            {retrying ? t.task.uploadRetrying : t.task.uploadingPercent({ pct })}
-          </p>
+      {/* Keep a copy of your own photo, the same affordance the video review has.
+          `download` works here without the server flag because a blob: url is local
+          to this page - see mediaDownloadUrl for why the cross-origin case cannot. */}
+      {preview && (
+        <div className="flex justify-end">
+          <a
+            href={preview}
+            download={`rushpoint-${Date.now()}.jpg`}
+            className="inline-flex items-center gap-1.5 min-h-[44px] px-2 -my-1 text-[13px] font-medium text-zinc-400 hover:text-ink-fire transition-colors"
+          >
+            <span aria-hidden>⤓</span>
+            {t.task.photoSaveToPhone}
+          </a>
         </div>
       )}
-      <Button disabled={!canSubmit} onClick={() => file && onSubmit(file)} data-testid="photo-submit">
-        {busy ? t.task.working : t.task.submitPhoto}
+      {/* A slow upload must never look like a frozen app. */}
+      <UploadProgress />
+      <Button
+        onClick={() => {
+          if (submitBlocker === '' && file) { onSubmit(file); return; }
+          // Name the obstacle instead of doing nothing. `fileErr` is already on
+          // screen above, so that case just re-points at it.
+          if (submitBlocker === 'noFile') setFileErr(t.task.photoTakeFirst);
+          else if (submitBlocker === 'busy') setWarn(t.task.photoStillWorking);
+          console.info('[rp:photo] submit blocked by', submitBlocker);
+        }}
+        data-testid="photo-submit"
+      >
+        {working ? t.task.working : t.task.submitPhoto}
       </Button>
     </div>
   );
@@ -1808,7 +2736,13 @@ function pickAudioMimeType(): string | null {
   return null;
 }
 
-function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, contentType: string) => void }) {
+function AudioEntry({ busy, working, onSubmit, onCaptured }: {
+  busy: boolean;
+  working: boolean;
+  onSubmit: (blob: Blob, contentType: string) => void;
+  /** The capture now in review (null once it is discarded): starts its upload right away. */
+  onCaptured?: (blob: Blob | null, contentType: string) => void;
+}) {
   const { t } = useT();
   const [recording, setRecording] = useState(false);
   const [remaining, setRemaining] = useState(MAX_AUDIO_SECONDS);
@@ -1821,6 +2755,18 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const mimeRef = useRef<string>('audio/webm');
+  // Every path that sets or clears the capture goes through `blob`, so one effect covers record,
+  // pick and re-record: the upload starts the moment there is something to send
+  // (change: media-upload-reliability).
+  const onCapturedRef = useRef(onCaptured);
+  onCapturedRef.current = onCaptured;
+  // Skips the MOUNT: a fresh entry has nothing captured, and announcing that would abort an
+  // upload a send is still awaiting if this entry happened to remount mid-send.
+  const announcedRef = useRef(false);
+  useEffect(() => {
+    if (!announcedRef.current) { announcedRef.current = true; if (!blob) return; }
+    onCapturedRef.current?.(blob, mimeRef.current);
+  }, [blob]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevPreviewRef = useRef<string | null>(null);
@@ -1903,12 +2849,18 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
     }
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
+      // Raced against a deadline (change: media-upload-reliability, D5): some webviews never
+      // answer at all, and a mic that never opens must still lead to the phone's own recorder.
+      stream = await withCameraDeadline(
+        navigator.mediaDevices.getUserMedia({ audio: true }),
+        CAMERA_OPEN_DEADLINE_MS,
+        (late) => late.getTracks().forEach((tr) => tr.stop()),
+      );
+    } catch (e) {
       // Denied, OR the embedded browser (WhatsApp / Instagram in-app webview)
       // refuses mic access entirely. Both leave the player stuck on a task they
       // cannot complete, so offer the phone's own recorder as a way through.
-      setErr(t.task.micDenied);
+      setErr((e as { code?: string })?.code === 'camera/timeout' ? t.task.micSlow : t.task.micDenied);
       setUnsupported(true);
       return;
     }
@@ -2016,9 +2968,10 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
               <Button variant="ghost" disabled={busy} onClick={start}>{t.task.reRecord}</Button>
             )}
             <Button disabled={busy} onClick={() => onSubmit(blob, mimeRef.current)}>
-              {busy ? t.task.working : t.task.submitAudio}
+              {working ? t.task.working : t.task.submitAudio}
             </Button>
           </div>
+          <UploadProgress />
         </div>
       ) : (
         <Button disabled={busy} onClick={start}>{t.task.startRecording}</Button>
@@ -2043,7 +2996,6 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
 //
 // The clip-length range comes from the TASK, resolved through the shared contract
 // so the Builder, the server and this recorder can never disagree about it.
-const MAX_VIDEO_BYTES = 20 * 1024 * 1024; // mirrors MAX_PARTICIPANT_VIDEO_BYTES
 
 function pickVideoMimeType(): string | null {
   const rec = (typeof window !== 'undefined' ? window.MediaRecorder : undefined) as
@@ -2072,27 +3024,59 @@ function readVideoDuration(url: string): Promise<number | undefined> {
   });
 }
 
-function VideoEntry({ smart, busy, onSubmit }: {
-  smart: { videoMinSeconds?: number; videoMaxSeconds?: number } | undefined;
+function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStreamStart, onStreamChunk, onStreamDiscard, isUploaded }: {
+  smart: { videoMinSeconds?: number; videoMaxSeconds?: number; preferredCamera?: 'front'; autoApprove?: boolean } | undefined;
+  /** Keys the player's remembered camera choice to this run (camera-switch D4). */
+  runId?: string;
   busy: boolean;
-  onSubmit: (blob: Blob | File, contentType: string) => void;
+  /** Something is really in flight (not merely a disabled viewer). Drives the "working" label. */
+  working: boolean;
+  /** `lengthSeconds` (video-upload-speed D7): the recorder's own count, or a picked file's readable duration. */
+  onSubmit: (blob: Blob | File, contentType: string, lengthSeconds?: number) => void;
+  /** The clip now in review (null once discarded or too short to send): starts its upload. */
+  onCaptured?: (blob: Blob | File | null, contentType: string) => void;
+  /** Send while filming (video-upload-speed D4): a take started, a slice arrived, a take was dropped. */
+  onStreamStart?: (contentType: string) => void;
+  onStreamChunk?: (chunk: Blob) => void;
+  onStreamDiscard?: () => void;
+  /** Has this clip already finished uploading (sent while filming)? Then there is nothing to estimate. */
+  isUploaded?: (clip: Blob) => boolean;
 }) {
   const { t } = useT();
   const { minSeconds, maxSeconds } = useMemo(() => resolveVideoDuration(smart), [smart]);
+  // Refs, because the recorder's handlers are wired once per take and must call the latest props.
+  const streamCbRef = useRef({ onStreamStart, onStreamChunk, onStreamDiscard });
+  streamCbRef.current = { onStreamStart, onStreamChunk, onStreamDiscard };
 
   // 'idle' → the mission card's own footprint. 'camera' → the fullscreen viewfinder
   // (camera live BEFORE the take starts, so the player frames the shot first).
   // 'review' → the recorded clip, playable, with submit / record-again.
   const [mode, setMode] = useState<'idle' | 'camera' | 'review'>('idle');
   const [recording, setRecording] = useState(false);
+  // Held mid-take rather than finished (change: clip-length-is-guidance). Pressing
+  // the shutter while the clip is still under the minimum PAUSES the recorder
+  // instead of ending it, so "keep going" resumes the SAME capture. Appending a
+  // second recording's chunks instead would produce a container whose duration and
+  // seek table are wrong - the exact defect that made four clips unplayable in run
+  // ijI9JMITSf8C9heN1Cwp, and not one to re-introduce from the other end.
+  const [paused, setPaused] = useState(false);
   const [remaining, setRemaining] = useState(maxSeconds);
   const [elapsed, setElapsed] = useState(0);
   const [clipSeconds, setClipSeconds] = useState<number | undefined>(undefined);
+  // The length sent with the clip for the organizer's badge. Separate from clipSeconds, which a
+  // picked clip deliberately leaves unset so it is never re-judged in review.
+  const [lengthSeconds, setLengthSeconds] = useState<number | undefined>(undefined);
   const [blob, setBlob] = useState<Blob | File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [opening, setOpening] = useState(false);
+  const profileRef = useRef<CaptureProfile>(captureProfileFor(undefined));
   const [unsupported, setUnsupported] = useState(false);
+  // camera-switch: which way the open camera faces (drives the mirrored preview),
+  // and whether there is a second camera to switch to at all.
+  const [facing, setFacing] = useState<Facing>('environment');
+  const [canSwitch, setCanSwitch] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -2148,22 +3132,28 @@ function VideoEntry({ smart, busy, onSubmit }: {
     chunksRef.current = [];
     if (discardRef.current) {
       discardRef.current = false;
+      streamCbRef.current.onStreamDiscard?.();
       setMode('idle');
       return;
     }
     const out = new Blob(parts, { type: mimeRef.current });
     if (out.size === 0) {
+      streamCbRef.current.onStreamDiscard?.();
       setErr(t.task.videoUnsupported);
       setUnsupported(true);
       setMode('idle');
       return;
     }
-    if (out.size > MAX_VIDEO_BYTES) {
-      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+    if (out.size > MAX_PARTICIPANT_VIDEO_BYTES) {
+      streamCbRef.current.onStreamDiscard?.();
+      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_PARTICIPANT_VIDEO_BYTES / 1024 / 1024) }));
       setMode('idle');
       return;
     }
     setClipSeconds(seconds);
+    setLengthSeconds(seconds);
+    // 'short' is not an error - it is sendable, and saying so in the alert colour
+    // would read as a refusal. Only a far miss blocks.
     setErr(recordedClipVerdict(seconds, minSeconds) === 'too-short'
       ? t.task.videoTooShort({ sec: minSeconds })
       : '');
@@ -2199,8 +3189,40 @@ function VideoEntry({ smart, busy, onSubmit }: {
   // shutter with no disabled state, it never consults the mission's minimum, and
   // every failure path falls through to finalize() rather than leaving the player
   // inside a recording they cannot end.
+  // Hold the take without ending it. Only ever offered while the clip is under the
+  // minimum, which is the only situation where "start again from zero" was the
+  // alternative. Falls through to a real stop if the browser will not pause.
+  function holdTake() {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'recording' || typeof recorder.pause !== 'function') { stop(); return; }
+    try { recorder.pause(); } catch { stop(); return; }
+    clearTimers();
+    setPaused(true);
+    // `recording` deliberately STAYS true. It is what the shutter branches on, and
+    // the shutter must keep meaning "end this take" - scripts/test-video-recorder-guards.ts
+    // pins that shape because gating it once trapped a player inside a live take
+    // with a dead grey button. A paused recorder stops cleanly, so holding changes
+    // only whether frames are being captured, never whether the take can be ended.
+  }
+
+  function resumeTake() {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'paused') { setPaused(false); return; }
+    try { recorder.resume(); } catch { stop(); return; }
+    setPaused(false);
+    setRecording(true);
+    // The clock continues from where it was held - the clip really is that long.
+    timerRef.current = setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+      setRemaining((r) => (r > 0 ? r - 1 : 0));
+    }, 1000);
+    stopTimeoutRef.current = setTimeout(() => stop(), Math.max(1, maxSeconds - elapsedRef.current) * 1000);
+  }
+
   function stop() {
     clearTimers();
+    setPaused(false);
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === 'inactive') { finalize(); return; }
     try {
@@ -2232,31 +3254,101 @@ function VideoEntry({ smart, busy, onSubmit }: {
       return;
     }
     setOpening(true);
+    // A lighter frame and bitrate on a weak link (change: media-upload-reliability, D9): the
+    // upload IS the wait on 3G. Kept for beginRecording so the recorder matches the frame.
+    // video-upload-speed task 0.2: the picture drops ONLY on a weak link. This phone's own recent
+    // uplink sample (the only weak signal an iPhone has) decides when it is fresh.
+    const recentUplink = readUplinkSample(localStorageOrNull());
+    const freshUplink = uplinkPrior({ recent: recentUplink, nowMs: Date.now() }).basis === 'recent' ? recentUplink?.bytesPerSecond : null;
+    const profile = captureProfileFor(
+      (navigator as Navigator & { connection?: { saveData?: unknown; effectiveType?: unknown } }).connection,
+      freshUplink,
+    );
+    profileRef.current = profile;
+    // camera-switch D4: the player's own choice this run, then the mission's selfie
+    // default, then the rear camera. Still `ideal`, so a front-only laptop opens.
+    const wanted = initialFacing({ explicit: readCameraChoice(safeSessionStorage(), runId ?? ''), taskDefault: smart?.preferredCamera });
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        // The rear camera is what a field mission is filmed with; `ideal` so a
-        // laptop or a front-only device still gets a working camera instead of an
-        // OverconstrainedError.
-        video: { facingMode: { ideal: 'environment' } },
+      stream = await withCameraDeadline(navigator.mediaDevices.getUserMedia({
+        // The whole capture profile, not just the camera (change:
+        // video-capture-profile). This used to ask ONLY for `facingMode`, so the
+        // browser captured at the camera's own default - 1080p on essentially every
+        // modern phone - and the pinned 2 Mbps was then spread over four times the
+        // pixels of 720p. Blocky clip, hot phone, large file, all at once.
+        //
+        // Every constraint is `ideal`, so a laptop or a front-only device still gets
+        // a working camera instead of an OverconstrainedError.
+        video: { ...profile.video, facingMode: { ideal: wanted } },
         audio: true,
-      });
-    } catch {
-      // Denied, or an embedded webview that refuses camera access outright. Either
-      // way the player is stuck on a mission they cannot complete, so route them to
-      // the phone's own camera app instead of leaving them there.
+      }), CAMERA_OPEN_DEADLINE_MS, (late) => late.getTracks().forEach((tr) => tr.stop()));
+    } catch (e) {
+      // Denied, or an embedded webview that refuses camera access outright - or one that never
+      // answers at all (the deadline above). Either way the player is stuck on a mission they
+      // cannot complete, so route them to the phone's own camera app instead of leaving them there.
       setOpening(false);
-      setErr(t.task.videoCameraDenied);
+      setErr((e as { code?: string })?.code === 'camera/timeout' ? t.task.videoCameraSlow : t.task.videoCameraDenied);
       setUnsupported(true);
       return;
     }
     setOpening(false);
     streamRef.current = stream;
+    setFacing(reportedFacing(stream) ?? wanted);
+    // Labels (and so a reliable device count on some browsers) exist only once the
+    // page holds permission, which it does now. Failure just means no switch button.
+    void navigator.mediaDevices.enumerateDevices?.()
+      .then((d) => setCanSwitch(canSwitchCamera(d)))
+      .catch(() => setCanSwitch(false));
     mimeRef.current = mime;
     setRemaining(maxSeconds);
     setElapsed(0);
     elapsedRef.current = 0;
     setMode('camera');
+  }
+
+  // camera-switch D2. Never during a take (the button is not rendered then). The old
+  // tracks are stopped BEFORE asking for the new camera: iOS allows one open camera.
+  async function switchCamera() {
+    if (recording || switching || !navigator.mediaDevices?.getUserMedia) return;
+    setSwitching(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [] as MediaDeviceInfo[]);
+      const current = streamRef.current?.getVideoTracks()[0]?.getSettings?.();
+      const plan = planCameraSwitch({ devices, currentFacing: facing, currentDeviceId: current?.deviceId ?? null });
+      if (!plan) { setCanSwitch(false); return; }
+      const base = { ...profileRef.current.video } as MediaTrackConstraints;
+      delete base.facingMode;
+      const ask = (video: MediaTrackConstraints) => navigator.mediaDevices.getUserMedia({ video, audio: true });
+      stopTracks();
+      let next: MediaStream | null = null;
+      try {
+        next = await ask(plan.kind === 'deviceId'
+          ? { ...base, deviceId: { exact: plan.deviceId } }
+          : { ...base, facingMode: { exact: plan.facing } });
+      } catch {
+        if (plan.kind === 'facing' && plan.fallbackDeviceId) {
+          next = await ask({ ...base, deviceId: { exact: plan.fallbackDeviceId } }).catch(() => null);
+        }
+      }
+      // Never leave the player staring at a black viewfinder: if the other camera
+      // would not open, reopen the one they had.
+      if (!next) {
+        next = await ask({ ...base, facingMode: { ideal: facing } }).catch(() => null);
+        setErr(t.task.cameraSwitchFailed);
+        if (!next) { setMode('idle'); return; }
+      }
+      streamRef.current = next;
+      const nowFacing = reportedFacing(next) ?? plan.facing;
+      setFacing(nowFacing);
+      writeCameraChoice(safeSessionStorage(), runId ?? '', nowFacing);
+      const el = liveVideoRef.current;
+      if (el) {
+        el.srcObject = next;
+        void el.play().catch(() => { /* viewfinder only */ });
+      }
+    } finally {
+      setSwitching(false);
+    }
   }
 
   function beginRecording() {
@@ -2277,8 +3369,8 @@ function VideoEntry({ smart, busy, onSubmit }: {
     try {
       recorder = new MediaRecorder(stream, {
         mimeType: mimeRef.current,
-        videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
-        audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+        videoBitsPerSecond: profileRef.current.videoBitsPerSecond,
+        audioBitsPerSecond: profileRef.current.audioBitsPerSecond,
       });
     } catch {
       stopTracks();
@@ -2288,7 +3380,13 @@ function VideoEntry({ smart, busy, onSubmit }: {
       return;
     }
     recorderRef.current = recorder;
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunksRef.current.push(e.data);
+        // The same bytes, in the same order, go up while the player is still filming.
+        try { streamCbRef.current.onStreamChunk?.(e.data); } catch { /* the local clip never depends on the upload */ }
+      }
+    };
     recorder.onstop = () => finalize();
     // A recorder that errors mid-capture never reaches `onstop` on some browsers.
     recorder.onerror = () => finalize();
@@ -2299,7 +3397,10 @@ function VideoEntry({ smart, busy, onSubmit }: {
     setElapsed(0);
     elapsedRef.current = 0;
     try {
-      recorder.start();
+      // Slices every 4 s where the engine is known to produce valid slices (not WebKit yet):
+      // lib/videoCapture.ts recorderTimesliceFor.
+      recorder.start(recorderTimesliceFor(recorderEngineFromUserAgent(typeof navigator !== 'undefined' ? navigator.userAgent : '')));
+      try { streamCbRef.current.onStreamStart?.(mimeRef.current); } catch { /* upload is best effort until send */ }
     } catch {
       finalizedRef.current = true;
       stopTracks();
@@ -2327,8 +3428,17 @@ function VideoEntry({ smart, busy, onSubmit }: {
     // The byte check is exact and matches the server's own cap, so refusing here
     // is strictly kinder than letting a 100MB camera clip upload and be rejected.
     // (Unlike the duration read below, there is nothing uncertain to fail open on.)
-    if (file.size > MAX_VIDEO_BYTES) {
-      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+    if (file.size > MAX_PARTICIPANT_VIDEO_BYTES) {
+      // "Film a shorter clip" is advice that cannot work here (change:
+      // video-capture-profile). A native camera at 4K60 makes roughly 400MB a minute,
+      // so a TEN SECOND clip can exceed the cap - and the player has no idea their
+      // camera is the reason. Point them at the in-app recorder, which pins its own
+      // bitrate and therefore cannot produce a file this size. Only when that
+      // recorder is unavailable on this device does the length advice stand, because
+      // then it is the only lever they have.
+      setErr(unsupported
+        ? t.task.videoTooLarge({ mb: Math.round(MAX_PARTICIPANT_VIDEO_BYTES / 1024 / 1024) })
+        : t.task.videoTooLargeUseRecorder({ mb: Math.round(MAX_PARTICIPANT_VIDEO_BYTES / 1024 / 1024) }));
       return;
     }
     const url = URL.createObjectURL(file);
@@ -2349,14 +3459,32 @@ function VideoEntry({ smart, busy, onSubmit }: {
     // A picked clip is never re-judged in review — pickedClipVerdict already made
     // the (fail-open) call on the only duration this path can see.
     setClipSeconds(undefined);
+    setLengthSeconds(typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : undefined);
     setBlob(file);
     setPreview(url);
     setMode('review');
   }
 
   // The minimum gates the SUBMIT button only. It never gates stopping.
-  const clipTooShort = recordedClipVerdict(clipSeconds, minSeconds) === 'too-short';
+  //
+  // And it only BLOCKS on a far miss now (change: clip-length-is-guidance). A clip a
+  // little under the asked length is sendable with a warning: nothing downstream
+  // reads seconds, so the minimum is advice about what makes a good answer, and
+  // refusing a near miss only forced the player to record the whole thing again.
+  const clipGrade = recordedClipVerdict(clipSeconds, minSeconds);
+  const clipTooShort = clipGrade === 'too-short';
+  // A clip that cannot be sent is not uploaded; one that can starts now (media-upload-reliability).
+  const onCapturedRef = useRef(onCaptured);
+  onCapturedRef.current = onCaptured;
+  const announcedRef = useRef(false);
+  useEffect(() => {
+    const ready = blob && !clipTooShort ? blob : null;
+    // Skips the mount, like AudioEntry: nothing captured yet is not a discard.
+    if (!announcedRef.current) { announcedRef.current = true; if (!ready) return; }
+    onCapturedRef.current?.(ready, mimeRef.current);
+  }, [blob, clipTooShort]);
   const canSubmit = !!blob && !busy && !clipTooShort;
+  const autoLength = autoApproveLengthVerdict(lengthSeconds, smart);
   const shortBy = Math.max(0, minSeconds - elapsed);
 
   if (unsupported && !blob) {
@@ -2383,7 +3511,9 @@ function VideoEntry({ smart, busy, onSubmit }: {
           muted
           playsInline
           autoPlay
-          className="absolute inset-0 h-full w-full object-cover"
+          // Front camera: mirrored like the system camera. The recorded clip is the
+          // raw track, so players send what others see (camera-switch D3).
+          className={`absolute inset-0 h-full w-full object-cover ${shouldMirror(facing) ? '-scale-x-100' : ''}`}
         />
         <div
           className="relative flex items-start justify-between gap-3 p-4"
@@ -2420,6 +3550,23 @@ function VideoEntry({ smart, busy, onSubmit }: {
               {t.task.videoKeepRecording({ sec: shortBy })}
             </span>
           )}
+          {/* Front / back (camera-switch D2). Rendered only when a second camera
+              exists, and NOT rendered during a take: swapping the track mid-clip
+              would end the recording. Opposite corner from the pause control. */}
+          {!recording && canSwitch && (
+            <button
+              type="button"
+              onClick={() => void switchCamera()}
+              disabled={switching}
+              aria-label={t.task.switchCamera}
+              title={t.task.switchCamera}
+              data-testid="camera-switch"
+              className="absolute start-6 bottom-[34px] flex h-12 w-12 items-center justify-center rounded-full
+                border-2 border-white/80 bg-black/45 backdrop-blur-sm text-xl text-white transition-transform active:scale-95 disabled:opacity-50"
+            >
+              🔄
+            </button>
+          )}
           <button
             type="button"
             onClick={() => (recording ? stop() : beginRecording())}
@@ -2432,6 +3579,33 @@ function VideoEntry({ smart, busy, onSubmit }: {
                 : 'h-14 w-14 rounded-full bg-red-600 transition-all'}
             />
           </button>
+          {/* Pause is a SEPARATE control, never the shutter (change:
+              clip-length-is-guidance). It exists so a clip that is still too short
+              can be continued instead of lost: "start again from zero" was the only
+              option before, and players said so. The shutter beside it still ends
+              the take on any press, in any state. */}
+          {recording && (
+            <button
+              type="button"
+              onClick={() => (paused ? resumeTake() : holdTake())}
+              aria-label={paused ? t.task.videoKeepGoing : t.task.videoHold}
+              title={paused ? t.task.videoKeepGoing : t.task.videoHold}
+              className="absolute end-6 bottom-[34px] flex h-12 w-12 items-center justify-center rounded-full
+                border-2 border-white/80 bg-black/45 backdrop-blur-sm text-white transition-transform active:scale-95"
+            >
+              {/* The phone-camera vocabulary: two bars to hold, a triangle to go on.
+                  The previous version was a white pill with white text on a white
+                  viewfinder - unreadable, and it did not look like a camera control. */}
+              {paused ? (
+                <span className="ms-0.5 h-0 w-0 border-y-[9px] border-y-transparent border-s-[15px] border-s-white" />
+              ) : (
+                <span className="flex gap-[5px]">
+                  <span className="block h-[18px] w-[5px] rounded-sm bg-white" />
+                  <span className="block h-[18px] w-[5px] rounded-sm bg-white" />
+                </span>
+              )}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -2441,7 +3615,34 @@ function VideoEntry({ smart, busy, onSubmit }: {
     return (
       <div className="space-y-3">
         {err && <p className="text-ink-alert text-sm">{err}</p>}
+        {/* Short but sendable: a plain note, NOT the alert colour, because the
+            submit button beside it is enabled (change: clip-length-is-guidance). */}
+        {/* An AUTO-APPROVED mission only approves a clip inside its length range (owner rule,
+            2026-09-26). Say so BEFORE sending, so the team can reshoot instead of waiting. */}
+        {!err && smart?.autoApprove === true && autoLength !== 'ok' ? (
+          <p className="text-sm text-ink-amber" data-testid="video-wont-auto-approve">
+            {autoLength === 'long' ? t.task.videoTooLongForAuto({ sec: maxSeconds })
+              : autoLength === 'short' ? t.task.videoTooShortForAuto({ sec: minSeconds })
+              : t.task.videoLengthUnknownForAuto}
+          </p>
+        ) : !err && clipGrade === 'short' && (
+          <p className="text-sm text-zinc-400">{t.task.videoShortButOk({ sec: minSeconds })}</p>
+        )}
         <video controls src={previewUrl} className="w-full rounded-xl bg-black" />
+        {/* Keep a copy. Players asked to be able to save what they filmed - it is
+            their own footage, and an approved clip otherwise only ever lives in the
+            organizer's console. `download` on a blob URL is the one path that needs
+            no permission and no share sheet. */}
+        <div className="flex justify-end">
+          <a
+            href={previewUrl}
+            download={`rushpoint-${Date.now()}.${mimeRef.current.includes('mp4') ? 'mp4' : 'webm'}`}
+            className="inline-flex items-center gap-1.5 min-h-[44px] px-2 -my-1 text-[13px] font-medium text-zinc-400 hover:text-ink-fire transition-colors"
+          >
+            <span aria-hidden>⤓</span>
+            {t.task.videoSaveToPhone}
+          </a>
+        </div>
         <div className="flex gap-2">
           {unsupported ? (
             <label className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-zinc-400 cursor-pointer hover:bg-white transition-colors`}>
@@ -2451,10 +3652,14 @@ function VideoEntry({ smart, busy, onSubmit }: {
           ) : (
             <Button variant="ghost" disabled={busy || opening} onClick={() => void openCamera()}>{t.task.reRecord}</Button>
           )}
-          <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current)}>
-            {busy ? t.task.working : t.task.submitVideo}
+          <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current, lengthSeconds)}>
+            {working ? t.task.working : t.task.submitVideo}
           </Button>
         </div>
+        {isUploaded?.(blob)
+          ? <p className="text-xs text-zinc-400" data-testid="video-already-up">{t.task.videoAlreadyUp}</p>
+          : <SendEstimate bytes={blob.size} />}
+        <UploadProgress />
       </div>
     );
   }
@@ -2470,4 +3675,24 @@ function VideoEntry({ smart, busy, onSubmit }: {
       <Button disabled={busy || opening} onClick={() => void openCamera()}>{t.task.startRecording}</Button>
     </div>
   );
+}
+
+// camera-switch helpers. sessionStorage can throw on access (private mode, blocked
+// site data), and a camera must still open without it.
+function safeSessionStorage(): Storage | null {
+  try { return typeof window !== 'undefined' ? window.sessionStorage : null; } catch { return null; }
+}
+
+/** The facing a stream's camera reports about itself, when the browser says. */
+function reportedFacing(stream: MediaStream): Facing | null {
+  try {
+    const f = stream.getVideoTracks()[0]?.getSettings?.().facingMode;
+    return f === 'user' || f === 'environment' ? f : null;
+  } catch { return null; }
+}
+
+// The in-app photo camera needs getUserMedia (camera-switch 2.4). Where it is missing the phone's own
+// camera is the only button, exactly as before.
+function canUseInAppCamera(): boolean {
+  try { return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia; } catch { return false; }
 }

@@ -117,7 +117,7 @@ export default function SmartBuildReveal({
               <li key={i} className="rounded-xl border border-[--rp-border] bg-[--surface-0] px-3 py-2.5">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-[12px] font-semibold text-[--ink-1]">{labels.stage(i + 1)}</span>
-                  <span className="text-[11px] text-[--ink-3]">{labels.missions(missions.length)}</span>
+                  <span className="text-[13px] text-[--ink-3]">{labels.missions(missions.length)}</span>
                 </div>
 
                 <ul className="mt-1.5 flex flex-col gap-1">

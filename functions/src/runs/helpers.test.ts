@@ -122,6 +122,49 @@ describe('applyStageCompletion', () => {
     expect(res.heldAssignedTaskIds).toEqual([]); // an unassigned task holds no station slot
   });
 
+  // ── skip-keeps-the-stage ───────────────────────────────────────────────────
+  // Production run oNaUvNrCWRia4Y1b9xOO (2026-09-22): ONE operator skip of the head of this
+  // chain was logged `stageCompleted: true` and the team lost the whole stage. An OPERATOR skip
+  // removes an obstacle; it must not retire the missions waiting behind it.
+  const chain = game([{
+    id: 's0',
+    tasks: [
+      { id: 'f13163ca' },
+      { id: '2b83fd50', unlockAfterTaskIds: ['f13163ca'] },
+      { id: 'c42b88d4', unlockAfterTaskIds: ['2b83fd50', 'f13163ca'] },
+    ],
+  }, { id: 's1' }]);
+
+  it('(e2) an OPERATOR skip of a chain head keeps the stage and its dependents', () => {
+    const head = { ...task('f13163ca', 'skipped'), skipCause: 'operator' } as RunTaskRecord;
+    const stages = [
+      stageRec('s0', 'active', [head, task('2b83fd50', 'unassigned'), task('c42b88d4', 'unassigned')]),
+      stageRec('s1', 'locked', [task('x', 'unassigned')]),
+    ];
+    const res = applyStageCompletion(stages, 0, chain, NOW, NOW);
+
+    expect(res.completed).toBe(false);
+    expect(stages[0].status).toBe('active');
+    expect(stages[0].tasks[1].status).toBe('unassigned');
+    expect(stages[0].tasks[2].status).toBe('unassigned');
+    expect(stages[1].status).toBe('locked');
+  });
+
+  it('(e3) every automatic skip records WHY: unreachable retirement and satisfied leftovers', () => {
+    // Exclusive loss of the head (legacy record, no cause) retires the chain as before, and the
+    // retired records now say so, so a later reader can tell them from an operator skip.
+    const stages = [
+      stageRec('s0', 'active', [task('f13163ca', 'skipped'), task('2b83fd50', 'unassigned'), task('c42b88d4', 'unassigned')]),
+    ];
+    applyStageCompletion(stages, 0, chain, NOW, NOW);
+    expect(stages[0].tasks[1].skipCause).toBe('unreachable');
+    expect(stages[0].tasks[2].skipCause).toBe('unreachable');
+
+    const partial = [stageRec('s0', 'active', [task('t1', 'completed', 10), task('t2', 'unassigned')], 1)];
+    applyStageCompletion(partial, 0, game([{ id: 's0' }]), NOW, NOW);
+    expect(partial[0].tasks[1].skipCause).toBe('stageSatisfied');
+  });
+
   it('(f) a task retired as unreachable scores exactly like any other skip: nothing', () => {
     const stages = [
       stageRec('s0', 'active', [task('a1', 'skipped'), task('a2', 'completed', 10), task('b', 'unassigned')]),

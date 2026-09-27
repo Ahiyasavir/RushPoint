@@ -1,0 +1,175 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;700;800&family=Rubik:wght@500;700;900&display=swap">
+</head>
+<body style="margin:0;background:#222;font-family:system-ui,sans-serif">
+<div style="padding:16px;display:flex;gap:12px;align-items:center">
+  <button id="dl-play" style="padding:8px 16px;cursor:pointer">Download play.jpg</button>
+  <button id="dl-creator" style="padding:8px 16px;cursor:pointer">Download creator.jpg</button>
+  <span style="color:#aaa">Save each into apps/play-web/public/og.jpg (also copy to apps/marketing/src/assets/images/og.jpg) and apps/creator-web/public/og.jpg</span>
+</div>
+<canvas id="play" width="1200" height="630" style="max-width:600px;display:block;margin:8px"></canvas>
+<canvas id="creator" width="1200" height="630" style="max-width:600px;display:block;margin:8px"></canvas>
+<script>
+const W = 1200, H = 630;
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ── PLAY / MARKETING CARD: warm orange gradient, matches the current brand ──
+function drawPlay() {
+  const c = document.getElementById('play');
+  const ctx = c.getContext('2d');
+
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#FCA855');
+  bg.addColorStop(0.5, '#F97316');
+  bg.addColorStop(1, '#DC4F08');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Soft gloss, top left
+  const gloss = ctx.createRadialGradient(300, 120, 0, 300, 120, 500);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.28)');
+  gloss.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gloss;
+  ctx.fillRect(0, 0, W, H);
+
+  // Wordmark, top right (RTL layout: brand sits where a Hebrew reader looks first)
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '800 34px Rubik, Assistant, sans-serif';
+  ctx.fillText('RushPoint', W - 70, 90);
+
+  // Compass mark, top left
+  ctx.font = '54px serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('🧭', 60, 100);
+
+  // Headline, right aligned
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '800 76px Rubik, Assistant, sans-serif';
+  ctx.fillText('המירוץ החי', W - 70, 260);
+  ctx.fillText('שהקבוצה שלכם תזכור', W - 70, 350);
+
+  // Subhead
+  ctx.font = '500 34px Assistant, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText('בשטח, בבית או במסיבה. כולם משחקים באותו האופן.', W - 70, 420);
+
+  // Feature chips, right to left
+  const chips = [['📍', 'ניתוב אוטומטי'], ['⚡', 'ניקוד חי'], ['✅', 'בלי התקנה']];
+  ctx.font = '600 30px Assistant, sans-serif';
+  let cx = W - 70;
+  for (const [icon, label] of chips) {
+    const text = icon + ' ' + label;
+    const textW = ctx.measureText(text).width;
+    const chipW = textW + 56;
+    const chipX = cx - chipW;
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    roundRect(ctx, chipX, 520, chipW, 62, 31);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'right';
+    ctx.fillText(text, cx - 28, 560);
+    cx = chipX - 20;
+  }
+}
+
+// ── CREATOR CARD: dark theme + orange glow, matches creator-web's own UI ──
+function drawCreator() {
+  const c = document.getElementById('creator');
+  const ctx = c.getContext('2d');
+
+  ctx.fillStyle = '#050508';
+  ctx.fillRect(0, 0, W, H);
+
+  const glow = ctx.createRadialGradient(W - 200, H - 100, 0, W - 200, H - 100, 700);
+  glow.addColorStop(0, 'rgba(255,87,34,0.35)');
+  glow.addColorStop(1, 'rgba(255,87,34,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textBaseline = 'alphabetic';
+
+  // Wordmark
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#FF5722';
+  ctx.font = '800 34px Rubik, Assistant, sans-serif';
+  ctx.fillText('RushPoint', W - 70, 90);
+
+  ctx.font = '54px serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('🧭', 60, 100);
+
+  // Headline
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '800 76px Rubik, Assistant, sans-serif';
+  ctx.fillText('בונים מירוץ חי', W - 70, 260);
+  ctx.font = '800 76px Rubik, Assistant, sans-serif';
+  ctx.fillStyle = '#FF5722';
+  ctx.fillText('משלכם', W - 70, 350);
+
+  // Subhead
+  ctx.font = '500 34px Assistant, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillText('מעצבים תחנות בכל מקום, מפעילים מירוץ חי, והניקוד קורה לבד.', W - 70, 420);
+
+  const chips = [['🎯', 'בונה חזותי'], ['📡', 'שליטה חיה'], ['🏆', 'ניקוד אוטומטי']];
+  ctx.font = '600 30px Assistant, sans-serif';
+  let cx = W - 70;
+  for (const [icon, label] of chips) {
+    const text = icon + ' ' + label;
+    const textW = ctx.measureText(text).width;
+    const chipW = textW + 56;
+    const chipX = cx - chipW;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    roundRect(ctx, chipX, 520, chipW, 62, 31);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'right';
+    ctx.fillText(text, cx - 28, 560);
+    cx = chipX - 20;
+  }
+}
+
+window.renderCards = function() {
+  drawPlay();
+  drawCreator();
+  return {
+    play: document.getElementById('play').toDataURL('image/jpeg', 0.88),
+    creator: document.getElementById('creator').toDataURL('image/jpeg', 0.88),
+  };
+};
+
+function downloadCanvas(id, filename) {
+  const canvas = document.getElementById(id);
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/jpeg', 0.88);
+  a.download = filename;
+  a.click();
+}
+
+window.addEventListener('load', async () => {
+  await document.fonts.ready;
+  window.renderCards();
+  document.getElementById('dl-play').addEventListener('click', () => downloadCanvas('play', 'og.jpg'));
+  document.getElementById('dl-creator').addEventListener('click', () => downloadCanvas('creator', 'og.jpg'));
+});
+</script>
+</body>
+</html>

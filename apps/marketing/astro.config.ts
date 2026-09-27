@@ -12,6 +12,8 @@ import icon from 'astro-icon';
 import compress from 'astro-compress';
 import type { AstroIntegration } from 'astro';
 
+import { FONTS } from '@rushpoint/brand';
+
 import astrowind from './vendor/integration';
 
 import { readingTimeRemarkPlugin, responsiveTablesRehypePlugin } from './src/utils/frontmatter';
@@ -32,29 +34,41 @@ export default defineConfig({
   // 2.4 KB of script on pages that otherwise need none.
   prefetch: false,
 
-  // Native Fonts API: self-hosts + subsets + preloads Inter and generates
-  // metric-adjusted fallbacks. Injected via <Font /> in Layout.astro and
-  // consumed through the `--font-inter` CSS variable in CustomStyles.astro.
+  // Fonts come from the brand package (packages/brand/tokens.mjs), which is the
+  // single source. Nothing about the typeface is decided here.
+  //
+  // The `hebrew` subset is the whole point of this block. Both faces used to be
+  // loaded latin-only and the previous display face had no Hebrew glyphs at all,
+  // so every Hebrew character on a Hebrew-first site was rendered by the
+  // browser's default font: a brand typeface in English and Arial in Hebrew,
+  // which is the half most readers actually see.
+  //
+  // Fetched from Fontsource at build time and then self hosted, so the browser
+  // never touches a third party. That fetch is the one part that needs the
+  // network, and jsdelivr failed intermittently here (two of three attempts for
+  // one file); Astro caches per file, so a retried build succeeds and warm
+  // builds never reach out at all.
+  //
+  // Written out rather than mapped: Astro derives a literal union of css
+  // variables from this list and expects each entry to name exactly one, and a
+  // map gives every element the union of both.
   fonts: [
     {
       provider: fontProviders.fontsource(),
-      name: 'Inter',
-      cssVariable: '--font-inter',
-      weights: ['100 900'],
+      name: FONTS.display.family,
+      cssVariable: FONTS.display.cssVariable,
+      weights: FONTS.display.weights,
       styles: ['normal'],
-      subsets: ['latin'],
+      subsets: FONTS.display.subsets,
       fallbacks: ['sans-serif'],
     },
     {
-      // The apps' display face (`font-brand` in their Tailwind configs,
-      // `--rp-font-display` in creator-web's stylesheet). Headings only, which is
-      // why it carries the heading weights and not the full range.
       provider: fontProviders.fontsource(),
-      name: 'Space Grotesk',
-      cssVariable: '--font-space-grotesk',
-      weights: ['500 800'],
+      name: FONTS.body.family,
+      cssVariable: FONTS.body.cssVariable,
+      weights: FONTS.body.weights,
       styles: ['normal'],
-      subsets: ['latin'],
+      subsets: FONTS.body.subsets,
       fallbacks: ['sans-serif'],
     },
   ],

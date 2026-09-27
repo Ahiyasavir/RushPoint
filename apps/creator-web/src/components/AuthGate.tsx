@@ -3,7 +3,10 @@ import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { User } from 'firebase/auth';
 import { getAdditionalUserInfo } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import { markJustSignedUp, shouldRedirectAfterSignup } from '../lib/creatorOnboarding';
+import {
+  markJustSignedUp, shouldRedirectAfterSignup,
+  readStartIntent, markStartIntent, hasStartIntent,
+} from '../lib/creatorOnboarding';
 import { doc, setDoc } from 'firebase/firestore';
 import {
   watchAuth,
@@ -18,13 +21,19 @@ import {
 import { Button, Card, Input, Label, Spinner } from './ui';
 import { claimReferral } from '../services/calls';
 import { dialog, DialogHost } from './dialog';
+import { authErrorInfo } from '../lib/authError';
 import { ToastHost } from './toast';
 import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
+import { TAP_TEXT } from '../lib/interaction';
+import { resolvePublicCreatorRoute } from '../lib/publicCreatorPath';
 
 const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
-
-const LEGAL_PATHS = ['/privacy', '/terms'];
+// A game shared by link (change: game-share-link). Served WITHOUT an account for
+// the same reason the legal pages are: the recipient of a link is very often
+// somebody who has never heard of the product, and bouncing them to a sign-up
+// form is indistinguishable from a broken link.
+const SharedGamePage = lazyWithRetry('sharedGame', () => import('../pages/SharedGamePage'));
 
 // The participant app, for the no-signup "try a sample game" demo link. This
 // opens the FLAGSHIP instant-play demo ("אקדמיית הסוכנים"): the `?game=<id>` promo
@@ -49,6 +58,12 @@ export const useAuth = () => useContext(Ctx);
 const REF_KEY = 'rp_ref';
 const incomingRef = new URLSearchParams(window.location.search).get('ref');
 if (incomingRef) { try { localStorage.setItem(REF_KEY, incomingRef); } catch { /* private mode */ } }
+
+// "Take me straight to building" (change: marketing-cta-straight-to-build).
+// Captured at module load, exactly like the referral above, because it has to
+// survive whatever the auth flow does to the URL next — a Google redirect, or the
+// post-signup `nav('/', ...)` — and both of those drop the query string.
+if (readStartIntent(window.location.search)) markStartIntent();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const t = useT();
@@ -84,12 +99,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  // Legal pages are public: serve them without requiring auth.
-  if (!user && LEGAL_PATHS.includes(window.location.pathname)) {
-    const type = window.location.pathname === '/privacy' ? 'privacy' : 'terms';
+  // Public routes: served without requiring auth. Resolved by ONE pure function
+  // (lib/publicCreatorPath) rather than compared inline, because the pathname
+  // carries the router basename — `/creator/terms` behind the playtest proxy —
+  // and the old inline comparison silently missed every one of those.
+  const publicRoute = !user
+    ? resolvePublicCreatorRoute(window.location.pathname, import.meta.env.BASE_URL)
+    : null;
+  if (publicRoute?.kind === 'legal') {
     return (
       <Suspense fallback={<Spinner label="..." />}>
-        <LegalPage type={type} standalone />
+        <LegalPage type={publicRoute.type} standalone />
+      </Suspense>
+    );
+  }
+  if (publicRoute?.kind === 'shared') {
+    return (
+      <Suspense fallback={<Spinner label="..." />}>
+        <div className="min-h-screen bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] px-4 py-8">
+          <SharedGamePage token={publicRoute.token} signedIn={false} />
+        </div>
       </Suspense>
     );
   }
@@ -130,6 +159,27 @@ function LoginScreen() {
     setMode(next); setErr(''); setPassword(''); setConfirm('');
   }
 
+  // Every auth failure is shown as a popup, not raw red text under the field
+  // (change: friendly-auth-errors). "No account with those details" offers a
+  // one-tap jump to sign-up; "email already in use" offers a jump to sign-in;
+  // everything else is a plain, translated alert instead of
+  // "Error (auth/api-key-not-valid…)".
+  async function handleAuthError(e: unknown) {
+    const info = authErrorInfo(e);
+    if (info.silent) return; // the user closed / blocked the Google popup
+    const ae = t.auth.errors;
+    setErr('');
+    if (info.suggestSignUp) {
+      if (await dialog.confirm(ae.noMatchTitle, ae.createAccountCta)) switchMode('up');
+      return;
+    }
+    if (info.suggestSignIn) {
+      if (await dialog.confirm(ae.emailInUse, ae.goToSignInCta)) switchMode('in');
+      return;
+    }
+    await dialog.alert((ae as Record<string, string>)[info.key] ?? ae.unknown);
+  }
+
   function validateSignUp(): string | null {
     if (!fullName.trim()) return t.auth.validationName;
     if (!email.trim())    return t.auth.validationEmail;
@@ -160,7 +210,7 @@ function LoginScreen() {
         landAfterAuth(true);
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.signInFailed);
+      await handleAuthError(e);
     } finally {
       setBusy(false);
     }
@@ -186,8 +236,7 @@ function LoginScreen() {
       landAfterAuth(getAdditionalUserInfo(cred)?.isNewUser === true);
     }
     catch (e) {
-      const msg = e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.googleSignInFailed;
-      if (!/popup-closed-by-user|cancelled-popup-request|popup-blocked/.test(msg)) setErr(msg);
+      await handleAuthError(e);
     }
     finally { setBusy(false); }
   }
@@ -200,7 +249,7 @@ function LoginScreen() {
       await resetPassword(email.trim());
       await dialog.alert(t.auth.resetSent(email.trim()));
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.resetFailed);
+      await handleAuthError(e);
     } finally {
       setBusy(false);
     }
@@ -277,7 +326,7 @@ function LoginScreen() {
           {mode === 'in' && (
             <div className="text-end -mt-1.5">
               <button type="button" onClick={forgotPassword} disabled={busy}
-                className="text-xs text-[--ink-3] hover:text-rp-fire transition-colors disabled:opacity-40">
+                className={`${TAP_TEXT} px-2 -me-2 text-xs text-[--ink-3] hover:text-ink-fire transition-colors disabled:opacity-40`}>
                 {t.auth.forgotPassword}
               </button>
             </div>
@@ -291,14 +340,14 @@ function LoginScreen() {
                 onKeyDown={(e) => e.key === 'Enter' && submit()}
                 className={confirm && confirm !== password ? '!border-rp-alert/60 !ring-rp-alert/20' : ''} />
               {confirm && confirm !== password && (
-                <p className="text-[11px] text-rp-alert mt-1">{t.auth.passwordsMismatch}</p>
+                <p className="text-[13px] text-ink-alert mt-1">{t.auth.passwordsMismatch}</p>
               )}
             </div>
           )}
 
           {err && (
             <div className="rounded-lg bg-rp-alert/8 border border-rp-alert/20 px-3 py-2">
-              <p className="text-rp-alert text-xs font-medium">{err}</p>
+              <p className="text-ink-alert text-xs font-medium">{err}</p>
             </div>
           )}
 
@@ -311,17 +360,17 @@ function LoginScreen() {
           </Button>
 
           {mode === 'up' && (
-            <p className="text-center text-[10px] text-[--ink-3] leading-relaxed pt-1">
+            <p className="text-center text-[12px] text-[--ink-3] leading-relaxed pt-1">
               {t.auth.agreeToTermsLead}
-              <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.termsLink}</a>
+              <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-ink-fire">{l.termsLink}</a>
               {t.auth.agreeToTermsBetween}
-              <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.privacyLink}</a>
+              <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-ink-fire">{l.privacyLink}</a>
             </p>
           )}
 
           <p className="text-center text-xs text-[--ink-3] pt-1">
             {mode === 'in' ? t.auth.noAccount : t.auth.haveAccount}{' '}
-            <button className="text-rp-fire font-semibold hover:underline"
+            <button className={`${TAP_TEXT} -my-2 px-1 text-ink-fire font-semibold hover:underline`}
               onClick={() => switchMode(mode === 'in' ? 'up' : 'in')}>
               {mode === 'in' ? t.auth.signUpFree : t.auth.signIn}
             </button>
@@ -336,12 +385,35 @@ function LoginScreen() {
   // forgot-password confirmation, the referral-bonus alert) silently no-op. Mounting
   // them here makes that pre-signin feedback actually render. These two branches are
   // mutually exclusive with App, so the module-singleton host is never double-owned.
+  // A visitor who arrived from the marketing CTA has already read the pitch and
+  // clicked anyway — showing them the landing page again is asking them to
+  // decide twice (change: marketing-cta-straight-to-build). They get the auth
+  // card on its own; everyone else gets the full landing page, unchanged.
+  //
+  // Read, never consumed, here: this screen re-renders on a failed password or a
+  // switch to sign-up, and each of those still needs the bare layout. The
+  // Dashboard is what spends the intent, once, when it acts on it.
   return (
     <>
-      <Landing authCard={authCard} />
+      {hasStartIntent() ? <BareSignIn authCard={authCard} /> : <Landing authCard={authCard} />}
       <DialogHost />
       <ToastHost />
     </>
+  );
+}
+
+/** The auth card alone, centred, on the same ambient background the Landing uses. */
+function BareSignIn({ authCard }: { authCard: ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[--surface-1] text-[--ink-1] relative overflow-hidden flex items-center justify-center p-4">
+      <div aria-hidden="true" className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-[46rem] h-[46rem] rounded-full opacity-70"
+          style={{ background: 'radial-gradient(circle, rgba(255,87,34,0.16) 0%, transparent 62%)', filter: 'blur(90px)' }} />
+        <div className="absolute bottom-0 left-1/3 w-[36rem] h-[36rem] rounded-full opacity-40"
+          style={{ background: 'radial-gradient(circle, rgba(255,179,0,0.12) 0%, transparent 62%)', filter: 'blur(90px)' }} />
+      </div>
+      <div className="relative flex justify-center w-full">{authCard}</div>
+    </div>
   );
 }
 
@@ -374,14 +446,14 @@ function Landing({ authCard }: { authCard: ReactNode }) {
           <span className="font-brand text-xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
             RushPoint
           </span>
-          <a href="#signin" className="text-sm text-[--ink-3] hover:text-[--ink-1] transition-colors font-medium">{l.signInNav}</a>
+          <a href="#signin" className={`${TAP_TEXT} px-2 -mx-2 text-sm text-[--ink-3] hover:text-[--ink-1] transition-colors font-medium`}>{l.signInNav}</a>
         </div>
 
         {/* Hero */}
         <div className="grid md:grid-cols-2 gap-12 items-center min-h-[calc(100vh-4rem)] pb-16">
           <div className="animate-fade-up">
             {incomingRef ? (
-              <div className="inline-flex items-center gap-2 rounded-full border border-rp-fire/40 bg-rp-fire/8 px-3.5 py-1.5 text-xs text-rp-fire font-semibold mb-5">
+              <div className="inline-flex items-center gap-2 rounded-full border border-rp-fire/40 bg-rp-fire/8 px-3.5 py-1.5 text-xs text-ink-fire font-semibold mb-5">
                 {l.referralBadge(REFERRAL_BONUS_FREE_RUNS)}
               </div>
             ) : (
@@ -413,19 +485,19 @@ function Landing({ authCard }: { authCard: ReactNode }) {
                 Deliberately the bare join screen, not the demo — they have a code. */}
             <p className="mt-4 text-sm text-[--ink-3]">
               {l.playerCta}{' '}
-              <a href={PLAY_URL} className="font-semibold text-rp-fire underline underline-offset-2 hover:opacity-80">
+              <a href={PLAY_URL} className={`${TAP_TEXT} -my-2 px-1 font-semibold text-ink-fire underline underline-offset-2 hover:opacity-80`}>
                 {l.playerLink}
               </a>
             </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-7 text-xs text-[--ink-3] font-medium">
-              <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustNoCc}</span>
-              <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustDemo}</span>
-              <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN)}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustNoCc}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustDemo}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN)}</span>
             </div>
 
             {/* Use-case strip — leads with the launch wedges (events) */}
             <div className="mt-8">
-              <p className="text-[11px] uppercase tracking-widest text-[--ink-3] font-semibold mb-2.5">{l.useCasesTitle}</p>
+              <p className="text-[13px] uppercase tracking-widest text-[--ink-3] font-semibold mb-2.5">{l.useCasesTitle}</p>
               <div className="flex flex-wrap gap-2">
                 {l.useCases.map((u) => (
                   <span key={u.label}
@@ -484,11 +556,11 @@ function Landing({ authCard }: { authCard: ReactNode }) {
         <footer className="border-t border-[--rp-border] py-6 text-center text-xs text-[--ink-3] space-y-2">
           <p>{l.footerText}</p>
           <p className="flex items-center justify-center gap-3">
-            <a href="/privacy" target="_blank" rel="noreferrer" className="hover:text-[--ink-1] hover:underline transition-colors">{l.privacyLink}</a>
+            <a href="/privacy" target="_blank" rel="noreferrer" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>{l.privacyLink}</a>
             <span aria-hidden="true">·</span>
-            <a href="/terms" target="_blank" rel="noreferrer" className="hover:text-[--ink-1] hover:underline transition-colors">{l.termsLink}</a>
+            <a href="/terms" target="_blank" rel="noreferrer" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>{l.termsLink}</a>
             <span aria-hidden="true">·</span>
-            <a href="mailto:legal@rushpoint.app" className="hover:text-[--ink-1] hover:underline transition-colors">legal@rushpoint.app</a>
+            <a href="mailto:legal@rushpoint.app" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>legal@rushpoint.app</a>
           </p>
         </footer>
       </div>
@@ -522,7 +594,7 @@ function PhoneMockup() {
           </div>
           <div className="px-4 pt-1 pb-3">
             <div className="text-[13px] font-extrabold text-orange-600">מסע אוצר העיר העתיקה</div> {/* i18n-ignore mockup sample */}
-            <div className="text-[10px] text-[#3D4259]">ניקוד: <span className="font-mono text-orange-600">690</span></div> {/* i18n-ignore mockup sample */}
+            <div className="text-[12px] text-[#3D4259]">ניקוד: <span className="font-mono text-orange-600">690</span></div> {/* i18n-ignore mockup sample */}
             <div className="mt-2 flex gap-1">
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
@@ -539,14 +611,14 @@ function PhoneMockup() {
             <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-[#3D4259]">240מ להמשך</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="m-4 mt-3 rounded-xl border border-orange-200 bg-white p-3">
-            <div className="text-[11px] font-semibold text-[#0A0C1A]">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
-            <div className="text-[10px] text-[#3D4259] mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
-            <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center">שלח תמונה</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[13px] font-semibold text-[#0A0C1A]">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[12px] text-[#3D4259] mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
+            <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[12px] font-bold flex items-center justify-center">שלח תמונה</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="mx-4 mb-4 rounded-xl bg-white border border-orange-100 p-2.5">
-            <div className="text-[10px] font-semibold text-[#0A0C1A] mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[12px] font-semibold text-[#0A0C1A] mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
             {board.map((r) => (
-              <div key={r.rank} className={`flex items-center justify-between text-[10px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-[#3D4259]'}`}>
+              <div key={r.rank} className={`flex items-center justify-between text-[12px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-[#3D4259]'}`}>
                 <span className="truncate"><span className="font-mono me-1.5">{r.rank}</span>{r.name}</span>
                 <span className="font-mono">{r.score}</span>
               </div>

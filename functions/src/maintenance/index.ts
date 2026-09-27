@@ -21,7 +21,7 @@
 
 import * as functions from 'firebase-functions';
 import { loggedCallable } from '../obs/log';
-import { db, storage } from '../firebase';
+import { db } from '../firebase';
 import {
   RUN_DATA_RETENTION_DAYS,
   GAME_TRASH_RETENTION_DAYS, isPurgeDue, type Game,
@@ -29,7 +29,10 @@ import {
   ANSWER_LOG_RETENTION_DAYS, stripAnswerLogsFromStages, type RunStageRecord,
 } from '@rushpoint/shared';
 import { deleteDocsInChunks } from '../batchUtil';
-import { runPhotoPrefix } from '../storagePaths';
+// The movement track also lives on the VPS disk when configured; retention must reach it too
+// or the 90-day promise would hold in Firestore and quietly fail on disk (change: vps-track-storage).
+import { trackStore } from '../trackStore';
+import { deleteRunUploads, hasLocalUploadStore } from '../storageUtil';
 // Pure, total, fail-closed prune eligibility (change: run-retention-completeness).
 import {
   evaluateRunPrune, parseRunPath, ABANDONABLE_RUN_STATUSES, type RunRetentionFacts,
@@ -94,6 +97,12 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   //    PII_BULK_SUBCOLLECTIONS covers teamLocations, the append-only movement track
   //    (locationTrack), capture zones, the live photo feed, and — critically — the
   //    `alerts` subcollection whose SOS/safe_zone_breach docs carry raw lat/lng.
+  //    The same track is ALSO purged from the VPS's local disk when that is where it was
+  //    recorded. Called unconditionally and best-effort: for a Firestore-mode run it resolves
+  //    to "no such file" and costs nothing, so retention does not have to know which mode
+  //    recorded the run — and cannot get that judgement wrong.
+  await trackStore.delete({ ownerUid, gameId, runId });
+
   const bulkRefs: FirebaseFirestore.DocumentReference[] = [];
   for (const sub of PII_BULK_SUBCOLLECTIONS) {
     const snap = await db.collection(`${runPath}/${sub}`).get();
@@ -156,15 +165,13 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   consentCleared += await deleteDocsInChunks(tokSnap.docs.map((d) => d.ref));
 
   // 3) Delete uploaded photo objects under this run's Storage prefix.
-  let storagePurged = false;
-  try {
-    // Pure, unit-tested prefix derivation (change: storage-rules-hardening): a
-    // blank runId here would widen to `runs/` and purge every run in the bucket.
-    await storage.bucket().deleteFiles({ prefix: runPhotoPrefix(runId) });
-    storagePurged = true;
-  } catch (e) {
-    functions.logger.warn(`pruneRunPII: storage purge failed for run ${runId}`, e);
-  }
+  // BOTH stores (change: run-media-disk-retention). This used to call only the bucket, which does
+  // not exist on the VPS where every photo, audio clip and video actually lives: the call threw,
+  // the run was stamped pruned below, and its media stayed on disk forever. The prefix is still
+  // derived by the unit-tested `runPhotoPrefix` inside the helper, so a blank id cannot widen.
+  const purge = await deleteRunUploads(runId);
+  const storagePurged = purge.bucket || (hasLocalUploadStore() && purge.disk);
+  if (!storagePurged) functions.logger.warn(`pruneRunPII: no upload store was cleared for run ${runId}`);
 
   // 4) Stamp the run so the scheduled sweep skips it next time. `answerLogPrunedAt`
   //    is stamped too: this prune is a superset of the 30-day answer sweep, so the

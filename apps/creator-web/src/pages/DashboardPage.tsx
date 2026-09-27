@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game, GameMode, Stage, GameFile } from '@rushpoint/shared';
 import {
-  GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL,
+  GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED,
   DEFAULT_WRONG_ANSWER_LEVEL, parseGameFile, AGE_BANDS,
 } from '@rushpoint/shared';
 import {
@@ -11,22 +11,31 @@ import {
   createGameFromTemplate, importGameFile, type TemplateGroupEntry,
 } from '../services/calls';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
+import { TAP_TARGET } from '../lib/interaction';
 import { composeGame, previewShape, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
 import SmartBuildReveal, { type RevealStage } from '../components/SmartBuildReveal';
 import { readRecentPicks, recordRecentPicks } from '../lib/recentBankPicks';
-import { TASK_BANK } from '../taskBank';
+// The bank the composer draws from is `taskBank.ts` MERGED with the admin's
+// edits and deletions (change: admin-editable-mission-bank). loadMissionBank()
+// fails open to the authored bank, so composing never depends on that read.
+import { loadMissionBank } from '../lib/missionBank';
 import NewGameWizard, { type WizardSubmission, type WizardTemplate } from '../components/NewGameWizard';
 import { Badge, Button, Card, EmptyState, Input, Label, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
+// The stamp that tells the Builder this mount is the landing from the new-game
+// wizard, so it does not stack a second guided flow on top (change:
+// creator-mobile-mechanics).
+import { JUST_CREATED_NAV_STATE } from '../lib/quickSetup';
 import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
-import { ShareSheet } from '../components/ShareSheet';
+import ShareLinkDialog from '../components/ShareLinkDialog';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
 import { firstLaunchBlocker, splitTestDriveReadiness, type ReadinessIssue } from '../lib/gameReadiness';
+import { describeCallFailure } from '../lib/callFeedback';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../components/AuthGate';
@@ -37,7 +46,7 @@ import { liveRunForGame } from '../lib/creatorNav';
 import {
   KNOWN_GAME_COUNT_KEY, ONBOARDING_DISMISSED_KEY, PREVIEWED_STORAGE_KEY, TOUR_FIRST_GAME_KEY, firstGameIdKey,
   buildOnboardingChecklist, knownGameCountKey, readKnownGameCount, readPreviewedGames,
-  skeletonCardCount,
+  skeletonCardCount, consumeStartIntent,
   type OnboardingStepId,
 } from '../lib/creatorOnboarding';
 
@@ -47,7 +56,12 @@ import {
 function blankStage(): Stage {
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
   return {
-    id: uuid(), order: 0, title: 'שלב 1', requiredTaskCount: 1,
+    // Empty, not a hardcoded 'שלב 1'. That literal shipped a HEBREW stage title to
+    // an English creator, and it duplicated the rail's own positional label
+    // besides (change: stage-name-shown-twice). Every reader of stage.title
+    // already falls back — the rail prints the label, and the readiness and
+    // delete-confirm sentences use b.untitledStage / b.stageTitlePlaceholder.
+    id: uuid(), order: 0, title: '', requiredTaskCount: 1,
     tasks: [{
       id: uuid(), title: '', type: 'field', coordinates: { lat: 0, lng: 0 },
       locationless: true, triggerMode: 'locationless',
@@ -73,10 +87,6 @@ function readGamesCache(uid: string | undefined): Game[] | null {
   if (Date.now() - _gamesCache.ts >= CACHE_TTL) return null;
   return _gamesCache.data;
 }
-
-const PLAY_URL = import.meta.env.DEV
-  ? resolvePlayOrigin(window.location.origin)
-  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
 
 function getAccentBar(g: Game): string {
   if (g.visibility === 'public') return 'from-rp-plasma to-rp-go';
@@ -137,7 +147,7 @@ function OnboardingChecklist({ checklist, onDismiss, onStep }: {
           </span>
           <button
             onClick={onDismiss}
-            className="text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+            className="text-[13px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
           >
             {o.dismiss}
           </button>
@@ -152,13 +162,13 @@ function OnboardingChecklist({ checklist, onDismiss, onStep }: {
             <>
               <span aria-hidden="true"
                 className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  step.done ? 'bg-rp-go/20 text-rp-go' : 'bg-[--surface-2] text-[--ink-3]'}`}
+                  step.done ? 'bg-rp-go/20 text-ink-go' : 'bg-[--surface-2] text-[--ink-3]'}`}
               >
                 {step.done ? '✓' : i + 1}
               </span>
               <div className="min-w-0 text-start">
                 <div className="text-sm font-semibold text-[--ink-1]">{copy.title}</div>
-                <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{copy.body}</p>
+                <p className="text-[13px] text-[--ink-3] mt-0.5 leading-relaxed">{copy.body}</p>
                 {step.done && <span className="sr-only">{o.stepDone}</span>}
               </div>
             </>
@@ -207,6 +217,9 @@ export default function DashboardPage() {
   };
 
   const [games, setGames] = useState<Game[] | null>(() => readGamesCache(user?.uid));
+  // COULD NOT LOAD is a different state from HAVE NONE
+  // (change: failed-load-is-not-an-empty-account). See the render below.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [picking, setPicking] = useState(false);
   // The composed game waiting to be revealed (change: smart-build-delight).
   // Non-null only between "the game was created" and "the creator continued", so
@@ -221,6 +234,21 @@ export default function DashboardPage() {
   // Escape closes the template picker, matching its backdrop click. Gated on
   // `picking` because this page renders the whole dashboard behind it.
   useModalDismiss(() => { setPicking(false); setChosen(null); }, undefined, picking);
+
+  // Arriving from the marketing CTA opens the new-game wizard straight away
+  // (change: marketing-cta-straight-to-build) — its first step is already "what
+  // is this game called", which is exactly where that link promised to land.
+  //
+  // The ref guard is load-bearing under StrictMode, which mounts effects twice in
+  // dev: `consumeStartIntent` clears on read, so an unguarded second call would
+  // read `false` and the intent would look like it had never arrived when
+  // debugging. Guarding keeps dev and production behaving identically.
+  const startIntentChecked = useRef(false);
+  useEffect(() => {
+    if (startIntentChecked.current) return;
+    startIntentChecked.current = true;
+    if (consumeStartIntent()) setPicking(true);
+  }, []);
   // Firestore-backed templates (change: admin-manage-game-templates). null = still
   // loading; [] + failed = the fetch errored. Seeded SYNCHRONOUSLY from the cache
   // (perf: template-picker-latency) so a returning creator's picker paints its menu
@@ -249,7 +277,11 @@ export default function DashboardPage() {
   const [dismissed, setDismissed] = useState(() => readFlag(ONBOARDING_DISMISSED_KEY));
   const previewedGameIds = readStoredPreviewed();
   const { runs: liveRuns } = useLiveRuns();
-  const [sharing, setSharing] = useState<Game | null>(null);
+  // Share this game by read-only link (change: game-share-link). This REPLACED the
+  // card's public promo share: that URL only resolves once the game is published,
+  // and on a published game with instant play it starts a solo demo run rather
+  // than showing the reader the game. Sharing must not depend on publishing.
+  const [sharingLink, setSharingLink] = useState<Game | null>(null);
   // The game whose delete confirmation is open (change: recoverable-game-deletion).
   // A creator destroyed a real game with the old single-click dialog.confirm, so
   // deleting now costs a deliberate act: type this game's title.
@@ -333,15 +365,24 @@ export default function DashboardPage() {
         localStorage.removeItem(TOUR_FIRST_GAME_KEY);
       } catch { /* storage unavailable */ }
       setGames(games);
+      setLoadFailed(false);
     } catch (e) {
       // Escape the spinner on a first-load failure, but never blank an already-
       // loaded dashboard if a post-mutation refresh fails.
       setGames((prev) => prev ?? []);
+      setLoadFailed(true);
       // Never leak a raw Firebase error CODE ("not-found", "unavailable", …) into
       // the UI — a load failure is always technical, not user-actionable. Show the
       // friendly localized message and keep the real error in the console.
       console.error('[dashboard] listGames failed:', e);
-      await dialog.alert(d.loadGamesFailed);
+      // One cause is worth naming: when the project's daily Firestore budget is
+      // spent, EVERY load fails until it resets, and the generic "failed to load"
+      // reads as a broken app for hours (2026-08-28). Say what is actually
+      // happening and when to come back; everything else keeps the generic copy.
+      const failure = describeCallFailure(e, { online: navigator.onLine });
+      await dialog.alert(
+        failure.key === 'dailyCapacity' ? t.callFailure.dailyCapacity : d.loadGamesFailed,
+      );
     }
   }
   useEffect(() => { void load(); }, []);
@@ -438,8 +479,16 @@ export default function DashboardPage() {
    * ONE call per path, and the guided path is a single atomic
    * `createGameFromTemplate` — personalization is applied server-side inside that
    * same write, so a failure can never leave a half-personalized game behind.
-   * Navigating to /build/<id> IS the Quick Setup handoff: BuilderPage already
-   * offers it on mount for a game carrying wizardSteps.
+   *
+   * Every hop into the Builder from here carries `JUST_CREATED_NAV_STATE`
+   * (change: creator-mobile-mechanics). This used to be the Quick Setup handoff:
+   * BuilderPage auto-offered that flow's welcome card on mount for any game
+   * carrying wizardSteps, which meant the creator answered a questionnaire, sat
+   * through the reveal, and was then handed a SECOND guided flow before ever
+   * seeing the game — three screens of ceremony ahead of the product, and the
+   * reason the setup reads as chaotic on a phone. The stamp defers that
+   * invitation to the next visit; it does not remove it (see
+   * shouldAutoOpenQuickSetup).
    */
   async function newGame(submission: WizardSubmission) {
     const { plan } = submission;
@@ -455,7 +504,7 @@ export default function DashboardPage() {
           scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
         });
         _gamesCache = null;
-        nav(`/build/${gameId}`);
+        nav(`/build/${gameId}`, { state: JUST_CREATED_NAV_STATE });
       } catch (e) {
         console.error('[dashboard] create blank game failed:', e);
         await dialog.alert(d.templateFailed);
@@ -472,8 +521,13 @@ export default function DashboardPage() {
       // from this exact seed. Composing under a different stream would hand them a
       // different shape from the one they watched being built — the specific lie
       // this change exists to make impossible (change: smart-build-delight).
+      // ONE bank for this whole composition: the compose call below and the
+      // `previewShape` further down must be handed the SAME entries, or the
+      // reveal would report planned slots against a different pool than the one
+      // the game was actually built from.
+      const bank = await loadMissionBank();
       const result = composeGame(
-        TASK_BANK,
+        bank,
         plan.composerAnswers,
         composerCopy,
         seededRng(plan.composerSeed),
@@ -493,7 +547,7 @@ export default function DashboardPage() {
           });
           _gamesCache = null;
           await dialog.alert(d.wizard.smartFailed);
-          nav(`/build/${gameId}`);
+          nav(`/build/${gameId}`, { state: JUST_CREATED_NAV_STATE });
         } catch (e) {
           console.error('[dashboard] blank fallback failed:', e);
           await dialog.alert(d.templateFailed);
@@ -537,7 +591,7 @@ export default function DashboardPage() {
         // watched accumulate, so the reveal can show which planned slots the
         // composer could not fill instead of quietly shipping a shorter stage.
         const planned = previewShape(
-          TASK_BANK,
+          bank,
           plan.composerAnswers,
           plan.composerSeed,
           readRecentPicks(user?.uid),
@@ -583,7 +637,7 @@ export default function DashboardPage() {
       if (res?.fitsRequestedDuration === false && typeof res.estimatedMinutes === 'number') {
         await dialog.alert(d.wizard.longerThanAsked(res.estimatedMinutes));
       }
-      nav(`/build/${res.gameId}`);
+      nav(`/build/${res.gameId}`, { state: JUST_CREATED_NAV_STATE });
     } catch (e) {
       // The wizard closes FIRST, so a failure here used to leave the creator on an
       // unchanged dashboard with no game and no error at all
@@ -609,6 +663,8 @@ export default function DashboardPage() {
         return b.taskNotCompletable(issue.taskTitle || b.untitledTask);
       case 'taskNotPlaced':
         return b.taskNeedsLocation(issue.taskTitle || b.untitledTask);
+      case 'taskNotNamed':
+        return b.taskNeedsName;
       case 'stageUnwinnable':
         return b.stageUnwinnable(issue.stageTitle || b.stageTitlePlaceholder);
     }
@@ -770,7 +826,10 @@ export default function DashboardPage() {
       />
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden mb-10 pb-10 border-b border-[--rp-border]">
+      {/* Spacing is HALVED below `sm` (change: phone-dashboard-shows-your-games).
+          `mb-10 pb-10` is 80px of nothing on a 375px phone, spent above the list
+          the creator opened the app to see. */}
+      <div className="relative overflow-hidden mb-5 pb-5 sm:mb-10 sm:pb-10 border-b border-[--rp-border]">
         <div className="absolute -top-8 -left-8 w-96 h-48 bg-gradient-radial from-rp-fire/8 to-transparent pointer-events-none" />
 
         <div className="relative flex flex-col sm:flex-row sm:items-end justify-between gap-6">
@@ -781,7 +840,12 @@ export default function DashboardPage() {
             <h1 className="font-brand text-3xl sm:text-4xl font-extrabold tracking-tight leading-none bg-gradient-to-r from-rp-fire via-rp-amber to-rp-amber bg-clip-text text-transparent">
               {d.title}
             </h1>
-            <p className="text-[--ink-3] mt-3 text-base max-w-sm">{d.subtitle}</p>
+            {/* Desktop only (change: phone-dashboard-shows-your-games). This
+                sentence explains what RushPoint is — to someone already signed in,
+                looking at their own games, on the screen with the least room to
+                spare. Kept from `sm` up rather than deleted: it earns its place on
+                an empty first-run desktop, where there is nothing else to read. */}
+            <p className="hidden sm:block text-[--ink-3] mt-3 text-base max-w-sm">{d.subtitle}</p>
           </div>
 
           <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
@@ -825,7 +889,7 @@ export default function DashboardPage() {
                 with Build/Gallery/Wallet in the top nav. */}
             <button
               onClick={() => nav('/trash')}
-              className="text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+              className="text-[13px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
             >
               {d.trashLink}
             </button>
@@ -833,8 +897,17 @@ export default function DashboardPage() {
         </div>
 
         {/* Stats row */}
+        {/* THREE ACROSS ON A PHONE, not three stacked
+            (change: phone-dashboard-shows-your-games). At `grid-cols-1` these
+            were three full-width tiles totalling 257px — and the comment below
+            already says two of the three are inert because "they summarise what
+            is already on this page". Two inert summaries were taking 170px
+            directly above the thing they summarise, on the one screen with no
+            room to give. Three numbers side by side is 64px and reads the same:
+            these are glanceable figures, and a phone reads them in a row the way
+            it reads any other row of counters. */}
         {games.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+          <div className="grid grid-cols-3 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 mt-5 sm:mt-8">
             {/* The runs tile is a LINK (change: post-run-player-report). It counted
                 the one thing a creator most wants to look back at and did nothing
                 when clicked, while finished runs had no route into them at all.
@@ -849,20 +922,26 @@ export default function DashboardPage() {
                 <>
                   <div className={`absolute inset-0 bg-gradient-to-br ${s.tint} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
                   <div className="relative flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
+                    {/* The icon square is the first thing to go on a phone: at three
+                       across, 36px of decoration would leave the number and its label
+                       about 60px to share. It returns from `sm` up. */}
+                    <div className="hidden sm:flex w-9 h-9 rounded-xl items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
                     <div className="min-w-0 text-start">
-                      <div className="font-brand text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
-                      <div className="text-[11px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
+                      <div className="font-brand text-xl sm:text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
+                      <div className="text-[11px] sm:text-[13px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
                     </div>
                     {s.to && (
-                      <div className="relative ms-auto text-[11px] text-[--ink-3] group-hover:text-rp-signal transition-colors shrink-0">
+                      /* Hidden below `sm`: at a third of a 375px screen there is no
+                         room for a call to action beside the number, and the tile is
+                         still the button — the whole 68px box navigates. */
+                      <div className="relative ms-auto hidden sm:block text-[13px] text-[--ink-3] group-hover:text-ink-signal transition-colors shrink-0">
                         {d.statTotalPlaysCta}
                       </div>
                     )}
                   </div>
                 </>
               );
-              const shell = `group relative overflow-hidden w-full rounded-2xl border border-[--rp-border] bg-[--surface-0]/80 dark:bg-white/[0.03] backdrop-blur-sm px-4 py-3.5 transition-all duration-200 hover:-translate-y-0.5 ${s.ring}`;
+              const shell = `group relative overflow-hidden w-full rounded-2xl border border-[--rp-border] bg-[--surface-0]/80 dark:bg-white/[0.03] backdrop-blur-sm px-2.5 py-3 sm:px-4 sm:py-3.5 transition-all duration-200 hover:-translate-y-0.5 ${s.ring}`;
               return s.to ? (
                 <button
                   key={s.label}
@@ -889,7 +968,38 @@ export default function DashboardPage() {
       )}
 
       {/* ── Empty state ───────────────────────────────────────────────────── */}
-      {games.length === 0 ? (
+      {/* "WE COULD NOT LOAD" IS NOT "YOU HAVE NONE"
+          (change: failed-load-is-not-an-empty-account).
+ 
+          A failed `listGames` sets `games` to `[]` so the spinner cannot trap the
+          creator — right — and the ONLY thing that said so was a modal alert. Behind
+          that alert the page rendered the first-run empty state, so dismissing it
+          left a creator with fifteen games looking at "start your first field game"
+          and an invitation to create one. Their work reads as deleted, and the only
+          way back is knowing to reload a page that is not obviously wrong.
+ 
+          This is not a rare path. `listGames` goes to the self-hosted API, and a
+          redeploy of it has a ~40 second window of 503s; the 2026-08-28 Firestore
+          quota exhaustion failed EVERY load for hours. Reproduced here with the
+          emulator down: `functions/internal`, and the screen offered to start a
+          first game.
+ 
+          So the failure keeps its own state and its own words, and it OFFERS THE
+          RETRY rather than requiring a page reload — `load()` is already idempotent
+          and is what the alert should have been able to trigger all along. The
+          empty state now means what it says: this account really has no games. */}
+      {loadFailed && games.length === 0 ? (
+        <EmptyState
+          icon="⚠️"
+          title={d.loadGamesFailed}
+          body={d.loadFailedBody}
+          action={
+            <Button disabled={busy} onClick={() => { void load(); }} className="!px-8 !py-3 !text-base">
+              {d.loadFailedRetry}
+            </Button>
+          }
+        />
+      ) : games.length === 0 ? (
         <EmptyState
           icon="🗺️"
           title={d.emptyTitle}
@@ -930,14 +1040,14 @@ export default function DashboardPage() {
                     {allTaskTypes.length > 0 && (
                       <div className="flex gap-1.5 flex-wrap">
                         {allTaskTypes.map(type => (
-                          <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[10px] font-medium">
+                          <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[12px] font-medium">
                             {TASK_TYPE_EMOJI[type] ?? '●'} {TASK_TYPE_LABEL[type] ?? type}
                           </span>
                         ))}
                       </div>
                     )}
 
-                    <div className="flex items-center gap-3 text-[11px] text-[--ink-3] font-medium">
+                    <div className="flex items-center gap-3 text-[13px] text-[--ink-3] font-medium">
                       <span>{d.cardStages(g.stages.length)}</span>
                       <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                       <span>{d.cardTasks(taskCount)}</span>
@@ -948,7 +1058,7 @@ export default function DashboardPage() {
                     {live && (
                       <button
                         onClick={() => nav(`/run/${live.gameId}/${live.runId}`)}
-                        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-rp-alert bg-rp-alert/10 hover:bg-rp-alert/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40"
+                        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-ink-alert bg-rp-alert/10 hover:bg-rp-alert/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40"
                       >
                         <span aria-hidden="true" className="w-2 h-2 rounded-full bg-rp-alert animate-pulse" />
                         {d.cardOpenRun}
@@ -979,7 +1089,7 @@ export default function DashboardPage() {
                       </Button>
                       <OverflowMenu label="⋯" ariaLabel={d.cardMoreActions}>
                         {dashboardCardActions(g).overflow.map((id) => {
-                          const items: Record<'testRun' | 'history' | 'publish' | 'unpublish' | 'share' | 'delete', {
+                          const items: Record<'testRun' | 'history' | 'publish' | 'unpublish' | 'shareLink' | 'delete', {
                             label: string; title: string | undefined; disabled: boolean;
                             onClick: () => void; destructive: boolean;
                           }> = {
@@ -1016,11 +1126,11 @@ export default function DashboardPage() {
                               onClick: () => void publishAction.run(g),
                               destructive: false,
                             },
-                            share: {
-                              label: d.cardShare,
+                            shareLink: {
+                              label: t.share.menuLabel,
                               title: undefined as string | undefined,
                               disabled: false,
-                              onClick: () => setSharing(g),
+                              onClick: () => setSharingLink(g),
                               destructive: false,
                             },
                             delete: {
@@ -1039,9 +1149,9 @@ export default function DashboardPage() {
                               disabled={item.disabled}
                               title={item.title}
                               onClick={item.onClick}
-                              className={`w-full justify-start text-start min-h-[36px] px-2.5 py-2 rounded-lg text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                              className={`w-full justify-start text-start min-h-[36px] px-2.5 py-2 rounded-lg text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${
                                 item.destructive
-                                  ? 'text-rp-alert/80 hover:text-rp-alert hover:bg-rp-alert/8 focus-visible:ring-rp-alert/40'
+                                  ? 'text-ink-alert/80 hover:text-ink-alert hover:bg-rp-alert/8 focus-visible:ring-rp-alert/40'
                                   : 'text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] focus-visible:ring-rp-fire/50'
                               }`}
                             >
@@ -1068,8 +1178,8 @@ export default function DashboardPage() {
               ＋
             </div>
             <div>
-              <div className="font-brand font-bold text-sm text-[--ink-2] group-hover:text-rp-fire transition-colors">{d.newAdventureLabel}</div>
-              <div className="text-[11px] text-[--ink-3] mt-0.5">{d.newAdventureSub}</div>
+              <div className="font-brand font-bold text-sm text-[--ink-2] group-hover:text-ink-fire transition-colors">{d.newAdventureLabel}</div>
+              <div className="text-[13px] text-[--ink-3] mt-0.5">{d.newAdventureSub}</div>
             </div>
           </button>
         </div>
@@ -1091,7 +1201,7 @@ export default function DashboardPage() {
               onContinue={() => {
                 const { gameId } = reveal;
                 setReveal(null);
-                nav(`/build/${gameId}`);
+                nav(`/build/${gameId}`, { state: JUST_CREATED_NAV_STATE });
               }}
               labels={{
                 title: d.wizard.revealTitle,
@@ -1128,7 +1238,7 @@ export default function DashboardPage() {
               </div>
               <button onClick={() => { setPicking(false); setChosen(null); }}
                 aria-label={b.closePanel} title={b.closePanel}
-                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
+                className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors`}>✕</button>
             </div>
             {/* Body — bounded to the modal; the compact cards fit without scrolling
                 on a normal screen, and only this region (never the page) scrolls on
@@ -1160,18 +1270,11 @@ export default function DashboardPage() {
         document.body,
       )}
 
-      {sharing && (
-        <ShareSheet
-          title={d.shareTitle(sharing.title)}
-          text={d.shareText(sharing.title)}
-          url={`${PLAY_URL}/?game=${sharing.id}`}
-          notPublic={sharing.visibility !== 'public'}
-          onPublish={async () => {
-            await publishGame({ gameId: sharing.id, visibility: 'public' });
-            setSharing({ ...sharing, visibility: 'public' });
-            void load(true);
-          }}
-          onClose={() => setSharing(null)}
+      {sharingLink && (
+        <ShareLinkDialog
+          gameId={sharingLink.id}
+          gameTitle={sharingLink.title}
+          onClose={() => setSharingLink(null)}
         />
       )}
 
@@ -1218,7 +1321,7 @@ function DeleteGameDialog({ game, busy, onCancel, onConfirm }: {
         className="relative bg-[--surface-0] dark:bg-[--surface-1] border border-rp-alert/30 rounded-2xl w-full max-w-md p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="font-brand font-bold text-rp-alert text-lg mb-1">{d.deleteDialogTitle}</div>
+        <div className="font-brand font-bold text-ink-alert text-lg mb-1">{d.deleteDialogTitle}</div>
         <p className="text-xs text-[--ink-2] leading-relaxed mb-1">{d.deleteDialogBody(game.title)}</p>
         <p className="text-xs text-[--ink-3] leading-relaxed mb-4">{d.deleteDialogRecoverable(GAME_TRASH_RETENTION_DAYS)}</p>
 

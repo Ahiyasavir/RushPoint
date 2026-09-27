@@ -24,6 +24,19 @@ export function assertGameNotDeleted(game: Pick<Game, 'deletedAt'> | undefined |
 }
 
 /**
+ * Refuse a LOCKED shared-launch copy (change: shared-launch-opens-console). A launch through a
+ * share link that does not allow copying still has to give the launcher a game of their own, or
+ * their Run Console cannot open; the lock is what keeps "may run it" from becoming "may have it".
+ * Every door that edits, copies, exports, publishes or re-shares calls this. Reading (getGame) and
+ * operating the run do not, because that is exactly what the launcher was given.
+ */
+export function assertNotShareLocked(game: Pick<Game, 'sharedLaunch'> | undefined | null): void {
+  if (game?.sharedLaunch?.locked === true) {
+    throw new functions.https.HttpsError('failed-precondition', 'share-launch-locked: this game was launched from a share link that does not allow copying');
+  }
+}
+
+/**
  * Load a game the caller owns and that is NOT in the trash. The four checks that
  * every owner-scoped game callable needs, in one place: exists, owned, live, typed.
  */

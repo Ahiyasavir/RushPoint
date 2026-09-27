@@ -21,6 +21,7 @@ import {
   DEFAULT_SCORING_PRESET,
   describeGameRequirements,
   matchesTaskAnswer,
+  challengeVerdict,
   collectTranslatableFields,
   applyTranslations,
   normalizeTaskMedia,
@@ -33,7 +34,9 @@ import {
   validateUnlockGraph,
   requiredTaskCountProblem,
   videoDurationProblem,
+  answerOutcomesProblem,
   validateAvailabilityWindow,
+  timeLimitProblem,
   validateOrderItems,
   validateSurveyChoices,
   sumEstimatedMinutes,
@@ -66,10 +69,18 @@ import {
   validateConsentFlag,
   // הקמה מהירה / Quick Setup (change: quick-setup-wizard).
   normalizeWizardSteps,
+  normalizeStaffCapabilities,
+  type StaffCapability,
   extractQuickSetupSteps,
   pruneWizardSteps,
+  // Benched missions (change: mission-card-actions) — never published.
+  playableTasks,
 } from '@rushpoint/shared';
-import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
+import { assertGameNotDeleted, assertNotShareLocked, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
+// Read-only share links for an unpublished game (change: game-share-link).
+import {
+  resolveShareTokenForCopy, bumpShareLinkCopyCount, deleteGameShareLinks,
+} from './share';
 // What a PUBLIC GAME may say about where it is (change: surface-invisible-fields).
 // The gallery map plots publicGames by approxLocation and nothing ever wrote one, so
 // the map was permanently blank; this derives a coarse area from the game's own
@@ -82,7 +93,8 @@ import {
 // transactional writer, so a counter can never move without its score.
 import { bumpPublicSignals, scoreFor } from '../gallery/popularityStore';
 import { bumpTagStats } from '../gallery/tagStats';
-import { deleteRunsPhotos, deleteGameMedia, copyGameMedia } from '../storageUtil';
+import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
+import { rehostGameMedia } from './rehost';
 import { deleteDocsInChunks } from '../batchUtil';
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
@@ -176,62 +188,6 @@ function normalizeStagesMedia(
   return next;
 }
 
-/**
- * Copy a game's uploaded media into a new game's storage prefix and return the stages
- * with their urls re-pointed there (change: task-media-durability).
- *
- * The single door for every "this game becomes a new game" path — duplicate, translate,
- * and the first save of media uploaded before the game had an id. They all used to carry
- * the url and not the bytes, which silently coupled the new game's pictures to the old
- * game's lifetime.
- *
- * Total and best-effort: no media, nothing to copy, or a failed copy all return the
- * stages unchanged, so a storage hiccup degrades the copy's independence rather than
- * failing the duplication a creator asked for.
- */
-async function rehostGameMedia(
-  stages: Stage[] | undefined,
-  srcOwnerUid: string,
-  srcGameId: string,
-  destOwnerUid: string,
-  destGameId: string,
-): Promise<Stage[] | undefined> {
-  if (!Array.isArray(stages)) return stages;
-  // Only the urls that actually live in the SOURCE game's folder. This is what makes the
-  // same helper safe for the draft-migration call, which runs on every stages-carrying
-  // save: a game with no draft media matches nothing and returns before touching Storage.
-  const segments = encodedForms(`/games/${srcGameId}/`);
-  const urls = new Set<string>();
-  for (const stage of stages) {
-    for (const task of stage.tasks ?? []) {
-      for (const m of task.media ?? []) {
-        if (m?.kind === 'youtube' || typeof m?.url !== 'string') continue;
-        if (segments.some((seg) => m.url.includes(seg))) urls.add(m.url);
-      }
-    }
-  }
-  if (urls.size === 0) return stages;
-  try {
-    // Copy only the objects these urls name — a draft folder can hold media from other
-    // games in progress, and those must not be duplicated into this one.
-    const pathMapping = await copyGameMedia(
-      srcOwnerUid, srcGameId, destOwnerUid, destGameId,
-      (objectName) => encodedForms(objectName).some(
-        (form) => [...urls].some((u) => u.includes(form)),
-      ),
-    );
-    if (pathMapping.size === 0) return stages;
-    return rewriteStagesMedia(stages, buildMediaUrlMapping(urls, pathMapping)) as Stage[];
-  } catch (e) {
-    logBestEffort('game.media.rehost', { srcGameId, destGameId }, e);
-    return stages;
-  }
-}
-
-/** The forms an object path can take inside a stored url (raw / encodeURI / component). */
-function encodedForms(s: string): string[] {
-  return [...new Set([s, encodeURI(s), encodeURIComponent(s)])];
-}
 
 /**
  * The pseudo game id the Builder uploads under before a game has one
@@ -291,7 +247,7 @@ function sanitizeStagesText(stages: Stage[] | undefined, gameTags?: string[]): S
  * items), survey-choice rules (2–8 non-empty options) and stage winnability (a
  * `requiredTaskCount` above what the stage's exclusive groups can ever yield).
  */
-function stagesProblems(stages: Stage[] | undefined): string[] {
+function stagesProblems(stages: Stage[] | undefined, scoringPreset?: string): string[] {
   const problems: string[] = [];
   // AUTHORING phase (change: builder-draft-save-tolerance): this helper serves the
   // two SAVE doors (updateGame + importGameFile), so an answer key that is not filled
@@ -317,6 +273,9 @@ function stagesProblems(stages: Stage[] | undefined): string[] {
     for (const task of stage.tasks ?? []) {
       const windowError = validateAvailabilityWindow(task);
       if (windowError) problems.push(`Task "${task.title || task.id}": ${windowError}`);
+      // mission-time-limit: the per team countdown must be a sane number of minutes.
+      const limitError = timeLimitProblem(task);
+      if (limitError) problems.push(`Task "${task.title || task.id}": ${limitError}`);
       if (task.orderItems !== undefined) {
         const label = `Task "${task.title || task.id}"`;
         if (task.type !== 'quiz') {
@@ -339,6 +298,17 @@ function stagesProblems(stages: Stage[] | undefined): string[] {
       if (task.smart?.captureKind === 'video') {
         const durationError = videoDurationProblem(task.smart.videoMinSeconds, task.smart.videoMaxSeconds);
         if (durationError) problems.push(`Task "${task.title || task.id}": ${durationError}`);
+      }
+      // answer-scored-question: overlaps, counts, points, exclusivity, and the
+      // time_only rule (no points exist there) when the preset is known. Refused at
+      // save, where the creator can still fix it.
+      const outcomesError = answerOutcomesProblem(task, scoringPreset);
+      if (outcomesError) problems.push(`Task "${task.title || task.id}": points by answer: ${outcomesError}`);
+      // camera-switch: 'front' or absent. null is the transport's "cleared", so it is
+      // accepted like absent (the cleared-optional-field trap).
+      const cam = (task.smart as { preferredCamera?: unknown } | undefined)?.preferredCamera;
+      if (cam !== undefined && cam !== null && cam !== 'front') {
+        problems.push(`Task "${task.title || task.id}": preferredCamera must be "front" or absent`);
       }
     }
   }
@@ -397,7 +367,7 @@ export const createGame = loggedCallable('createGame', async (data, context) => 
  * the gallery describing a layout the game no longer has.
  */
 function resyncPublicGameSummary(gameId: string, merged: Game, updatedAt: string): void {
-  const allTasks = merged.stages.flatMap((s) => s.tasks);
+  const allTasks = merged.stages.flatMap((s) => playableTasks(s));
   db.doc(`publicGames/${gameId}`).update({
     title: merged.title,
     description: merged.description,
@@ -424,6 +394,19 @@ function resyncPublicGameSummary(gameId: string, merged: Game, updatedAt: string
   }).catch((e) => logBestEffort('publicGames.resync', { gameId }, e));
 }
 
+/**
+ * `Game.staffDefaults` from a client or a file (change: staff-capabilities). Refused LOUDLY when
+ * malformed or naming an unknown capability: silently dropping it would store "absent", which
+ * means EVERYTHING, i.e. a typo would hand staff the power the organizer tried to withhold.
+ */
+function validateStaffDefaults(value: unknown): { capabilities: StaffCapability[] } {
+  const caps = value && typeof value === 'object'
+    ? normalizeStaffCapabilities((value as { capabilities?: unknown }).capabilities)
+    : null;
+  if (!caps) throw new functions.https.HttpsError('invalid-argument', 'staffDefaults must list known staff capabilities');
+  return { capabilities: caps };
+}
+
 export const updateGame = loggedCallable('updateGame', async (data, context) => {
   const uid = requireAuth(context);
   const {
@@ -432,8 +415,10 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     registrationFields, branding, tags, coverImage, approxLocation,
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
+    autoStartLateJoiners, autoApproveAllMedia, requireAllMembersOnline,
     instructions, pinnedFirst, wizardSteps,
   } = data as UpdateGamePayload;
+  const { staffDefaults } = data as { staffDefaults?: unknown };
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
   // raw payload with a narrow cast rather than the UpdateGamePayload destructure
   // — the shared payload type does not carry the field yet (see
@@ -455,6 +440,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // A game in the trash is not editable (change: recoverable-game-deletion) —
   // otherwise a stale Builder tab could keep writing to a "deleted" game.
   assertGameNotDeleted(snap.data() as Game);
+  assertNotShareLocked(snap.data() as Game);
 
   const updates: Partial<Game> & { updatedAt: string } = { updatedAt: new Date().toISOString() };
   if (title !== undefined)              updates.title = stripUnsafeDisplayChars(title).trim();
@@ -469,7 +455,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     // release is an empty availability window and can never be played.
     // Save-time validation, shared verbatim with importGameFile (stagesProblems
     // above) so the Builder save path and the file-restore path can never drift.
-    const problems = stagesProblems(stages);
+    const problems = stagesProblems(stages, scoringPreset);
     if (problems.length > 0) {
       throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
     }
@@ -537,6 +523,20 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
   if (powerUpsEnabled !== undefined)    updates.powerUpsEnabled = powerUpsEnabled;
+  // change: late-joiner-autostart. `autoStartLateJoiners` starts a team playing
+  // without being asked, so it is stored as a STRICT boolean: a legacy truthy value
+  // must never be read as the creator having asked for that.
+  if (autoStartLateJoiners !== undefined) updates.autoStartLateJoiners = autoStartLateJoiners === true;
+  if (autoApproveAllMedia !== undefined)  updates.autoApproveAllMedia = autoApproveAllMedia === true;
+  // change: staff-capabilities. Read when a staff code is MINTED, never afterwards.
+  // null is the callable transport's encoding of undefined: the Builder's payload always
+  // carries this key, and for a game that never set a default its value is undefined.
+  // null therefore means "not set" (like absent), never a malformed value. Refusing it
+  // refused every Builder autosave of such a game (the cleared-optional-field trap).
+  if (staffDefaults !== undefined && staffDefaults !== null) updates.staffDefaults = validateStaffDefaults(staffDefaults);
+  // change: every-member-plays. STRICT boolean for the same reason as above: this one
+  // holds a team out of a game they turned up to play.
+  if (requireAllMembersOnline !== undefined) updates.requireAllMembersOnline = requireAllMembersOnline === true;
   // Task-library priority (change: task-library-priority-boost). Cascades into
   // every published task's PublicTask.pinnedFirst on the next publishGame call —
   // this write alone has no gallery effect until the game is (re-)published.
@@ -695,6 +695,12 @@ export async function purgeGameTree(ownerUid: string, gameId: string, operatorId
   const codes = await gameAccessCodes(ownerUid, gameId);
   await deleteDocsInChunks(codes.map((d) => d.ref))
     .catch((e) => logBestEffort('accessCodes.purge', { ownerUid, gameId }, e));
+
+  // Same orphan class, newer collection (change: game-share-link): share links
+  // live OUTSIDE users/{uid}, so the recursiveDelete below never reaches them and
+  // a link would survive as a read token for a game that no longer exists.
+  await deleteGameShareLinks(ownerUid, gameId)
+    .catch((e) => logBestEffort('gameShareLinks.purge', { ownerUid, gameId }, e));
 
   await db.recursiveDelete(ref);
 
@@ -870,10 +876,23 @@ export const purgeGameNow = loggedCallable('purgeGameNow', async (data, context)
 
 export const duplicateGame = loggedCallable('duplicateGame', async (data, context) => {
   const uid = requireAuth(context);
-  const { gameId, sourceOwnerUid } = data as { gameId: string; sourceOwnerUid?: string };
+  const { gameId: requestedGameId, sourceOwnerUid, shareToken } = data as {
+    gameId?: string; sourceOwnerUid?: string; shareToken?: string;
+  };
+
+  // A share link (change: game-share-link) is the THIRD way to reach a source
+  // game, beside "my own" and "someone's public one". The token resolves owner +
+  // game itself, so the caller never sends — and never needs to know — either;
+  // whatever they DID send is ignored rather than merged, so a token cannot be
+  // paired with someone else's gameId to reach a game the link is not for.
+  const sharedLink = shareToken !== undefined && shareToken !== null
+    ? await resolveShareTokenForCopy(shareToken)
+    : null;
 
   // Can duplicate own private games OR any public game by any creator
-  const ownerUid = sourceOwnerUid ?? uid;
+  const ownerUid = sharedLink ? sharedLink.ownerUid : (sourceOwnerUid ?? uid);
+  const gameId = sharedLink ? sharedLink.gameId : (requestedGameId ?? '');
+  if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
   const sourceRef = db.doc(gamePath(ownerUid, gameId));
   const sourceSnap = await sourceRef.get();
 
@@ -883,9 +902,12 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
   // (change: recoverable-game-deletion) — a copy would resurrect content the
   // creator asked to delete, and would survive the purge of the original.
   assertGameNotDeleted(sourceGame);
+  assertNotShareLocked(sourceGame);
 
-  // Enforce: can only copy public games from other creators
-  if (ownerUid !== uid && sourceGame.visibility !== 'public') {
+  // Enforce: can only copy public games from other creators — UNLESS a live
+  // share link said otherwise. That is the whole point of the link: the owner
+  // authorized this copy explicitly, one recipient at a time, without publishing.
+  if (!sharedLink && ownerUid !== uid && sourceGame.visibility !== 'public') {
     throw new functions.https.HttpsError('permission-denied', 'Game is not public');
   }
 
@@ -920,10 +942,16 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
 
   await newRef.set(copy);
 
+  // A share-link copy is counted on the LINK, so the owner can see that the
+  // person they sent it to actually took it. It deliberately does NOT touch
+  // bumpPublicSignals: there is no publicGames document to rank — not publishing
+  // is the entire reason this path exists.
+  if (sharedLink) bumpShareLinkCopyCount(sharedLink);
+
   // Increment original's playCount (best-effort). The PUBLIC bump goes through
   // bumpPublicSignals so the gallery's ranking score is recomputed with the
   // counter, never after it (change: gallery-popularity-ranking).
-  if (ownerUid !== uid) {
+  if (!sharedLink && ownerUid !== uid) {
     sourceRef.update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
     bumpPublicSignals('game', gameId, { uses: 1 }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
   }
@@ -955,6 +983,7 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
   // A trashed game can never be (re-)listed in the public gallery
   // (change: recoverable-game-deletion).
   assertGameNotDeleted(game);
+  assertNotShareLocked(game);
   const now = new Date().toISOString();
 
   // Instant play defaults ON at publish (change: gallery-missions-quick-play).
@@ -988,8 +1017,15 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
     if (problems.length > 0) {
       throw new functions.https.HttpsError('failed-precondition', problems.join(' · '));
     }
-    // Compute summary stats
-    const allTasks = game.stages.flatMap((s) => s.tasks);
+    // Compute summary stats.
+    // BENCHED MISSIONS ARE NOT PUBLISHED (change: mission-card-actions). A mission
+    // the creator has taken out of the game must not appear in the world-readable
+    // gallery, must not be counted in the game's own mission total, and must not
+    // be copyable out of the task library — publishing one would advertise a stop
+    // no run will ever send a team to. `playableTasks` is the single predicate;
+    // the stale `publicTasks` sweep below (which deletes the documents this loop
+    // did not write) is what un-publishes one that was benched after publishing.
+    const allTasks = game.stages.flatMap((s) => playableTasks(s));
     const estimatedTotalMinutes = sumEstimatedMinutes(allTasks);
 
     // Get creator display name
@@ -1181,7 +1217,10 @@ export const listGames = loggedCallable('listGames', async (_data, context) => {
   // `where('deletedAt','==',null)` does NOT match documents that lack the field,
   // so a server-side filter would require backfilling `deletedAt: null` onto
   // every existing game. Absence of the field stays the normal state.
-  const games = visibleGames(snap.docs.map((d) => d.data() as Game));
+  // A LOCKED shared-launch copy is someone else's game the caller may only run
+  // (change: shared-launch-opens-console): it is reached from the runs list, never the games list.
+  const games = visibleGames(snap.docs.map((d) => d.data() as Game))
+    .filter((g) => g.sharedLaunch?.locked !== true);
   return { games };
 });
 
@@ -1223,7 +1262,8 @@ export const checkChallengeAnswer = loggedCallable('checkChallengeAnswer', async
     throw new functions.https.HttpsError('not-found', 'Task not found');
   }
 
-  return { correct: matchesTaskAnswer(task, String(answer ?? '')) };
+  // challengeVerdict also grades a question scored BY ANSWER (answer-scored-question).
+  return { correct: challengeVerdict(task, String(answer ?? '')) };
 });
 
 
@@ -1259,6 +1299,7 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
   // A trashed game cannot be translated into a fresh copy
   // (change: recoverable-game-deletion) — same reasoning as duplicateGame.
   assertGameNotDeleted(game);
+  assertNotShareLocked(game);
 
   const lang = targetLang.trim();
 
@@ -1338,6 +1379,7 @@ export const exportGameFile = loggedCallable('exportGameFile', async (data, cont
     throw new functions.https.HttpsError('permission-denied', 'Not your game');
   }
   assertGameNotDeleted(game);
+  assertNotShareLocked(game);
 
   return { file: serializeGameToFile(game) };
 });
@@ -1361,7 +1403,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // Layer 3 — the SAME semantic guards updateGame runs, from the same helper, so
   // an imported game can never be accepted on terms an authored one would not be.
   const stages = (parsed.stages ?? []) as Stage[];
-  const problems = stagesProblems(stages);
+  const problems = stagesProblems(stages, (parsed as { scoringPreset?: string }).scoringPreset);
   if (problems.length > 0) {
     throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
   }
@@ -1450,6 +1492,11 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     ? normalizeWizardSteps(parsed.wizardSteps)
     : (extracted?.wizardSteps ?? []);
 
+  // staff-capabilities: validated like updateGame (a file is still client-supplied bytes).
+  const rawStaffDefaults = (parsed as { staffDefaults?: unknown }).staffDefaults;
+  // null = "not set", exactly as updateGame treats it.
+  const importedStaffDefaults = rawStaffDefaults == null ? undefined : validateStaffDefaults(rawStaffDefaults);
+
   if (target) {
     // Replace = every authored field the file format carries. A field the file does
     // NOT carry is DELETED, not left behind: "load this file into this game" must
@@ -1481,12 +1528,17 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     setOrClear('powerUpsEnabled', parsed.powerUpsEnabled);
     setOrClear('manualLeaderboardReveal', (parsed as { manualLeaderboardReveal?: boolean }).manualLeaderboardReveal);
     setOrClear('testMode', (parsed as { testMode?: boolean }).testMode);
+    // game-file-full-settings: the three run behaviours ride the in-place door too.
+    setOrClear('autoApproveAllMedia', parsed.autoApproveAllMedia);
+    setOrClear('autoStartLateJoiners', parsed.autoStartLateJoiners);
+    setOrClear('requireAllMembersOnline', parsed.requireAllMembersOnline);
     setOrClear('instructions', instructions);
     // requiresGuardianConsent: `true` was already refused above, so this only ever
     // stores `false` or clears the field.
     setOrClear('requiresGuardianConsent', parsed.requiresGuardianConsent);
     setOrClear('safeZone', importedZone.value);
     setOrClear('wizardSteps', (importedSteps ?? []).length > 0 ? importedSteps : undefined);
+    setOrClear('staffDefaults', importedStaffDefaults);
 
     await db.doc(gamePath(uid, target.id)).update(updates);
     if (target.visibility === 'public') {
@@ -1527,6 +1579,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // the spread above would otherwise carry any extra key straight onto a field the
   // safety path reads.
   if (importedZone.value) game.safeZone = importedZone.value; else delete game.safeZone;
+  if (importedStaffDefaults) game.staffDefaults = importedStaffDefaults; else delete game.staffDefaults;
 
   // ONE write. Deliberately not createGame + updateGame (two writes, which can
   // strand an empty game if the second fails) — and deliberately a fresh document

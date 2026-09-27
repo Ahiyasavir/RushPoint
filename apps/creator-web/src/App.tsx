@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { useAuth } from './components/AuthGate';
 import { useEngagementTracker } from './hooks/useEngagementTracker';
@@ -8,8 +8,13 @@ import { useT } from './components/LanguageContext';
 import { Spinner } from './components/ui';
 import { DialogHost } from './components/dialog';
 import { ToastHost } from './components/toast';
+// One arbiter for every Builder guidance surface (change: builder-guidance-arbiter).
+// Mounted here, above BOTH <CreatorTour /> and the routed Builder, because those two
+// are siblings: nothing inside the Builder could ever arbitrate with the tour.
+import { GuidanceProvider } from './components/GuidanceProvider';
 import ActiveRunBar from './components/ActiveRunBar';
 import { buildNavDestinations } from './lib/creatorNav';
+import { SHARE_RETURN_KEY, sharedGamePath } from './lib/publicCreatorPath';
 import AppFooter from './components/AppFooter';
 // First-run guided tour (change: creator-guided-tour). Mounted once, renders
 // nothing unless it is running, and is replayable from here and from Settings.
@@ -40,9 +45,19 @@ const AdminUsersPage = lazyWithRetry('adminUsers', () => import('./pages/AdminUs
 // Admin-managed game templates (change: admin-manage-game-templates). Same
 // treatment: not in buildNavDestinations, reachable only by direct URL.
 const AdminTemplatesPage = lazyWithRetry('adminTemplates', () => import('./pages/AdminTemplatesPage'));
+const AdminMissionBankPage = lazyWithRetry('adminMissionBank', () => import('./pages/AdminMissionBankPage'));
 // Contact form messages from the marketing site (change: marketing-site). Same
 // treatment again: admin only, direct URL, gated by the page and by the callable.
 const AdminContactPage = lazyWithRetry('adminContact', () => import('./pages/AdminContactPage'));
+// RushPoint Live team applications (change: rushpoint-live-signup). Same treatment
+// again. Routed at /admin/live-applications rather than /admin/live because this app
+// already has a creator-facing /live (live RUNS), and two neighbouring routes whose
+// names differ by a path segment is how an operator ends up on the wrong screen.
+const AdminLiveApplicationsPage = lazyWithRetry('adminLiveApplications', () => import('./pages/AdminLiveApplicationsPage'));
+// A game shared by link, read-only (change: game-share-link). Registered here for
+// a SIGNED-IN visitor; AuthGate serves the same page to a signed-out one, since
+// the whole point of a share link is that the recipient may not have an account.
+const SharedGamePage = lazyWithRetry('sharedGame', () => import('./pages/SharedGamePage'));
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -79,6 +94,22 @@ export default function App() {
   // while keeping the ordinary scrolling shell, header and footer.
   const isRunConsole = pathname.startsWith('/run/');
 
+  // Coming back from a share link (change: game-share-link). A signed-out visitor
+  // who pressed "make a copy" was sent to the login screen; landing them on an
+  // empty dashboard afterwards would lose both the game and the reason they
+  // signed up. The token is read ONCE and cleared, so a later reload cannot
+  // teleport the creator out of whatever they are doing.
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!user) return;
+    let token: string | null = null;
+    try {
+      token = sessionStorage.getItem(SHARE_RETURN_KEY);
+      if (token) sessionStorage.removeItem(SHARE_RETURN_KEY);
+    } catch { /* private mode — nothing was stored either */ }
+    if (token) navigate(sharedGamePath(token), { replace: true });
+  }, [user, navigate]);
+
   // Mobile nav drawer: below `sm` the inline links collapse behind a hamburger.
   const [menuOpen, setMenuOpen] = useState(false);
   // Close the drawer whenever the route changes (a link was tapped).
@@ -101,6 +132,7 @@ export default function App() {
     // rule always win — silently reverting to vh on every browser instead of
     // tracking the keyboard on the ones that support dvh. `rp-h-dvh` uses
     // `@supports` for an unambiguous, order-independent fallback instead.
+    <GuidanceProvider>
     <div className={`relative bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250 ${isBuilder ? 'rp-h-dvh overflow-hidden flex flex-col' : 'min-h-screen overflow-x-clip'}`}>
 
       {/* ── Animated mesh gradient ── */}
@@ -137,7 +169,7 @@ export default function App() {
                 className={({ isActive }) =>
                   `px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                     isActive
-                      ? 'bg-rp-fire/10 text-rp-fire dark:bg-rp-fire/15'
+                      ? 'bg-rp-fire/10 text-ink-fire dark:bg-rp-fire/15'
                       : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'
                   }`
                 }
@@ -167,7 +199,7 @@ export default function App() {
           >
             {dark ? '☀️' : '🌙'}
           </button>
-          <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-rp-alert transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
+          <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-ink-alert transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
             {t.common.signOut}
           </button>
         </div>
@@ -183,7 +215,7 @@ export default function App() {
                 className={({ isActive }) =>
                   `px-3 py-2 rounded-lg text-sm font-medium text-start transition-all duration-150 ${
                     isActive
-                      ? 'bg-rp-fire/10 text-rp-fire dark:bg-rp-fire/15'
+                      ? 'bg-rp-fire/10 text-ink-fire dark:bg-rp-fire/15'
                       : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'
                   }`
                 }
@@ -218,7 +250,10 @@ export default function App() {
                 URL (bookmark it); the page itself gates on the admin claim. */}
             <Route path="/admin/users"         element={<AdminUsersPage />} />
             <Route path="/admin/templates"     element={<AdminTemplatesPage />} />
+            <Route path="/admin/mission-bank"  element={<AdminMissionBankPage />} />
             <Route path="/admin/contact"       element={<AdminContactPage />} />
+            <Route path="/admin/live-applications" element={<AdminLiveApplicationsPage />} />
+            <Route path="/p/:token"            element={<SharedGamePage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />
           </Routes>
@@ -235,5 +270,6 @@ export default function App() {
       <DialogHost />
       <ToastHost />
     </div>
+    </GuidanceProvider>
   );
 }

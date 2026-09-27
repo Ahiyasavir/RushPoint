@@ -1,7 +1,8 @@
 // Typed wrappers around every creator-facing Cloud Function callable.
-import { callable } from './api';
+import { callable, publicCallable } from './api';
 import type {
   Game,
+  StaffCapability,
   CreateGamePayload,
   UpdateGamePayload,
   PublicGame,
@@ -29,6 +30,9 @@ import type {
   AdminUserSummary,
   TemplateGenre,
   RunPlayerReport,
+  GameShareLink,
+  ShareLinkRefusal,
+  SharedGameView,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -37,9 +41,46 @@ export const updateGame    = callable<UpdateGamePayload, { ok: boolean }>('updat
 // SOFT delete (change: recoverable-game-deletion): tombstones the game and
 // revokes its join codes. Destroys nothing — see purgeGameNow / the trash view.
 export const deleteGame    = callable<{ gameId: string }, { ok: boolean; deletedAt: string; purgeDueAt: string | null }>('deleteGame');
-export const duplicateGame = callable<{ gameId: string; sourceOwnerUid?: string }, { gameId: string }>('duplicateGame');
+// `shareToken` is the third door (change: game-share-link): the token resolves
+// the owner and the game itself, so gameId/sourceOwnerUid are not sent with it.
+export const duplicateGame = callable<
+  { gameId?: string; sourceOwnerUid?: string; shareToken?: string },
+  { gameId: string }
+>('duplicateGame');
 export const publishGame   = callable<{ gameId: string; visibility: 'public' | 'private' }, { ok: boolean; visibility: string }>('publishGame');
 export const getGame       = callable<{ gameId: string }, { game: Game }>('getGame');
+
+// ── Share links (change: game-share-link) ──
+// A read-only link to an UNPUBLISHED game. `getSharedGame` needs no account: it
+// is the one call this app makes that a signed-out visitor is expected to make.
+export const createGameShareLink = callable<
+  { gameId: string; allowCopy?: boolean; revealAnswers?: boolean; allowLaunch?: boolean; expiresInDays?: number },
+  { link: GameShareLink }
+>('createGameShareLink');
+// Start a run of someone else's game from a link that allows it (change:
+// shared-launch-opens-console): the caller gets their OWN copy with the run in it, so their Run
+// Console opens at /run/:gameId/:runId. Locked when the link does not allow copying.
+export const launchSharedRun = callable<
+  { token: string },
+  { gameId: string; runId: string; accessCode: string }
+>('launchSharedRun');
+export const listGameShareLinks = callable<
+  { gameId: string },
+  { links: (GameShareLink & { refusal: ShareLinkRefusal | null })[] }
+>('listGameShareLinks');
+// Change what a link ALREADY SENT is allowed to do. Omitted flags are untouched.
+export const updateGameShareLink = callable<
+  { token: string; allowCopy?: boolean; revealAnswers?: boolean; allowLaunch?: boolean },
+  { link: GameShareLink }
+>('updateGameShareLink');
+export const revokeGameShareLink = callable<{ token: string }, { ok: boolean; revokedAt: string }>('revokeGameShareLink');
+export const getSharedGame = publicCallable<
+  { token: string },
+  {
+    game: SharedGameView; allowCopy: boolean; sharedAt: string;
+    allowLaunch: boolean; launchExhausted: boolean;
+  }
+>('getSharedGame');
 export const listGames     = callable<void, { games: Game[] }>('listGames');
 // Creator-owned portability (change: game-file-export-import). exportGameFile is
 // OWNER-ONLY: the document it returns deliberately contains answer keys, hint text,
@@ -71,20 +112,46 @@ export const launchRun     = callable<{ gameId: string; testDrive?: boolean }, {
 // `heldForConsent` counts teams the server refused to start because the game
 // requires guardian consent and none is recorded (change: expose-enforced-settings).
 // Optional so an older backend simply reports nothing rather than breaking.
-export const startTeams    = callable<{ gameId: string; runId: string; teamIds?: string[] }, { launched: number; heldForConsent?: number }>('startTeams');
+// `heldForMembers` counts teams held because not every declared member is on their own
+// phone (change: every-member-plays). Optional, like heldForConsent, so an older backend
+// reports nothing rather than breaking.
+export const startTeams    = callable<
+  { gameId: string; runId: string; teamIds?: string[] },
+  { launched: number; heldForConsent?: number; heldForMembers?: number }
+>('startTeams');
 export const skipStage     = callable<{ gameId: string; runId: string; teamId: string }, { ok: boolean }>('skipStage');
 // Skip ONE mission for ONE team, keeping them inside the same stage
 // (change: skip-single-task). `taskId` omitted means "the mission this team is on
 // right now", resolved server-side. `requiredTaskCount` comes back so the console
 // can say when the skip lowered what that team must complete in the stage.
 export const skipTaskForTeam = callable<
-  { ownerUid?: string; gameId: string; runId: string; teamId: string; taskId?: string; reason?: string },
+  // `dryRun` (change: skip-keeps-the-stage): plan only, nothing written; the confirm shows it.
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; taskId?: string; reason?: string; dryRun?: boolean },
   {
-    ok: boolean; taskId: string; stageCompleted: boolean;
+    ok: boolean; taskId: string; stageCompleted?: boolean;
     requiredTaskCount: number; requirementLowered: boolean;
+    // Present on a dry run: the plan the confirm describes.
+    dryRun?: boolean; taskTitle?: string; stageCompletes?: boolean;
+    // What the skip opens (dry run) or opened (real skip).
+    dependentsOpened?: { id: string; title: string }[];
+    // What the skip PAID (change: live-ops-feedback-loop). A single mission skip now
+    // pays the same consolation skipStage pays, so the console can say so instead of
+    // the organizer computing it by hand and paying it as a manual bonus.
+    consolation?: number;
     nextTaskId: string | null; nextReason: string | null;
   }
 >('skipTaskForTeam');
+// Send ONE team back to a skipped/completed mission or an earlier stage (change: send-team-back).
+// `dryRun` returns the plan the confirm shows, writing nothing.
+export type SendBackTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
+export const returnTeamTo = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; target: SendBackTarget; reason?: string; dryRun?: boolean },
+  {
+    ok: boolean; dryRun?: boolean; targetKind: 'task' | 'stage'; stageTitle: string; taskTitle: string;
+    reopened: { id: string; title: string }[]; relockedStages: string[]; pointsRemoved: number;
+    reactivatesTeam: boolean; assignedTaskId?: string | null; queued?: boolean; finished?: boolean;
+  }
+>('returnTeamTo');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
 export const refreshLeaderboard = callable<
   { ownerUid: string; gameId: string; runId: string; publish?: boolean; frozen?: boolean },
@@ -189,6 +256,20 @@ export interface RunTeamRow {
   activeStageOrder: number | null;
   finished: boolean;
   launched: boolean;
+  /** When the team joined (change: late-joiner-autostart). Null on a legacy row. */
+  joinedAt?: string | null;
+  /**
+   * How many of this team's declared people have no phone attached
+   * (change: every-member-plays).
+   *
+   * A COUNT, never a person. Null means the headcount is unknowable, which is the
+   * common case - `memberCount` is only meaningful when the game collects member
+   * names - so a console must render null as "cannot tell", never as zero.
+   */
+  membersNotConnected?: number | null;
+  // Check-ins this team was let into on a fix that could not prove it
+  // (change: arrival-needs-a-usable-fix). A count, never the places.
+  unverifiedArrivals?: number;
   startedAt: string | null;
   finishedAt: string | null;
   /** Safe-zone latch: the team is soft-paused until it is verifiably back inside. */
@@ -276,7 +357,10 @@ export const subscribePro    = callable<{ interval: 'month' | 'year' }, { checko
 export const claimReferral   = callable<{ referrerUid: string }, { ok: boolean; alreadyClaimed: boolean; bonusFreeRuns: number }>('claimReferral');
 
 // ── Staff / live-ops ──
-export const inviteStaff           = callable<{ ownerUid: string; gameId: string; runId: string; name: string; permissions: string[] }, { inviteId: string; pin: string }>('inviteStaff');
+// staff-capabilities: a code shared by several staff; `capabilities` absent = the game's default.
+export const inviteStaff           = callable<{ ownerUid: string; gameId: string; runId: string; name: string; capabilities?: StaffCapability[] }, { inviteId: string; pin: string; capabilities: StaffCapability[] }>('inviteStaff');
+export const updateStaffCode       = callable<{ ownerUid: string; gameId: string; runId: string; codeId: string; capabilities?: StaffCapability[]; disabled?: boolean; label?: string }, { ok: true }>('updateStaffCode');
+export const removeStaffMember     = callable<{ ownerUid: string; gameId: string; runId: string; staffUid?: string; codeId?: string }, { removed: number }>('removeStaffMember');
 export const pushAnnouncement      = callable<{ ownerUid: string; gameId: string; runId: string; message: string; messageHe?: string; teamId?: string }, { announcementId: string }>('pushAnnouncement');
 // Team ↔ HQ chat (change: team-hq-chat): HQ replies into one team's thread as from:'hq'.
 export const sendTeamChatMessage   = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; text: string; senderName?: string }, { messageId: string }>('sendTeamChatMessage');
@@ -289,7 +373,14 @@ export const acknowledgeAlert      = callable<{ ownerUid: string; gameId: string
 // Out-of-bounds recovery: release a team the safe-zone latch is holding. The server
 // keeps a short grace window so a broken phone's next bad fix can't re-latch them.
 export const clearTeamOutOfBounds  = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; reason?: string }, { ok: boolean; overrideUntil: string }>('clearTeamOutOfBounds');
-export const reviewStationSubmission = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; taskId: string; approved: boolean; note?: string }, { ok: boolean; approved: boolean }>('reviewStationSubmission');
+// `reversal` and `scoreDelta` are present only when an APPROVED submission was undone
+// (change: approval-can-be-undone) - the server removes exactly what the approval
+// awarded, and reports it so the console can say what it cost rather than leaving the
+// organizer to infer that a status flip moved points.
+export const reviewStationSubmission = callable<
+  { ownerUid: string; gameId: string; runId: string; teamId: string; taskId: string; approved: boolean; note?: string },
+  { ok: boolean; approved: boolean; reversal?: 'reversed' | 'alreadyRejected' | 'notApproved' | 'unknownAward'; scoreDelta?: number }
+>('reviewStationSubmission');
 export const adjustTeamScore       = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; delta: number; reason?: string }, { ok: boolean; newBonusPenalty: number }>('adjustTeamScore');
 // Live photo feed moderation (change: live-photo-feed): hide an item from the run's feed.
 export const hideFeedItem          = callable<{ ownerUid: string; gameId: string; runId: string; itemId: string }, { ok: boolean }>('hideFeedItem');
@@ -298,12 +389,22 @@ export const hideFeedItem          = callable<{ ownerUid: string; gameId: string
 // already holding the task keeps it (`teamsHolding` says how many that is). The
 // server refuses a change that would leave the owning stage unwinnable unless
 // `force` is set, answering with details.code === 'stageUnwinnable'.
+// quick-dial-and-actions: tonight's phone numbers for a run (owner only).
+export const setRunContacts = callable<
+  { ownerUid: string; gameId: string; runId: string; contacts: { label: string; phone: string; visibleTo: ('players' | 'staff')[] }[] },
+  { ok: boolean; count: number }
+>('setRunContacts');
+
 export const setRunTaskStatus      = callable<
   { ownerUid: string; gameId: string; runId: string; taskId: string; status: StationStatus; reason?: string; force?: boolean },
   {
     ok: boolean; taskId: string; status: StationStatus; previousStatus: StationStatus;
     noop: boolean; teamsHolding: number; availableCount: number; requiredCount: number;
     stageUnwinnable: boolean;
+    // live-task-close-rules: teams moved off a closed mission, and what the change opened / locked.
+    teamsMoved?: number;
+    dependentsOpened?: string[];
+    dependentsLocked?: string[];
   }
 >('setRunTaskStatus');
 
@@ -347,6 +448,10 @@ export const setGameTemplateFlag = callable<
     // What kind of game this template is, so the new-game wizard's conceptual
     // question can resolve to it (change: guided-new-game-wizard).
     templateGenre?: TemplateGenre;
+    // Out of the creator picker, still in the admin's builder
+    // (change: template-visibility). OPTIONAL AND STICKY: omitting it leaves the
+    // stored state alone, so an emoji edit cannot un-hide a parked template.
+    templateHidden?: boolean;
   },
   { ok: boolean; gameId: string; isTemplate: boolean }
 >('setGameTemplateFlag');
@@ -413,6 +518,64 @@ export const listAdminTemplates = callable<
   { games: Game[] }
 >('listAdminTemplates');
 
+// ─── Mission-bank overrides (change: admin-editable-mission-bank) ──────────────
+//
+// The smart-build mission bank itself is static content in `src/taskBank.ts`.
+// These three callables move only the DELTAS an admin has made from
+// /admin/mission-bank: one row per mission that has been edited or deleted.
+// All three are admin-only server-side (`assertAdmin`), and the two mutations
+// leave an auditLogs record — they change what every creator is offered.
+//
+// Reading the rows for the COMPOSER does not go through here: the merge happens
+// in the browser and reads the collection directly (see lib/missionBank.ts).
+// This list call exists for the admin's own editing view.
+export interface MissionBankOverrideRow {
+  key: string;
+  deleted?: boolean;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  difficulty?: number;
+  minAge?: number | null;
+  transitMinutes?: number | null;
+  /** Curation bookkeeping, not content — see lib/missionBankOverlay.ts. */
+  reviewedCopy?: boolean;
+  verifiedSetup?: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export const listMissionBankOverrides = callable<
+  Record<string, never>,
+  { overrides: MissionBankOverrideRow[] }
+>('listMissionBankOverrides');
+
+// One call carries the WHOLE edited state of that mission. An absent optional
+// field means "leave the source value alone"; an explicit `null` on minAge /
+// transitMinutes means "clear it". The distinction is load-bearing because the
+// callable transport collapses `undefined` to `null` on the wire.
+export const setMissionBankOverride = callable<
+  {
+    key: string;
+    deleted?: boolean;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    difficulty?: number;
+    minAge?: number | null;
+    transitMinutes?: number | null;
+    reviewedCopy?: boolean;
+    verifiedSetup?: boolean;
+  },
+  { ok: boolean; key: string; override: MissionBankOverrideRow }
+>('setMissionBankOverride');
+
+/** Discard an edit and return the mission to the content authored in taskBank.ts. */
+export const clearMissionBankOverride = callable<
+  { key: string },
+  { ok: boolean; key: string; cleared: boolean }
+>('clearMissionBankOverride');
+
 // Contact messages sent from the marketing site (change: marketing-site). Admin only
 // and audit logged server-side: every document holds the name and email address of
 // someone who is NOT a user of the platform and cannot see, correct or delete what is
@@ -432,3 +595,46 @@ export const listContactMessages = callable<
   { limit?: number },
   { messages: ContactMessage[] }
 >('listContactMessages');
+
+// RushPoint Live team applications (change: rushpoint-live-signup). Admin only and
+// audit logged server-side, for the same reason the contact list is — and more so:
+// every record holds a phone number, a home town, an age range and a photograph of
+// identifiable people, none of whom have an account or any way to see, correct or
+// delete what is stored about them.
+export interface LiveApplication {
+  id: string;
+  teamName: string;
+  teamSize: number;
+  sectors: string[];
+  location: string;
+  howTheyMet: string;
+  ageRange: string;
+  motivation: string;
+  cameraComfort: number;
+  /** As the applicant wrote it — that is the form a person recognises. */
+  phone: string;
+  /** Digits only, `972…`. Two spellings of one number are one number. */
+  phoneNormalized: string;
+  /** False when the team applied without one. The photo is optional. */
+  hasPhoto: boolean;
+  photoContentType: string;
+  photoBytes: number;
+  language: string | null;
+  receivedAt: number;
+  status: string;
+  uid: string | null;
+}
+
+export const listLiveApplications = callable<
+  { limit?: number },
+  { applications: LiveApplication[] }
+>('listLiveApplications');
+
+// The photo is a SEPARATE call on purpose. Half a megabyte per row would make the
+// list unusable, and a photograph of identifiable people — quite possibly minors —
+// should be a deliberate act by a named operator that leaves an audit row behind,
+// not a side effect of opening a page.
+export const getLiveApplicationPhoto = callable<
+  { applicationId: string },
+  { contentType: string; base64: string }
+>('getLiveApplicationPhoto');

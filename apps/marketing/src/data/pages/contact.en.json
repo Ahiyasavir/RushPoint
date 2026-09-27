@@ -1,0 +1,20 @@
+{
+  "title": "Contact us",
+  "description": "A question, an idea, a problem, or a request about an event. Write and we will reply.",
+  "headline": "Contact us",
+  "intro": "If something is not working, if something is missing, or if you are not sure whether RushPoint suits your event, write. We read all of it.",
+  "nameLabel": "Your name",
+  "emailLabel": "Email to reply to",
+  "messageLabel": "What you wanted to say",
+  "submit": "Send",
+  "sending": "Sending",
+  "successTitle": "Message sent",
+  "successBody": "Thank you. We will reply to the address you left.",
+  "errorInvalid": "Something in the form is not valid. Check that name, email and message are filled in, and that the message is not too long.",
+  "errorRateLimited": "Too many messages have been sent from this device. Try again in a few minutes.",
+  "errorOffline": "We could not reach the server. Your message is still here on screen, so nothing is lost. Try again in a moment.",
+  "errorUnknown": "The message was not sent. You can try again, and your message stays here meanwhile.",
+  "otherWaysTitle": "Looking for something else",
+  "otherWaysBody": "If you just want to see how it works, you can open a game and try it without sending anything.",
+  "directEmailLabel": "You can also write directly to"
+}

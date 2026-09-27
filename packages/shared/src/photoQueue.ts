@@ -30,9 +30,17 @@ export interface RawSubmission {
   submittedAt?: string;
   status?: string;
   mediaKind?: MediaKind;
+  /** video-upload-speed D7: a small JPEG frame, so a console shows the clip without pulling it. */
+  posterUrl?: string;
+  /** video-upload-speed D7: the clip's measured length in seconds (display only). */
+  mediaDurationSec?: number;
   reviewedAt?: string;
   reviewedBy?: string;
   reviewNote?: string;
+  /** Which attached phone sent it (team-phones-simple D2). Server-stamped. */
+  submittedBy?: { uid?: unknown; name?: unknown } | null;
+  /** background-media-upload: approved before its file existed; the file is still on its way. */
+  mediaPending?: boolean;
 }
 
 /** The shape a team doc needs to have for the queue (a structural subset of Team). */
@@ -51,9 +59,18 @@ export interface SubmissionRow {
   /** ISO string, or '' when the server never wrote one (legacy/partial doc). */
   submittedAt: string;
   mediaKind: MediaKind;
+  /** '' when the submission carries no poster (every photo, every older clip). */
+  posterUrl: string;
+  /** null when unknown. */
+  mediaDurationSec: number | null;
+  /** background-media-upload: approved, and the file is still uploading from the team's phone. */
+  mediaPending: boolean;
   status: SubmissionStatus;
   reviewedAt: string;
   reviewNote: string;
+  /** Name of the phone that sent it, or '' when unknown or when it is just the
+   *  team's own name (the founding phone) — repeating the team name is noise. */
+  senderName: string;
 }
 
 /** The stable identity of a row. MUST match the key the consoles already use for
@@ -79,24 +96,47 @@ export function normalizeStatus(status: string | undefined | null): SubmissionSt
  * rejected + reject   → rejected   (no op)
  * approved + approve  → approved   (NO OP — the server returns completed:false,
  *                                   so no second score, no duplicate feed item)
- * approved + reject   → approved   (REFUSED, see canReject: the server has no
- *                                   score clawback path, so "rejecting" an
- *                                   approved task would flip a status string
- *                                   while the points silently stay. Use the
- *                                   manual adjustTeamScore instead.)
+ * approved + reject   → rejected   (change: approval-can-be-undone. This used to
+ *                                   be REFUSED, because the server had no score
+ *                                   clawback path and "rejecting" an approved
+ *                                   task would have flipped a status string while
+ *                                   the points silently stayed. That objection is
+ *                                   now answered: planApprovalReversal in
+ *                                   shared/approvalReversal removes exactly what
+ *                                   the approval awarded, so the status and the
+ *                                   scoreboard cannot disagree.
+ *
+ *                                   It matters because bank photo missions default
+ *                                   to autoApprove and the alternative BLOCKS the
+ *                                   team, so "approved" was effectively
+ *                                   "unreviewable" - which is how a photo of
+ *                                   somebody's hand scored full points with nothing
+ *                                   an organizer could do about it.)
  *
  * Idempotence is a property of this table: applying the same action twice equals
  * applying it once, for every starting status.
  */
 export function nextStatus(current: SubmissionStatus, action: ReviewAction): SubmissionStatus {
+  void current;
   if (action === 'approve') return 'approved';
-  return current === 'approved' ? 'approved' : 'rejected';
+  // A reject now lands on 'rejected' from EVERY starting status, approved included.
+  return 'rejected';
 }
 
-/** Whether a reviewer may still reject this row. False once approved — the UI
- *  must DISABLE the button and say why rather than no op silently. */
+/** Whether a reviewer may still reject this row.
+ *
+ *  Now TRUE for every status (change: approval-can-be-undone). It used to be false
+ *  once approved, and the UI disabled the control - which meant an organizer looking
+ *  at a photo of somebody's hand that had auto-approved for full points had no button
+ *  to press. The reversal takes the award back with the status, so the refusal that
+ *  justified disabling it no longer applies.
+ *
+ *  Kept as a function rather than deleted: it is the one place this policy is stated,
+ *  and a future status (expired, withdrawn) would want to answer here rather than at
+ *  four call sites. */
 export function canReject(status: SubmissionStatus): boolean {
-  return status !== 'approved';
+  void status;
+  return true;
 }
 
 /** Whether a reviewer may still approve this row (an approve is a harmless no op
@@ -126,10 +166,23 @@ function toRow(team: SubmissionTeamDoc, taskId: string, sub: RawSubmission): Sub
     // to 'photo' is what sent a VIDEO submission to the reviewer's <img> tag,
     // where it rendered as nothing but its link (change: video-submission-task).
     mediaKind: sub.mediaKind === 'audio' ? 'audio' : sub.mediaKind === 'video' ? 'video' : 'photo',
+    posterUrl: typeof sub.posterUrl === 'string' ? sub.posterUrl : '',
+    mediaDurationSec: typeof sub.mediaDurationSec === 'number' && Number.isFinite(sub.mediaDurationSec) && sub.mediaDurationSec > 0 ? sub.mediaDurationSec : null,
+    mediaPending: sub.mediaPending === true,
     status: normalizeStatus(sub.status),
     reviewedAt: typeof sub.reviewedAt === 'string' ? sub.reviewedAt : '',
     reviewNote: typeof sub.reviewNote === 'string' ? sub.reviewNote : '',
+    senderName: submissionSenderName(team, sub),
   };
+}
+
+/** The sender line for a submission, shared by both consoles so they agree: the
+ *  phone's name, or '' when unknown or equal to the team's own name. */
+export function submissionSenderName(team: { displayName?: string }, sub: Pick<RawSubmission, 'submittedBy'>): string {
+  const raw = sub.submittedBy && typeof sub.submittedBy === 'object' ? sub.submittedBy.name : undefined;
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  if (!name || name === team.displayName?.trim()) return '';
+  return name;
 }
 
 /** Every submission across every team, unfiltered and unsorted. */

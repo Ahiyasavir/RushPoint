@@ -11,6 +11,7 @@ const HE = {
     settings: 'הגדרות',
     admin:    'משתמשי הפלטפורמה',
     adminTemplates: 'תבניות משחק',
+    adminMissionBank: 'בנק המשימות',
   },
   liveRuns: {
     title: 'ריצות חיות',
@@ -78,6 +79,7 @@ const HE = {
     offline:     'אין כרגע חיבור לשרת. שום דבר לא אבד, העבודה שלכם עדיין כאן על המסך. נסו שוב כשהחיבור חוזר.',
     notAllowed:  'החיבור לחשבון פג, או שאין לכם הרשאה לפעולה הזו. היכנסו שוב לחשבון ונסו מחדש.',
     rateLimited: 'יותר מדי פעולות בזמן קצר. המתינו כמה שניות ונסו שוב.',
+    dailyCapacity: 'אנחנו משפרים את האפליקציה היום. המשחקים שלכם שמורים ולא אבד כלום, פשוט חזרו מחר והכול יעבוד כרגיל.',
     rejected:    'השרת דחה את הפעולה. בדקו את הפרטים, משהו בהם לא תקין כרגע.',
     generic:     'הפעולה לא עברה, ושום דבר לא השתנה. נסו שוב, ואם זה חוזר רעננו את העמוד.',
   },
@@ -162,6 +164,21 @@ const HE = {
     // "[object Object]", which is exactly what every new creator used to read.
     agreeToTermsLead: 'בלחיצה על "יצירת חשבון" אתה מסכים ל',
     agreeToTermsBetween: ' ול',
+    // Friendly auth-error popups (change: friendly-auth-errors).
+    errors: {
+      noMatchTitle: 'לא מצאנו חשבון עם הפרטים האלה. אולי עדיין לא נרשמת? אפשר לפתוח חשבון חינם עכשיו.',
+      createAccountCta: 'פתיחת חשבון חינם',
+      emailInUse: 'כבר קיים חשבון עם האימייל הזה. אפשר להתחבר במקום.',
+      goToSignInCta: 'מעבר להתחברות',
+      invalidEmail: 'כתובת האימייל אינה תקינה. בדוק אותה ונסה שוב.',
+      weakPassword: 'הסיסמה חלשה מדי. בחר סיסמה עם 8 תווים לפחות.',
+      tooManyRequests: 'היו יותר מדי ניסיונות התחברות. המתן כמה דקות ונסה שוב, או אפס את הסיסמה.',
+      network: 'אין חיבור לאינטרנט כרגע. בדוק את החיבור ונסה שוב.',
+      userDisabled: 'החשבון הזה מושבת. פנה אלינו לתמיכה כדי להפעיל אותו מחדש.',
+      methodDisabled: 'הכניסה עם אימייל וסיסמה כבויה כרגע. אפשר להיכנס עם כפתור "המשך עם גוגל" שלמעלה.',
+      config: 'יש תקלה זמנית בשירות ההתחברות שלנו. נסה שוב בעוד רגע, ואם התקלה חוזרת פנה אלינו לתמיכה.',
+      unknown: 'ההתחברות נכשלה. נסה שוב בעוד רגע.',
+    },
   },
   // ── היסטוריית ריצות + דוח שחקנים (change: post-run-player-report) ──
   runHistory: {
@@ -235,6 +252,9 @@ const HE = {
     question: 'השאלה',
     expected: 'התשובה הנכונה',
     theirAnswer: 'מה הם ענו',
+    outcome: 'התשובה שנבחרה',
+    outcomeOther: 'תשובה אחרת',
+    outcomeChip: ({ label }: { label: string }) => `ענו: ${label}`,
     attempts: ({ n }: { n: number }) => `${n} ניסיונות`,
     points: ({ n }: { n: number }) => `${n} נק׳`,
     minutes: ({ n }: { n: number }) => `${n} דק׳`,
@@ -304,6 +324,10 @@ const HE = {
     emptyBody:  'עצב שלבים, הוסף משימות גיאוגרפיות והשק משחק חי לקבוצה שלך.',
     untitledGame: 'משחק ללא שם',
     loadGamesFailed: 'טעינת המשחקים נכשלה',
+    // כשלון טעינה הוא לא חשבון ריק (change: failed-load-is-not-an-empty-account).
+    // הנוסח אומר במפורש שהמשחקים לא נמחקו, כי זה בדיוק מה שהמסך הקודם שידר.
+    loadFailedBody: 'המשחקים שלכם במקומם. לא הצלחנו להביא אותם כרגע. אפשר לנסות שוב בעוד רגע.',
+    loadFailedRetry: 'ניסיון נוסף',
     loading: [
       'מחממים את משחקי השדה שלך',
       'אוספים את ההרפתקאות האחרונות שלך',
@@ -384,7 +408,6 @@ const HE = {
     cardTestRunHint: 'ריצת חזרה חינמית עד 2 משתתפים, לא נספרת בסטטיסטיקות',
     cardPublish:  'פרסם',
     cardUnpublish:'בטל פרסום',
-    cardShare:    'שיתוף',
     cardHistory: 'ריצות קודמות',
     cardHistoryHint: 'ניקוד, תשובות ותמונות מכל ריצה של המשחק הזה',
     cardDelete:   'מחיקה',
@@ -404,7 +427,7 @@ const HE = {
       // glance. This one now says what it actually is: an EXISTING authored
       // plot, picked and fitted — not something composed for them.
       guidedTitle:  'משחק עלילה מוכן',
-      guidedBody:   'בוחרים עלילה שכתבנו, ואנחנו מתאימים אותה לגודל הקבוצה ולזמן שלכם.',
+      guidedBody:   'בוחרים עלילה שכתבנו, ואנחנו מתאימים אותה לקבוצה ולזמן שלכם.',
       detailsTitle: 'ספרו לנו על המשחק',
       detailsSub:   'אפשר לדלג על הכל, יש ברירות מחדל.',
       typeLabel:    'סוג המשחק',
@@ -441,7 +464,9 @@ const HE = {
       // ── Smart build (change: smart-game-composer) ─────────────────────────
       smartRecommended: 'מומלץ',
       smartTitle:   'שנרכיב לכם משחק',
-      smartBody:    'עונים על כמה שאלות, ומקבלים משחק שנבנה במיוחד לאירוע שלכם. כל פעם יוצא אחר.',
+      // Two clauses, not three: these cards no longer clamp their text (see
+      // NewGameWizard), so the copy itself is what keeps them short.
+      smartBody:    'עונים על כמה שאלות, ומקבלים משחק שנבנה לאירוע שלכם.',
       smartFinish:  'הרכיבו לי משחק',
       smartProgress: (step: number, total: number) => `שאלה ${step} מתוך ${total}`,
       // The OCCASION — asked first. Keys are OCCASION_IDS (lib/occasions.ts).
@@ -639,8 +664,6 @@ const HE = {
     deleteFailed:       'מחיקת המשחק נכשלה',
     trashLink:          'נמחקו לאחרונה',
     loadingGames:  'טוען משחקים...',
-    shareTitle:    (title: string) => `שתף "${title}"`,
-    shareText:     (title: string) => `הצטרף למשחק השדה שלי בפלטפורמת RushPoint: ${title}`,
   },
   // Recently deleted games (change: recoverable-game-deletion).
   trash: {
@@ -659,6 +682,9 @@ const HE = {
       'טוענים את מה שאפשר לשחזר',
     ],
     loadFailed:   'טעינת המשחקים שנמחקו נכשלה',
+    // כשלון טעינה הוא לא פח ריק (change: failed-load-is-not-an-empty-account).
+    loadFailedBody: 'לא הצלחנו להביא את הרשימה כרגע. שום דבר לא נמחק לצמיתות בינתיים.',
+    loadFailedRetry: 'ניסיון נוסף',
     restoreFailed:'השחזור נכשל. ייתכן שהמשחק כבר נמחק לצמיתות.',
     purgeFailed:  'המחיקה לצמיתות נכשלה',
     purgeDialogTitle:  'מחיקה לצמיתות',
@@ -719,6 +745,10 @@ const HE = {
     likeFailed: 'לא הצלחנו לשמור. נסו שוב.',
     // תגיות (change: game-task-tags)
     moreTags:   (n: number) => `+${n} תגיות`,
+    // משימות מבנק המשימות (change: mission-bank-in-library)
+    bankRowBadge:     'משימת רשפוינט',
+    bankRowBadgeHelp: 'משימה שרשפוינט כתבה מראש. היא לא הגיעה ממשחק שפורסם, ולכן אין לה מספר העתקים או יוצר. אפשר להוסיף אותה כמו כל משימה אחרת.',
+    bankRowSource:    'משימה מוכנה של רשפוינט',
     // תצוגת פרטי משימה (change: gallery-mission-detail)
     detailTitle:         'פרטי המשימה',
     detailAboutTitle:    'איך המשימה עובדת',
@@ -934,6 +964,7 @@ const HE = {
     dataExportBtn:'ייצא את הנתונים שלי',
     dataExporting:'מכין ייצוא…',
     dataExported: 'הנתונים הורדו.',
+    dataExportFailed: 'הדפדפן חסם את ההורדה. נסו שוב או השתמשו בדפדפן אחר.',
 
     // Legal documents
     legalLabel: 'מסמכים משפטיים',
@@ -1009,13 +1040,22 @@ const HE = {
     photoReviewApprove: 'אישור',
     photoReviewReject: 'דחייה',
     photoReviewRejectPrompt: 'סיבת הדחייה (לא חובה)',
+    photoReviewRejectCta: 'דחו את ההגשה',
     photoReviewApproved: 'ההגשה אושרה והנקודות נרשמו',
     photoReviewRejected: 'ההגשה נדחתה',
     photoReviewFailed: 'הבדיקה נכשלה',
     photoReviewRecent: 'נבדקו לאחרונה',
     photoReviewTagApproved: 'אושר',
     photoReviewTagRejected: 'נדחה',
-    photoReviewRejectDisabled: 'כבר אושר. לביטול השתמשו בעדכון ניקוד ידני.',
+    photoReviewRejectDisabled: 'כבר אושר.',
+    // ביטול אישור (change: approval-can-be-undone). מזיז ניקוד, ולכן שואל קודם
+    // ואומר מה זה עולה.
+    reverseApprovalCta: 'ביטול האישור',
+    reverseApprovalTitle: 'ביטול אישור של הגשה',
+    reverseApprovalConfirm: ({ team }: { team: string }) =>
+      `לבטל את האישור של ${team}? הנקודות שההגשה הזאת נתנה יירדו מהקבוצה, וההגשה תסומן כנדחתה.`,
+    reverseApprovalDone: ({ team, points }: { team: string; points: number }) =>
+      `האישור בוטל. ${points} נקודות ירדו מ${team}.`,
     photoReviewAlreadyRejected: 'כבר נדחה',
     photoReviewLoadError: 'טעינת ההגשות נכשלה, מנסים שוב',
     photoReviewSubmittedAt: ({ time }: { time: string }) => `הוגש בשעה ${time}`,
@@ -1026,6 +1066,8 @@ const HE = {
     photoReviewOverdue: 'הקבוצה תקועה וממתינה לכם',
     photoReviewTeamFinished: 'הקבוצה כבר סיימה, אף אחד לא ממתין',
     photoReviewRowFailed: ({ team }: { team: string }) => `הבדיקה של ${team} לא נשמרה. הקבוצה עדיין ממתינה.`,
+    // team-phones-simple D2: any phone in the team may send media, so name which one did.
+    mediaSentBy: ({ name }: { name: string }) => `נשלח מהטלפון של ${name}`,
     photoReviewRetry: 'לנסות שוב',
     photoReviewKeyboardHint: 'מקלדת: J או K למעבר בין הגשות, A לאישור, R לדחייה',
     photoReviewQueueLabel: 'הגשות שממתינות לבדיקה',
@@ -1037,8 +1079,11 @@ const HE = {
     mediaGalleryStatusApproved: 'אושר',
     mediaGalleryStatusRejected: 'נדחה',
     mediaGalleryNoMedia: 'אין מדיה',
+    // background-media-upload: approved, the file is still on its way from the team's phone.
+    mediaGalleryUploading: '⏳ אושר, הקובץ עדיין עולה מהטלפון של הקבוצה',
     mediaGalleryAlt: 'הגשה',
     mediaGalleryVideoAria: 'סרטון שהוגש',
+    clipLength: ({ time }: { time: string }) => `אורך הסרטון ${time}`,
     mediaGalleryTaskLine: ({ name }: { name: string }) => `משימה: ${name}`,
     chatTitle: 'צ׳אט עם הקבוצות',
     chatHq: 'המטה',
@@ -1150,7 +1195,64 @@ const HE = {
     staffLinkCopy: 'העתקת קישור לצוות',
     staffLinkNote: 'הקישור ממלא מראש את פרטי הריצה. איש הצוות רק מקליד את הקוד למעלה.',
     staffLinkQrAlt: 'קוד QR לכניסת צוות',
+    // change: staff-capabilities. Codes shared by several staff, each with its own permissions.
+    staffCodes: {
+      title: 'קודי צוות',
+      intro: 'כמה אנשי צוות יכולים להיכנס עם אותו קוד. לכל קוד ההרשאות שלו, ואפשר לשנות אותן תוך כדי הריצה.',
+      newCode: 'קוד חדש',
+      labelPlaceholder: 'שם לקוד, למשל: שער צפון, שופטים',
+      create: 'יצירת הקוד',
+      cancel: 'ביטול',
+      save: 'שמירה',
+      pin: 'קוד:',
+      people: ({ n }: { n: number }) => (n === 1 ? 'איש צוות אחד מחובר' : `${n} אנשי צוות מחוברים`),
+      noPeople: 'עוד אף אחד לא נכנס עם הקוד הזה.',
+      disabledBadge: 'סגור לכניסות חדשות',
+      disable: 'סגירה לכניסות חדשות',
+      enable: 'פתיחה מחדש',
+      editCaps: 'עריכת הרשאות',
+      showPeople: 'מי מחובר',
+      removePerson: 'הוצאה',
+      removeAll: 'הוצאת כל מי שעל הקוד',
+      removePersonConfirm: ({ name }: { name: string }) => `להוציא את ${name} מצוות הריצה? מהרגע הזה לא תהיה אפשרות לבצע שום פעולת צוות.`,
+      removeAllConfirm: ({ label, n }: { label: string; n: number }) => `להוציא ${n === 1 ? 'איש צוות אחד' : `${n} אנשי צוות`} שנכנסו עם "${label}"?`,
+      removeCta: 'להוציא',
+      disableNote: 'מי שכבר מחובר ממשיך לעבוד. כדי להוציא מישהו, השתמשו ב"הוצאה".',
+      legacy: 'קוד ישן: מאפשר הכל ומתאים לאדם אחד.',
+      usedUp: 'כבר נוצל',
+      presetsLabel: 'מהיר:',
+      presets: { marshal: 'סדרן', judge: 'שופט', full: 'הכל' },
+      locked: 'תמיד מותר',
+      failed: 'השינוי לא נשמר. בדקו את החיבור ונסו שוב.',
+      saved: 'ההרשאות עודכנו. זה חל מהפעולה הבאה של הצוות.',
+      created: 'הקוד נוצר.',
+      empty: 'אין עדיין קודי צוות לריצה הזו.',
+    },
+    staffCaps: {
+      safety: { name: 'בטיחות', help: 'אישור קריאות SOS וביטול התראת יציאה מהאזור' },
+      staffChannel: { name: 'ערוץ הצוות', help: 'הודעות בין הצוות למארגנים' },
+      outline: { name: 'שמות המשימות', help: 'רואים את שמות השלבים והמשימות' },
+      review: { name: 'בדיקת הגשות', help: 'אישור ודחייה של תמונות, סרטונים והקלטות, ותוצאות הסקרים' },
+      score: { name: 'ניקוד', help: 'הוספה והורדה של נקודות לקבוצה' },
+      route: { name: 'ניתוב', help: 'דילוג על משימה, שליחה למשימה, החזרת קבוצה' },
+      hold: { name: 'עצירת קבוצה', help: 'עצירה ושחרור של קבוצה' },
+      broadcast: { name: 'הודעות לכולם', help: 'הכרזות ומשימות בזק' },
+      chat: { name: 'צ\u05f3אט עם קבוצות', help: 'שיחה עם הקבוצות' },
+      feed: { name: 'פיד התמונות', help: 'הסתרת תמונה מהפיד' },
+      tasks: { name: 'סגירת משימות', help: 'השהיה וסגירה של משימה בריצה הזו' },
+      locations: { name: 'מפה חיה', help: 'רואים איפה הקבוצות נמצאות' },
+      contactTeams: { name: 'חיוג לקבוצות', help: 'כפתור התקשרות לקבוצה' },
+    },
     startedAllTeams: 'כל הקבוצות התחילו.',
+    // מוצע ברגע הלחיצה על 'התחילו את כולן' (change: late-joiner-autostart).
+    offerAutoStartTitle: 'ומה עם מי שיצטרף אחר כך?',
+    offerAutoStartBody: 'הלחיצה הזו הפעילה את הקבוצות שקיימות עכשיו. קבוצה שתצטרף בעוד רגע תמתין עד שתלחצו שוב. רוצים שקבוצה כזו תקבל משימה לבד?',
+    offerAutoStartCta: 'כן, שיתחילו לבד',
+    offerAutoStartDone: 'מעכשיו קבוצה שמצטרפת באיחור מתחילה לבד',
+    offerAutoStartFailed: 'לא הצלחנו לשנות את ההגדרה. הקבוצות שהתחלתן רצות כרגיל',
+    autoStartToggleLabel: 'קבוצה שמצטרפת באיחור מתחילה לבד',
+    autoStartToggleHelp: 'מי שנכנס אחרי שלחצתם להתחיל יקבל משימה מיד, בלי שתצטרכו ללחוץ שוב. חל על הריצה הזו.',
+    autoStartToggleOff: 'קבוצה שמצטרפת באיחור תמתין לכם',
     heldForConsent: ({ launched, held }: { launched: number; held: number }) =>
       `${launched} קבוצות התחילו. ${held} קבוצות ממתינות לאישור אפוטרופוס ולא יוכלו להתחיל בלעדיו.`,
     startFailed: 'התחלת הקבוצות נכשלה. בדקו את החיבור ונסו שוב.',
@@ -1162,6 +1264,17 @@ const HE = {
     // דילוג על משימה בודדת (change: skip-single-task)
     skipTaskFailed: 'הדילוג על המשימה נכשל. בדקו את החיבור ונסו שוב.',
     skipTaskDone: ({ team }: { team: string }) => `המשימה הנוכחית של ${team} דולגה.`,
+    // skip-keeps-the-stage: the confirm states the server's own dry run, fact by fact.
+    skipPreview: {
+      skips: ({ title }: { title: string }) => `המשימה "${title}" תדולג לקבוצה הזו.`,
+      opens: ({ titles }: { titles: string }) => `נפתח לה עכשיו: ${titles}.`,
+      staysInStage: 'הקבוצה נשארת בשלב וממשיכה לשאר המשימות בו.',
+      endsStage: 'זו המשימה האחרונה שנשארה לה בשלב, ולכן השלב יסתיים והיא תעבור לשלב הבא.',
+      requirementLowered: ({ n }: { n: number }) => `כדי שהשלב יישאר אפשרי, הקבוצה תצטרך להשלים בו ${n} משימות.`,
+      consolation: ({ n }: { n: number }) => `הקבוצה תקבל ${n} נקודות פיצוי.`,
+    },
+    skipOpenedDone: ({ team, titles }: { team: string; titles: string }) => `המשימה של ${team} דולגה. נפתח לה: ${titles}.`,
+    skipNoMission: ({ team }: { team: string }) => `ל${team} אין כרגע משימה פעילה, אז אין מה לדלג. נסו שוב ברגע שתקבל את המשימה הבאה.`,
     // אישור הצלחה לדילוג על שלב ולהחזרת קבוצה למשחק (change: run-console-action-feedback)
     skipStageDone: ({ team }: { team: string }) => `השלב של ${team} דולג.`,
     letBackInDone: ({ team }: { team: string }) => `${team} חזרה למשחק.`,
@@ -1183,6 +1296,31 @@ const HE = {
     // היקף הדילוג כתוב על הכפתור, לא רק בדיאלוג (change: run-console-clarity).
     skipStage: 'דילוג על השלב',
     skipTask: 'דילוג על המשימה',
+    // send-team-back: the row button and its picker.
+    sendBack: 'החזרת הקבוצה',
+    sendBackAria: ({ team }: { team: string }) => `להחזיר את ${team} למשימה או לשלב`,
+    sendBackPicker: {
+      title: ({ team }: { team: string }) => `לאן להחזיר את ${team}?`,
+      intro: 'בחרו משימה שהקבוצה השלימה או שדולגה, או שלב שלם שכבר עברה.',
+      wholeStage: ({ stage }: { stage: string }) => `כל השלב: ${stage}`,
+      statusDone: 'הושלמה',
+      statusSkipped: 'דולגה',
+      statusCurrent: 'עכשיו',
+      statusOpen: 'עוד לא',
+      nothingYet: 'אין עדיין לאן להחזיר: הקבוצה לא השלימה ולא דילגה על אף משימה.',
+      cancel: 'ביטול',
+    },
+    sendBackPreview: {
+      toTask: ({ title }: { title: string }) => `הקבוצה תחזור למשימה "${title}" ותקבל אותה עכשיו.`,
+      toStage: ({ stage }: { stage: string }) => `הקבוצה תחזור לשלב "${stage}".`,
+      reopens: ({ titles }: { titles: string }) => `ייפתחו מחדש: ${titles}.`,
+      points: ({ n }: { n: number }) => `יירדו ${n} נקודות, שהיא תרוויח שוב כשתשלים.`,
+      relocks: ({ stages }: { stages: string }) => `שלבים שיחכו עד שתסיים: ${stages}. משימות שכבר השלימה בהם נשארות מושלמות.`,
+      reactivates: 'הקבוצה סיימה את המשחק, והיא תחזור לשחק.',
+    },
+    sendBackDone: ({ team }: { team: string }) => `${team} הוחזרה.`,
+    sendBackQueued: ({ team }: { team: string }) => `${team} הוחזרה. התחנה מלאה כרגע, והיא תקבל את המשימה ברגע שיתפנה מקום.`,
+    sendBackFailed: 'לא הצלחנו להחזיר את הקבוצה. נסו שוב.',
     scoreAdjustmentPrompt: 'עדכון ניקוד, בונוס בפלוס או קנס במינוס:',
     scoreAdjustmentInvalid: 'הכניסו מספר נקודות שלם: 50 לבונוס, או מינוס 25 לקנס.',
     liveTeamMap: '📍 מפת קבוצות חיה',
@@ -1196,6 +1334,7 @@ const HE = {
     printQrEmpty: 'אין תחנות חכמות במשחק הזה.',
     printQrBlocked: 'החלון החוסם מנע את פתיחת ההדפסה. אפשרו חלונות קופצים ונסו שוב.',
     printQrCodeFallback: 'קוד ידני',
+    printQrWorth: ({ code, n }: { code: string; n: number }) => `${code}: ${n} נקודות`,
     announcementPersists: 'הודעה לשחקנים',
     announcementPlaceholder: 'הודעה לכל הקבוצות…',
     announceTargetLabel: 'למי לשלוח את ההודעה',
@@ -1214,6 +1353,97 @@ const HE = {
     sectionsHeader: 'מה מציגים',
     groupTeams: 'קבוצות וניקוד',
     groupModeration: 'מה מגיע מהשטח',
+    // run-console-tabs-up-front: the short names under the phone tab bar's icons.
+    sectionShort: { teamsAndScores: 'קבוצות', moderation: 'מהשטח', gameMechanics: 'שליטה', shareAndScreens: 'שיתוף', afterTheRun: 'דוחות' },
+    sectionHasNew: 'יש משהו חדש',
+    // team-dossier-and-search D4: finding a team among many.
+    teamSearchPlaceholder: 'חיפוש קבוצה, שחקן, טלפון או קוד',
+    teamSortLabel: 'מיון',
+    teamSortRank: 'לפי מקום',
+    teamSortName: 'לפי שם',
+    teamSortActivity: 'לפי פעילות אחרונה',
+    teamFilterLabel: 'סינון',
+    teamFilter: { all: 'הכל', attention: 'צריכות תשומת לב', review: 'מחכות לבדיקה', notStarted: 'עוד לא התחילו', finished: 'סיימו' },
+    teamSearchNoMatch: 'אף קבוצה לא מתאימה.',
+    teamSearchClear: 'ניקוי החיפוש',
+    // team-dossier-and-search D3: everything about one team.
+    openTeamAria: ({ team }: { team: string }) => `פתיחת כל הפרטים של ${team}`,
+    quickActions: {
+      icon: { broadcast: '📣', startTeams: '🏁', refreshStandings: '🔄', photoQueue: '📷', adjustScore: '➕', findTeam: '🔎', callContact: '📞' },
+      label: { broadcast: 'הודעה לכולם', startTeams: 'זינוק לכולם', refreshStandings: 'רענון דירוג', photoQueue: 'תמונות לבדיקה', adjustScore: 'ניקוד לקבוצה', findTeam: 'מציאת קבוצה', callContact: 'חיוג למטה' },
+      customise: 'בחירת קיצורים',
+      customiseHelp: ({ max }: { max: number }) => `בחרו עד ${max} פעולות שיופיעו תמיד בראש המסך. הבחירה נשמרת בחשבון שלכם.`,
+      moveUp: ({ name }: { name: string }) => `להזיז את ${name} למעלה`,
+      moveDown: ({ name }: { name: string }) => `להזיז את ${name} למטה`,
+      done: 'סיום',
+      pickTeam: 'לאיזו קבוצה?',
+    },
+    // quick-dial-and-actions: the run's phone numbers.
+    contacts: {
+      title: 'טלפונים לחיוג מהיר',
+      help: 'מספרים שהשחקנים או הצוות יכולים לחייג אליהם בלחיצה, למשל אליכם. השחקנים רואים כפתור חיוג ליד כפתור המצוקה.',
+      labelPlaceholder: 'למי מתקשרים (למשל: המארגן)',
+      phonePlaceholder: 'מספר טלפון',
+      players: 'שחקנים רואים',
+      staff: 'צוות רואה',
+      remove: 'הסרה',
+      add: 'הוספת מספר',
+      save: 'שמירה',
+      saved: 'המספרים נשמרו.',
+      saveFailed: 'לא הצלחנו לשמור את המספרים. בדקו אותם ונסו שוב.',
+      needLabel: 'כתבו למי שייך המספר.',
+      badPhone: 'המספר לא נראה תקין, למשל 052 1234567.',
+      needAudience: 'סמנו מי יראה את המספר.',
+    },
+    teamPage: {
+      location: 'מיקום אחרון',
+      lastSeen: ({ minutes }: { minutes: number }) => `נראו לפני ${minutes} דק׳`,
+      lastSeenNow: 'נראו ממש עכשיו',
+      lastSeenUnknown: 'הזמן לא ידוע',
+      openMap: 'פתיחה במפה',
+      chat: 'צ׳אט עם הקבוצה',
+      chatEmpty: 'עוד אין הודעות. מה שתכתבו כאן יגיע לטלפונים של הקבוצה.',
+      outcome: ({ label }: { label: string }) => `ענו: ${label}`,
+      outcomeOther: 'תשובה אחרת',
+      dialogLabel: ({ team }: { team: string }) => `הקבוצה ${team}`,
+      close: 'סגירה',
+      statusPlaying: 'במשחק',
+      score: ({ score }: { score: number }) => `${score} נקודות`,
+      rank: ({ rank }: { rank: number }) => `מקום ${rank}`,
+      currentMission: 'המשימה הנוכחית',
+      onItFor: ({ minutes }: { minutes: number }) => (minutes < 1 ? 'התחילו עכשיו' : `עליה כבר ${minutes} דקות`),
+      actions: 'פעולות',
+      people: 'מי בקבוצה',
+      phoneFallback: 'טלפון',
+      sending: 'עונה בשם הקבוצה',
+      media: ({ n }: { n: number }) => `תמונות וסרטונים (${n})`,
+      noMedia: 'הקבוצה עוד לא שלחה תמונות או סרטונים.',
+      mediaAlt: ({ task }: { task: string }) => `מה שהקבוצה שלחה למשימה ${task}`,
+      mediaStatus: { pending: 'מחכה לבדיקה', approved: 'אושר', rejected: 'נדחה' },
+      approve: 'אישור',
+      reject: 'דחייה',
+      undoApproval: 'ביטול האישור',
+      ledger: 'למה הניקוד השתנה',
+      noLedger: 'אין שינויי ניקוד ידניים.',
+      ledgerKind: { adjust: 'עדכון ידני', hint: 'רמז בתשלום', skipAward: 'ניקוד על דילוג', reversal: 'ביטול ניקוד' },
+      by: ({ name }: { name: string }) => `על ידי ${name}`,
+      organizer: 'המארגן',
+      timeline: 'המסלול של הקבוצה',
+      stage: ({ n }: { n: number }) => `שלב ${n}`,
+      noTimeline: 'הקבוצה עוד לא התחילה.',
+      taskStatus: { completed: 'הושלמה', assigned: 'עכשיו', skipped: 'דולגה', unassigned: 'עוד לא', expired: 'נסגרה' },
+      points: ({ n }: { n: number }) => `${n} נקודות`,
+      minutes: ({ n }: { n: number }) => `${n} דקות`,
+      answerRight: 'תשובה נכונה:',
+      answerWrong: 'תשובה שגויה:',
+      callTeam: 'יצירת קשר עם הקבוצה',
+      call: 'חיוג',
+      whatsapp: 'וואטסאפ',
+      noPhoneGiven: 'הקבוצה לא מסרה מספר טלפון בהרשמה.',
+      noPhoneField: 'המשחק לא מבקש מספר טלפון בהרשמה. כדי שתוכלו להתקשר לקבוצות, הוסיפו בבונה שדה הרשמה מסוג טלפון.',
+    },
+    teamSearchCount: ({ shown, total }: { shown: number; total: number }) => `מוצגות ${shown} מתוך ${total} קבוצות`,
+    sectionShortcut: ({ name, key }: { name: string; key: number }) => `${name} (מקש ${key})`,
     groupMechanics: 'הפתעות ושליטה במשחק',
     groupShare: 'קישורים ומסכים',
     groupAfter: 'דוחות וניתוח',
@@ -1235,6 +1465,11 @@ const HE = {
     taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
       `בשלב "${stage}" יישארו ${available} משימות זמינות מתוך ${required} שנדרשות להשלמת השלב, כך שקבוצות שעדיין לא סיימו אותו ייתקעו. להשהות בכל זאת?`,
     taskAvailForce: 'להשהות בכל זאת',
+    // live-task-close-rules: what a closure does, said before it happens.
+    taskAvailCloseConfirm: ({ title }: { title: string }) =>
+      `לסגור את "${title}" לכל שאר הריצה? קבוצה שנמצאת עליה עכשיו תעבור למשימה הבאה בלי נקודות ותקבל הודעה, משימות שחיכו לה ייפתחו, והשלב יתקצר לכל קבוצה כדי שאף אחת לא תיתקע. אם רק צריך הפסקה, עדיף להשהות.`,
+    taskAvailClosedMoved: ({ n }: { n: number }) => (n === 1 ? 'קבוצה אחת הועברה למשימה הבאה' : `${n} קבוצות הועברו למשימה הבאה`),
+    taskAvailPausedLocks: ({ n }: { n: number }) => (n === 1 ? 'משימה אחת שמחכה לה נעולה עד שתחזור' : `${n} משימות שמחכות לה נעולות עד שתחזור`),
 
     // ── משטח השיתוף המאוחד ──
     shareTitle: 'שיתוף ומסכים',
@@ -1272,6 +1507,24 @@ const HE = {
     // Confirmations for actions that used to succeed or fail in total silence
     // (change: creator-no-silent-failures).
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `הניקוד של ${team} עודכן. השינוי שנרשם: ${delta} נקודות.`,
+    // Why a manual adjustment was made (change: live-ops-feedback-loop). The IDS
+    // come from packages/shared/scoreReasons and are language neutral, because the
+    // audit row they are written into may be read back in the other language; only
+    // the wording below is local. scripts/test-score-reasons-shared.ts pins that
+    // every id shared exports has a label here, in both languages.
+    reasonLabel: 'סיבה',
+    adjustScoreReasonPrompt: ({ team, delta }: { team: string; delta: string }) =>
+      `למה ${team} מקבלים ${delta} נקודות? אפשר גם לדלג.`,
+    adjustScoreReasonSkip: 'בלי לציין סיבה',
+    reasonOther: 'סיבה אחרת',
+    reasonOtherPlaceholder: 'כתבו סיבה קצרה',
+    reasonCreativity: 'בונוס יצירתיות',
+    reasonTeamwork: 'עבודת צוות',
+    reasonSpeed: 'בונוס מהירות',
+    reasonHelpfulness: 'עזרה לקבוצה אחרת',
+    reasonLate: 'קנס איחור',
+    reasonRuleBreak: 'הפרת כללים',
+    reasonStaffCall: 'החלטת צוות',
     skipStageAria: ({ team }: { team: string }) => `דילוג על השלב הנוכחי של ${team}`,
     skipTaskAria: ({ team }: { team: string }) => `דילוג על המשימה הנוכחית של ${team}`,
     // ── שחרור קבוצה שנתקעה מחוץ לאזור המשחק ──
@@ -1315,6 +1568,20 @@ const HE = {
       tasksPaused: ({ n }: { n: number }) => `${n} משימות מושהות`,
       nobodyJoined: () => 'עדיין אף אחד לא הצטרף',
       notStarted: ({ n }: { n: number }) => `${n} קבוצות עוד לא יצאו לדרך`,
+      // קבוצה שהצטרפה אחרי שהמשחק כבר התחיל, ועדיין לא משחקת (change: late-joiner-autostart)
+      lateJoinerStranded: ({ n }: { n: number }) => n === 1
+        ? 'קבוצה הצטרפה אחרי שהתחלתם ועדיין מחכה. הפעילו אותה'
+        : `${n} קבוצות הצטרפו אחרי שהתחלתם ועדיין מחכות. הפעילו אותן`,
+      // חברי צוות בלי טלפון משלהם (change: every-member-plays). מידע, לא אזהרה:
+      // לשתף טלפון זו דרך משחק לגיטימית, ולצעוק על זה ילמד את המנחה להתעלם מהרצועה.
+      membersOffline: ({ n }: { n: number }) => n === 1
+        ? 'בקבוצה אחת יש משתתפים בלי טלפון משלהם'
+        : `${n} קבוצות עם משתתפים בלי טלפון משלהם`,
+      // הגעות שהשרת קיבל בלי שהקליטה הוכיחה אותן (change: arrival-needs-a-usable-fix).
+      // מידע, לא אשמה: ברוב המקרים זו חצר בלי שמיים, לא רמאות.
+      arrivalsUnverified: ({ n }: { n: number }) => n === 1
+        ? 'הגעה אחת התקבלה בלי אימות מיקום מדויק'
+        : `${n} הגעות התקבלו בלי אימות מיקום מדויק`,
     },
 
     // ── מה כתוב על כפתור במדור שלא פתוח (change: run-console-clarity) ──
@@ -1334,6 +1601,24 @@ const HE = {
 
     // ── מה הכפתור הזה באמת עושה (change: run-console-clarity) ──
     confirmTitle: 'רגע לפני שממשיכים',
+    // What the CONFIRM BUTTON says (change: confirm-button-says-what-it-does).
+    // confirmTitle is the heading. It used to be passed as the button label, so
+    // every confirmed action showed a button that did not name the action.
+    // One entry per action with confirm: true in runConsoleActions.ts.
+    confirmCta: {
+      closeTask: 'לסגור את המשימה',
+      startTeams: 'כן, התחילו את כולם',
+      publishStandings: 'כן, פרסמו את הדירוג',
+      revealStandings: 'כן, חשפו את הדירוג',
+      deleteZone: 'כן, מחקו את האזור',
+      hideFeedPhoto: 'כן, הסתירו את התמונה',
+      finalizeRun: 'כן, סיימו את הריצה',
+      acknowledgeAlert: 'כן, סמנו כטופל',
+      skipStage: 'כן, דלגו על השלב',
+      skipTask: 'כן, דלגו על המשימה',
+      sendBack: 'כן, להחזיר את הקבוצה',
+      adjustTeamScore: 'כן, עדכנו את הניקוד',
+    },
     consequence: {
       startTeams: 'מפעיל את השעון של כל הקבוצות שהצטרפו, והמשחק מתחיל להן. אי אפשר לעצור את השעון אחורה.',
       publishStandings: 'הופך את הדירוג לגלוי לכל המשתתפים ולכל מי שיש לו את הקישור הפומבי.',
@@ -1344,7 +1629,7 @@ const HE = {
       activateHotZone: 'מכפיל את הניקוד של כל משימה בתוך האזור שבחרתם, לזמן מוגבל.',
       deactivateHotZone: 'מכבה את האזור החם. משימות בתוכו חוזרות לניקוד הרגיל.',
       pauseTask: 'מפסיק לשלוח קבוצות למשימה הזו. קבוצה שכבר נמצאת עליה תוכל לסיים אותה.',
-      closeTask: 'מוציא את המשימה מהמשחק לריצה הזו. קבוצה שכבר נמצאת עליה תוכל לסיים אותה.',
+      closeTask: 'מוציא את המשימה מהמשחק לכל שאר הריצה. קבוצה שנמצאת עליה עכשיו עוברת למשימה הבאה בלי נקודות ומקבלת הודעה, משימות שחיכו לה נפתחות, והשלב מתקצר לכל קבוצה כדי שאף אחת לא תיתקע.',
       resumeTask: 'מחזיר את המשימה למשחק, והמערכת תתחיל לשלוח אליה קבוצות שוב.',
       createZone: 'מוסיף שטח שהקבוצות יכולות לכבוש מעכשיו.',
       deleteZone: 'מוחק את השטח מהמשחק. כיבושים שכבר נרשמו נשארים.',
@@ -1355,6 +1640,7 @@ const HE = {
       clearTeamOutOfBounds: 'מחזיר לקבוצה את היכולת לקבל משימות, גם אם המיקום שלה עדיין לא מדויק.',
       skipStage: 'מדלג על כל השלב הנוכחי של הקבוצה. שאר המשימות בשלב הזה נסגרות לה.',
       skipTask: 'מדלג על המשימה הנוכחית של הקבוצה. היא נשארת בשלב וממשיכה לשאר המשימות בו.',
+      sendBack: 'מחזיר את הקבוצה למשימה או לשלב שבחרתם. הנקודות של מה שנפתח מחדש יורדות, והיא תרוויח אותן שוב כשתשלים.',
       adjustTeamScore: 'רושם שינוי ניקוד ידני לקבוצה. השינוי נשמר ביומן הפעולות.',
       approvePhoto: 'מזכה את הקבוצה בנקודות ומשחרר אותה להמשך.',
       rejectPhoto: 'מחזיר את ההגשה לקבוצה בלי נקודות.',
@@ -1504,10 +1790,127 @@ const HE = {
     tipBillingTitle: 'סוג הריצה',
     tipBillingBody: 'חינמית: אחת מהריצות שקיבלתם במתנה. פרו: כלולה במנוי שלכם. קרדיט: שולמה בקרדיט אירוע אחד. בדיקה: ריצת חזרה שלא נספרת.',
   },
+  // ── שיתוף משחק (change: game-share-link) ──
+  share: {
+    title: 'שיתוף המשחק',
+    subtitle: 'קישור לצפייה במשחק. מי שמקבל אותו רואה את כל השלבים והמשימות, בלי שהמשחק מתפרסם בגלריה.',
+    menuLabel: 'שיתוף',
+    createCta: 'יצירת קישור',
+    creating: 'יוצר…',
+    listTitle: 'הקישורים שיצרתם',
+    empty: 'עדיין לא יצרתם קישור למשחק הזה.',
+    allowCopy: 'לאפשר יצירת עותק',
+    allowCopyHelp: 'מי שפותח את הקישור יוכל להעתיק את המשחק לחשבון שלו.',
+    allowLaunch: 'לאפשר הפעלת משחק',
+    allowLaunchHelp: 'מי שפותח את הקישור יוכל להתחיל ריצה של המשחק הזה. הריצה נרשמת בחשבון שלכם, והוא מקבל גישת צוות כדי לנהל אותה.',
+    stateLaunchOn: 'מותר להפעיל',
+    stateAllowCopy: 'מותר להעתיק',
+    revealAnswers: 'להציג גם תשובות',
+    revealAnswersHelp: 'תשובות, רמזים וקודים יופיעו על המסך. עותק שנוצר מהקישור כולל אותם בכל מקרה.',
+    expiry: 'תוקף הקישור',
+    expiryNever: 'ללא הגבלה',
+    expiryDays: ({ n }: { n: number }) => `${n} ימים`,
+    expiresOn: ({ date }: { date: string }) => `בתוקף עד ${date}`,
+    copyLink: 'העתקת הקישור',
+    copied: 'הועתק',
+    showQr: 'קוד QR',
+    hideQr: 'סגירת הקוד',
+    revoke: 'ביטול',
+    revoking: 'מבטל…',
+    confirmRevokeTitle: 'לבטל את הקישור?',
+    confirmRevokeBody: 'מי שכבר קיבל את הקישור לא יוכל לפתוח אותו יותר. אפשר תמיד ליצור קישור חדש.',
+    stateRevoked: 'בוטל',
+    stateExpired: 'פג תוקף',
+    stateActive: 'פעיל',
+    stateCopyOff: 'צפייה בלבד',
+    stateAnswers: 'מציג תשובות',
+    stats: ({ views, copies }: { views: number; copies: number }) => `${views} צפיות · ${copies} עותקים`,
+    limitReached: 'יש כבר הרבה קישורים פעילים למשחק הזה. בטלו אחד כדי ליצור חדש.',
+    error: 'הפעולה נכשלה. נסו שוב.',
+    close: 'סגירה',
+    shareText: ({ title }: { title: string }) => `הצצה למשחק "${title}" ברשפוינט`,
+  },
+  sharedGame: {
+    loading: [
+      'פותחים את המשחק',
+      'טוענים את השלבים',
+      'מסדרים את המשימות על המפה',
+    ],
+    readOnly: 'תצוגה בלבד',
+    readOnlyHelp: 'זו תצוגה של המשחק כפי שהיוצר בנה אותו. שום דבר כאן לא ניתן לעריכה.',
+    answersShown: 'הקישור הזה מציג גם תשובות, רמזים וקודים.',
+    notFoundTitle: 'הקישור לא פעיל',
+    notFound: 'הקישור הזה לא קיים או שהוסר. בקשו מהיוצר קישור חדש.',
+    revoked: 'היוצר ביטל את הקישור הזה.',
+    expired: 'פג התוקף של הקישור הזה.',
+    launchCta: 'הפעלת המשחק',
+    launching: 'מפעיל…',
+    launchError: 'ההפעלה נכשלה. נסו שוב.',
+    launchDisabled: 'היוצר לא אפשר להפעיל את המשחק מהקישור הזה.',
+    launchLimit: 'הקישור הזה כבר הפעיל את מספר הריצות המרבי. בקשו מהיוצר קישור חדש.',
+    signInToLaunch: 'התחברו כדי להפעיל',
+    launchedToast: 'המשחק הושק. זה לוח הבקרה שלכם.',
+    launchLockedCopy: 'המשחק הזה הושק מקישור ששותף אתכם. אפשר להפעיל אותו מלוח הבקרה, אבל לא לערוך, להעתיק או לשתף אותו.',
+    launchLockedToRuns: 'למשחקים הפעילים',
+    copyCta: 'יצירת עותק אצלי',
+    copying: 'מעתיק…',
+    copyDone: 'העותק נוצר. פותחים אותו…',
+    copyError: 'ההעתקה נכשלה. נסו שוב.',
+    copyDisabled: 'היוצר לא אפשר להעתיק את המשחק הזה.',
+    signInToCopy: 'התחברו כדי ליצור עותק',
+    signInHint: 'צפייה לא דורשת חשבון. עותק כן, והוא נשמר בחשבון שלכם.',
+    overview: 'סקירה',
+    route: 'המסלול',
+    stagesLabel: ({ n }: { n: number }) => `${n} שלבים`,
+    missionsLabel: ({ n }: { n: number }) => `${n} משימות`,
+    stage: ({ n }: { n: number }) => `שלב ${n}`,
+    finalStage: 'שלב אחרון',
+    requiredTaskCount: ({ n }: { n: number }) => `צריך להשלים ${n} מהמשימות בשלב`,
+    noMissions: 'אין משימות בשלב הזה.',
+    notSet: 'לא הוגדר',
+    fieldType: 'סוג',
+    // שמות סוגי המשימות — אף פעם לא מציגים לאדם את שם ה-enum עצמו.
+    types: {
+      field: 'הגעה לנקודה בשטח',
+      self_report: 'דיווח עצמי',
+      smart_station: 'תחנה עם קוד',
+      photo: 'צילום',
+      quiz: 'שאלה',
+      numeric: 'תשובה מספרית',
+      geofence: 'הגעה אוטומטית',
+      sequence: 'רצף שלבים',
+      survey: 'סקר',
+      other: 'משימה',
+    },
+    fieldPoints: 'נקודות',
+    fieldDifficulty: 'רמת קושי',
+    fieldMinutes: 'זמן משוער',
+    minutes: ({ n }: { n: number }) => `${n} דק׳`,
+    fieldClue: 'רמז המיקום',
+    fieldHint: 'רמז בתשלום',
+    hintCost: ({ n }: { n: number }) => `עולה ${n} נקודות`,
+    hintHidden: 'יש רמז בתשלום (הטקסט מוסתר)',
+    fieldAnswer: 'תשובה',
+    fieldCode: 'קוד התחנה',
+    fieldChoices: 'אפשרויות',
+    fieldSteps: 'שלבי המשימה',
+    fieldMedia: 'מדיה',
+    locationless: 'ללא מיקום',
+    hiddenLocation: 'מיקום מוסתר מהשחקנים',
+    noLocation: 'לא הוגדר מיקום',
+    poweredBy: 'נבנה ברשפוינט',
+    createOwn: 'בנו משחק משלכם',
+  },
   builder: {
     backToGames: 'המשחקים',
     saved: 'נשמר',
     saving: 'שומר…',
+    // שמירה שלא נוחתת (change: save-tells-the-truth). ה־SDK מחכה 70 שניות לפני
+    // שהוא נכשל, אז "שומר…" סימן גם "בתהליך" וגם "תקוע דקה". אלה המילים
+    // שמבדילות ביניהם, והן מופיעות תוך שניות במקום אחרי דקה.
+    saveSlow:    'עדיין שומר…',
+    saveStalled: 'השמירה נתקעה. בדקו את החיבור',
+    saveOffline: 'אין חיבור. השמירה תמשיך לנסות',
     unsaved: 'לא נשמר',
     undo: 'בטל',
     redo: 'בצע מחדש',
@@ -1561,7 +1964,27 @@ const HE = {
     fromLibrary: 'מהספרייה',
     newTask: 'משימה חדשה',
     closePanel: 'סגירה',
+    // The guided mission editor's header — WHAT is being set up, before the one
+    // control the step asks for (change: quick-setup-guided-editor).
+    guidedGroupAria: 'המשימה שאנחנו מגדירים עכשיו',
+    guidedTypeLabel: 'סוג המשימה',
+    // The only door out of guided editing from inside the mission editor
+    // (change: builder-mission-editor-route).
+    guidedEditEverything: 'עריכת כל השדות',
     untitledTask: 'משימה ללא שם',
+    // תפריט הפעולות של כרטיס המשימה בקנבס (change: mission-card-actions).
+    taskActionsMenu: 'פעולות על המשימה',
+    duplicateTask: 'שכפול המשימה',
+    // החלפת המשימה במשימה אחרת מבנק המשימות, הכי דומה לזו שיש (change: mission-regenerate).
+    // לחיצה חוזרת מתרחקת בכוונה, ולכן הכיתוב הוא פעולה חוזרת ולא פעולה חד פעמית.
+    regenerateTask: 'החלפה במשימה דומה',
+    regenerateNothingLeft: 'אין כרגע משימה נוספת שמתאימה למשחק הזה. אפשר לערוך את המשימה ידנית.',
+    duplicatedTaskTitle: (title: string) => `${title} (עותק)`,
+    hideTask: 'הוצאה מהמשחק',
+    hideTaskHelp: 'המשימה נשמרת כאן, ולא תופיע באף ריצה עד שתחזירו אותה.',
+    unhideTask: 'החזרה למשחק',
+    unhideTaskHelp: 'המשימה תשתתף שוב בריצות הבאות.',
+    taskHiddenBadge: 'מחוץ למשחק',
     stageTitlePlaceholder: 'שם השלב',
     finalLabel: 'אחרון',
     stageSettings: 'הגדרות שלב',
@@ -1629,6 +2052,12 @@ const HE = {
     expiryAfterUnit: 'דקות אחרי תחילת המשחק (ריק = ללא הגבלה)',
     expiryWindowError: 'המשימה נסגרת לפני שהיא בכלל נפתחת. הגדילו את זמן הסגירה',
     expiryReleaseAtWarn: (when: string) => `המשימה נפתחת בתאריך ${when}`,
+    // mission-time-limit
+    windowOpensAt: 'נפתחת ב',
+    windowClosesAt: 'נסגרת ב',
+    timeLimitLead: 'זמן לכל קבוצה',
+    timeLimitUnit: 'דקות מהרגע שהקבוצה מקבלת את המשימה (ריק = ללא הגבלה)',
+    timeLimitHelp: 'כשהזמן נגמר, הקבוצה עוברת למשימה הבאה בלי נקודות ומקבלת הודעה. תשובה או תמונה שנשלחו בזמן נחשבות גם אם אושרו אחר כך.',
     stepLocation: 'מיקום',
     stepDetails: 'תיאור וסוג',
     stepInteraction: 'אופן ביצוע',
@@ -1659,6 +2088,7 @@ const HE = {
     issueStageHasNoTask: 'שלב בלי משימות',
     issueTaskNotCompletable: 'למשימה חסרה תשובה או קוד',
     issueTaskNotPlaced: 'למשימה אין נקודה על המפה',
+    issueTaskNotNamed: 'למשימה אין שם',
     issueStageUnwinnable: 'השלב דורש להשלים יותר משימות ממה שאפשר',
     launchBlockedSeeReadiness: 'יש דברים לתקן לפני ההשקה. פתחו את לוח המוכנות בראש המסך כדי לראות את כולם.',
     testDriveNotReadyBody: (n: number) => n === 1
@@ -1671,6 +2101,13 @@ const HE = {
     done: 'סיום',
     interactionIncomplete: 'חסר פרט חובה (תשובה, קוד סודי או שלבים). בלעדיו המשתתפים לא יוכלו להשלים את המשימה.',
     deleteTask: 'מחק משימה',
+    // Deleting a mission is as final as deleting a stage and was the ONLY
+    // destructive control in the Builder that fired without asking — a bare red
+    // link sitting between "back" and "next" in the mission editor's footer
+    // (change: builder-mobile-simplification). Same posture as deleteStage now.
+    deleteTaskConfirm: (title: string) =>
+      `למחוק את המשימה "${title}"? אי אפשר לשחזר.`,
+    taskMoreMenuAria: 'עוד פעולות למשימה',
     removeItem: 'הסר',
     // Folds an optional section back to a chip WITHOUT clearing it (change:
     // builder-nondestructive-disclosure). Must not say "הסר" — it removes nothing.
@@ -1692,9 +2129,12 @@ const HE = {
     locSpecificDesc: 'השחקנים צריכים להגיע לנקודה שסימנתם על המפה.',
     locAdvanced: 'אפשרויות מתקדמות למיקום',
     locAdvancedShort: 'אפשרויות מתקדמות',
+    locAdvancedHint: 'מרחק ההפעלה, דילוג על GPS, והסתרת המיקום',
     locRadiusLabel: 'מרחק ההפעלה',
     locRadiusHelp: 'מאיזה מרחק מהנקודה המשימה נפתחת. ברירת המחדל (40מ׳) מתאימה כמעט תמיד.',
-    locRadiusPresetTight: 'מדויק (4מ׳)',
+    // מה ייאכף בפועל כשהרדיוס קטן ממה שהטלפון יכול להוכיח (change: arrival-needs-a-usable-fix).
+    locRadiusFloorNote: ({ m }: { m: number }) => `טלפון לא יכול לדעת איפה הוא בדיוק כזה, ולכן במשחק המשימה תיפתח ברדיוס ${m} מטר. אחרת אף אחד לא היה מצליח לפתוח אותה.`,
+    locRadiusPresetTight: ({ m }: { m: number }) => `הכי מדויק (${m}מ׳)`,
     locRadiusPresetDefault: 'רגיל (40מ׳)',
     locSkipGps: 'ללא בדיקת GPS',
     locSkipGpsDesc: 'המשימה נפתחת בלי לוודא שהשחקנים באמת הגיעו. הסיכה נשארת על המפה והמרחק עדיין נספר. מתאים למקומות סגורים שבהם הקליטה חלשה.',
@@ -1754,6 +2194,11 @@ const HE = {
     mediaField: 'תמונות וסרטונים (אופציונלי)',
     mediaUpload: 'העלה קובץ מהמחשב',
     mediaUploadError: 'ההעלאה נכשלה, נסו שוב',
+    // גרירה של תמונה (change: drop-media-onto-the-editor). הרמז מזכיר גם קובץ
+    // מהמחשב וגם תמונה מלשונית אחרת, כי אלה שני מסלולים שונים לגמרי מתחת לפני השטח.
+    mediaDropHint: 'או גררו לכאן קובץ, או תמונה מלשונית אחרת',
+    // האתר שממנו נגררה התמונה הוא זה שחוסם, לא אנחנו — ולכן המשפט אומר מה כן עובד.
+    mediaDropBlocked: 'האתר שממנו גררתם לא מרשה לשלוף את התמונה. שמרו אותה ואז גררו את הקובץ, או השתמשו בהעלאה.',
     mediaYouTubePlaceholder: 'הדביקו קישור YouTube',
     mediaAddYouTube: 'הוסף',
     mediaYouTubeError: 'קישור YouTube לא תקין',
@@ -1769,6 +2214,32 @@ const HE = {
     secretCode: 'קוד סודי (המשתתפים מקלידים אותו)',
     secretCodePlaceholder: 'לדוגמה: 4821',
     autoApprove: 'אישור אוטומטי (ללא בדיקת צוות)',
+    selfieCamera: 'משימת סלפי (המצלמה נפתחת על הצד הקדמי)',
+    // answer-scored-question: several codes / points by answer.
+    outcomes: {
+      severalCodes: 'כמה קודים, לכל קוד ניקוד משלו',
+      pointsByAnswer: 'ניקוד לפי תשובה',
+      codesHelp: 'איש הצוות בעמדה מחליט איזה קוד לתת. כל קוד מזכה בניקוד שלו, למשל זעתר 50 ומרווה 100.',
+      answersHelp: 'כל תשובה היא כפתור שהשחקנים לוחצים עליו, ולכל אחת ניקוד משלה.',
+      codePlaceholder: 'קוד',
+      answerPlaceholder: 'תשובה',
+      pointsLabel: 'ניקוד',
+      pointsSuffix: 'נקודות',
+      remove: 'הסרה',
+      addCode: 'הוספת קוד',
+      addAnswer: 'הוספת תשובה',
+      presetNote: 'הניקוד כאן מחליף את הניקוד של המשימה. במשחק שמדורג רק לפי זמן אין נקודות, אז הניקוד חייב להיות 0.',
+      revealPoints: 'להציג לשחקנים כמה נקודות שווה כל תשובה',
+      problem: {
+        count: 'צריך בין 2 לעשר שורות.',
+        points: 'הניקוד חייב להיות מספר שלם, 0 או יותר.',
+        overlap: 'אותו טקסט מופיע פעמיים. כל קוד או תשובה צריכים להופיע רק פעם אחת.',
+        empty: 'יש שורה ריקה. מלאו אותה או הסירו אותה.',
+        exclusive: 'אי אפשר לשלב עם קוד או תשובה נכונה יחידה.',
+        type: 'סוג המשימה הזה לא תומך בניקוד לפי תשובה.',
+        timeOnly: 'במשחק שמדורג רק לפי זמן אין נקודות, אז הניקוד חייב להיות 0.',
+      },
+    },
     autoApproveHint: 'בלי אישור אוטומטי, כל הגשה ממתינה לאישור שלכם במהלך המשחק, והקבוצה עומדת במקום עד שתאשרו. עם 15 קבוצות זה הרבה בדיקות תוך כדי ריצה.',
     captureKindLabel: 'סוג ההגשה',
     captureKindPhoto: 'תמונה',
@@ -1903,6 +2374,20 @@ const HE = {
     photoFeedResponsibility: 'כמארגני האירוע אתם אחראים לתוכן שהמשתתפים שלכם מעלים. כל משתתף יכול לדווח על תמונה, תמונה שדווחה מוסרת עד לבדיקה, ואתם והצוות שלכם יכולים להסתיר או להחזיר כל תמונה מלוח הבקרה של ההרצה. פירוט מלא בתנאי השימוש.',
     powerUpsLabel: 'כוחות מיוחדים',
     powerUpsHint: 'סיכוי של בערך 25% בכל משימה שהושלמה לזכות בכוח מיוחד: פי 2 נקודות במשימה הבאה או 15 נקודות בונוס.',
+    // קבוצה שמצטרפת אחרי שהמשחק כבר התחיל (change: late-joiner-autostart)
+    autoStartLateJoinersLabel: 'התחלה אוטומטית לקבוצה שמצטרפת באיחור',
+    autoStartLateJoinersHint: 'קבוצה שנכנסת אחרי שלחצתם להתחיל תקבל משימה מיד, בלי לחכות לכם. כבוי כברירת מחדל. גם כשזה כבוי, הקונסולה תמיד תציג קבוצה שנתקעה. במשחק שדורש אישור הורה, האישור נדרש קודם.',
+    autoApproveAllMediaLabel: 'אישור אוטומטי לכל התמונות והסרטונים',
+    autoApproveAllMediaHint: 'כל הגשת מדיה בריצה תאושר מיד, בלי שתצטרכו לאשר אחת אחת. ההגדרה נתפסת ברגע ההשקה, ולכן היא תחול על הריצה הבאה ולא על ריצה שכבר רצה.',
+    // change: staff-capabilities
+    staffDefaultsTitle: 'מה צוות הריצה יכול לעשות',
+    staffDefaultsHint: 'ברירת המחדל לכל קוד צוות חדש. אפשר לשנות אותה לכל קוד בנפרד במסך הריצה, גם באמצע המשחק.',
+    // כולם מהטלפון שלהם (change: every-member-plays)
+    requireAllMembersOnlineLabel: 'כל חברי הקבוצה מהטלפון שלהם',
+    requireAllMembersOnlineHint: 'קבוצה תתחיל לשחק רק כשכל מי שנרשם בה מחובר מהטלפון שלו. עובד רק אם המשחק אוסף את שמות חברי הקבוצה בהרשמה, אחרת אין לנו מספר להשוות אליו ואף קבוצה לא תיעצר.',
+    // כמה חברי צוות חייבים לעשות חלק במשימה (change: every-member-plays)
+    requiredContributorsLabel: 'כמה חייבים לעשות חלק',
+    requiredContributorsHelp: 'המשימה תיסגר רק אחרי שכל כך הרבה מכשירים שונים לחצו "עשיתי את החלק שלי". השרת מקטין את המספר למספר המכשירים שבאמת מחוברים לקבוצה, אז משימה שדורשת ארבעה לא תיתקע קבוצה של שניים. ריק או 0 הוא ללא דרישה.',
     manualRevealLabel: 'חשיפה ידנית של טבלת הדירוג',
     manualRevealHint: 'בסיום המשחק הדירוג יישאר מוסתר מהמשתתפים עד שתחשפו אותו מלוח הבקרה של ההרצה.',
     testModeLabel: 'מצב מבחן',
@@ -1997,6 +2482,9 @@ const HE = {
     ],
     taskNotCompletable: (title: string) => `למשימה "${title}" חסרה תשובה או קוד, ולכן אי אפשר להשלים אותה. השלימו אותה לפני ההשקה.`,
     taskNeedsLocation: (title: string) => `למשימה "${title}" לא נקבע מיקום על המפה. סמנו נקודה, או הפכו אותה למשימה ללא מיקום, לפני ההשקה.`,
+    // readiness-requires-a-name: ה-Builder כבר לא מרשה להתקדם בעורך בלי שם, אז גם
+    // המוכנות דורשת אותו. השחקן רואה את הכותרת כמו שהיא, ושם ריק זה משימה בלי כותרת.
+    taskNeedsName: 'למשימה אחת עדיין אין שם. תנו לה שם לפני ההשקה, אחרת השחקנים יקבלו משימה בלי כותרת.',
     stageUnwinnable: (title: string) => `השלב "${title}" דורש להשלים יותר משימות ממה שאפשר להשלים בו. תקנו את מספר המשימות הנדרש לפני ההשקה.`,
     saveFailed: 'שמירת המשחק נכשלה. בדקו את החיבור ונסו שוב.',
     // The failed-save banner + its indicator word (change: creator-no-silent-failures).
@@ -2086,12 +2574,20 @@ const HE = {
 
     // ── כרטיס מעבר: מוצג לפני שנוגעים בשדה, לא בתוכו ──
     introEyebrow: (n: number, total: number) => `תחנה ${n} מתוך ${total}`,
-    introCta: 'הבנתי, קדימה',
-    introTaskLabel: (task: string) => `המשימה: ${task}`,
-    introGameLabel: 'הגדרות המשחק',
+    // מה שכתב מחבר התבנית — ציטוט, ולכן מסומן ככזה. בלי התווית הוא נקרא כאילו
+    // המוצר עצמו כתב פסקה חצי-אנגלית מתחת לכותרת העברית (change: quick-setup-one-card).
+    templateNote: 'מהתבנית:',
+    // ההערה של מחבר התבנית מקופלת כברירת מחדל (change: quick-setup-card-height).
+    // הכפתור אומר מה מסתתר מאחוריו, לא ״עוד״, כדי שאפשר יהיה להחליט בלי לפתוח.
+    templateNoteShow: 'הצגת ההערה מהתבנית',
+    templateNoteHide: 'הסתרת ההערה מהתבנית',
+    back: 'הקודם',
+    // Ends in its own full stop: this line now OPENS the instruction sentence
+    // rather than heading a card, so the punctuation that joins it to what
+    // follows belongs here, with the rest of the copy (change: quick-setup-one-card).
+    introTaskLabel: (task: string) => `המשימה: ${task}.`,
+    introGameLabel: 'הגדרות המשחק.',
     // רדיפה חופשית (fallback) לכרטיס מעבר על שדה שאין לו כותרת ייעודית.
-    introFallback: (task: string) => `בואו נשלים פרט קטן במשימה "${task}".`,
-    introGameFallback: 'בואו נשלים פרט קטן בהגדרות המשחק.',
 
     // ── שורה ראשונה לכל שדה: קצרה, שיחתית, לא ההוראה הגולמית של התבנית ──
     copy: {
@@ -2134,8 +2630,12 @@ const HE = {
   tour: {
     dialogLabel: 'סיור מודרך',
     helpLabel: 'פתיחת הסיור המודרך',
+    deferred: 'הסיור יתחיל ברגע שתסיימו את מה שפתוח כרגע.',
     next: 'הבא',
     back: 'הקודם',
+    // מוצג במקום 'הבא' כששלב ממתין לפעולה: הוא מדלג על כל הרצף החסום בבת אחת,
+    // במקום להעביר את היוצר בשבעה כרטיסים שחוזרים על אותה בקשה עצמה.
+    skipAhead: 'המשיכו בלי זה',
     skip: 'דילוג על הסיור',
     finish: 'סיימתי',
     restart: 'הפעלת הסיור מחדש',
@@ -2250,6 +2750,46 @@ const HE = {
     langTag:          (lang: string) => `שפת ההודעה: ${lang}`,
     countLabel:       (n: number) => `${n} הודעות`,
   },
+  adminLive: {
+    title:            'מועמדויות למירוץ RushPoint Live',
+    subtitle:         'קבוצות שנרשמו מאתר השיווק. כל רשומה כוללת טלפון, אזור מגורים, טווח גילאים ותמונה קבוצתית.',
+    deniedTitle:      'הדף הזה מוגבל למנהלי הפלטפורמה',
+    deniedBody:       'לחשבון שלך אין הרשאת מנהל.',
+    loading: [
+      'טוענים את המועמדויות',
+    ],
+    loadFailed:       'טעינת המועמדויות נכשלה',
+    refreshBtn:       'רענון',
+    empty:            'עדיין לא הגיעו מועמדויות',
+    emptyHint:        'קבוצה שתשלח את הטופס באתר תופיע כאן.',
+    colReceived:      'התקבלה',
+    colSize:          'גודל הקבוצה',
+    colSectors:       'מגזר',
+    colLocation:      'מאיפה',
+    colAges:          'גילאים',
+    colMet:           'איך מכירים',
+    colMotivation:    'למה הם',
+    colCamera:        'מול מצלמה',
+    colPhone:         'טלפון',
+    callBtn:          'חיוג',
+    whatsappBtn:      'וואטסאפ',
+    showPhotoBtn:     'הצגת התמונה הקבוצתית',
+    noPhoto:          'הקבוצה לא צירפה תמונה',
+    photoLoading:     'טוענים את התמונה',
+    photoFailed:      'טעינת התמונה נכשלה',
+    photoNotice:      'פתיחת תמונה נרשמת ביומן הביקורת.',
+    photoAlt:         'תמונה קבוצתית של המועמדים',
+    signedInTag:      'מחובר לחשבון',
+    membersLabel:     (n: number) => `${n} חברים`,
+    cameraLabel:      (n: number) => `${n} מתוך 5`,
+    sectorLabel:      (value: string) => ({
+      religious: 'דתי',
+      secular:   'חילוני',
+      mixed:     'מעורב',
+      other:     'אחר',
+    }[value] ?? value),
+    countLabel:       (n: number) => `${n} מועמדויות`,
+  },
   adminUsers: {
     title:            'משתמשי הפלטפורמה',
     subtitle:         'רשימת כל היוצרים: כמה משחקים יצרו, אילו ריצות הפעילו, ומתי היו פעילים לאחרונה.',
@@ -2330,6 +2870,13 @@ const HE = {
   adminTemplates: {
     title:            'תבניות משחק',
     subtitle:         'תבניות שמוצגות לכל יוצר במסך "משחק חדש". כל תבנית היא משחק רגיל, עורכים אותה בבילדר בדיוק כמו כל משחק אחר.',
+    // Phrased for what it does to CREATORS, not to the document
+    // (change: template-visibility, design D7). The destructive neighbour on
+    // this page is delete, so these must not read alike.
+    hiddenBadge:      'לא מוצגת ליוצרים',
+    hideCta:          'הסתרה מיוצרים',
+    unhideCta:        'הצגה ליוצרים',
+    hideFailed:       'לא הצלחנו לשנות את מצב התצוגה. נסו שוב.',
     deniedTitle:      'הדף הזה מוגבל למנהלי הפלטפורמה',
     deniedBody:       'לחשבון שלך אין הרשאת מנהל.',
     loading: [
@@ -2366,6 +2913,71 @@ const HE = {
     deleteConfirmBody: (title: string) => `למחוק את התבנית "${title}"? היא תוסר מהבורר של כל היוצרים.`,
     deleteConfirmCta: 'מחיקת התבנית',
     toUsersLink:      'משתמשי הפלטפורמה ←',
+    toMissionBankLink: 'בנק המשימות ←',
+  },
+  // Admin editing of the smart-build mission bank (change: admin-editable-mission-bank).
+  adminMissionBank: {
+    title:            'בנק המשימות',
+    subtitle:         'המשימות ש"תרכיבו לי משחק" בוחר מתוכן. עריכה או מחיקה כאן משנה את מה שכל היוצרים בפלטפורמה מקבלים.',
+    deniedTitle:      'הדף הזה מוגבל למנהלי הפלטפורמה',
+    deniedBody:       'לחשבון שלך אין הרשאת מנהל.',
+    loading: [
+      'טוענים את בנק המשימות',
+    ],
+    loadFailed:       'טעינת בנק המשימות נכשלה',
+    backToTemplates:  'תבניות משחק ←',
+    countLabel:       (shown: number, total: number) => `${shown} מתוך ${total} משימות`,
+    searchPlaceholder: 'חיפוש לפי שם, מזהה או תגית',
+    filterAll:        'הכול',
+    filterEdited:     'נערכו',
+    filterDeleted:    'נמחקו',
+    filterUnreviewed: 'לא נבדק מלל',
+    filterUnverified: 'לא אומת',
+    sortLabel:        'מיון',
+    sortBank:         'סדר הבנק',
+    sortUnreviewedFirst: 'לא נבדקו קודם',
+    sortUnverifiedFirst: 'לא אומתו קודם',
+    progressLabel:    (reviewed: number, verified: number, total: number) =>
+      `${reviewed}/${total} נבדקו · ${verified}/${total} אומתו`,
+    reviewedCopyLabel: 'עברתי על המלל',
+    reviewedCopyHint:  'קראתי את השם ואת ההוראות לשחקנים.',
+    verifiedSetupLabel: 'מאומתת',
+    verifiedSetupHint:  'הרצתי את המשימה במלואה, כולל הוראות ההקמה ליוצר.',
+    editedBadge:      'נערכה',
+    deletedBadge:     'נמחקה',
+    emptyTitle:       'אין משימות שמתאימות לחיפוש',
+    emptyBody:        'נסו מילה אחרת, או נקו את הסינון.',
+    editBtn:          'עריכה',
+    deleteBtn:        'מחיקה',
+    restoreBtn:       'החזרה לבנק',
+    resetBtn:         'איפוס למקור',
+    resetHint:        'מחזיר את המשימה לתוכן שנכתב בקוד.',
+    saveBtn:          'שמירה',
+    cancelBtn:        'ביטול',
+    saving:           'שומר',
+    saveFailed:       'השמירה נכשלה',
+    titleLabel:       'שם המשימה',
+    descriptionLabel: 'הוראות לשחקנים',
+    tagsLabel:        'תגיות',
+    tagsHint:         'התגיות קובעות למי ולאיפה המשימה מתאימה. אי אפשר להשאיר משימה בלי אף תגית.',
+    difficultyLabel:  'קושי (1 עד 10)',
+    difficultyShort:  'קושי',
+    bandDerived:      (band: string) => `רמה: ${band} (נגזרת מהמספר)`,
+    minAgeLabel:      'גיל מינימלי',
+    minAgeNone:       'ללא',
+    transitLabel:     'דקות הליכה למשימה',
+    transitNone:      'ללא',
+    keyLabel:         'מזהה',
+    familyLabel:      'משפחה',
+    // Creating a brand-new mission needs a build() factory (task type,
+    // verification, capacity, setup steps) — authoring, not editing.
+    noCreateHint:     'הוספת משימה חדשה עדיין נעשית בקוד. כאן אפשר לערוך ולמחוק.',
+    deleteConfirmBody: (title: string) => `להוציא את "${title}" מבנק המשימות? היא לא תוצע יותר לאף יוצר. אפשר להחזיר אותה בכל רגע.`,
+    deleteConfirmCta: 'הוצאה מהבנק',
+    // The merge refuses a deletion that would leave the composer without an
+    // opening or a closing mission (lib/missionBankOverlay.ts).
+    refusedDeletion:  'אי אפשר למחוק את המשימה הזאת: היא המשימה האחרונה שפותחת או סוגרת משחק, ובלעדיה המרכיב לא יוכל לבנות משחק בכלל.',
+    restoredBookend:  'תגית הפתיחה או הסיום הוחזרה למשימה הזאת: היא האחרונה שנשארה, ובלי אף אחת כזאת המרכיב לא יוכל לבנות משחק.',
   },
 };
 
@@ -2380,6 +2992,7 @@ const EN: typeof HE = {
     settings: 'Settings',
     admin:    'Platform users',
     adminTemplates: 'Game templates',
+    adminMissionBank: 'Mission bank',
   },
   liveRuns: {
     title: 'Live Runs',
@@ -2442,6 +3055,7 @@ const EN: typeof HE = {
     offline:     'No connection to the server right now. Nothing was lost: your work is still here on screen. Try again once you are back online.',
     notAllowed:  'Your session has expired, or your account is not allowed to do this. Sign in again and retry.',
     rateLimited: 'Too many actions in a short time. Wait a few seconds and try again.',
+    dailyCapacity: 'We are improving the app today. Your games are safe and nothing was lost, just come back tomorrow and everything will work as usual.',
     rejected:    'The server turned this action down. Check the details, something in them is not valid right now.',
     generic:     'That did not go through, and nothing was changed. Try again, and if it keeps happening reload the page.',
   },
@@ -2520,6 +3134,21 @@ const EN: typeof HE = {
     validationPwdMatch: 'Passwords do not match.',
     agreeToTermsLead: 'By creating an account you agree to the ',
     agreeToTermsBetween: ' and ',
+    // Friendly auth-error popups (change: friendly-auth-errors).
+    errors: {
+      noMatchTitle: "We couldn't find an account with those details. Maybe you haven't signed up yet? You can create a free account now.",
+      createAccountCta: 'Create a free account',
+      emailInUse: 'An account with this email already exists. You can sign in instead.',
+      goToSignInCta: 'Go to sign in',
+      invalidEmail: 'That email address looks invalid. Check it and try again.',
+      weakPassword: 'That password is too weak. Pick one with at least 8 characters.',
+      tooManyRequests: 'Too many attempts. Wait a few minutes and try again, or reset your password.',
+      network: "You're offline right now. Check your connection and try again.",
+      userDisabled: 'This account is disabled. Contact support to turn it back on.',
+      methodDisabled: 'Signing in with an email and password is switched off right now. Use the "Continue with Google" button above.',
+      config: 'Our login service is having a temporary problem. Try again in a moment; if it keeps happening, contact support.',
+      unknown: 'Sign in failed. Please try again in a moment.',
+    },
   },
   // ── Run history + the per-player report (change: post-run-player-report) ──
   runHistory: {
@@ -2593,6 +3222,9 @@ const EN: typeof HE = {
     question: 'Question',
     expected: 'Correct answer',
     theirAnswer: 'What they answered',
+    outcome: 'Answer given',
+    outcomeOther: 'Another answer',
+    outcomeChip: ({ label }: { label: string }) => `Answered: ${label}`,
     attempts: ({ n }: { n: number }) => `${n} attempts`,
     points: ({ n }: { n: number }) => `${n} pts`,
     minutes: ({ n }: { n: number }) => `${n} min`,
@@ -2662,6 +3294,11 @@ const EN: typeof HE = {
     emptyBody:  'Design stages, drop in geolocated missions, and launch a live game for your group.',
     untitledGame: 'Untitled game',
     loadGamesFailed: 'Failed to load games',
+    // A failed load is not an empty account (change:
+    // failed-load-is-not-an-empty-account). The copy says outright that nothing
+    // was lost, because that is exactly what the previous screen implied.
+    loadFailedBody: 'Your games are still there. We could not fetch them just now. Try again in a moment.',
+    loadFailedRetry: 'Try again',
     loading: [
       'Warming up your field games',
       'Gathering your latest adventures',
@@ -2736,7 +3373,6 @@ const EN: typeof HE = {
     cardTestRunHint: 'Free rehearsal, up to 2 players, not counted in your stats',
     cardPublish:   'Publish',
     cardUnpublish: 'Unpublish',
-    cardShare:     'Share',
     cardHistory: 'Past runs',
     cardHistoryHint: 'Scores, answers and photos from every run of this game',
     cardDelete:    'Delete',
@@ -2753,7 +3389,7 @@ const EN: typeof HE = {
       scratchBody:  'A blank page. You build all of it yourself.',
       // See the note on the Hebrew entry — this card names an EXISTING plot.
       guidedTitle:  'A ready story game',
-      guidedBody:   'Pick a plot we wrote, and we fit it to your group size and time.',
+      guidedBody:   'Pick a plot we wrote, and we fit it to your group and time.',
       detailsTitle: 'Tell us about the game',
       detailsSub:   'Skip anything you like, everything has a default.',
       typeLabel:    'Game type',
@@ -2787,7 +3423,8 @@ const EN: typeof HE = {
       // ── Smart build (change: smart-game-composer) ─────────────────────────
       smartRecommended: 'Recommended',
       smartTitle:   'Compose one for me',
-      smartBody:    'Answer a few questions and get a game built for your event. Different every time.',
+      // Two clauses, not three — see the Hebrew note above.
+      smartBody:    'Answer a few questions and get a game built for your event.',
       smartFinish:  'Compose my game',
       smartProgress: (step: number, total: number) => `Question ${step} of ${total}`,
       /** WHO is playing — audience and age in one. See the note on the Hebrew entry. */
@@ -2946,8 +3583,6 @@ const EN: typeof HE = {
     deleteFailed:       'Could not delete the game',
     trashLink:          'Recently deleted',
     loadingGames:  'Loading your games…',
-    shareTitle:    (title: string) => `Share "${title}"`,
-    shareText:     (title: string) => `Join my field game on RushPoint: ${title}`,
   },
   // Recently deleted games (change: recoverable-game-deletion).
   trash: {
@@ -2966,6 +3601,9 @@ const EN: typeof HE = {
       'Loading what you can restore',
     ],
     loadFailed:   'Could not load your deleted games',
+    // A failed load is not an empty bin (change: failed-load-is-not-an-empty-account).
+    loadFailedBody: 'We could not fetch the list just now. Nothing has been permanently deleted in the meantime.',
+    loadFailedRetry: 'Try again',
     restoreFailed:'Restore failed. The game may already have been erased permanently.',
     purgeFailed:  'Could not delete the game permanently',
     purgeDialogTitle:  'Delete permanently',
@@ -3026,6 +3664,10 @@ const EN: typeof HE = {
     likeFailed: 'Could not save that. Try again.',
     // Tags (change: game-task-tags)
     moreTags:   (n: number) => `+${n} tags`,
+    // Mission-bank rows (change: mission-bank-in-library)
+    bankRowBadge:     'RushPoint mission',
+    bankRowBadgeHelp: 'A mission RushPoint wrote for you. It did not come from a published game, so it has no copy count and no author. Add it like any other mission.',
+    bankRowSource:    'A mission RushPoint made for you',
     // Mission detail view (change: gallery-mission-detail)
     detailTitle:         'Mission details',
     detailAboutTitle:    'How this mission plays',
@@ -3236,6 +3878,7 @@ const EN: typeof HE = {
     dataExportBtn:'Export my data',
     dataExporting:'Preparing export…',
     dataExported: 'Data downloaded.',
+    dataExportFailed: 'The browser blocked the download. Try again, or use another browser.',
 
     legalLabel: 'Legal',
     legalDesc:  'RushPoint\'s privacy policy and terms of service. They open in a new tab.',
@@ -3309,13 +3952,22 @@ const EN: typeof HE = {
     photoReviewApprove: 'Approve',
     photoReviewReject: 'Reject',
     photoReviewRejectPrompt: 'Reason for the rejection (optional)',
+    photoReviewRejectCta: 'Reject the submission',
     photoReviewApproved: 'Submission approved and the points were awarded',
     photoReviewRejected: 'Submission rejected',
     photoReviewFailed: 'Review failed',
     photoReviewRecent: 'Recently reviewed',
     photoReviewTagApproved: 'Approved',
     photoReviewTagRejected: 'Rejected',
-    photoReviewRejectDisabled: 'Already approved. To undo, use a manual score adjustment.',
+    photoReviewRejectDisabled: 'Already approved.',
+    // Undoing an approval (change: approval-can-be-undone). It moves a score, so it
+    // asks first and says what it cost.
+    reverseApprovalCta: 'Undo approval',
+    reverseApprovalTitle: 'Undo an approved submission',
+    reverseApprovalConfirm: ({ team }: { team: string }) =>
+      `Undo the approval for ${team}? The points this submission awarded come off the team, and it is marked rejected.`,
+    reverseApprovalDone: ({ team, points }: { team: string; points: number }) =>
+      `Approval undone. ${points} points came off ${team}.`,
     photoReviewAlreadyRejected: 'Already rejected',
     photoReviewLoadError: 'Could not load submissions, retrying',
     photoReviewSubmittedAt: ({ time }: { time: string }) => `submitted at ${time}`,
@@ -3326,6 +3978,8 @@ const EN: typeof HE = {
     photoReviewOverdue: 'this team is stuck waiting for you',
     photoReviewTeamFinished: 'team already finished, nobody is waiting',
     photoReviewRowFailed: ({ team }: { team: string }) => `The review for ${team} was not saved. That team is still waiting.`,
+    // team-phones-simple D2: any phone in the team may send media, so name which one did.
+    mediaSentBy: ({ name }: { name: string }) => `Sent from ${name}'s phone`,
     photoReviewRetry: 'Try again',
     photoReviewKeyboardHint: 'Keyboard: J or K to move between submissions, A to approve, R to reject',
     photoReviewQueueLabel: 'Submissions waiting for review',
@@ -3337,8 +3991,10 @@ const EN: typeof HE = {
     mediaGalleryStatusApproved: 'Approved',
     mediaGalleryStatusRejected: 'Rejected',
     mediaGalleryNoMedia: 'No media',
+    mediaGalleryUploading: '⏳ Approved, the file is still uploading from the team\'s phone',
     mediaGalleryAlt: 'submission',
     mediaGalleryVideoAria: 'submitted video',
+    clipLength: ({ time }: { time: string }) => `Clip length ${time}`,
     mediaGalleryTaskLine: ({ name }: { name: string }) => `Mission: ${name}`,
     chatTitle: 'Team chat',
     chatHq: 'HQ',
@@ -3451,7 +4107,64 @@ const EN: typeof HE = {
     staffLinkCopy: 'Copy staff link',
     staffLinkNote: 'The link fills in the run details. Staff just type the PIN above.',
     staffLinkQrAlt: 'Staff sign in QR code',
+    // change: staff-capabilities. Codes shared by several staff, each with its own permissions.
+    staffCodes: {
+      title: 'Staff codes',
+      intro: 'Several staff can sign in with the same code. Each code has its own permissions, and you can change them during the run.',
+      newCode: 'New code',
+      labelPlaceholder: 'Name the code, e.g. North gate, Judges',
+      create: 'Create code',
+      cancel: 'Cancel',
+      save: 'Save',
+      pin: 'Code:',
+      people: ({ n }: { n: number }) => (n === 1 ? 'One staff member signed in' : `${n} staff members signed in`),
+      noPeople: 'Nobody has signed in with this code yet.',
+      disabledBadge: 'Closed to new sign ins',
+      disable: 'Close to new sign ins',
+      enable: 'Reopen',
+      editCaps: 'Edit permissions',
+      showPeople: 'Who is signed in',
+      removePerson: 'Remove',
+      removeAll: 'Remove everyone on this code',
+      removePersonConfirm: ({ name }: { name: string }) => `Remove ${name} from this run's staff? They will not be able to do anything else.`,
+      removeAllConfirm: ({ label, n }: { label: string; n: number }) => `Remove ${n === 1 ? 'the one staff member' : `all ${n} staff members`} who signed in with "${label}"?`,
+      removeCta: 'Remove',
+      disableNote: 'People already signed in keep working. To take someone out, use Remove.',
+      legacy: 'Older code: allows everything and fits one person.',
+      usedUp: 'Already used',
+      presetsLabel: 'Quick:',
+      presets: { marshal: 'Marshal', judge: 'Judge', full: 'Everything' },
+      locked: 'Always allowed',
+      failed: 'The change was not saved. Check the connection and try again.',
+      saved: 'Permissions updated. They apply from the staff\'s next action.',
+      created: 'Code created.',
+      empty: 'No staff codes for this run yet.',
+    },
+    staffCaps: {
+      safety: { name: 'Safety', help: 'Acknowledge SOS calls and clear an out of bounds alert' },
+      staffChannel: { name: 'Staff channel', help: 'Messages between staff and organizers' },
+      outline: { name: 'Mission names', help: 'See the names of stages and missions' },
+      review: { name: 'Review submissions', help: 'Approve and reject photos, videos and recordings, and see survey results' },
+      score: { name: 'Points', help: 'Add or take points from a team' },
+      route: { name: 'Routing', help: 'Skip a mission, send to a mission, send a team back' },
+      hold: { name: 'Hold a team', help: 'Hold and release a team' },
+      broadcast: { name: 'Announcements', help: 'Announcements and flash missions' },
+      chat: { name: 'Team chat', help: 'Talk with the teams' },
+      feed: { name: 'Photo feed', help: 'Hide a photo from the feed' },
+      tasks: { name: 'Close missions', help: 'Pause and close a mission for this run' },
+      locations: { name: 'Live map', help: 'See where the teams are' },
+      contactTeams: { name: 'Call teams', help: 'A button to phone a team' },
+    },
     startedAllTeams: 'All teams started.',
+    // Offered at the moment 'start all teams' is pressed (change: late-joiner-autostart).
+    offerAutoStartTitle: 'What about anyone who joins later?',
+    offerAutoStartBody: 'That press started the teams that exist right now. A team joining in a minute will wait until you press it again. Want a team like that to get a mission on its own?',
+    offerAutoStartCta: 'Yes, start them on their own',
+    offerAutoStartDone: 'A team joining late now starts on its own',
+    offerAutoStartFailed: 'We could not change that setting. The teams you started are running normally',
+    autoStartToggleLabel: 'A team joining late starts on its own',
+    autoStartToggleHelp: 'Anyone who joins after you press start gets a mission right away, with no second press. Applies to this run.',
+    autoStartToggleOff: 'A team joining late will wait for you',
     heldForConsent: ({ launched, held }: { launched: number; held: number }) =>
       `${launched} teams started. ${held} teams are waiting for guardian approval and cannot start without it.`,
     startFailed: 'Could not start teams. Check your connection and try again.',
@@ -3463,6 +4176,17 @@ const EN: typeof HE = {
     // Single mission skip (change: skip-single-task)
     skipTaskFailed: 'Could not skip the mission. Check your connection and try again.',
     skipTaskDone: ({ team }: { team: string }) => `The current mission of ${team} was skipped.`,
+    // skip-keeps-the-stage: the confirm states the server's own dry run, fact by fact.
+    skipPreview: {
+      skips: ({ title }: { title: string }) => `"${title}" will be skipped for this team.`,
+      opens: ({ titles }: { titles: string }) => `This opens for them now: ${titles}.`,
+      staysInStage: 'The team stays in the stage and moves on to its other missions.',
+      endsStage: 'This is the last mission they have left in the stage, so the stage ends and they move to the next one.',
+      requirementLowered: ({ n }: { n: number }) => `To keep the stage winnable, the team will need to complete ${n} missions in it.`,
+      consolation: ({ n }: { n: number }) => `The team gets ${n} consolation points.`,
+    },
+    skipOpenedDone: ({ team, titles }: { team: string; titles: string }) => `${team}'s mission was skipped. Now open for them: ${titles}.`,
+    skipNoMission: ({ team }: { team: string }) => `${team} has no current mission, so there is nothing to skip. Try again once they get their next one.`,
     // Success confirmation for skipping a stage and letting a team back in (change: run-console-action-feedback)
     skipStageDone: ({ team }: { team: string }) => `${team}'s stage was skipped.`,
     letBackInDone: ({ team }: { team: string }) => `${team} is back in play.`,
@@ -3486,6 +4210,31 @@ const EN: typeof HE = {
     // (change: run-console-clarity).
     skipStage: 'Skip the stage',
     skipTask: 'Skip the mission',
+    // send-team-back: the row button and its picker.
+    sendBack: 'Send team back',
+    sendBackAria: ({ team }: { team: string }) => `Send ${team} back to a mission or stage`,
+    sendBackPicker: {
+      title: ({ team }: { team: string }) => `Where should ${team} go back to?`,
+      intro: 'Pick a mission the team completed or skipped, or a whole stage it already passed.',
+      wholeStage: ({ stage }: { stage: string }) => `The whole stage: ${stage}`,
+      statusDone: 'done',
+      statusSkipped: 'skipped',
+      statusCurrent: 'now',
+      statusOpen: 'not yet',
+      nothingYet: 'Nothing to send them back to yet: the team has not completed or skipped any mission.',
+      cancel: 'Cancel',
+    },
+    sendBackPreview: {
+      toTask: ({ title }: { title: string }) => `The team goes back to "${title}" and gets it now.`,
+      toStage: ({ stage }: { stage: string }) => `The team goes back to the stage "${stage}".`,
+      reopens: ({ titles }: { titles: string }) => `Reopens: ${titles}.`,
+      points: ({ n }: { n: number }) => `${n} points come off, earned again when they complete it.`,
+      relocks: ({ stages }: { stages: string }) => `Stages that wait until they finish: ${stages}. Missions they already completed there stay completed.`,
+      reactivates: 'The team had finished the game, and will be playing again.',
+    },
+    sendBackDone: ({ team }: { team: string }) => `${team} was sent back.`,
+    sendBackQueued: ({ team }: { team: string }) => `${team} was sent back. That station is full right now, so they get the mission as soon as a slot frees.`,
+    sendBackFailed: "We couldn't send the team back. Try again.",
     scoreAdjustmentPrompt: 'Adjust score, plus for a bonus or minus for a fine:',
     scoreAdjustmentInvalid: 'Enter a whole number of points: 50 for a bonus, or minus 25 for a fine.',
     liveTeamMap: '📍 Live team map',
@@ -3499,6 +4248,7 @@ const EN: typeof HE = {
     printQrEmpty: 'No smart stations in this game.',
     printQrBlocked: 'A popup blocker stopped the print window. Allow popups and try again.',
     printQrCodeFallback: 'Manual code',
+    printQrWorth: ({ code, n }: { code: string; n: number }) => `${code}: ${n} points`,
     announcementPersists: 'Announcement to players',
     announcementPlaceholder: 'Heads up to all teams…',
     announceTargetLabel: 'Who to send the message to',
@@ -3518,6 +4268,97 @@ const EN: typeof HE = {
     sectionsHeader: 'What to show',
     groupTeams: 'Teams and scores',
     groupModeration: 'Coming in from the field',
+    // run-console-tabs-up-front: the short names under the phone tab bar's icons.
+    sectionShort: { teamsAndScores: 'Teams', moderation: 'Field', gameMechanics: 'Control', shareAndScreens: 'Share', afterTheRun: 'Reports' },
+    sectionHasNew: 'Something new',
+    // team-dossier-and-search D4: finding a team among many.
+    teamSearchPlaceholder: 'Search a team, player, phone or code',
+    teamSortLabel: 'Sort',
+    teamSortRank: 'By place',
+    teamSortName: 'By name',
+    teamSortActivity: 'By last activity',
+    teamFilterLabel: 'Filter',
+    teamFilter: { all: 'All', attention: 'Need attention', review: 'Waiting for review', notStarted: 'Not started', finished: 'Finished' },
+    teamSearchNoMatch: 'No team matches.',
+    teamSearchClear: 'Clear search',
+    // team-dossier-and-search D3: everything about one team.
+    openTeamAria: ({ team }: { team: string }) => `Open everything about ${team}`,
+    quickActions: {
+      icon: { broadcast: '📣', startTeams: '🏁', refreshStandings: '🔄', photoQueue: '📷', adjustScore: '➕', findTeam: '🔎', callContact: '📞' },
+      label: { broadcast: 'Message everyone', startTeams: 'Start all teams', refreshStandings: 'Refresh standings', photoQueue: 'Photos to review', adjustScore: 'Points for a team', findTeam: 'Find a team', callContact: 'Call HQ' },
+      customise: 'Choose shortcuts',
+      customiseHelp: ({ max }: { max: number }) => `Pick up to ${max} actions to keep at the top of the screen. Your choice is saved to your account.`,
+      moveUp: ({ name }: { name: string }) => `Move ${name} up`,
+      moveDown: ({ name }: { name: string }) => `Move ${name} down`,
+      done: 'Done',
+      pickTeam: 'Which team?',
+    },
+    // quick-dial-and-actions: the run's phone numbers.
+    contacts: {
+      title: 'Quick dial numbers',
+      help: 'Numbers players or staff can call with one tap, for example you. Players see a call button next to SOS.',
+      labelPlaceholder: 'Who they call (e.g. the organizer)',
+      phonePlaceholder: 'Phone number',
+      players: 'Players see it',
+      staff: 'Staff see it',
+      remove: 'Remove',
+      add: 'Add a number',
+      save: 'Save',
+      saved: 'Numbers saved.',
+      saveFailed: 'Could not save the numbers. Check them and try again.',
+      needLabel: 'Say whose number this is.',
+      badPhone: 'That does not look like a phone number, e.g. 052 1234567.',
+      needAudience: 'Choose who will see the number.',
+    },
+    teamPage: {
+      location: 'Last known location',
+      lastSeen: ({ minutes }: { minutes: number }) => `seen ${minutes} min ago`,
+      lastSeenNow: 'seen just now',
+      lastSeenUnknown: 'time unknown',
+      openMap: 'Open in maps',
+      chat: 'Chat with the team',
+      chatEmpty: 'No messages yet. Anything you write here reaches the team\'s phones.',
+      outcome: ({ label }: { label: string }) => `answered: ${label}`,
+      outcomeOther: 'another answer',
+      dialogLabel: ({ team }: { team: string }) => `Team ${team}`,
+      close: 'Close',
+      statusPlaying: 'Playing',
+      score: ({ score }: { score: number }) => `${score} points`,
+      rank: ({ rank }: { rank: number }) => `place ${rank}`,
+      currentMission: 'Current mission',
+      onItFor: ({ minutes }: { minutes: number }) => (minutes < 1 ? 'Just started' : `On it for ${minutes} min`),
+      actions: 'Actions',
+      people: 'Who is in the team',
+      phoneFallback: 'Phone',
+      sending: 'Answers for the team',
+      media: ({ n }: { n: number }) => `Photos and videos (${n})`,
+      noMedia: 'The team has not sent any photos or videos yet.',
+      mediaAlt: ({ task }: { task: string }) => `What the team sent for ${task}`,
+      mediaStatus: { pending: 'Waiting for review', approved: 'Approved', rejected: 'Rejected' },
+      approve: 'Approve',
+      reject: 'Reject',
+      undoApproval: 'Undo approval',
+      ledger: 'Why the score changed',
+      noLedger: 'No manual score changes.',
+      ledgerKind: { adjust: 'Manual change', hint: 'Paid hint', skipAward: 'Skip consolation', reversal: 'Points taken back' },
+      by: ({ name }: { name: string }) => `by ${name}`,
+      organizer: 'the organizer',
+      timeline: "The team's route",
+      stage: ({ n }: { n: number }) => `Stage ${n}`,
+      noTimeline: 'The team has not started yet.',
+      taskStatus: { completed: 'Done', assigned: 'Now', skipped: 'Skipped', unassigned: 'Not yet', expired: 'Closed' },
+      points: ({ n }: { n: number }) => `${n} points`,
+      minutes: ({ n }: { n: number }) => `${n} min`,
+      answerRight: 'Right answer:',
+      answerWrong: 'Wrong answer:',
+      callTeam: 'Contact the team',
+      call: 'Call',
+      whatsapp: 'WhatsApp',
+      noPhoneGiven: 'The team did not give a phone number when registering.',
+      noPhoneField: 'This game does not ask for a phone number at registration. To be able to call teams, add a phone registration field in the Builder.',
+    },
+    teamSearchCount: ({ shown, total }: { shown: number; total: number }) => `Showing ${shown} of ${total} teams`,
+    sectionShortcut: ({ name, key }: { name: string; key: number }) => `${name} (key ${key})`,
     groupMechanics: 'Surprises and game control',
     groupShare: 'Links and screens',
     groupAfter: 'Reports and analytics',
@@ -3539,6 +4380,10 @@ const EN: typeof HE = {
     taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
       `Stage "${stage}" would be left with ${available} available missions out of the ${required} it needs to complete, so teams still in it would be stuck. Pause it anyway?`,
     taskAvailForce: 'Pause anyway',
+    taskAvailCloseConfirm: ({ title }: { title: string }) =>
+      `Close "${title}" for the rest of the run? A team on it right now moves to its next mission with no points and gets a message, missions that were waiting for it open, and each team's stage shrinks so nobody gets stuck. If you only need a break, pause it instead.`,
+    taskAvailClosedMoved: ({ n }: { n: number }) => (n === 1 ? 'One team was moved to its next mission' : `${n} teams were moved to their next mission`),
+    taskAvailPausedLocks: ({ n }: { n: number }) => (n === 1 ? 'One mission waiting for it is locked until it returns' : `${n} missions waiting for it are locked until it returns`),
 
     // ── One consolidated share surface ──
     shareTitle: 'Share and screens',
@@ -3574,6 +4419,20 @@ const EN: typeof HE = {
     adjustScoreConfirmWithScore: ({ team, delta, current, result }: { team: string; delta: string; current: number; result: number }) =>
       `Current score of ${team}: ${current}. Applying ${delta} points makes ${result}. Apply?`,
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `Score of ${team} updated by ${delta} points.`,
+    // See the Hebrew map for why the ids are shared and the wording is not.
+    reasonLabel: 'Reason',
+    adjustScoreReasonPrompt: ({ team, delta }: { team: string; delta: string }) =>
+      `Why is ${team} getting ${delta} points? You can skip this.`,
+    adjustScoreReasonSkip: 'Without a reason',
+    reasonOther: 'Other reason',
+    reasonOtherPlaceholder: 'Write a short reason',
+    reasonCreativity: 'Creativity bonus',
+    reasonTeamwork: 'Teamwork',
+    reasonSpeed: 'Speed bonus',
+    reasonHelpfulness: 'Helped another team',
+    reasonLate: 'Late penalty',
+    reasonRuleBreak: 'Rule violation',
+    reasonStaffCall: 'Staff decision',
     skipStageAria: ({ team }: { team: string }) => `Skip the current stage of ${team}`,
     skipTaskAria: ({ team }: { team: string }) => `Skip the current mission of ${team}`,
     // ── Releasing a team stuck outside the play area ──
@@ -3618,6 +4477,21 @@ const EN: typeof HE = {
       tasksPaused: ({ n }: { n: number }) => `${n} missions are paused`,
       nobodyJoined: () => 'Nobody has joined yet',
       notStarted: ({ n }: { n: number }) => `${n} teams have not started`,
+      // A team that joined after play began and is still waiting (change: late-joiner-autostart)
+      lateJoinerStranded: ({ n }: { n: number }) => n === 1
+        ? 'A team joined after you started and is still waiting. Start them'
+        : `${n} teams joined after you started and are still waiting. Start them`,
+      // Members without their own phone (change: every-member-plays). Information, not
+      // a warning: sharing a phone is a legitimate way to play.
+      membersOffline: ({ n }: { n: number }) => n === 1
+        ? 'One team has members without their own phone'
+        : `${n} teams have members without their own phone`,
+      // Arrivals the server accepted without the fix proving them (change:
+      // arrival-needs-a-usable-fix). Information, not an accusation: the usual cause
+      // is a courtyard with no sky, not a player at home.
+      arrivalsUnverified: ({ n }: { n: number }) => n === 1
+        ? 'One arrival was accepted without a precise location'
+        : `${n} arrivals were accepted without a precise location`,
     },
 
     // ── What a closed section says about itself (change: run-console-clarity) ──
@@ -3637,6 +4511,24 @@ const EN: typeof HE = {
 
     // ── What this control actually does (change: run-console-clarity) ──
     confirmTitle: 'Before you go ahead',
+    // What the CONFIRM BUTTON says (change: confirm-button-says-what-it-does).
+    // confirmTitle is the heading. It used to be passed as the button label, so
+    // every confirmed action showed a button that did not name the action.
+    // One entry per action with confirm: true in runConsoleActions.ts.
+    confirmCta: {
+      closeTask: 'Close the mission',
+      startTeams: 'Yes, start everyone',
+      publishStandings: 'Yes, publish the standings',
+      revealStandings: 'Yes, reveal the standings',
+      deleteZone: 'Yes, delete the zone',
+      hideFeedPhoto: 'Yes, hide the photo',
+      finalizeRun: 'Yes, end the run',
+      acknowledgeAlert: 'Yes, mark it handled',
+      skipStage: 'Yes, skip the stage',
+      skipTask: 'Yes, skip the mission',
+      sendBack: 'Yes, send the team back',
+      adjustTeamScore: 'Yes, update the score',
+    },
     consequence: {
       startTeams: 'Starts the clock for every team that has joined, and the game begins for them. The clock cannot be wound back.',
       publishStandings: 'Makes the standings visible to every player and to anyone holding the public link.',
@@ -3647,7 +4539,7 @@ const EN: typeof HE = {
       activateHotZone: 'Multiplies the points of every mission inside the area you picked, for a limited time.',
       deactivateHotZone: 'Switches the hot zone off. Missions inside it go back to their normal points.',
       pauseTask: 'Stops routing teams to this mission. A team already on it can still finish it.',
-      closeTask: 'Takes the mission out of play for this run. A team already on it can still finish it.',
+      closeTask: 'Takes the mission out of play for the rest of the run. A team on it right now moves to its next mission with no points and gets a message, missions that were waiting for it open, and each team\'s stage shrinks so nobody gets stuck.',
       resumeTask: 'Puts the mission back in play, and teams start being routed to it again.',
       createZone: 'Adds a territory teams can capture from now on.',
       deleteZone: 'Removes the territory from the game. Captures already recorded are kept.',
@@ -3658,6 +4550,7 @@ const EN: typeof HE = {
       clearTeamOutOfBounds: 'Lets the team receive missions again, even if its location is still not accurate.',
       skipStage: 'Skips the team\'s whole current stage. The rest of its missions in that stage are closed for them.',
       skipTask: 'Skips the team\'s current mission. The team stays in the stage and moves on to the rest of it.',
+      sendBack: 'Sends the team back to the mission or stage you chose. The points of what reopens come off, and they earn them again when they complete it.',
       adjustTeamScore: 'Records a manual score change for the team. The change is kept in the audit log.',
       approvePhoto: 'Awards the points and releases the team to continue.',
       rejectPhoto: 'Sends the submission back to the team with no points.',
@@ -3807,10 +4700,128 @@ const EN: typeof HE = {
     tipBillingTitle: 'Run type',
     tipBillingBody: 'Free: one of the runs you were given. Pro: covered by your subscription. Credit: paid with one event credit. Test: a rehearsal run that is not counted.',
   },
+  // ── Game sharing (change: game-share-link) ──
+  share: {
+    title: 'Share this game',
+    subtitle: 'A link that opens the game for reading. Whoever gets it sees every stage and mission, without the game being published to the gallery.',
+    menuLabel: 'Share',
+    createCta: 'Create a link',
+    creating: 'Creating...',
+    listTitle: 'Your links',
+    empty: 'You have not created a link for this game yet.',
+    allowCopy: 'Allow making a copy',
+    allowCopyHelp: 'Whoever opens the link can copy the game into their own account.',
+    allowLaunch: 'Allow starting a run',
+    allowLaunchHelp: 'Whoever opens the link can start a run of this game. The run is recorded in your account, and they get staff access to operate it.',
+    stateLaunchOn: 'Can start a run',
+    stateAllowCopy: 'Can copy',
+    revealAnswers: 'Show answers too',
+    revealAnswersHelp: 'Answers, hints and station codes will be on screen. A copy made from the link includes them either way.',
+    expiry: 'Link expiry',
+    expiryNever: 'Never expires',
+    expiryDays: ({ n }: { n: number }) => `${n} days`,
+    expiresOn: ({ date }: { date: string }) => `Valid until ${date}`,
+    copyLink: 'Copy the link',
+    copied: 'Copied',
+    showQr: 'QR code',
+    hideQr: 'Hide the code',
+    revoke: 'Turn off',
+    revoking: 'Turning off...',
+    confirmRevokeTitle: 'Turn this link off?',
+    confirmRevokeBody: 'Anyone who already has it will no longer be able to open it. You can always create a new link.',
+    stateRevoked: 'Turned off',
+    stateExpired: 'Expired',
+    stateActive: 'Active',
+    stateCopyOff: 'Read only',
+    stateAnswers: 'Shows answers',
+    stats: ({ views, copies }: { views: number; copies: number }) => `${views} views, ${copies} copies`,
+    limitReached: 'This game already has a lot of active links. Turn one off to create another.',
+    error: 'That did not work. Please try again.',
+    close: 'Close',
+    shareText: ({ title }: { title: string }) => `A look inside "${title}" on RushPoint`,
+  },
+  sharedGame: {
+    loading: [
+      'Opening the game',
+      'Loading the stages',
+      'Laying the missions out on the map',
+    ],
+    readOnly: 'Read only',
+    readOnlyHelp: 'This is the game as its creator built it. Nothing here can be edited.',
+    answersShown: 'This link also shows answers, hints and station codes.',
+    notFoundTitle: 'This link is not active',
+    notFound: 'This link does not exist, or it was removed. Ask the creator for a new one.',
+    revoked: 'The creator turned this link off.',
+    expired: 'This link has expired.',
+    launchCta: 'Start the game',
+    launching: 'Starting...',
+    launchError: 'That did not start. Please try again.',
+    launchDisabled: 'The creator did not allow starting a run from this link.',
+    launchLimit: 'This link has already started the maximum number of runs. Ask the creator for a new one.',
+    signInToLaunch: 'Sign in to start',
+    launchedToast: 'The game is live. This is your dashboard.',
+    launchLockedCopy: 'This game was launched from a link someone shared with you. You can run it from the dashboard, but not edit, copy or share it.',
+    launchLockedToRuns: 'Go to live games',
+    copyCta: 'Make my own copy',
+    copying: 'Copying...',
+    copyDone: 'Copy created. Opening it...',
+    copyError: 'The copy failed. Please try again.',
+    copyDisabled: 'The creator did not allow copying this game.',
+    signInToCopy: 'Sign in to make a copy',
+    signInHint: 'Reading needs no account. A copy does, and it is saved to your account.',
+    overview: 'Overview',
+    route: 'The route',
+    stagesLabel: ({ n }: { n: number }) => `${n} stages`,
+    missionsLabel: ({ n }: { n: number }) => `${n} missions`,
+    stage: ({ n }: { n: number }) => `Stage ${n}`,
+    finalStage: 'Final stage',
+    requiredTaskCount: ({ n }: { n: number }) => `Teams complete ${n} of these missions`,
+    noMissions: 'This stage has no missions.',
+    notSet: 'Not set',
+    fieldType: 'Type',
+    // Mission type names — a person is never shown the raw enum.
+    types: {
+      field: 'Check in on site',
+      self_report: 'Self report',
+      smart_station: 'Station with a code',
+      photo: 'Photo',
+      quiz: 'Question',
+      numeric: 'Number answer',
+      geofence: 'Automatic arrival',
+      sequence: 'Step sequence',
+      survey: 'Survey',
+      other: 'Mission',
+    },
+    fieldPoints: 'Points',
+    fieldDifficulty: 'Difficulty',
+    fieldMinutes: 'Estimated time',
+    minutes: ({ n }: { n: number }) => `${n} min`,
+    fieldClue: 'Location clue',
+    fieldHint: 'Paid hint',
+    hintCost: ({ n }: { n: number }) => `costs ${n} points`,
+    hintHidden: 'There is a paid hint (its text is hidden)',
+    fieldAnswer: 'Answer',
+    fieldCode: 'Station code',
+    fieldChoices: 'Choices',
+    fieldSteps: 'Mission steps',
+    fieldMedia: 'Media',
+    locationless: 'No location',
+    hiddenLocation: 'Location hidden from players',
+    noLocation: 'No location set',
+    poweredBy: 'Built with RushPoint',
+    createOwn: 'Build your own game',
+  },
   builder: {
     backToGames: 'Games',
     saved: 'Saved',
     saving: 'Saving…',
+    // A save that is not landing (change: save-tells-the-truth). The SDK waits 70
+    // seconds before rejecting, so "Saving" used to mean both "in progress" and
+    // "stuck for a minute". These are the words that tell them apart, and they
+    // appear within seconds instead of after a minute.
+    saveSlow:    'Still saving…',
+    saveStalled: 'Save is stuck. Check your connection',
+    saveOffline: 'No connection. The save will keep trying',
     unsaved: 'Unsaved',
     undo: 'Undo',
     redo: 'Redo',
@@ -3864,7 +4875,27 @@ const EN: typeof HE = {
     fromLibrary: 'From library',
     newTask: 'New mission',
     closePanel: 'Close',
+    // The guided mission editor's header — WHAT is being set up, before the one
+    // control the step asks for (change: quick-setup-guided-editor).
+    guidedGroupAria: 'The mission being set up right now',
+    guidedTypeLabel: 'Mission type',
+    // The only door out of guided editing from inside the mission editor
+    // (change: builder-mission-editor-route).
+    guidedEditEverything: 'Edit every field',
     untitledTask: 'Untitled mission',
+    // The mission card's action menu on the canvas (change: mission-card-actions).
+    taskActionsMenu: 'Mission actions',
+    duplicateTask: 'Duplicate mission',
+    // Swap the mission for the closest one in the mission bank
+    // (change: mission-regenerate). Pressing again drifts further on purpose.
+    regenerateTask: 'Swap for a similar mission',
+    regenerateNothingLeft: 'There is no other mission that fits this game right now. You can edit this one by hand.',
+    duplicatedTaskTitle: (title: string) => `${title} (copy)`,
+    hideTask: 'Take out of the game',
+    hideTaskHelp: 'The mission is kept here and joins no run until you bring it back.',
+    unhideTask: 'Bring back into the game',
+    unhideTaskHelp: 'The mission will take part in future runs again.',
+    taskHiddenBadge: 'Out of play',
     stageTitlePlaceholder: 'Stage name',
     finalLabel: 'final',
     stageSettings: 'Stage settings',
@@ -3931,6 +4962,11 @@ const EN: typeof HE = {
     expiryAfterUnit: 'minutes after the game starts (empty = never)',
     expiryWindowError: 'This mission would close before it ever opens. Increase the closing time',
     expiryReleaseAtWarn: (when: string) => `This mission opens at ${when}`,
+    windowOpensAt: 'Opens at',
+    windowClosesAt: 'Closes at',
+    timeLimitLead: 'Time per team',
+    timeLimitUnit: 'minutes from when the team gets the mission (empty = no limit)',
+    timeLimitHelp: 'When time runs out, the team moves on to its next mission with no points and gets a message. An answer or photo sent in time still counts, even if it is approved later.',
     completionAll: ' (all of them)',
     stepLocation: 'Location',
     stepDetails: 'Details & type',
@@ -3962,6 +4998,7 @@ const EN: typeof HE = {
     issueStageHasNoTask: 'Stage with no missions',
     issueTaskNotCompletable: 'Mission has no answer or code',
     issueTaskNotPlaced: 'Mission has no point on the map',
+    issueTaskNotNamed: 'Mission has no name',
     issueStageUnwinnable: 'Stage requires completing more missions than it can yield',
     launchBlockedSeeReadiness: 'Some things need fixing before launch. Open launch readiness at the top of the screen to see them all.',
     testDriveNotReadyBody: (n: number) => n === 1
@@ -3974,6 +5011,13 @@ const EN: typeof HE = {
     done: 'Done',
     interactionIncomplete: 'A required detail is missing (answer, secret code or steps). Without it participants can never complete this mission.',
     deleteTask: 'Delete mission',
+    // Deleting a mission is as final as deleting a stage and was the ONLY
+    // destructive control in the Builder that fired without asking — a bare red
+    // link sitting between "back" and "next" in the mission editor's footer
+    // (change: builder-mobile-simplification). Same posture as deleteStage now.
+    deleteTaskConfirm: (title: string) =>
+      `Delete the mission "${title}"? This cannot be undone.`,
+    taskMoreMenuAria: 'More mission actions',
     removeItem: 'Remove',
     // Folds an optional section back to a chip WITHOUT clearing it (change:
     // builder-nondestructive-disclosure). Must not say "Remove" — it removes nothing.
@@ -3996,9 +5040,13 @@ const EN: typeof HE = {
     locSpecificDesc: 'Players have to reach the spot you pin on the map.',
     locAdvanced: 'Advanced location options',
     locAdvancedShort: 'Advanced options',
+    locAdvancedHint: 'Trigger distance, skipping GPS, and hiding the location',
     locRadiusLabel: 'How close players must get',
     locRadiusHelp: 'How near the spot a player has to be for the mission to open. The default (40m) is right almost every time.',
-    locRadiusPresetTight: 'Precise (4m)',
+    // What actually gets enforced when the radius is below what GPS can prove
+    // (change: arrival-needs-a-usable-fix).
+    locRadiusFloorNote: ({ m }: { m: number }) => `A phone cannot place itself that precisely, so the mission opens from ${m}m. Otherwise nobody could ever open it.`,
+    locRadiusPresetTight: ({ m }: { m: number }) => `As precise as it gets (${m}m)`,
     locRadiusPresetDefault: 'Normal (40m)',
     locSkipGps: 'Skip the GPS check',
     locSkipGpsDesc: 'Opens the mission without verifying players really arrived. The pin stays on the map and the walk still counts. Good for indoor spots where GPS is unreliable.',
@@ -4059,6 +5107,12 @@ const EN: typeof HE = {
     mediaField: 'Images & videos (optional)',
     mediaUpload: 'Upload from computer',
     mediaUploadError: 'Upload failed, try again',
+    // Dragging a picture in (change: drop-media-onto-the-editor). The hint names
+    // both routes because they are entirely different paths underneath.
+    mediaDropHint: 'or drop a file here, or a picture from another tab',
+    // The SITE you dragged from is what blocks this, not us — so the sentence says
+    // what does work instead.
+    mediaDropBlocked: 'That site would not release the picture. Save it and drop the file, or use upload.',
     mediaYouTubePlaceholder: 'Paste a YouTube link',
     mediaAddYouTube: 'Add',
     mediaYouTubeError: 'Not a valid YouTube link',
@@ -4074,6 +5128,32 @@ const EN: typeof HE = {
     secretCode: 'Secret code (participants enter this)',
     secretCodePlaceholder: 'e.g. FOX42',
     autoApprove: 'Auto approve (no staff review needed)',
+    selfieCamera: 'Selfie mission (the camera opens on the front side)',
+    // answer-scored-question: several codes / points by answer.
+    outcomes: {
+      severalCodes: 'Several codes, each with its own points',
+      pointsByAnswer: 'Points by answer',
+      codesHelp: 'The staff member at the station decides which code to hand out. Each code earns its own points, e.g. zaatar 50 and sage 100.',
+      answersHelp: 'Each answer is a button the players tap, and each one earns its own points.',
+      codePlaceholder: 'Code',
+      answerPlaceholder: 'Answer',
+      pointsLabel: 'Points',
+      pointsSuffix: 'points',
+      remove: 'Remove',
+      addCode: 'Add a code',
+      addAnswer: 'Add an answer',
+      presetNote: 'These points replace the mission\'s points. A game ranked only by time has no points, so they must be 0 there.',
+      revealPoints: 'Show players what each answer is worth',
+      problem: {
+        count: 'You need between 2 and 10 rows.',
+        points: 'Points must be a whole number, 0 or more.',
+        overlap: 'The same text appears twice. Each code or answer may appear only once.',
+        empty: 'There is an empty row. Fill it in or remove it.',
+        exclusive: 'This cannot be combined with a single right answer or code.',
+        type: 'This mission type does not support points by answer.',
+        timeOnly: 'A game ranked only by time has no points, so they must be 0.',
+      },
+    },
     autoApproveHint: 'Without auto approve, every submission waits for you to approve it during the game, and the team stands still until you do. With 15 teams that is a lot of reviewing while you are on the move.',
     captureKindLabel: 'Submission type',
     captureKindPhoto: 'Photo',
@@ -4210,6 +5290,20 @@ const EN: typeof HE = {
     photoFeedResponsibility: 'As the organizer you are responsible for the content your participants upload. Any participant can report a photo, a reported photo is removed pending review, and you and your staff can hide or restore any photo from the run console. See the Terms of Service for the full policy.',
     powerUpsLabel: 'Power ups',
     powerUpsHint: 'About a 25% chance on each completed mission to win a power up: 2x points on the next mission, or 15 bonus points.',
+    // A team that joins after the game already started (change: late-joiner-autostart)
+    autoStartLateJoinersLabel: 'Start a late joining team automatically',
+    autoStartLateJoinersHint: 'A team that joins after you pressed start gets a mission right away instead of waiting for you. Off by default. Even when off, the console always shows a team that is stranded. In a game that needs guardian consent, the consent still comes first.',
+    autoApproveAllMediaLabel: 'Approve every photo and video automatically',
+    autoApproveAllMediaHint: 'Every media submission in the run is approved on arrival, so you never review one by one. The setting is captured at launch, so it applies to the next run rather than one already under way.',
+    // change: staff-capabilities
+    staffDefaultsTitle: 'What run staff can do',
+    staffDefaultsHint: 'The default for every new staff code. You can change it for each code on the run screen, even mid game.',
+    // Everyone on their own phone (change: every-member-plays)
+    requireAllMembersOnlineLabel: 'Every team member on their own phone',
+    requireAllMembersOnlineHint: 'A team starts playing only once everyone registered in it is connected from their own phone. This works only if the game collects team member names at registration, otherwise there is no number to compare against and no team is held.',
+    // How many teammates must each do part of the mission (change: every-member-plays)
+    requiredContributorsLabel: 'How many must take part',
+    requiredContributorsHelp: 'The mission closes only once that many different devices have tapped "I did my part". The server reduces the number to the devices a team actually has, so a mission needing four never strands a team of two. Empty or 0 means no requirement.',
     manualRevealLabel: 'Manual leaderboard reveal',
     manualRevealHint: 'When the game ends the standings stay hidden from players until you reveal them from the run console.',
     testModeLabel: 'Test mode',
@@ -4302,6 +5396,9 @@ const EN: typeof HE = {
     ],
     taskNotCompletable: (title: string) => `Mission "${title}" has no answer or code, so it can't be completed. Finish it before launching.`,
     taskNeedsLocation: (title: string) => `Mission "${title}" has no map location set. Drop a pin, or make it a locationless mission, before launching.`,
+    // readiness-requires-a-name: the mission editor already refuses to move past an
+    // empty title, so readiness asks for one too. Players see the title verbatim.
+    taskNeedsName: 'One mission still has no name. Name it before launching, or players get a mission with a blank heading.',
     stageUnwinnable: (title: string) => `Stage "${title}" requires completing more missions than teams can finish. Fix the required mission count before launching.`,
     saveFailed: 'Saving the game failed. Check your connection and try again.',
     saveFailedShort:  'Save failed',
@@ -4391,11 +5488,19 @@ const EN: typeof HE = {
 
     // ── Transition card: shown BEFORE touching a field, never inside one ──
     introEyebrow: (n: number, total: number) => `Stop ${n} of ${total}`,
-    introCta: "Got it, let's go",
-    introTaskLabel: (task: string) => `Mission: ${task}`,
-    introGameLabel: 'Game settings',
-    introFallback: (task: string) => `Let's fill in a small detail on "${task}".`,
-    introGameFallback: "Let's fill in a small detail in the game settings.",
+    // The template author's own note — a quotation, and marked as one. Unlabelled
+    // it read as a paragraph the product itself had written, often in the other
+    // language (change: quick-setup-one-card).
+    templateNote: 'From the template:',
+    // Collapsed by default (change: quick-setup-card-height). The toggle names
+    // what is behind it rather than saying "more", so the choice can be made
+    // without opening it.
+    templateNoteShow: 'Show the template note',
+    templateNoteHide: 'Hide the template note',
+    back: 'Back',
+    // Ends in its own full stop — see the Hebrew note above.
+    introTaskLabel: (task: string) => `Mission: ${task}.`,
+    introGameLabel: 'Game settings.',
 
     // ── The first line for each field: short, conversational, not the raw template note ──
     copy: {
@@ -4439,8 +5544,13 @@ const EN: typeof HE = {
   tour: {
     dialogLabel: 'Guided tour',
     helpLabel: 'Open the guided tour',
+    deferred: 'The tour will start as soon as you finish what is open.',
     next: 'Next',
     back: 'Back',
+    // Replaces 'Next' while a step is waiting on an action: it jumps the whole
+    // blocked run at once, instead of paging through seven cards repeating the
+    // same request.
+    skipAhead: 'Continue without it',
     skip: 'Skip the tour',
     finish: 'Done',
     restart: 'Play the tour again',
@@ -4556,6 +5666,46 @@ const EN: typeof HE = {
     langTag:          (lang: string) => `Sent in: ${lang}`,
     countLabel:       (n: number) => `${n} messages`,
   },
+  adminLive: {
+    title:            'RushPoint Live applications',
+    subtitle:         'Teams that applied from the marketing site. Every record holds a phone number, a home town, an age range and a group photo.',
+    deniedTitle:      'This page is restricted to platform admins',
+    deniedBody:       'Your account does not have admin access.',
+    loading: [
+      'Loading the applications',
+    ],
+    loadFailed:       'Could not load the applications',
+    refreshBtn:       'Refresh',
+    empty:            'No applications have arrived yet',
+    emptyHint:        'A team that sends the form on the site will show up here.',
+    colReceived:      'Received',
+    colSize:          'Team size',
+    colSectors:       'Sector',
+    colLocation:      'Lives in',
+    colAges:          'Ages',
+    colMet:           'How they met',
+    colMotivation:    'Why them',
+    colCamera:        'On camera',
+    colPhone:         'Phone',
+    callBtn:          'Call',
+    whatsappBtn:      'WhatsApp',
+    showPhotoBtn:     'Show the group photo',
+    noPhoto:          'This team did not attach a photo',
+    photoLoading:     'Loading the photo',
+    photoFailed:      'Could not load the photo',
+    photoNotice:      'Opening a photo is recorded in the audit log.',
+    photoAlt:         'Group photo of the applicants',
+    signedInTag:      'signed in',
+    membersLabel:     (n: number) => `${n} members`,
+    cameraLabel:      (n: number) => `${n} out of 5`,
+    sectorLabel:      (value: string) => ({
+      religious: 'Religious',
+      secular:   'Secular',
+      mixed:     'Mixed',
+      other:     'Other',
+    }[value] ?? value),
+    countLabel:       (n: number) => `${n} applications`,
+  },
   adminUsers: {
     title:            'Platform users',
     subtitle:         'Every creator: how many games they made, which runs they launched, and when they were last active.',
@@ -4636,6 +5786,11 @@ const EN: typeof HE = {
   adminTemplates: {
     title:            'Game templates',
     subtitle:         'Templates shown to every creator on the "new game" screen. Each one is an ordinary game, edit it in the Builder like any other.',
+    // See the Hebrew note above.
+    hiddenBadge:      'Not shown to creators',
+    hideCta:          'Hide from creators',
+    unhideCta:        'Show to creators',
+    hideFailed:       'We could not change the visibility. Try again.',
     deniedTitle:      'This page is restricted to platform admins',
     deniedBody:       'Your account does not have admin access.',
     loading: [
@@ -4672,6 +5827,66 @@ const EN: typeof HE = {
     deleteConfirmBody: (title: string) => `Delete the template "${title}"? It will be removed from every creator's picker.`,
     deleteConfirmCta: 'Delete template',
     toUsersLink:      'Platform users ←',
+    toMissionBankLink: 'Mission bank ←',
+  },
+  adminMissionBank: {
+    title:            'Mission bank',
+    subtitle:         'The missions "compose one for me" draws from. Editing or deleting one here changes what every creator on the platform is offered.',
+    deniedTitle:      'This page is restricted to platform admins',
+    deniedBody:       'Your account does not have admin access.',
+    loading: [
+      'Loading the mission bank',
+    ],
+    loadFailed:       'Could not load the mission bank',
+    backToTemplates:  'Game templates →',
+    countLabel:       (shown: number, total: number) => `${shown} of ${total} missions`,
+    searchPlaceholder: 'Search by name, key or tag',
+    filterAll:        'All',
+    filterEdited:     'Edited',
+    filterDeleted:    'Deleted',
+    filterUnreviewed: 'Copy not read',
+    filterUnverified: 'Not verified',
+    sortLabel:        'Sort',
+    sortBank:         'Bank order',
+    sortUnreviewedFirst: 'Unreviewed first',
+    sortUnverifiedFirst: 'Unverified first',
+    progressLabel:    (reviewed: number, verified: number, total: number) =>
+      `${reviewed}/${total} read · ${verified}/${total} verified`,
+    reviewedCopyLabel: 'Copy read',
+    reviewedCopyHint:  'I have read the title and the player instructions.',
+    verifiedSetupLabel: 'Verified',
+    verifiedSetupHint:  'I have run the whole mission, setup instructions included.',
+    editedBadge:      'Edited',
+    deletedBadge:     'Deleted',
+    emptyTitle:       'No missions match that search',
+    emptyBody:        'Try another word, or clear the filter.',
+    editBtn:          'Edit',
+    deleteBtn:        'Delete',
+    restoreBtn:       'Put back',
+    resetBtn:         'Reset to source',
+    resetHint:        'Returns the mission to the content written in the code.',
+    saveBtn:          'Save',
+    cancelBtn:        'Cancel',
+    saving:           'Saving',
+    saveFailed:       'Could not save',
+    titleLabel:       'Mission name',
+    descriptionLabel: 'Instructions for players',
+    tagsLabel:        'Tags',
+    tagsHint:         'Tags decide who and where this mission suits. A mission cannot be left with no tags at all.',
+    difficultyLabel:  'Difficulty (1 to 10)',
+    difficultyShort:  'Difficulty',
+    bandDerived:      (band: string) => `Band: ${band} (derived from the number)`,
+    minAgeLabel:      'Minimum age',
+    minAgeNone:       'None',
+    transitLabel:     'Walking minutes to reach it',
+    transitNone:      'None',
+    keyLabel:         'Key',
+    familyLabel:      'Family',
+    noCreateHint:     'Adding a new mission is still done in code. Here you can edit and delete.',
+    deleteConfirmBody: (title: string) => `Take "${title}" out of the mission bank? It will no longer be offered to any creator. You can put it back at any time.`,
+    deleteConfirmCta: 'Remove from the bank',
+    refusedDeletion:  'This mission cannot be deleted: it is the last one that opens or closes a game, and without it the composer cannot build a game at all.',
+    restoredBookend:  'The opening or closing tag was put back on this mission: it is the last one left, and without one the composer cannot build a game.',
   },
 };
 

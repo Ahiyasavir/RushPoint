@@ -36,16 +36,39 @@
 /**
  * The origin these pages are served from.
  *
- * The apex, not the creator console. It carries the brand, and its robots.txt already
- * answers `Allow: /`, whereas the console's crawl rules deliberately allow only `/$`,
+ * The participant host, because that is where the files physically live: they are
+ * real files under `apps/play-web/public/`, and play-web moved off the apex when the
+ * marketing site took it (change: marketing-to-apex). Its robots.txt answers
+ * `Allow: /`, whereas the console's crawl rules deliberately allow only `/$`,
  * `/privacy` and `/terms` because everything else there is behind authentication.
- * Threading marketing pages through that allow-list would weaken a rule that is
- * currently crisp, to host them on the subdomain with the least brand recognition.
+ *
+ * The old apex URLs are 301'd here from the marketing site (`firebase.json`), so
+ * nothing already indexed dies. Moving these pages INTO the marketing app was the
+ * obvious alternative and does not work: their index is `/he/`, which is the
+ * marketing home's own path, so the two would collide.
  */
-export const LANDING_ORIGIN = 'https://rush-point.com';
+export const LANDING_ORIGIN = 'https://player.rush-point.com';
 
-/** Where the call to action sends a creator: the console's logged out landing page. */
+/** The creator console's origin. */
 export const CREATOR_ORIGIN = 'https://creator.rush-point.com';
+
+/**
+ * Where every call to action on these pages actually sends a creator.
+ *
+ * NOT the bare origin. The bare origin is the console's own logged out landing page,
+ * which is a SECOND pitch shown to somebody who just read this one and clicked anyway;
+ * what they see is a sign in screen wearing marketing copy, which is indistinguishable
+ * from a link that went to the wrong place.
+ *
+ * `?start=game` is the contract the creator app already publishes: `readStartIntent` in
+ * apps/creator-web/src/lib/creatorOnboarding.ts records the arrival, the AuthGate drops
+ * its landing copy and shows the auth card alone, and the Dashboard opens the new game
+ * wizard the moment it mounts. The marketing site has linked this way since change
+ * marketing-cta-straight-to-build (`CREATOR_BUILD_URL` in apps/marketing/src/navigation.ts)
+ * and these pages simply never adopted it, so the highest intent traffic on the site was
+ * the traffic landing furthest from the thing it came to do.
+ */
+export const CREATOR_BUILD_URL = `${CREATOR_ORIGIN}/?start=game`;
 
 /**
  * The marketing site (change: marketing-site).
@@ -56,7 +79,7 @@ export const CREATOR_ORIGIN = 'https://creator.rush-point.com';
  * in the SAME language as the page carrying the link, so a Hebrew reader is not
  * handed an English page.
  */
-export const MARKETING_ORIGIN = 'https://www.rush-point.com';
+export const MARKETING_ORIGIN = 'https://rush-point.com';
 
 const MARKETING_LABEL: Record<LandingLanguage, string> = {
   he: 'על RushPoint',
@@ -94,6 +117,14 @@ export type LandingLanguage = typeof LANDING_LANGUAGES[number];
  * `other` from that file is deliberately absent. It is the neutral "we were not told what
  * this event is" answer, which biases nothing and shapes nothing, and there is no search
  * intent behind it.
+ *
+ * `home-activities` and `education` are the exception to the paragraph above: they are NOT
+ * composer occasions (change: marketing-home-occasion-doors). They exist because the
+ * marketing homepage opens four doors and a door has to lead somewhere linkable and
+ * findable, and these two are the doors the composer's occasion list happens not to name.
+ * The product supports both without any new feature: `home-activities` is the existing
+ * location free task type, and `education` is the same field game run by a teacher. Do not
+ * assume every subject here maps to an `OccasionId`; that stopped being true here.
  */
 export const LANDING_SUBJECTS = [
   'home',
@@ -102,6 +133,8 @@ export const LANDING_SUBJECTS = [
   'wedding',
   'team-building',
   'youth-group',
+  'home-activities',
+  'education',
 ] as const;
 export type LandingSubject = typeof LANDING_SUBJECTS[number];
 
@@ -149,6 +182,8 @@ export const SUBJECT_SLUGS: Record<LandingSubject, string> = {
   wedding: 'hatuna',
   'team-building': 'gibush-tzevet',
   'youth-group': 'tnuat-noar',
+  'home-activities': 'pe-ilut-babayit',
+  education: 'chinuch',
 };
 
 // ── THE COPY ─────────────────────────────────────────────────────────────────
@@ -165,10 +200,10 @@ export const SUBJECT_SLUGS: Record<LandingSubject, string> = {
 
 const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slug'>> = {
   home: {
-    title: 'RushPoint: בונים משחק שדה אמיתי לכל אירוע',
-    description: 'פלטפורמה לבניית משחקי שדה בשטח: מסלול משימות אמיתי, ניווט אוטומטי בין תחנות, ניקוד בזמן אמת וטבלת מובילים חיה. בלי אפליקציה להתקין ובלי שופטים.',
-    headline: 'המשחק יוצא החוצה',
-    intro: 'בונים משחק שדה משלכם, משתפים קוד כניסה אחד, והשחקנים יוצאים לשטח. הניקוד קורה לבד.',
+    title: 'בונים משחק משימות אמיתי לכל אירוע, RushPoint',
+    description: 'פלטפורמה לבניית משחקי משימות לקבוצות. מסלול אמיתי, ניווט אוטומטי בין תחנות, ניקוד בזמן אמת וטבלת מובילים חיה. בשכונה, בכיתה או בסלון, בלי אפליקציה להתקין ובלי שופטים.',
+    headline: 'משחק אחד, בכל מקום שתבחרו',
+    intro: 'בונים מסלול משימות משלכם, משתפים קוד כניסה אחד, והקבוצות מתחילות לשחק. הניקוד קורה מעצמו.',
     sections: [
       {
         heading: 'איך זה עובד',
@@ -187,17 +222,18 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
       {
         heading: 'לכל סוג אירוע',
         paragraphs: [
-          'יום הולדת, בר מצווה, חתונה, גיבוש צוות או פעולה בתנועת נוער. לכל אירוע יש קצב אחר, קהל אחר וכמות זמן אחרת, והמערכת בונה מסלול שמתאים לו.',
+          'יום הולדת, בר מצווה, חתונה, גיבוש צוות, פעולה בתנועת נוער, פעילות בכיתה או ערב משפחתי בסלון. לכל אירוע יש קצב אחר, קהל אחר וכמות זמן אחרת, והמערכת בונה מסלול שמתאים לו.',
+          'משימה לא חייבת נקודה על המפה. משימה חופשית נפתחת מכל מקום ונבדקת בדיוק כמו כל אחת אחרת, ולכן אותו מסלול עובד גם בשכונה שלמה וגם בתוך דירה אחת.',
         ],
       },
     ],
     ctaLabel: 'בונים משחק עכשיו',
   },
   birthday: {
-    title: 'משחק שדה ליום הולדת: מסלול משימות בשכונה',
-    description: 'יום הולדת שיוצא מהסלון. מסלול משימות אמיתי בשכונה או בפארק, עם צילומים, אתגרים וניקוד אוטומטי. מתאים לילדים ולנוער, ומוכן תוך דקות.',
-    headline: 'יום הולדת שיוצא מהסלון',
-    intro: 'מסלול משימות בשכונה, בפארק או בכל מקום שאתם מכירים. קצר, רועש, ומלא תמונות.',
+    title: 'משחק משימות ליום הולדת לילדים ולנוער',
+    description: 'יום הולדת עם מסלול משימות אמיתי, בשכונה, בפארק או בתוך הבית עצמו. צילומים, אתגרים וניקוד אוטומטי. מתאים לילדים ולנוער, ומוכן תוך דקות.',
+    headline: 'יום הולדת שמדברים עליו אחר כך',
+    intro: 'מסלול משימות בשכונה, בפארק, או בתוך הבית אם לא יוצאים. קצר, רועש, ומלא תמונות.',
     sections: [
       {
         heading: 'למה זה עובד ליום הולדת',
@@ -240,7 +276,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'בונים משחק לבר מצווה',
   },
   wedding: {
-    title: 'משחק לחתונה: פעילות לאורחים בין החלקים',
+    title: 'משחק לחתונה שמעסיק את האורחים בין החלקים',
     description: 'פעילות לאורחי החתונה שלא דורשת ללכת רחוק ולא הורסת את הנעליים. משימות צילום קצרות בשטח האירוע, ניקוד אוטומטי ואלבום שנבנה מעצמו.',
     headline: 'פעילות לחתונה שלא הורסת נעליים',
     intro: 'האורחים לבושים ולא הולכים רחוק. המשחק הוא הבידור בין החלקים של הערב, לא הערב עצמו.',
@@ -262,7 +298,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'בונים משחק לחתונה',
   },
   'team-building': {
-    title: 'גיבוש צוות: משחק שדה לחברות וארגונים',
+    title: 'משחק שדה לגיבוש צוות בחברות ובארגונים',
     description: 'יום גיבוש שבו הקושי הוא הנקודה. מסלול בן חמישה שלבים עם טוויסט באמצע, משימות שדורשות שיתוף פעולה אמיתי, וניקוד אובייקטיבי בלי שופטים.',
     headline: 'גיבוש שבו הקושי הוא הנקודה',
     intro: 'הקבוצה נמצאת שם כדי להיאלץ לשתף פעולה תחת לחץ. המסלול בנוי בשביל זה.',
@@ -285,7 +321,7 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'בונים יום גיבוש',
   },
   'youth-group': {
-    title: 'פעולה בתנועת נוער: משחק שדה לחניכים',
+    title: 'פעולה בתנועת נוער כמשחק שדה לחניכים',
     description: 'פעולה שבועית שמדריך יכול להכין בזמן שיש לו. מסלול משימות בשכונה עם תוכן חינוכי, סיום מאתגר וניקוד אוטומטי. בלי ציוד ובלי הכנה בשטח.',
     headline: 'פעולה שאפשר להכין בערב',
     intro: 'משהו לעשות, משהו ללמוד, וסיום שמדברים עליו בפעולה הבאה.',
@@ -307,14 +343,60 @@ const HE: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ],
     ctaLabel: 'בונים פעולה',
   },
+  'home-activities': {
+    title: 'משחק משימות בבית למשפחה ולילדים',
+    description: 'מסלול משימות שרץ בתוך הבית, בלי לצאת ובלי ציוד. משימות לילדים, ערב משפחתי או ערב זוגי, עם ניקוד אוטומטי וטלפון אחד לכל קבוצה.',
+    headline: 'המשחק שקורה בתוך הבית',
+    intro: 'אותו מסלול משימות, בלי מפה ובלי לצאת מהדלת. החדרים הם התחנות.',
+    sections: [
+      {
+        heading: 'משימה לא חייבת מיקום',
+        paragraphs: [
+          'משימה יכולה להיות חופשית לגמרי, בלי נקודה על המפה. היא נפתחת מכל מקום, נפתרת בסלון, ונבדקת בדיוק כמו כל משימה אחרת. זה מה שמאפשר למסלול שלם לרוץ בתוך דירה.',
+          'מי שרוצה יכול בכל זאת להשתמש בחדרים כתחנות. קוד סודי מודבק מאחורי דלת, חידה שהתשובה שלה מסתתרת במטבח, או משימת צילום שדורשת את כל המשפחה בפריים אחד.',
+        ],
+      },
+      {
+        heading: 'שלושה ערבים שונים לגמרי',
+        paragraphs: [
+          'משימות לילדים, כשצריך שהבית יסתדר וגם שיהיה כיף. סידור החדר הופך לתחנה עם ניקוד, והתחרות עושה את העבודה שהבקשה לא עשתה.',
+          'ערב משפחתי או ערב זוגי, כשכולם בבית ואף אחד לא מתכוון לצאת. מסלול קצר של חידות וצילומים, בלי הכנה מראש ובלי לקנות כלום.',
+        ],
+      },
+    ],
+    ctaLabel: 'בונים משחק לבית',
+  },
+  education: {
+    title: 'משחק משימות לכיתה ולפעילות חינוכית',
+    description: 'פעילות לימודית שרצה כמו משחק. מסלול משימות לכיתה, לשכבה או לקבוצת סטודנטים, עם התוכן שלכם בתוך החידות וניקוד שנבדק לבד.',
+    headline: 'שיעור שנראה כמו משחק',
+    intro: 'מבית ספר יסודי ועד אוניברסיטה. אותו מסלול משימות, רק שהתוכן הוא החומר שלכם.',
+    sections: [
+      {
+        heading: 'התוכן יושב בתוך המשחק',
+        paragraphs: [
+          'משימה שמרגישה כמו מבחן מפסיקה לעבוד ברגע שהיא מזוהה. לכן החומר יושב בתוך חידה, בתוך קוד שצריך לפצח או בתוך נקודה שצריך למצוא, והתלמיד פוגש אותו כשהוא כבר בתוך המשחק.',
+          'שאלה אמריקאית, שאלה פתוחה, שאלה מספרית או משימת צילום. כל אחת נבדקת מול השרת, כך שאף אחד לא יושב בסוף עם ארבעים מחברות.',
+        ],
+      },
+      {
+        heading: 'עובד בכיתה ועובד בחוץ',
+        paragraphs: [
+          'פעילות בסוף שיעור יכולה לרוץ בתוך הכיתה עצמה, בלי מפה ובלי לצאת. יום שיא, טיול שכבתי או סיור בקמפוס רצים על אותה מערכת עם תחנות אמיתיות.',
+          'אתם רואים מסך אחד עם כל הקבוצות. מי התקדם, מי תקוע ומי ענה מה. בסוף יש דוח מלא של התשובות, ואפשר לייצא אותו לגיליון.',
+        ],
+      },
+    ],
+    ctaLabel: 'בונים פעילות לכיתה',
+  },
 };
 
 const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slug'>> = {
   home: {
-    title: 'RushPoint: build a real world field game for any event',
-    description: 'Build your own outdoor team game: real missions on a map, automatic routing between stops, live scoring and a leaderboard that updates itself. No app to install and no judges.',
-    headline: 'The game goes outside',
-    intro: 'Build a field game, share one access code, and send players into the street. The scoring takes care of itself.',
+    title: 'Build a real world mission game for any event, RushPoint',
+    description: 'Build your own team mission game: real missions, automatic routing between stops, live scoring and a leaderboard that updates itself. Around a neighbourhood, inside a classroom or across a living room, with no app to install and no judges.',
+    headline: 'One game, wherever you are',
+    intro: 'Build a mission route, share one access code, and the teams start playing. The scoring takes care of itself.',
     sections: [
       {
         heading: 'How it works',
@@ -333,17 +415,18 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
       {
         heading: 'Built for the occasion',
         paragraphs: [
-          'A birthday, a bar mitzvah, a wedding, a team building day or a youth movement session. Each one has a different pace, a different crowd and a different amount of time, and the route is shaped to match.',
+          'A birthday, a bar mitzvah, a wedding, a team building day, a youth movement session, a lesson or a family evening at home. Each one has a different pace, a different crowd and a different amount of time, and the route is shaped to match.',
+          'A mission does not have to sit on a map. A location free mission opens anywhere and is checked exactly like any other, which is why the same route works across a whole neighbourhood or inside a single flat.',
         ],
       },
     ],
     ctaLabel: 'Start building',
   },
   birthday: {
-    title: 'Birthday scavenger hunt: a real mission route nearby',
-    description: 'A birthday party that leaves the living room. A real mission route around your neighbourhood or park, with photo challenges and automatic scoring. Built for kids and teens, ready in minutes.',
-    headline: 'A birthday that leaves the living room',
-    intro: 'A mission route through your neighbourhood, a park, or anywhere you already know. Short, loud, and full of photos.',
+    title: 'Birthday scavenger hunt on a real mission route',
+    description: 'A birthday with a real mission route, around your neighbourhood, through a park, or inside the house itself. Photo challenges and automatic scoring. Built for kids and teens, ready in minutes.',
+    headline: 'The birthday they talk about afterwards',
+    intro: 'A mission route through your neighbourhood, a park, or the house itself if nobody is going out. Short, loud, and full of photos.',
     sections: [
       {
         heading: 'Why it works for a birthday',
@@ -363,7 +446,7 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'Build a birthday game',
   },
   mitzvah: {
-    title: 'Bar mitzvah activity: a field game the whole crowd can play',
+    title: 'Bar mitzvah field game the whole crowd can play',
     description: 'A bar mitzvah activity that holds a crowd running from grandparents to classmates. An outdoor mission route, automatic scoring, and a finish that leads into the ceremony. No staff and no equipment.',
     headline: 'A bar mitzvah activity everyone can play',
     intro: 'A crowd that runs from grandparents to classmates, and one game that holds both.',
@@ -386,7 +469,7 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'Build a bar mitzvah game',
   },
   wedding: {
-    title: 'Wedding game: an activity for guests between the parts',
+    title: 'Wedding game that keeps guests busy between the parts',
     description: 'A wedding activity that asks nobody to walk far or ruin their shoes. Short photo missions around the venue, automatic scoring, and an album that builds itself from the guests.',
     headline: 'A wedding activity that spares the shoes',
     intro: 'Guests are dressed up and are not walking far. The game is the entertainment between the parts of the evening, not the evening itself.',
@@ -431,7 +514,7 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
     ctaLabel: 'Build a team building day',
   },
   'youth-group': {
-    title: 'Youth group activity: a field game for a weekly session',
+    title: 'Youth group field game for a weekly session',
     description: 'A weekly session a group leader can actually prepare in the time they have. An outdoor mission route with real content, a hard finish and automatic scoring. No equipment and no site visit.',
     headline: 'A session you can prepare in one evening',
     intro: 'Something to do, something to learn, and a finish worth talking about next week.',
@@ -452,6 +535,52 @@ const EN: Record<LandingSubject, Omit<LandingPage, 'subject' | 'language' | 'slu
       },
     ],
     ctaLabel: 'Build a session',
+  },
+  'home-activities': {
+    title: 'Indoor mission game at home for families and kids',
+    description: 'A mission route that runs inside the house, with nothing to go out for and nothing to buy. Chores for the kids, a family evening or a night in for two, with automatic scoring and one phone per team.',
+    headline: 'The game that happens indoors',
+    intro: 'The same mission route, with no map and without leaving the front door. The rooms are the stops.',
+    sections: [
+      {
+        heading: 'A mission does not need a location',
+        paragraphs: [
+          'A mission can be entirely location free, with no point on a map. It opens anywhere, it is solved on the sofa, and it is checked exactly like every other mission. That is what lets a whole route run inside a flat.',
+          'You can still use the rooms as stops if you want to. A secret code taped behind a door, a riddle whose answer is hiding in the kitchen, or a photo mission that needs the whole family in one frame.',
+        ],
+      },
+      {
+        heading: 'Three completely different evenings',
+        paragraphs: [
+          'Chores for the kids, when the house has to get sorted and it may as well be fun. Tidying a room becomes a scored stop, and the competition does the work that asking did not.',
+          'A family evening or a night in for two, when everyone is home and nobody is going anywhere. A short route of riddles and photos, with no preparation and nothing bought.',
+        ],
+      },
+    ],
+    ctaLabel: 'Build a game for home',
+  },
+  education: {
+    title: 'Classroom mission game for teaching and campus activities',
+    description: 'A lesson that runs like a game. A mission route for a class, a year group or a group of students, with your own material inside the riddles and answers checked automatically.',
+    headline: 'A lesson that looks like a game',
+    intro: 'From primary school to university. The same mission route, except the content is your material.',
+    sections: [
+      {
+        heading: 'The content sits inside the game',
+        paragraphs: [
+          'A mission that feels like a test stops working the moment it is recognised. So the material sits inside a riddle, inside a code to crack, or inside a point that has to be found, and the student meets it while already inside the game.',
+          'Multiple choice, a written answer, a numeric answer or a photo. Each is checked against the server, so nobody ends the day with forty exercise books to mark.',
+        ],
+      },
+      {
+        heading: 'Works in the room and works outside it',
+        paragraphs: [
+          'An end of lesson activity can run inside the classroom itself, with no map and without going anywhere. An activity day, a year group trip or a campus tour runs on the same system with real stops.',
+          'You watch one screen with every group on it. Who has moved on, who is stuck, and who answered what. At the end there is a full report of the answers, and it exports to a spreadsheet.',
+        ],
+      },
+    ],
+    ctaLabel: 'Build a classroom activity',
   },
 };
 
@@ -651,24 +780,72 @@ const MORE_LABEL: Record<LandingLanguage, string> = {
   en: 'More occasions',
 };
 
-/** A short nav label per subject, for the sibling links. */
+/**
+ * A short nav label per subject, for the sibling links.
+ *
+ * The general page is labelled by what it COVERS, not "home". Under a heading that
+ * reads "more occasions", a link called "home" promises the site's front door and
+ * delivers another page of the same shape, which is the single most confusing link
+ * in the set: the reader clicks it expecting to leave and arrives somewhere that
+ * looks like where they started. The site's actual front door is the brand wordmark
+ * at the top, which goes to the marketing site.
+ */
 const NAV_LABEL: Record<LandingLanguage, Record<LandingSubject, string>> = {
   he: {
-    home: 'ראשי',
+    home: 'לכל אירוע',
     birthday: 'יום הולדת',
     mitzvah: 'בר מצווה',
     wedding: 'חתונה',
     'team-building': 'גיבוש צוות',
     'youth-group': 'תנועת נוער',
+    'home-activities': 'פעילויות בבית',
+    education: 'חינוך',
   },
   en: {
-    home: 'Home',
+    home: 'Any occasion',
     birthday: 'Birthday',
     mitzvah: 'Bar mitzvah',
     wedding: 'Wedding',
     'team-building': 'Team building',
     'youth-group': 'Youth group',
+    'home-activities': 'At home',
+    education: 'Education',
   },
+};
+
+/**
+ * The three things every one of these pages can promise, whatever its subject.
+ *
+ * Deliberately generic and deliberately TRUE of the product as built: participants open
+ * a link with nothing to install, a team plays from one phone, and scoring is automatic
+ * with no judge. They sit under the headline as the answer to the question a reader has
+ * before any of the body copy: what is this going to cost me to run.
+ *
+ * Shared chrome rather than per page copy, because a subject specific promise would have
+ * to be authored eight times in two languages and the eighth would be the one that
+ * quietly overstated something.
+ */
+const FACTS: Record<LandingLanguage, readonly string[]> = {
+  he: ['בלי התקנה, פותחים קישור', 'טלפון אחד לכל קבוצה', 'ניקוד אוטומטי, בלי שופטים'],
+  en: ['No install, just a link', 'One phone per team', 'Automatic scoring, no judges'],
+};
+
+/** The line above the closing call to action. */
+const CLOSER_LEAD: Record<LandingLanguage, string> = {
+  he: 'המשחק הראשון שלכם מוכן תוך כמה דקות.',
+  en: 'Your first game is ready in a few minutes.',
+};
+
+/** The footer link for a visitor who came to PLAY rather than to build. */
+const JOIN_LABEL: Record<LandingLanguage, string> = {
+  he: 'הצטרפות למשחק',
+  en: 'Join a game',
+};
+
+/** Screen reader name for the top bar, per language. */
+const TOPBAR_LABEL: Record<LandingLanguage, string> = {
+  he: 'ניווט ראשי',
+  en: 'Main navigation',
 };
 
 /** `og:locale` per language. */
@@ -688,7 +865,7 @@ const OG_LOCALE: Record<LandingLanguage, string> = { he: 'he_IL', en: 'en_US' };
  */
 const STYLE = `
 :root { color-scheme: light dark; --ink: #1c1917; --muted: #57534e; --bg: #fffbf5;
-  --card: #ffffff; --line: #e7e0d6;
+  --card: #ffffff; --line: #e7e0d6; --hero: #fdf3e7;
   /* --brand is the FILL, --brand-ink is brand-coloured TEXT, and --cta-ink is what
      sits on the fill. One token was doing all three and failed as two of them:
      #EA580C measured 3.56:1 under white and 3.45:1 as link text, where both need
@@ -703,31 +880,81 @@ const STYLE = `
      product's colour rather than a third orange that happens to pass. */
   --brand: #b03a0b; --brand-ink: #b03a0b; --cta-ink: #ffffff; }
 @media (prefers-color-scheme: dark) { :root { --ink: #f5f5f4; --muted: #a8a29e;
-  --bg: #0c0a09; --card: #1c1917; --line: #292524;
+  --bg: #0c0a09; --card: #1c1917; --line: #292524; --hero: #1a1210;
   /* In dark the fill is a LIGHT orange, so white on it was 2.26:1, the worst
      pairing on either page set. The fix is the TEXT, not the fill: the page's own
      near-black on that orange is 8.73:1 and the fill is unchanged. */
   --brand: #fb923c; --brand-ink: #fb923c; --cta-ink: #0c0a09; } }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.7;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-main, header, footer { max-width: 46rem; margin-inline: auto; padding-inline: 1.25rem; }
-header { padding-block: 2.5rem 1rem; }
-.brand { font-weight: 700; letter-spacing: .02em; color: var(--brand-ink); text-decoration: none; }
-h1 { font-size: clamp(1.9rem, 5vw, 2.75rem); line-height: 1.2; margin-block: .75rem .5rem; }
-h2 { font-size: 1.3rem; margin-block: 2.25rem .5rem; }
-.intro { font-size: 1.15rem; color: var(--muted); margin-block: 0 1.5rem; }
-p { margin-block: 0 1rem; }
-.cta { display: inline-block; background: var(--brand); color: var(--cta-ink); text-decoration: none;
-  font-weight: 600; padding: .85rem 1.6rem; border-radius: .6rem; margin-block: 1.5rem; }
+
+/* One measure for every band, so the hero, the body and the footer line up down a
+   single edge instead of each choosing its own. The band paints edge to edge and the
+   wrapper inside it holds the text, which is what lets the hero carry a background
+   colour without the copy drifting away from the content below it. */
+.wrap { max-width: 52rem; margin-inline: auto; padding-inline: 1.25rem; }
+
+.hero { background: var(--hero); border-block-end: 1px solid var(--line);
+  padding-block-end: 3rem; }
+.topbar { display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding-block: .75rem 2.25rem; }
+.brand { font-weight: 800; font-size: 1.05rem; letter-spacing: .02em;
+  color: var(--brand-ink); text-decoration: none; }
+/* A real 44px target, not line-height tall: these are text styled links and the
+   product already learned that lesson the expensive way on the join screen. */
+.topbar a, footer a { display: inline-flex; align-items: center; min-height: 44px; }
+.lang { color: var(--muted); text-decoration: none; font-size: .95rem; }
+.lang:hover { color: var(--brand-ink); }
+
+h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.15; margin-block: 0 .75rem;
+  max-width: 22ch; }
+.intro { font-size: clamp(1.05rem, 2.4vw, 1.25rem); color: var(--muted);
+  margin-block: 0 1.75rem; max-width: 46ch; }
+.cta { display: inline-flex; align-items: center; justify-content: center; min-height: 48px;
+  background: var(--brand); color: var(--cta-ink); text-decoration: none;
+  font-weight: 700; padding: .8rem 1.75rem; border-radius: .75rem; }
 .cta:hover { filter: brightness(1.08); }
-nav.more { border-top: 1px solid var(--line); margin-block-start: 3rem; padding-block-start: 1.25rem; }
+.facts { list-style: none; margin: 2rem 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: .5rem; }
+.facts li { background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: .35rem 1rem; font-size: .9rem; color: var(--muted); }
+
+main { padding-block: 2.5rem 1rem; }
+/* Each section is a card on the warm ground rather than one unbroken column of prose.
+   Same words, but a reader scanning for the paragraph that answers their question can
+   see where one answer ends and the next begins. */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 1rem;
+  padding: 1.5rem 1.5rem .5rem; margin-block-end: 1rem; }
+h2 { font-size: 1.25rem; line-height: 1.35; margin-block: 0 .75rem; }
+p { margin-block: 0 1rem; }
+
+.closer { background: var(--hero); border: 1px solid var(--line); border-radius: 1rem;
+  padding: 2.25rem 1.5rem; margin-block: 2rem 0; text-align: center; }
+.closer p { font-size: 1.15rem; font-weight: 600; margin-block: 0 1.25rem; }
+
+nav.more { border-block-start: 1px solid var(--line); margin-block-start: 2.5rem;
+  padding-block-start: 1.5rem; }
+nav.more h2 { font-size: .95rem; font-weight: 600; color: var(--muted); margin-block-end: .9rem; }
 nav.more ul { list-style: none; padding-inline-start: 0; margin: 0;
-  display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; }
-nav.more a { color: var(--brand-ink); }
-footer { border-top: 1px solid var(--line); margin-block-start: 2rem; padding-block: 1.25rem 3rem;
-  color: var(--muted); font-size: .9rem; display: flex; flex-wrap: wrap; gap: 1rem; }
-footer a { color: var(--brand-ink); }
+  display: flex; flex-wrap: wrap; gap: .5rem; }
+nav.more a { display: inline-flex; align-items: center; min-height: 40px;
+  padding: .25rem 1rem; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--brand-ink); text-decoration: none; font-size: .95rem; }
+nav.more a:hover { border-color: var(--brand-ink); }
+
+footer { border-block-start: 1px solid var(--line); background: var(--card);
+  margin-block-start: 3rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: .25rem 1.5rem;
+  padding-block: 1rem 2.5rem; }
+footer a { color: var(--muted); text-decoration: none; font-size: .9rem; }
+footer a:hover { color: var(--brand-ink); text-decoration: underline; }
+
+/* Keyboard users get to see where they are. The page has no script, so this is the
+   only affordance there is. */
+a:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 3px;
+  border-radius: .4rem; }
 `.trim();
 
 /**
@@ -765,9 +992,6 @@ export function renderLandingPage(page: LandingPage): string {
   const counterpart = LANDING_PAGES.find(
     (p) => p.subject === page.subject && p.language !== page.language,
   )!;
-  const home = LANDING_PAGES.find(
-    (p) => p.subject === HOME_SUBJECT && p.language === page.language,
-  )!;
   // Siblings in the same language, minus this page. This is what keeps the set
   // internally connected instead of twelve dead ends that each only Google can reach.
   const siblings = LANDING_PAGES.filter(
@@ -778,15 +1002,24 @@ export function renderLandingPage(page: LandingPage): string {
     .map((a) => `    <link rel="alternate" hreflang="${a.hreflang}" href="${a.href}" />`)
     .join('\n');
 
+  // One card per section rather than one unbroken column. The words are the registry's,
+  // untouched; only the container changed, and a reader scanning for the paragraph that
+  // answers their own question can now see where one answer stops and the next starts.
   const sections = page.sections
     .map((s) => [
-      `      <h2>${esc(s.heading)}</h2>`,
-      ...s.paragraphs.map((t) => `      <p>${esc(t)}</p>`),
+      '      <section class="card">',
+      `        <h2>${esc(s.heading)}</h2>`,
+      ...s.paragraphs.map((t) => `        <p>${esc(t)}</p>`),
+      '      </section>',
     ].join('\n'))
     .join('\n');
 
+  const facts = FACTS[page.language]
+    .map((f) => `          <li>${esc(f)}</li>`)
+    .join('\n');
+
   const siblingLinks = siblings
-    .map((p) => `        <li><a href="${landingPageUrl(p)}">${esc(NAV_LABEL[page.language][p.subject])}</a></li>`)
+    .map((p) => `          <li><a href="${landingPageUrl(p)}">${esc(NAV_LABEL[page.language][p.subject])}</a></li>`)
     .join('\n');
 
   return `<!DOCTYPE html>
@@ -819,15 +1052,26 @@ ${STYLE}
     </style>
   </head>
   <body>
-    <header>
-      <a class="brand" href="${landingPageUrl(home)}">RushPoint</a>
-      <h1>${esc(page.headline)}</h1>
-      <p class="intro">${esc(page.intro)}</p>
-      <a class="cta" href="${CREATOR_ORIGIN}/">${esc(page.ctaLabel)}</a>
+    <header class="hero">
+      <div class="wrap">
+        <nav class="topbar" aria-label="${esc(TOPBAR_LABEL[page.language])}">
+          <a class="brand" href="${MARKETING_ORIGIN}/${page.language}/">RushPoint</a>
+          <a class="lang" href="${landingPageUrl(counterpart)}" hreflang="${hreflangFor(counterpart.language)}">${esc(COUNTERPART_LABEL[counterpart.language])}</a>
+        </nav>
+        <h1>${esc(page.headline)}</h1>
+        <p class="intro">${esc(page.intro)}</p>
+        <a class="cta" href="${CREATOR_BUILD_URL}">${esc(page.ctaLabel)}</a>
+        <ul class="facts">
+${facts}
+        </ul>
+      </div>
     </header>
-    <main>
+    <main class="wrap">
 ${sections}
-      <p><a class="cta" href="${CREATOR_ORIGIN}/">${esc(page.ctaLabel)}</a></p>
+      <section class="closer">
+        <p>${esc(CLOSER_LEAD[page.language])}</p>
+        <a class="cta" href="${CREATOR_BUILD_URL}">${esc(page.ctaLabel)}</a>
+      </section>
       <nav class="more">
         <h2>${esc(MORE_LABEL[page.language])}</h2>
         <ul>
@@ -836,11 +1080,12 @@ ${siblingLinks}
       </nav>
     </main>
     <footer>
-      <a href="${landingPageUrl(counterpart)}" hreflang="${hreflangFor(counterpart.language)}">${esc(COUNTERPART_LABEL[counterpart.language])}</a>
-      <a href="${MARKETING_ORIGIN}/${page.language}/">${esc(MARKETING_LABEL[page.language])}</a>
-      <a href="${LANDING_ORIGIN}/">${esc(page.language === 'he' ? 'הצטרפות למשחק' : 'Join a game')}</a>
-      <a href="${LANDING_ORIGIN}/privacy">${esc(page.language === 'he' ? 'פרטיות' : 'Privacy')}</a>
-      <a href="${LANDING_ORIGIN}/terms">${esc(page.language === 'he' ? 'תנאים' : 'Terms')}</a>
+      <div class="wrap">
+        <a href="${MARKETING_ORIGIN}/${page.language}/">${esc(MARKETING_LABEL[page.language])}</a>
+        <a href="${LANDING_ORIGIN}/">${esc(JOIN_LABEL[page.language])}</a>
+        <a href="${LANDING_ORIGIN}/privacy">${esc(page.language === 'he' ? 'פרטיות' : 'Privacy')}</a>
+        <a href="${LANDING_ORIGIN}/terms">${esc(page.language === 'he' ? 'תנאים' : 'Terms')}</a>
+      </div>
     </footer>
   </body>
 </html>

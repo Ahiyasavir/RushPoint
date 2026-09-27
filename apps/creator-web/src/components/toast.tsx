@@ -9,6 +9,7 @@
 // aria-live region and auto-dismisses.
 import { useEffect, useState } from 'react';
 import { useT } from './LanguageContext';
+import { TAP_INLINE } from '../lib/interaction';
 
 type ToastKind = 'success' | 'error' | 'info';
 interface ToastItem { id: number; kind: ToastKind; message: string }
@@ -77,7 +78,7 @@ export function ToastHost() {
             type="button"
             aria-label={c.dismiss}
             onClick={() => remove(t.id)}
-            className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+            className={`${TAP_INLINE} shrink-0 rounded-md text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}
           >
             ✕
           </button>

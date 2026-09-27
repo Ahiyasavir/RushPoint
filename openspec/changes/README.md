@@ -1,18 +1,306 @@
-# Change backlog — categorized index
+# Change backlog — index
 
-> This is a **navigation index**, not a directory layout. OpenSpec requires every change to live in
-> a **flat** folder `openspec/changes/<name>/` (so `openspec validate --all`, `list`, and archive
-> work). Do **not** nest changes into category sub-folders. Categories below are organizational only
-> and mirror the RED-phase blueprint in `functions/src/__planned__/v21-*.todo.test.ts`.
+> OpenSpec requires every change to live in a **flat** folder `openspec/changes/<name>/`. Do **not**
+> nest changes into category sub-folders. The categories further down are organizational only.
 
-**Status legend** — `📋 backlog` (proposal only, not implemented) · `🟡 partial` (some code/tests
-exist; needs per-change verification before it can be archived) · `✅ archived` (folded into
-`openspec/specs/`, lives in `changes/archive/`).
+**Status legend** — 📋 backlog (proposal only, nothing ticked) · 🟡 partial (some tasks ticked) ·
+archived changes live in [`archive/`](archive) and their specs in [`../specs/`](../specs).
 
-Run `npx openspec validate --all --strict` to confirm every item below is well-formed (currently:
-all green).
+## Status as of 2026-09-08
+
+| | Count |
+|---|---|
+| Archived (folded into `openspec/specs/`) | **127** |
+| Open — partial | **100** |
+| Open — backlog only | **29** |
+
+**86 changes were archived on 2026-09-08** in one sweep: every change whose `tasks.md` was fully
+ticked, folded into the living specs with `openspec archive`. `openspec validate --all --strict`
+passes on every archived change and on every open change that carries a delta spec.
+
+> ⚠️ **Two caveats on these counts.**
+>
+> 1. **A ticked checkbox is the only "done" signal used here.** The older, pre-OpenSpec backlog was
+>    built without maintaining `tasks.md`, so a 📋 backlog row below does **not** mean the work is
+>    missing — several describe shipped, documented behaviour (`team-hq-chat` ships
+>    `sendTeamChatMessage`; `admin-user-activity-dashboard` ships `listPlatformUsers` and the
+>    `/admin/users` page). Each needs a read against the code before it can be archived.
+> 2. **26 open changes carry no delta spec at all** (marked below). They fail
+>    `openspec validate --strict` by design: a proposal with no `specs/` folder cannot be archived
+>    until someone writes the requirement it implies.
+
+### Open — partial (100)
+
+| Change | Tasks | Delta spec |
+|---|---|---|
+| `accessibility-colorblind` | 🟡 partial (7/8) | **no delta spec** |
+
+| `adaptive-difficulty-routing` | 🟡 partial (9/16) | **no delta spec** |
+
+| `admin-manage-game-templates` | 🟡 partial (32/36) | valid |
+
+| `analytics-csv-export` | 🟡 partial (5/6) | **no delta spec** |
+
+| `builder-analytics-tab-signpost` | 🟡 partial (4/6) | valid |
+
+| `builder-first-task-flow` | 🟡 partial (36/40) | valid |
+
+| `builder-guidance-arbiter` | 🟡 partial (21/23) | valid |
+
+| `callable-rate-limiting` | 🟡 partial (6/14) | valid |
+
+| `callable-test-coverage` | 🟡 partial (5/14) | valid |
+
+| `ceremony-mode` | 🟡 partial (15/17) | **no delta spec** |
+
+| `ceremony-tv-error-state` | 🟡 partial (5/8) | valid |
+
+| `chat-integrations` | 🟡 partial (10/13) | **no delta spec** |
+
+| `ci-pipeline` | 🟡 partial (5/7) | valid |
+
+| `consent-gate-routing` | 🟡 partial (11/13) | valid |
+
+| `creator-launch-liftoff` | 🟡 partial (9/13) | valid |
+
+| `creator-onboarding-and-plain-language` | 🟡 partial (33/38) | valid |
+
+| `creator-pending-states-speak` | 🟡 partial (6/9) | valid |
+
+| `creator-signin-methods` | 🟡 partial (17/23) | valid |
+
+| `dashboard-card-actions-overflow` | 🟡 partial (10/11) | valid |
+
+| `dashboard-drop-redundant-quicklinks` | 🟡 partial (4/5) | valid |
+
+| `e2e-suite-coherence` | 🟡 partial (66/69) | valid |
+
+| `emulator-gate-isolation` | 🟡 partial (11/13) | valid |
+
+| `emulator-port-offset` | 🟡 partial (11/13) | valid |
+
+| `feed-ugc-safety` | 🟡 partial (25/31) | valid |
+
+| `final-consolidate-share` | 🟡 partial (3/6) | valid |
+
+| `firestore-rules-coverage` | 🟡 partial (13/15) | valid |
+
+| `fix-auth-forgot-password-feedback` | 🟡 partial (5/8) | valid |
+
+| `fix-fixed-points-speed-template-drift` | 🟡 partial (12/13) | valid |
+
+| `fix-leaderboard-flag-race` | 🟡 partial (6/7) | valid |
+
+| `fix-solo-selfguided-finalize` | 🟡 partial (8/11) | valid |
+
+| `fix-station-slot-same-team-race` | 🟡 partial (3/7) | valid |
+
+| `flagship-instant-demo` | 🟡 partial (5/7) | valid |
+
+| `gallery-game-card-preview` | 🟡 partial (6/10) | valid |
+
+| `gallery-map-legacy-coarse-repair` | 🟡 partial (8/10) | valid |
+
+| `gallery-map-serve-exact` | 🟡 partial (6/7) | valid |
+
+| `gallery-mission-detail` | 🟡 partial (10/11) | valid |
+
+| `gallery-popularity-ranking` | 🟡 partial (21/22) | valid |
+
+| `gallery-precise-task-location` | 🟡 partial (14/16) | valid |
+
+| `game-file-export-import` | 🟡 partial (20/27) | valid |
+
+| `game-intro-instructions` | 🟡 partial (13/14) | valid |
+
+| `google-analytics-tag` | 🟡 partial (16/17) | valid |
+
+| `guided-new-game-wizard` | 🟡 partial (30/31) | valid |
+
+| `hidden-location-leak-guard` | 🟡 partial (8/13) | valid |
+
+| `hidden-location-map-visibility` | 🟡 partial (21/21) | valid |
+
+| `hidden-mission-search-area` | 🟡 partial (16/17) | valid |
+
+| `hint-auto-escalation` | 🟡 partial (18/20) | **no delta spec** |
+
+| `join-demote-attach-device` | 🟡 partial (6/7) | valid |
+
+| `live-photo-feed` | 🟡 partial (23/25) | **no delta spec** |
+
+| `manual-bonus-staff` | 🟡 partial (6/8) | **no delta spec** |
+
+| `map-recenter-thumb-reach` | 🟡 partial (2/5) | valid |
+
+| `mobile-dashboard-runconsole-reflow` | 🟡 partial (6/7) | valid |
+
+| `mobile-drag-handle-target` | 🟡 partial (5/6) | valid |
+
+| `mobile-move-task-visibility` | 🟡 partial (4/5) | valid |
+
+| `mobile-responsive-creator` | 🟡 partial (15/16) | valid |
+
+| `mobile-taskwizard-density` | 🟡 partial (4/5) | valid |
+
+| `movement-heatmap` | 🟡 partial (10/11) | **no delta spec** |
+
+| `multi-run-gm-panel` | 🟡 partial (9/10) | **no delta spec** |
+
+| `narrative-chapters` | 🟡 partial (9/10) | **no delta spec** |
+
+| `observability-instrumentation` | 🟡 partial (3/15) | valid |
+
+| `optimistic-card-out` | 🟡 partial (8/10) | valid |
+
+| `participant-read-budget` | 🟡 partial (6/11) | valid |
+
+| `play-map-recenter-control` | 🟡 partial (8/10) | valid |
+
+| `play-pending-states-speak` | 🟡 partial (3/7) | valid |
+
+| `play-plain-language-task-eyebrow` | 🟡 partial (6/7) | valid |
+
+| `play-touch-rtl-a11y` | 🟡 partial (26/27) | valid |
+
+| `play-working-feedback` | 🟡 partial (10/12) | valid |
+
+| `player-profile-badges` | 🟡 partial (10/11) | **no delta spec** |
+
+| `playtest-build-isolation` | 🟡 partial (10/13) | valid |
+
+| `playtest-durability` | 🟡 partial (15/16) | valid |
+
+| `post-run-player-report` | 🟡 partial (29/30) | valid |
+
+| `power-ups` | 🟡 partial (19/20) | **no delta spec** |
+
+| `public-task-coordinates-backfill` | 🟡 partial (14/21) | valid |
+
+| `quick-setup-wizard` | 🟡 partial (16/34) | valid |
+
+| `quiz-ordering` | 🟡 partial (20/22) | **no delta spec** |
+
+| `recoverable-game-deletion` | 🟡 partial (32/33) | valid |
+
+| `refactor-runs-module-split` | 🟡 partial (8/18) | valid |
+
+| `run-console-action-feedback` | 🟡 partial (8/9) | valid |
+
+| `run-console-density` | 🟡 partial (15/16) | valid |
+
+| `run-console-progressive-disclosure` | 🟡 partial (28/32) | valid |
+
+| `run-summary-report` | 🟡 partial (18/19) | valid |
+
+| `scheduled-release` | 🟡 partial (18/22) | **no delta spec** |
+
+| `share-surface-failure-feedback` | 🟡 partial (6/9) | valid |
+
+| `skip-single-task` | 🟡 partial (11/13) | valid |
+
+| `smart-build-occasion-and-prep-scale` | 🟡 partial (29/31) | valid |
+
+| `staff-alert-team-name` | 🟡 partial (3/6) | valid |
+
+| `staff-sos-google-maps-walking` | 🟡 partial (2/5) | valid |
+
+| `storage-rules-hardening` | 🟡 partial (19/24) | valid |
+
+| `targeted-announcements` | 🟡 partial (20/21) | **no delta spec** |
+
+| `task-expiry` | 🟡 partial (18/20) | **no delta spec** |
+
+| `task-media-attachments` | 🟡 partial (21/22) | valid |
+
+| `task-media-durability` | 🟡 partial (27/29) | valid |
+
+| `task-single-map-link` | 🟡 partial (3/6) | valid |
+
+| `template-visibility` | 🟡 partial (29/34) | valid |
+
+| `territory-capture` | 🟡 partial (11/12) | **no delta spec** |
+
+| `trackable-collectibles` | 🟡 partial (11/12) | **no delta spec** |
+
+| `unlockable-tasks` | 🟡 partial (17/19) | **no delta spec** |
+
+| `video-submission-task` | 🟡 partial (44/44) | valid |
+
+| `vps-firestore-read-offload` | 🟡 partial (31/43) | valid |
+
+| `wizard-single-primary-action` | 🟡 partial (2/5) | valid |
+
+| `wrong-answer-cost` | 🟡 partial (16/17) | valid |
+
+### Open — backlog only (29)
+
+| Change | Tasks | Delta spec |
+|---|---|---|
+| `admin-editable-mission-bank` | no tasks.md | valid |
+
+| `admin-user-activity-dashboard` | 📋 backlog (0/23) | valid |
+
+| `audio-tasks` | 📋 backlog (0/24) | **no delta spec** |
+
+| `builder-file-menu` | 📋 backlog (0/9) | valid |
+
+| `builder-nondestructive-disclosure` | 📋 backlog (0/15) | valid |
+
+| `callable-hardening-consistency` | 📋 backlog (0/15) | valid |
+
+| `creator-value-prop-terminology` | 📋 backlog (0/8) | valid |
+
+| `finish-moment-polish` | 📋 backlog (0/8) | valid |
+
+| `fix-photo-camera-capture` | 📋 backlog (0/14) | valid |
+
+| `fix-play-screen-hierarchy` | 📋 backlog (0/13) | valid |
+
+| `fix-territory-map-visibility` | 📋 backlog (0/13) | valid |
+
+| `fold-slot-release-into-txn` | 📋 backlog (0/10) | valid |
+
+| `frontend-component-decomposition` | 📋 backlog (0/16) | valid |
+
+| `gallery-tags-filters` | 📋 backlog (0/16) | **no delta spec** |
+
+| `hot-path-read-cost` | 📋 backlog (0/11) | valid |
+
+| `occasion-recipe-deep-links` | 📋 backlog (0/34) | valid |
+
+| `participant-photo-access-control` | 📋 backlog (0/24) | valid |
+
+| `play-sos-header-access` | 📋 backlog (0/7) | valid |
+
+| `post-review-fixes` | 📋 backlog (0/16) | valid |
+
+| `qr-station-scan` | 📋 backlog (0/17) | **no delta spec** |
+
+| `quiz-location-verification` | 📋 backlog (0/16) | valid |
+
+| `run-email-scope-and-digest` | 📋 backlog (0/25) | valid |
+
+| `staff-console-field-ops` | 📋 backlog (0/82) | valid |
+
+| `stream-upload-write` | 📋 backlog (0/29) | valid |
+
+| `survey-tasks` | 📋 backlog (0/24) | **no delta spec** |
+
+| `team-hq-chat` | 📋 backlog (0/28) | **no delta spec** |
+
+| `test-drive-mode` | 📋 backlog (0/20) | **no delta spec** |
+
+| `unify-app-ui-kit-i18n` | 📋 backlog (0/16) | valid |
+
+| `wallet-tx-date-guard` | 📋 backlog (0/5) | valid |
 
 ---
+
+# Historical narrative (per-category notes, not maintained)
+
+The tables below were written as each change landed and are **not** kept current; the counts above
+are. Every ✅ row has its full proposal/design/tasks preserved in [`archive/`](archive).
 
 ## 1. Launch hardening — `v21-launch-hardening.todo.test.ts`
 | Change | Status |

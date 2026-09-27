@@ -1,16 +1,14 @@
 import { useEffect, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, localizedInstructionsBody, type PublicGame, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, localizedInstructionsBody, type PublicGame } from '@rushpoint/shared';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { startInstantPlay } from '../services/calls';
 import { saveSession, type Session } from '../store';
 import { Spinner } from '../components/Spinner';
 import { Button, Card, Screen, Skeleton, TagChips } from '../components/ui';
 import { useT } from '../i18nContext';
+import { creatorUrl } from '../lib/creatorUrl';
 
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gameId: string; onPlay: () => void; onInstantPlay: (s: Session) => void }) {
   const { t, lang } = useT();
@@ -129,7 +127,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             </div>
           )}
           {/* Badge */}
-          <div className="absolute top-3 start-3 bg-black/50 backdrop-blur-sm text-white text-[11px] font-medium px-2.5 py-1 rounded-full">
+          <div className="absolute top-3 start-3 bg-black/50 backdrop-blur-sm text-white text-[13px] font-medium px-2.5 py-1 rounded-full">
             {t.promo.badge}
           </div>
         </div>
@@ -183,7 +181,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             <div key={s.label} className="bg-app-card border border-glass-border rounded-xl px-2 py-3 text-center shadow-task-card">
               <div className="text-base mb-0.5">{s.emoji}</div>
               <div className="text-lg font-brand font-bold text-ink-fire">{s.value}</div>
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wide">{s.label}</div>
+              <div className="text-[12px] text-zinc-500 uppercase tracking-wide">{s.label}</div>
             </div>
           ))}
         </div>
@@ -216,14 +214,14 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           <button
             type="button"
             onClick={shareGame}
-            className="mt-3 w-full text-xs font-medium text-zinc-500 hover:text-ink-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded py-1"
+            className="mt-2 w-full inline-flex items-center justify-center min-h-[44px] text-xs font-medium text-zinc-500 hover:text-ink-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded"
           >
             {copied ? t.promo.linkCopied : `🔗 ${t.promo.shareGame}`}
           </button>
         </Card>
       </div>
 
-      <a href={CREATOR_URL} target="_blank" rel="noreferrer"
+      <a href={creatorUrl()} target="_blank" rel="noreferrer"
         className="block text-center text-sm font-semibold py-4 hover:underline bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent"
       >
         {t.promo.buildOwn}

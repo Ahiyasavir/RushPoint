@@ -12,6 +12,7 @@ import LegalFooter from '../components/LegalFooter';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { TAP_TARGET } from '../lib/interaction';
 import { normalizeJoinCodeInput, joinErrorKey } from '../lib/joinCode';
+import { joinReadiness, MEMBER_NAME_FIELD_ID } from '../lib/joinReadiness';
 import { creatorUrl } from '../lib/creatorUrl';
 import { LoadingView } from '../components/LoadingView';
 import { planTestDriveAutoJoin } from '../lib/testDriveAutoJoin';
@@ -20,7 +21,7 @@ import { planTestDriveAutoJoin } from '../lib/testDriveAutoJoin';
 // the same links (a player who finishes without ever re-reading Join still needs
 // a route to the privacy policy).
 
-export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, onDemo }: {
+export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, onJoined, onStaff, onDemo }: {
   /**
    * The access code carried by the link, already resolved by lib/playRoute.ts.
    * The URL is parsed in exactly ONE place now: a screen re-reading
@@ -35,6 +36,11 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
    * participant's registration.
    */
   autoJoin?: boolean;
+  /**
+   * The team's device code from an "add a phone" link (change: team-phones-simple, D1). The
+   * screen opens in attach mode, pre-filled, and says "join team <name>" with one field.
+   */
+  initialDeviceCode?: string;
   onJoined: (s: Session) => void;
   onStaff?: () => void;
   /**
@@ -56,8 +62,8 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
   const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
   // Shared team devices: team-mode games offer "my team is already in" — this
   // phone attaches to an existing team via its device join code.
-  const [joinMode, setJoinMode] = useState<'create' | 'attach'>('create');
-  const [teamCode, setTeamCode] = useState('');
+  const [joinMode, setJoinMode] = useState<'create' | 'attach'>(initialDeviceCode ? 'attach' : 'create');
+  const [teamCode, setTeamCode] = useState(initialDeviceCode ?? '');
   const [memberName, setMemberName] = useState('');
   // Auto-focus the code field and animate/focus a newly-added member row.
   const codeRef = useRef<HTMLInputElement>(null);
@@ -141,9 +147,14 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
     unlockAudio(); // first user gesture — satisfy the iOS/Safari autoplay policy
     setErr('');
     try {
-      const i = await getJoinInfo({ code: normalizeJoinCodeInput(code) });
+      const i = await getJoinInfo({
+        code: normalizeJoinCodeInput(code),
+        ...(initialDeviceCode ? { deviceCode: initialDeviceCode } : {}),
+      });
       if (i.runStatus === 'finished') { setErr(t.join.finished); return; }
       setInfo(i);
+      // A device code that matches no team: keep the ordinary attach form, pre-filled, and say why.
+      if (initialDeviceCode && i.deviceTeam === null) setErr(t.devices.linkTeamNotFound);
     } catch (e) {
       setErr(joinError(e));
     }
@@ -161,13 +172,43 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
     // 'name' against `values` here used to block every join: the name lives in
     // `members`, so values['name'] was always empty.)
     const memberNames = members.map((m) => m.trim()).filter(Boolean);
-    const errors = validateRequiredFields(allFields.filter((f) => f.id !== 'name'), values);
-    // Team mode: each team must pick its own name (no defaulting to the first member).
-    if (info.mode === 'team' && !(values.teamName ?? '').trim()) { errors.add('teamName'); }
-    if (memberNames.length === 0) return; // guarded by the disabled Join button
-    if (errors.size > 0) { setFieldErrors(errors); return; }
+    const errors = validateRequiredFields(allFields.filter((f) => f.id !== MEMBER_NAME_FIELD_ID), values);
+
+    // The button is no longer disabled when something is missing (it explained
+    // nothing and simply refused to respond — see lib/joinReadiness.ts), so this
+    // is now the ONLY thing standing between a half-filled form and the server.
+    // It must say what is missing, mark every offending field, and put the cursor
+    // in the first one.
+    const verdict = joinReadiness({
+      isSolo: info.mode !== 'team',
+      members,
+      teamName: values.teamName ?? '',
+      emptyFieldIds: [...errors],
+    });
+    if (!verdict.ready) {
+      setFieldErrors(new Set(verdict.missingIds));
+      setErr(
+        verdict.reason === 'teamName' ? t.join.needTeamName
+          : verdict.reason === 'memberName' ? (info.mode !== 'team' ? t.join.needYourName : t.join.needMemberName)
+            : t.join.needRequiredFields,
+      );
+      focusMissing(verdict.focusId);
+      return;
+    }
+
     setFieldErrors(new Set());
     await sendJoin(info, values, memberNames);
+  }
+
+  /** Put the cursor in the first thing we are waiting for, so the player never
+   *  has to hunt for it on a scrolled form. Best-effort: a field that is not
+   *  rendered simply gets no focus, and the message above still names it. */
+  function focusMissing(fieldId: string | null) {
+    if (!fieldId) return;
+    if (fieldId === MEMBER_NAME_FIELD_ID) { memberRefs.current[0]?.focus({ preventScroll: false }); return; }
+    const el = document.querySelector<HTMLElement>(`[data-field="${fieldId}"]`);
+    el?.focus({ preventScroll: false });
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   // The one place that actually joins. Shared by the form path above and the
@@ -284,7 +325,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
   // ── Step 1: enter access code ──────────────────────────────────────────────
   if (!info) {
     return (
-      <div className="min-h-screen flex flex-col max-w-md mx-auto w-full animate-race-in">
+      <div className="min-h-screen flex flex-col max-w-md mx-auto w-full animate-race-in rp-safe-t-flush">
 
         {/* Full-bleed gradient hero */}
         {/* Tightened from pt-16/pb-12 (change: join-screen-fits-one-phone). The
@@ -321,7 +362,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
               aria-checked={colorblind}
               aria-label={t.common.colorblindMode}
               title={t.common.colorblindMode}
-              className={`text-[10px] rounded-full w-11 h-11 flex items-center justify-center transition-colors opacity-60 hover:opacity-100 ${
+              className={`text-[12px] rounded-full w-11 h-11 flex items-center justify-center transition-colors opacity-60 hover:opacity-100 ${
                 colorblind ? 'text-zinc-300' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
@@ -412,7 +453,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
           {/* Whole groups were signing in phone-by-phone and then could not work
               out why they were separate teams (change: one-device-per-team-clarity).
               Say it BEFORE the code is entered, not in the registration step. */}
-          <p className="text-[11px] text-zinc-500 text-center mb-3 leading-snug px-2">
+          <p className="text-[13px] text-zinc-500 text-center mb-3 leading-snug px-2">
             {t.join.oneDeviceNote}
           </p>
 
@@ -438,7 +479,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
               >
                 <span aria-hidden="true">🎭</span> {t.join.tryDemo}
               </button>
-              <p className="text-[11px] text-zinc-500 mt-2 leading-snug px-4">{t.join.tryDemoSub}</p>
+              <p className="text-[13px] text-zinc-500 mt-2 leading-snug px-4">{t.join.tryDemoSub}</p>
             </div>
           )}
 
@@ -452,17 +493,19 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
               The 🔑 emoji is gone: it also marks the "join" how-to card, and these
               are precisely the two things players already confuse. */}
           <div className="mt-5 pt-3 border-t border-glass-border text-center space-y-1.5">
-              <p className="text-[11px] text-zinc-500">
+              <p className="text-[13px] text-zinc-500">
                 {t.join.createOwnCta}{' '}
+                {/* Same 44px treatment as the staff button just below: styled
+                    down to inline text this measured 17px tall. */}
                 <a
                   href={creatorUrl()}
-                  className="font-bold text-ink-fire underline underline-offset-2 hover:opacity-80"
+                  className="inline-flex items-center justify-center min-h-[44px] px-2 font-bold text-ink-fire underline underline-offset-2 hover:opacity-80"
                 >
                   {t.join.createOwnLink}
                 </a>
               </p>
               {onStaff && (
-                <p className="text-[11px] text-zinc-500">
+                <p className="text-[13px] text-zinc-500">
                   {/* Visually 11px to stay quiet, but a REAL 44px tap target:
                       organizers hit this outdoors, one-handed. Styling it down
                       to inline text shrank it to 17px. */}
@@ -493,11 +536,11 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
                 >
                   <div className="text-xl mb-1">{s.icon}</div>
                   <div className="text-[13px] font-bold text-zinc-200">{s.label}</div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5 leading-tight">{s.sub}</div>
+                  <div className="text-[12px] text-zinc-500 mt-0.5 leading-tight">{s.sub}</div>
                 </div>
               ))}
             </div>
-            <p className="text-center text-[11px] text-zinc-500 mt-2 flex items-center justify-center gap-1.5">
+            <p className="text-center text-[13px] text-zinc-500 mt-2 flex items-center justify-center gap-1.5">
               <span className="text-ink-go">●</span> {t.join.noAccountNeeded}
             </p>
             <LegalFooter />
@@ -547,15 +590,25 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
         <>
           <div className="space-y-4 flex-1">
             <Card className="p-5">
-              <p className="text-sm text-zinc-400 mb-4 leading-relaxed">{t.devices.attachExplain}</p>
-              <Input
-                value={teamCode}
-                dir="ltr"
-                onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
-                placeholder={t.devices.teamCodePlaceholder}
-                className="text-center font-mono text-xl tracking-[0.4em] mb-3"
-                maxLength={6}
-              />
+              {info?.deviceTeam ? (
+                // Arrived by the team's own link: the code is already known and correct, so
+                // the only thing left to ask is this phone's name.
+                <p dir="auto" className="text-base font-semibold text-zinc-100 mb-4 leading-relaxed" data-testid="join-team-by-link">
+                  {t.devices.joinTeamByLink({ team: info.deviceTeam.displayName })}
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-zinc-400 mb-4 leading-relaxed">{t.devices.attachExplain}</p>
+                  <Input
+                    value={teamCode}
+                    dir="ltr"
+                    onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
+                    placeholder={t.devices.teamCodePlaceholder}
+                    className="text-center font-mono text-xl tracking-[0.4em] mb-3"
+                    maxLength={6}
+                  />
+                </>
+              )}
               <Input
                 value={memberName}
                 dir="auto"
@@ -602,6 +655,10 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
               dir="auto"
               placeholder={t.join.teamNamePlaceholder}
               data-testid="join-team-name"
+              // Focus anchor for focusMissing() — the join button now points the
+              // player at whatever it is waiting for instead of going quiet.
+              data-field="teamName"
+              aria-invalid={fieldErrors.has('teamName') || undefined}
               className={fieldErrors.has('teamName') ? 'border-rp-alert' : ''}
               onChange={(e) => setValues({ ...values, teamName: e.target.value })}
             />
@@ -615,7 +672,12 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
           </div>
           {isSolo ? (
             // Solo: exactly one name input. No member list, no add-member.
-            <Input value={members[0] ?? ''} placeholder={t.join.yourName} data-testid="join-name"
+            <Input
+              ref={(el: HTMLInputElement | null) => { memberRefs.current[0] = el; }}
+              value={members[0] ?? ''} placeholder={t.join.yourName} data-testid="join-name"
+              data-field={MEMBER_NAME_FIELD_ID}
+              aria-invalid={fieldErrors.has(MEMBER_NAME_FIELD_ID) || undefined}
+              className={fieldErrors.has(MEMBER_NAME_FIELD_ID) ? 'border-rp-alert' : ''}
               onChange={(e) => setMembers([e.target.value])} />
           ) : (
             <>
@@ -625,6 +687,9 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
                     ref={(el: HTMLInputElement | null) => { memberRefs.current[i] = el; }}
                     value={m} placeholder={t.join.memberPlaceholder(i + 1)}
                     data-testid="join-member"
+                    {...(i === 0 ? { 'data-field': MEMBER_NAME_FIELD_ID } : {})}
+                    aria-invalid={(i === 0 && fieldErrors.has(MEMBER_NAME_FIELD_ID)) || undefined}
+                    className={i === 0 && fieldErrors.has(MEMBER_NAME_FIELD_ID) ? 'border-rp-alert' : ''}
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
                     <button aria-label={t.join.removeMember(m)} className={`${TAP_TARGET} shrink-0 flex items-center justify-center text-ink-alert font-bold`} onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
@@ -647,7 +712,11 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
       {err && <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
 
       <Button
-        disabled={busy || !members.some((m) => m.trim()) || (!isSolo && !(values.teamName ?? '').trim())}
+        // Disabled ONLY while a join is genuinely in flight. An incomplete form
+        // no longer disables it: `submit()` answers the tap by naming what is
+        // missing and focusing it. See lib/joinReadiness.ts for why a silent
+        // unresponsive primary button was the worse failure.
+        disabled={busy}
         loading={submitAction.busy}
         onClick={() => void submitAction.run()}
         data-testid="join-submit"
@@ -683,7 +752,8 @@ function FieldInput({ field, value, onChange, hasError }: { field: RegistrationF
   if (field.type === 'checkbox') {
     return (
       <label className={`flex items-center gap-3 text-sm text-zinc-300 bg-white border border-glass-border rounded-xl px-4 py-3${errRing}`}>
-        <input type="checkbox" checked={value === 'true'} onChange={(e) => onChange(String(e.target.checked))} className="w-4 h-4" />
+        <input type="checkbox" data-field={field.id} aria-invalid={hasError || undefined}
+          checked={value === 'true'} onChange={(e) => onChange(String(e.target.checked))} className="w-4 h-4" />
         {field.label}{field.required && ' *'}
       </label>
     );
@@ -692,7 +762,7 @@ function FieldInput({ field, value, onChange, hasError }: { field: RegistrationF
     return (
       <div>
         <label htmlFor={id} className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
-        <select id={id} value={value} onChange={(e) => onChange(e.target.value)}
+        <select id={id} data-field={field.id} aria-invalid={hasError || undefined} value={value} onChange={(e) => onChange(e.target.value)}
           className={`w-full px-4 py-4 rounded-2xl bg-white border border-glass-border text-zinc-100 focus:outline-none focus:border-rp-fire/40${errRing}`}>
           <option value="">…</option>
           {(field.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
@@ -705,6 +775,10 @@ function FieldInput({ field, value, onChange, hasError }: { field: RegistrationF
       <label htmlFor={id} className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
       <Input
         id={id}
+        // Focus anchor: the join button points the player at the first thing it
+        // is waiting for rather than refusing silently (lib/joinReadiness.ts).
+        data-field={field.id}
+        aria-invalid={hasError || undefined}
         type={field.type === 'number' ? 'number' : field.type === 'phone' ? 'tel' : 'text'}
         value={value}
         onChange={(e) => onChange(e.target.value)}

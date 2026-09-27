@@ -13,7 +13,7 @@ import {
   panelPlacement, buildRunConsoleSections, pinnedPanels, resolveSection, sectionStateKey,
   assignPanelColumns, buildPinnedLayout, pinnedPanelIds, consoleColumnCount, sectionColumnCount,
   gridTemplateClass, columnSpanClass,
-  defaultSection, resolveSectionWithReason, summaryChips,
+  defaultSection, resolveSectionWithReason, summaryChips, sectionHasNew,
   type RunConsoleState, type PanelId, type GroupId, type SectionId, type ColumnCount,
   type RunStatus,
 } from '../runConsoleLayout';
@@ -78,7 +78,9 @@ function emptyState(status: RunConsoleState['status']): RunConsoleState {
 // The station QR sheet moved to the share surface (change: run-console-clarity):
 // it is a share artifact, and pinning it unconditionally cost the incident
 // controls the widest part of the page for the whole event.
-const PRIMARY_PANELS: PanelId[] = ['joinShare', 'startTeams', 'alerts', 'broadcast', 'liveMap'];
+// run-console-tabs-up-front: the join card, the broadcast and the live map moved
+// into sections too, so the tabs are no longer two phone screens down.
+const PRIMARY_PANELS: PanelId[] = ['startTeams', 'alerts'];
 
 describe('buildRunConsolePlan — catalogue totality', () => {
   it('assigns every panel to exactly one group', () => {
@@ -465,16 +467,18 @@ describe('assignPanelColumns', () => {
 });
 
 describe('buildPinnedLayout', () => {
-  it('leads with the join card while nobody has joined and demotes it once teams are in', () => {
+  // run-console-tabs-up-front: the join card is no longer pinned. With nobody in
+  // yet the console OPENS on the section that holds it (defaultSection), and it
+  // stays reachable there for a late joiner at every team count.
+  it('never pins the join card, and leads with an open alert', () => {
     const plan = buildRunConsolePlan(emptyState('live'));
-    const before = buildPinnedLayout(plan, 3, { teamCount: 0 });
-    expect(before.columns[0][0]).toBe('joinShare');
+    expect(buildPinnedLayout(plan, 3, { teamCount: 0 }).columns.flat()).not.toContain('joinShare');
 
     const busy = buildRunConsolePlan(fullState('live'));
     const during = buildPinnedLayout(busy, 3, { teamCount: 6 });
     expect(during.columns[0][0]).toBe('alerts');
-    // Demoted, never removed: a late joiner can arrive at any moment.
-    expect(during.columns.flat()).toContain('joinShare');
+    expect(during.columns.flat()).not.toContain('joinShare');
+    expect(planPanels(busy, 'shareAndScreens')).toContain('joinShare');
   });
 
   it('lays out only the panels the pinned zone decided to keep', () => {
@@ -507,13 +511,14 @@ describe('pinnedPanelIds', () => {
     expect(planPanels(plan, 'shareAndScreens')).toContain('stationQr');
   });
 
-  it('leads with the join card while nobody has joined and demotes it once teams are in', () => {
+  it('keeps the join card out of the pinned zone and reachable in share and screens', () => {
     const quiet = buildRunConsolePlan(emptyState('live'));
-    expect(pinnedPanelIds(quiet, { teamCount: 0 })[0]).toBe('joinShare');
+    expect(pinnedPanelIds(quiet, { teamCount: 0 })).not.toContain('joinShare');
+    expect(planPanels(quiet, 'shareAndScreens')).toContain('joinShare');
     const busy = buildRunConsolePlan(fullState('live'));
     expect(pinnedPanelIds(busy, { teamCount: 6 })[0]).toBe('alerts');
-    // Demoted, never removed: a late joiner can arrive at any moment.
-    expect(pinnedPanelIds(busy, { teamCount: 6 })).toContain('joinShare');
+    // Never removed: a late joiner can arrive at any moment.
+    expect(planPanels(busy, 'shareAndScreens')).toContain('joinShare');
   });
 
   it('lays out exactly the pinned panels of the plan, at every team count', () => {
@@ -573,12 +578,15 @@ describe('classifyRunAction', () => {
     expect(classifyRunAction('adjustTeamScore')).toBe('destructive');
   });
 
-  // Taking a task out of play (change: live-task-pause) is reversible, but it
-  // removes a scoring opportunity from every team not yet at the stop; putting it
-  // back only ever adds one.
-  it('treats taking a task out of play as cautionary and restoring it as routine', () => {
+  // Pausing a task (change: live-task-pause) is reversible, but it removes a scoring opportunity
+  // from every team not yet at the stop; putting it back only ever adds one. CLOSING is final for
+  // every team already playing (change: live-task-close-rules): the team on it is moved off, and
+  // each team's stage shrinks. So it is destructive and confirmed.
+  it('treats pausing as cautionary, closing as destructive and confirmed, restoring as routine', () => {
     expect(classifyRunAction('pauseTask')).toBe('cautionary');
-    expect(classifyRunAction('closeTask')).toBe('cautionary');
+    expect(classifyRunAction('closeTask')).toBe('destructive');
+    expect(runActionNeedsConfirm('closeTask')).toBe(true);
+    expect(runActionConsequence('closeTask').reversible).toBe(false);
     expect(classifyRunAction('resumeTask')).toBe('routine');
   });
 
@@ -753,6 +761,9 @@ function quietSignals(status: RunStatus = 'live'): RunSignalInput {
     pausedTaskCount: 0,
     teamCount: 4,
     unstartedTeamCount: 0,
+    strandedLateJoinerCount: 0,
+    teamsWithMembersOffline: 0,
+    unverifiedArrivalCount: 0,
   };
 }
 
@@ -808,6 +819,7 @@ describe('buildRunSignals — the catalogue', () => {
       [{ pausedTaskCount: 2 }, 'tasksPaused'],
       [{ teamCount: 0 }, 'nobodyJoined'],
       [{ unstartedTeamCount: 2 }, 'notStarted'],
+      [{ strandedLateJoinerCount: 1, unstartedTeamCount: 1 }, 'lateJoinerStranded'],
     ];
     for (const [patch, id] of cases) {
       const ids = buildRunSignals({ ...quietSignals('live'), ...patch }).map((s) => s.id);
@@ -819,6 +831,77 @@ describe('buildRunSignals — the catalogue', () => {
     const [signal] = buildRunSignals({ ...quietSignals('live'), stuckTeamCount: 3 });
     expect(signal.id).toBe('teamsStuck');
     expect(signal.count).toBe(3);
+  });
+
+  // change: late-joiner-autostart. In run ijI9JMITSf8C9heN1Cwp a team joined after
+  // the start, sat 27 minutes with nothing on screen and had to press SOS to be
+  // noticed. `notStarted` already existed but is INFO and means "you have not
+  // pressed start yet" - a different, unalarming situation. A team stranded AFTER
+  // play began is the urgent one, and it must not be told as the calm one.
+  it('tells a stranded late joiner apart from a run that has not started', () => {
+    const signals = buildRunSignals({
+      ...quietSignals('live'), unstartedTeamCount: 1, strandedLateJoinerCount: 1,
+    });
+    const ids = signals.map((s) => s.id);
+    expect(ids).toContain('lateJoinerStranded');
+    // Same team, told twice, would be noise on the screen that matters most.
+    expect(ids).not.toContain('notStarted');
+    expect(signals.find((s) => s.id === 'lateJoinerStranded')?.severity).toBe('warn');
+    expect(signals.find((s) => s.id === 'lateJoinerStranded')?.count).toBe(1);
+  });
+
+  // change: every-member-plays. A team of six sharing one phone was indistinguishable
+  // from a solo player on every screen, because memberCount and deviceUids were never
+  // compared. INFO, not a warning: sharing a phone is a legitimate way to play, and
+  // crying wolf would teach an organizer to ignore the strip.
+  it('surfaces teams whose members have no phone, as information rather than alarm', () => {
+    const signals = buildRunSignals({ ...quietSignals('live'), teamsWithMembersOffline: 3 });
+    const chip = signals.find((s) => s.id === 'membersOffline');
+    expect(chip).toBeDefined();
+    expect(chip?.severity).toBe('info');
+    expect(chip?.count).toBe(3);
+  });
+
+  it('says nothing when every team is fully connected or unknowable', () => {
+    const ids = buildRunSignals({ ...quietSignals('live'), teamsWithMembersOffline: 0 }).map((s) => s.id);
+    expect(ids).not.toContain('membersOffline');
+  });
+
+  // change: arrival-needs-a-usable-fix. The server now lets a team through a check-in
+  // its GPS could not prove, once the grace window has passed — because refusing
+  // forever made a 4m mission, and any courtyard with no sky, permanently unwinnable.
+  // The count exists so an organizer can SEE that, and for nothing else.
+  it('surfaces arrivals accepted without a precise fix', () => {
+    const signals = buildRunSignals({ ...quietSignals('live'), unverifiedArrivalCount: 4 });
+    const chip = signals.find((s) => s.id === 'arrivalsUnverified');
+    expect(chip).toBeDefined();
+    expect(chip?.count).toBe(4);
+  });
+
+  // INFO, deliberately. The overwhelmingly common cause is bad reception, not a player
+  // at home — the server let them through precisely BECAUSE refusing was the worse
+  // bug. Ranking this as a warning would accuse the ordinary case.
+  it('reports unverified arrivals as information, never as an accusation', () => {
+    const chip = buildRunSignals({ ...quietSignals('live'), unverifiedArrivalCount: 1 })
+      .find((s) => s.id === 'arrivalsUnverified');
+    expect(chip?.severity).toBe('info');
+  });
+
+  it('stays silent when every arrival was proven', () => {
+    const ids = buildRunSignals({ ...quietSignals('live'), unverifiedArrivalCount: 0 }).map((s) => s.id);
+    expect(ids).not.toContain('arrivalsUnverified');
+  });
+
+  // A quiet run must stay quiet: the strip is only worth reading if it is empty when
+  // nothing is wrong.
+  it('does not add the chip to an otherwise silent run', () => {
+    expect(buildRunSignals(quietSignals('live'))).toEqual([]);
+  });
+
+  it('still says "not started" for teams waiting BEFORE the organizer pressed start', () => {
+    const ids = buildRunSignals({ ...quietSignals('live'), unstartedTeamCount: 3 }).map((s) => s.id);
+    expect(ids).toContain('notStarted');
+    expect(ids).not.toContain('lateJoinerStranded');
   });
 
   it('lets one queue occupy one chip: overdue photos suppress the pending chip', () => {
@@ -848,6 +931,9 @@ describe('buildRunSignals — ordering', () => {
     pausedTaskCount: 1,
     teamCount: 5,
     unstartedTeamCount: 1,
+    strandedLateJoinerCount: 1,
+    teamsWithMembersOffline: 1,
+    unverifiedArrivalCount: 0,
   };
 
   it('puts every critical signal before every warning and every warning before every note', () => {
@@ -874,7 +960,9 @@ describe('buildRunSignals — every signal leads somewhere', () => {
         status: 'live',
         alertCount: 1, outOfBoundsCount: 1, overduePhotoCount: 1, pendingPhotoCount: 4,
         stuckTeamCount: 1, heldForConsentCount: 1, unreadChatThreads: 1, pausedTaskCount: 1,
-        teamCount: 0, unstartedTeamCount: 1,
+        teamCount: 0, unstartedTeamCount: 1, strandedLateJoinerCount: 1,
+        teamsWithMembersOffline: 1,
+    unverifiedArrivalCount: 0,
       });
       void id;
       for (const s of signals) expect(ALL_PANEL_IDS, s.id).toContain(s.panel);
@@ -898,7 +986,9 @@ describe('buildRunSignals — every signal leads somewhere', () => {
       alertCount: state.alertCount, outOfBoundsCount: 2, overduePhotoCount: 1,
       pendingPhotoCount: state.pendingPhotoCount, stuckTeamCount: 2, heldForConsentCount: 1,
       unreadChatThreads: state.unreadChatThreads, pausedTaskCount: state.pausedTaskCount,
-      teamCount: 0, unstartedTeamCount: 0,
+      teamCount: 0, unstartedTeamCount: 0, strandedLateJoinerCount: 0,
+      teamsWithMembersOffline: 0,
+    unverifiedArrivalCount: 0,
     });
     expect(signals.length).toBeGreaterThan(0);
     for (const s of signals) expect([...reachable], s.id).toContain(s.panel);
@@ -1098,7 +1188,7 @@ describe('teamRowActions — a row that fits a phone', () => {
         const all = [...inline, ...overflow];
         expect(new Set(all).size, JSON.stringify(team)).toBe(all.length);
         expect([...all].sort()).toEqual(
-          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'skipStage', 'skipTask'].sort(),
+          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'sendBack', 'skipStage', 'skipTask'].sort(),
         );
       }
     }
@@ -1125,6 +1215,20 @@ describe('teamRowActions — a row that fits a phone', () => {
     expect(teamRowActions({}, ok).inline).toEqual([]);
   });
 
+  // send-team-back: Ahiya, 2026-09-25: "I have no button at all to send a team back, make sure
+  // there is one." Every row offers it; it is cautionary (confirmed, previewed), never destructive.
+  it('offers "send back" on every team row', () => {
+    for (const team of [{}, { outOfBounds: true }]) {
+      for (const attention of [ok, stuck]) {
+        const { inline, overflow } = teamRowActions(team, attention);
+        expect([...inline, ...overflow]).toContain('sendBack');
+      }
+    }
+    expect(classifyRunAction('sendBack')).toBe('cautionary');
+    expect(runActionNeedsConfirm('sendBack')).toBe(true);
+    expect(runActionConsequence('sendBack').audience).toBe('oneTeam');
+  });
+
   it('is total over a malformed row', () => {
     expect(() => teamRowActions(undefined as never, undefined as never)).not.toThrow();
     expect(teamRowActions(undefined as never, undefined as never).overflow.length).toBeGreaterThan(0);
@@ -1137,7 +1241,7 @@ describe('teamRowActions — a row that fits a phone', () => {
     const stuckRow = teamRowActions({}, stuck);
     expect(stuckRow.inline).toEqual(['skipTask']);
     expect(stuckRow.overflow).not.toContain('skipTask');
-    expect(stuckRow.overflow).toEqual(['skipStage', 'adjustTeamScore']);
+    expect(stuckRow.overflow).toEqual(['skipStage', 'sendBack', 'adjustTeamScore']);
   });
 
   it('promotes nothing for a calm or merely watched team', () => {
@@ -1268,5 +1372,77 @@ describe('resolveEnumLabel', () => {
   it('does not accept an inherited or empty label as a name', () => {
     expect(resolveEnumLabel('toString', labels, fallback)).toBe('unknown (toString)');
     expect(resolveEnumLabel('blank', { blank: '  ' }, fallback)).toBe('unknown (blank)');
+  });
+});
+
+// ── run-console-tabs-up-front (field report 2026-09-25) ──────────────────────
+// The section tabs sat two phone screens down because FIVE panels were pinned
+// above them. The pinned zone now holds only what is urgent everywhere.
+describe('run-console-tabs-up-front: a small pinned zone', () => {
+  it('moves the join card, the broadcast and the live map into sections', () => {
+    expect(PANEL_GROUP.joinShare).toBe('shareAndScreens');
+    expect(PANEL_GROUP.broadcast).toBe('gameMechanics');
+    expect(PANEL_GROUP.liveMap).toBe('teamsAndScores');
+  });
+
+  it('pins only the control bar during play when nothing is wrong', () => {
+    const plan = buildRunConsolePlan({ ...fullState('live'), alertCount: 0 });
+    expect(pinnedPanels(plan)).toEqual(['startTeams']);
+  });
+
+  it('pins alerts only while there is one', () => {
+    expect(pinnedPanels(buildRunConsolePlan({ ...fullState('live'), alertCount: 2 }))).toContain('alerts');
+    expect(pinnedPanels(buildRunConsolePlan({ ...fullState('live'), alertCount: 0 }))).not.toContain('alerts');
+  });
+
+  it('pins nothing once the run has finished and no alert is open', () => {
+    expect(pinnedPanels(buildRunConsolePlan({ ...fullState('finished'), alertCount: 0 }))).toEqual([]);
+  });
+
+  it('keeps every moved panel reachable in its section', () => {
+    const plan = buildRunConsolePlan(fullState('live'));
+    const sections = buildRunConsoleSections(plan);
+    const where = (p: PanelId) => sections.find((s) => s.panels.includes(p))?.id;
+    expect(where('joinShare')).toBe('shareAndScreens');
+    expect(where('broadcast')).toBe('gameMechanics');
+    expect(where('liveMap')).toBe('teamsAndScores');
+  });
+});
+
+describe('run-console-tabs-up-front: where the console opens', () => {
+  it('opens on share and screens while nobody has joined, so the join code is the first thing seen', () => {
+    expect(defaultSection('live', 0)).toBe('shareAndScreens');
+    expect(defaultSection('draft', 0)).toBe('shareAndScreens');
+  });
+  it('opens on teams once anyone has joined', () => {
+    expect(defaultSection('live', 3)).toBe('teamsAndScores');
+  });
+  it('a finished run still opens on the reports', () => {
+    expect(defaultSection('finished', 0)).toBe('afterTheRun');
+  });
+  it('an unknown team count keeps the old live default', () => {
+    expect(defaultSection('live')).toBe('teamsAndScores');
+  });
+  it('resolution uses the team-aware default', () => {
+    const sections = buildRunConsoleSections(buildRunConsolePlan(emptyState('live')));
+    expect(resolveSectionWithReason(sections, null, 'live', 0).id).toBe('shareAndScreens');
+  });
+});
+
+describe('run-console-tabs-up-front: sectionHasNew', () => {
+  it('is true only when a count GREW since the section was last looked at', () => {
+    expect(sectionHasNew({ pendingPhotos: 1 }, { pendingPhotos: 3 })).toBe(true);
+    expect(sectionHasNew({ pendingPhotos: 3 }, { pendingPhotos: 1 })).toBe(false);
+    expect(sectionHasNew({ pendingPhotos: 2 }, { pendingPhotos: 2 })).toBe(false);
+  });
+  it('a first look (nothing recorded) is not "new": the badge already says how many', () => {
+    expect(sectionHasNew(undefined, { unreadChats: 4 })).toBe(false);
+  });
+  it('a count appearing from nothing is new', () => {
+    expect(sectionHasNew({}, { attentionTeams: 1 })).toBe(true);
+  });
+  it('ignores the structural panelCount and garbage values', () => {
+    expect(sectionHasNew({ panelCount: 2 }, { panelCount: 5 })).toBe(false);
+    expect(sectionHasNew({ pendingPhotos: 'x' as never }, { pendingPhotos: NaN as never })).toBe(false);
   });
 });

@@ -28,7 +28,7 @@
 //
 // Unit-tested by scripts/test-location-picker.ts (in `npm test`).
 import type { Task, TriggerMode } from '@rushpoint/shared';
-import { normalizeTriggerMode, defaultRadiusFor } from '@rushpoint/shared';
+import { normalizeTriggerMode, defaultRadiusFor, ARRIVAL_RADIUS_FLOOR_M } from '@rushpoint/shared';
 
 /** The two choices the creator actually sees. */
 export type LocationChoice = 'anywhere' | 'specific';
@@ -49,7 +49,50 @@ export const DEFAULT_RADIUS_M = defaultRadiusFor('radius'); // 40
  * top-level buttons, demoted to presets on a single control: the information the
  * "Exact" button carried is preserved, just one level deeper.
  */
-export const RADIUS_PRESETS: readonly number[] = [TIGHT_RADIUS_M, DEFAULT_RADIUS_M];
+/**
+ * The TIGHTEST radius the one-tap preset is allowed to offer.
+ *
+ * It used to be TIGHT_RADIUS_M (4m), and that was a button handing creators a number
+ * the game does not honour: the arrival gate floors every radius at
+ * ARRIVAL_RADIUS_FLOOR_M, so pressing "precise" authored 4 and played 25. Ahiya found
+ * it immediately - the control offered a promise the product cannot keep.
+ *
+ * Offering the floor instead removes the contradiction at its source rather than
+ * explaining it afterwards. TIGHT_RADIUS_M itself is deliberately NOT changed: it is
+ * also the `triggerModeFromRadius` cutoff, and moving that would reclassify the mode of
+ * every stored task. So a preset press now yields 'radius' mode, exactly like the
+ * normal preset - which is honest, because the server treats 'exact' and 'radius'
+ * identically and always has.
+ */
+export const TIGHT_PRESET_M = ARRIVAL_RADIUS_FLOOR_M;
+
+export const RADIUS_PRESETS: readonly number[] = [TIGHT_PRESET_M, DEFAULT_RADIUS_M];
+
+/**
+ * What the server will ACTUALLY enforce for an authored radius
+ * (change: arrival-needs-a-usable-fix).
+ *
+ * The arrival gate floors every radius at `ARRIVAL_RADIUS_FLOOR_M`, because a consumer
+ * handset cannot resolve better and a mission nobody can complete is not a stricter
+ * mission. The tight preset on this very control is 4m, so the Builder hands creators a
+ * value the game will not honour literally - and a creator who is never told that has
+ * no way to discover it except by failing to check in at their own mission.
+ *
+ * Re-exported through the floor rather than restated: a hardcoded 25 here would drift
+ * silently the first time the floor moved.
+ */
+export function enforcedRadiusM(authoredM: number | null | undefined): number {
+  const authored = typeof authoredM === 'number' && Number.isFinite(authoredM) && authoredM > 0
+    ? authoredM
+    : DEFAULT_RADIUS_M;
+  return Math.max(authored, ARRIVAL_RADIUS_FLOOR_M);
+}
+
+/** Is the authored radius smaller than anything a phone could prove? */
+export function radiusBelowFloor(authoredM: number | null | undefined): boolean {
+  return typeof authoredM === 'number' && Number.isFinite(authoredM)
+    && authoredM > 0 && authoredM < ARRIVAL_RADIUS_FLOOR_M;
+}
 
 /** Which of the two buttons is lit for a stored task. */
 export function locationChoiceOf(task: Pick<Task, 'triggerMode' | 'locationless'>): LocationChoice {

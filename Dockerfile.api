@@ -47,10 +47,24 @@ COPY --from=build /repo/functions/package.runtime.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /repo/functions/lib ./lib
 COPY --from=build /repo/functions/server.js ./server.js
-# server.js requires this directly (streaming-upload-write) — it is plain Node,
-# never bundled by esbuild, so it must be copied into the runtime image alongside
-# server.js or the container crash-loops on boot with MODULE_NOT_FOUND.
+# server.js requires these directly (streaming-upload-write; the CMS's GitHub
+# token exchange) — both are plain Node, never bundled by esbuild, so each must
+# be copied into the runtime image alongside server.js or the container
+# crash-loops on boot with MODULE_NOT_FOUND (confirmed in production 2026-08-27:
+# oauthRoute.js was added to server.js's require list without a matching line
+# here, and the deploy took the live API down until this was added).
 COPY --from=build /repo/functions/uploadRoute.js ./uploadRoute.js
+COPY --from=build /repo/functions/uploadSessionRoute.js ./uploadSessionRoute.js
+COPY --from=build /repo/functions/oauthRoute.js ./oauthRoute.js
+COPY --from=build /repo/functions/ingestUrlRoute.js ./ingestUrlRoute.js
+COPY --from=build /repo/functions/mediaServing.js ./mediaServing.js
+# TRANSITIVE, and therefore NOT covered by scripts/test-api-image-contents.ts:
+# that guard scans server.js's own require list, and server.js never mentions
+# this file — ingestUrlRoute.js does. It is just as fatal to omit (the container
+# crash-loops on boot exactly the same way), so it is listed here by hand and
+# the guard was widened to follow local requires transitively so the next one
+# cannot be missed the way this one nearly was.
+COPY --from=build /repo/functions/urlIngestGuard.js ./urlIngestGuard.js
 # Upload storage. This mkdir only matters when NO volume is mounted (a bind mount
 # at the same path replaces the image's directory entirely, ownership included) —
 # it keeps the server writable in a bare `docker run` rather than 500ing on the

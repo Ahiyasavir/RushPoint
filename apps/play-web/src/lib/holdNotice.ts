@@ -33,6 +33,7 @@ export const HELD_HELP_KEY = 'held-team';
 export type HeldKind =
   | 'none'              // not held: either launched, or nothing says otherwise
   | 'guardian_consent'  // the server is waiting on the run's guardian-consent step
+  | 'members_offline'   // the rest of the team is not on their own phones yet
   | 'unknown';          // held for a reason this app version does not know
 
 export interface HeldNotice {
@@ -51,6 +52,11 @@ export interface HeldNotice {
 /** The reasons this app version understands. Anything else is `unknown`, never invented. */
 const KNOWN: Record<string, HeldKind> = {
   guardian_consent: 'guardian_consent',
+  // change: every-member-plays. This one is BLAMELESS like the others but is the only
+  // hold the team can clear themselves - by sending the join code to the people who are
+  // not connected yet. `offerHelp` stays true regardless: the host is still a route out,
+  // and a team whose sixth member went home must not be trapped.
+  members_offline: 'members_offline',
 };
 
 const NOT_HELD: HeldNotice = { kind: 'none', held: false, blameless: true, offerHelp: false };

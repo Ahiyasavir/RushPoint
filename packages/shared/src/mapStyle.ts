@@ -10,6 +10,26 @@
 
 export type MapMode = 'topo' | 'satellite';
 
+/**
+ * The mode a map OPENS in (change: maps-open-on-satellite).
+ *
+ * Satellite, because the creator's first question at a map is "is this the right
+ * spot on the ground?" — a courtyard, an entrance, which side of a building — and
+ * imagery answers that where a topographic rendering cannot. Declared here because
+ * it was `useState<MapMode>('topo')` written out at six separate call sites across
+ * two apps, which is a default in name only: changing it meant finding all six.
+ *
+ * Safe without a MapTiler key: `resolveMapStyle` falls back to keyless Esri World
+ * Imagery, so satellite is not a configuration-dependent default.
+ *
+ * NOTE the RTL consequence, already handled but easy to undo: the satellite style
+ * labels places with their LOCAL name, so Hebrew renders backwards unless
+ * `ensureRtlTextPlugin` has run. Every map component calls it at module scope —
+ * making this the default means that call is now on the FIRST paint of every map,
+ * not only after someone flips the toggle.
+ */
+export const DEFAULT_MAP_MODE: MapMode = 'satellite';
+
 // Minimal structural type — matches maplibre's StyleSpecification shape we use.
 export interface RasterMapStyle {
   version: 8;

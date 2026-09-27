@@ -475,6 +475,60 @@ export function consumeJustSignedUp(): boolean {
   } catch { return false; }
 }
 
+// ── "Start building" intent, carried in from the marketing site ─────────────
+//
+// The marketing CTA used to land on the creator LANDING page — a second pitch,
+// to somebody who had just read the first one and clicked anyway. This carries
+// their intent across the sign-in instead: the login screen drops the marketing
+// copy and shows only the auth card, and the Dashboard opens the new-game wizard
+// (whose first step is already "what is this game called") the moment it mounts.
+//
+// SESSION scoped, not local: it describes one arrival, not a standing
+// preference. A creator who clicks the link, closes the tab and comes back next
+// week should get their ordinary dashboard, not a modal they never asked for.
+
+const START_INTENT_KEY = 'rp-start-intent';
+
+/**
+ * Does this URL ask to go straight to building?
+ *
+ * Pure and total — it is read at module load on every single page view, so a
+ * malformed query string must yield `false` rather than throw and take the whole
+ * app down before it renders. Only the exact value is honoured: `?start=` on its
+ * own, or any other value, is not an instruction.
+ */
+export function readStartIntent(search: unknown): boolean {
+  if (typeof search !== 'string' || search === '') return false;
+  try {
+    return new URLSearchParams(search).get('start') === 'game';
+  } catch { return false; }
+}
+
+export function markStartIntent(): void {
+  try { sessionStorage.setItem(START_INTENT_KEY, '1'); } catch { /* storage unavailable */ }
+}
+
+/** Is the intent still pending? Does NOT clear it — see `consumeStartIntent`. */
+export function hasStartIntent(): boolean {
+  try { return sessionStorage.getItem(START_INTENT_KEY) === '1'; } catch { return false; }
+}
+
+/**
+ * True at most once per arrival: reading it clears it.
+ *
+ * Consumed by the Dashboard rather than the login screen, because the login
+ * screen may be rendered several times over one arrival (a failed password, a
+ * switch between sign-in and sign-up) and each of those still needs the bare
+ * layout. Only the thing that ACTS on the intent gets to spend it.
+ */
+export function consumeStartIntent(): boolean {
+  try {
+    const hit = sessionStorage.getItem(START_INTENT_KEY) === '1';
+    if (hit) sessionStorage.removeItem(START_INTENT_KEY);
+    return hit;
+  } catch { return false; }
+}
+
 // ── Presentation decisions (still pure) ────────────────────────────────────
 
 /**
@@ -580,6 +634,49 @@ export function tourNavIntent(
   }
 
   return { kind: 'stay' };
+}
+
+/**
+ * From a step the creator cannot yet reach, the next step they CAN.
+ *
+ * Why this exists. A brand-new creator auto-starts the tour on an empty
+ * dashboard, and `tourNavIntent` correctly turns every Builder step into
+ * `awaitAction` — "create your first game and I'll take you in". But there are
+ * SEVEN consecutive Builder steps, so pressing Next walked the creator through
+ * seven cards that all carried the identical 👆 prompt, all pointing at the same
+ * "new game" button, none of them able to show the thing they described. Worse,
+ * the prompt says the game is needed *to continue* while Next continued anyway —
+ * so the tour's own instruction was visibly false, on the first screen a creator
+ * ever sees. (Observed live: steps 4 through 10, all with the same prompt.)
+ *
+ * A blocked RUN of steps is one situation, not seven, so Next treats it as one:
+ * it lands on the first step that is actually reachable. The creator keeps both
+ * honest options — do the thing (and the tour walks them in), or move on to what
+ * they can see now — and never pages through the same instruction six times.
+ *
+ * Returns the LAST index when nothing further is reachable, so Next still ends
+ * the tour rather than stalling. Total: a malformed step list or index yields a
+ * valid in-range index, because a tour must never be the thing that breaks the
+ * console it is explaining.
+ */
+export function nextReachableTourIndex(
+  steps: readonly TourStep[],
+  index: number,
+  ctx: TourTargetContext,
+  pathname: string,
+): number {
+  const list = Array.isArray(steps) ? steps : [];
+  if (list.length === 0) return 0;
+  const last = list.length - 1;
+  const from = Number.isFinite(index) ? Math.max(0, Math.min(last, Math.floor(index))) : 0;
+
+  for (let i = from + 1; i <= last; i += 1) {
+    const step = list[i];
+    if (!step) continue;
+    if (tourNavIntent(step, ctx ?? {}, pathname).kind !== 'awaitAction') return i;
+  }
+  // Everything ahead is still blocked — go to the end, which finishes the tour.
+  return last;
 }
 
 export interface TourRect { top: number; left: number; width: number; height: number }
@@ -712,8 +809,16 @@ export function readSpotlightRecord(raw: string | null | undefined): SpotlightRe
 /** Should the Builder spotlight run right now? Total — never throws. */
 export function shouldStartBuilderSpotlight(args: {
   record: SpotlightRecord | null;
-  tourRunning: boolean;
-  quickSetupActive: boolean;
+  /**
+   * Both yields are now OPTIONAL and secondary. Which guided surface may be on
+   * screen is decided by `lib/builderGuidance.ts` via `GuidanceProvider`, so the
+   * caller no longer reaches into other components to answer them (change:
+   * builder-guidance-arbiter). They are kept as a defensive second gate — a caller
+   * that does know is still obeyed — and because they are what makes this predicate
+   * meaningful on its own.
+   */
+  tourRunning?: boolean;
+  quickSetupActive?: boolean;
 }): boolean {
   if (!args || typeof args !== 'object') return false;
   if (args.record?.seen === true) return false;

@@ -124,3 +124,32 @@ export function videoDurationProblem(min: unknown, max: unknown): string | null 
   }
   return null;
 }
+
+/**
+ * The clip length a submission may store beside its media (change: video-upload-speed, D7): the
+ * organizer's duration badge, because MediaRecorder output often carries no up-front duration.
+ * A display hint, never a gate, so anything outside (0, ceiling + 5 s] is DROPPED (undefined),
+ * never refused. One decimal; a tiny positive value is kept as 0.1 rather than rounded to 0.
+ */
+export function mediaDurationForRecord(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
+  if (raw > VIDEO_DURATION_LIMITS.ceilingSeconds + 5) return undefined;
+  return Math.max(0.1, Math.round(raw * 10) / 10);
+}
+
+export type AutoApproveLength = 'ok' | 'short' | 'long' | 'unknown';
+
+/**
+ * May an AUTO-APPROVED clip be approved on its length? (product owner, 2026-09-26: "a clip that
+ * does not meet the minimum and maximum is not approved".) The recorder counts whole seconds, so
+ * half a second of slack under the minimum and one second over the maximum, where its auto-stop
+ * lands. An unknown length cannot be proven either way and is 'unknown': the server then leaves
+ * the clip for the organizers rather than approving it blind. Total.
+ */
+export function autoApproveLengthVerdict(durationSec: unknown, smart: VideoDurationSource | undefined | null): AutoApproveLength {
+  if (typeof durationSec !== 'number' || !Number.isFinite(durationSec) || durationSec <= 0) return 'unknown';
+  const { minSeconds, maxSeconds } = resolveVideoDuration(smart);
+  if (minSeconds > 0 && durationSec < minSeconds - 0.5) return 'short';
+  if (durationSec > maxSeconds + 1) return 'long';
+  return 'ok';
+}

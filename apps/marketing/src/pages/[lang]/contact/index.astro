@@ -1,16 +1,17 @@
 ---
 import PageLayout from '~/layouts/PageLayout.astro';
 import HeroText from '~/components/widgets/HeroText.astro';
+import TopoBackdrop from '~/components/TopoBackdrop.astro';
 
-import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, API_ORIGIN, type Language } from '~/utils/i18n';
-import { contactCopy, CONTACT_FALLBACK_EMAIL } from '~/copy/contact';
+import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, API_ORIGIN, CONTACT_FALLBACK_EMAIL, type Language } from '~/utils/i18n';
+import { pageContent } from '~/utils/pages';
 
 export function getStaticPaths() {
   return LANGUAGES.map((lang) => ({ params: { lang } }));
 }
 
 const language = Astro.params.lang as Language;
-const t = contactCopy[language];
+const t = await pageContent('contactPages', 'contact', language);
 
 const metadata = {
   title: t.title,
@@ -21,7 +22,12 @@ const metadata = {
 ---
 
 <PageLayout metadata={metadata} language={language} alternates={alternatesFor('contact')}>
-  <HeroText title={t.headline} subtitle={t.intro} />
+  <div class="relative overflow-hidden">
+    <TopoBackdrop />
+    <div class="relative">
+      <HeroText title={t.headline} subtitle={t.intro} />
+    </div>
+  </div>
 
   <section class="px-4 py-8 sm:px-6 mx-auto max-w-xl lg:px-8 lg:py-12">
     {/*

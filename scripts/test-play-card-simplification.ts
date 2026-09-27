@@ -211,8 +211,17 @@ check('PlayScreen uses the drawer planner', /planMoreDrawer/.test(play));
 // the poll reassigned the next one — a stale recovery menu on a new mission the
 // player never opened. `key={task.id}` forces the remount ExpiryCountdown and
 // OrderingEntry already rely on for exactly this reason.
-check('MissionExtras remounts per mission (key={task.id}), matching ExpiryCountdown/OrderingEntry',
-  /key=\{task\.id\}\s*\n\s*hasLocation=/.test(runner));
+// The key is now PREFIXED (change: duplicate-sibling-keys). <ExpiryCountdown> is a
+// direct sibling under the same <Card> and was keyed to a bare `task.id` too, so
+// one parent had two children with the identical key — the browser logged
+// "Encountered two children with the same key" twelve times on the first mission
+// of the flagship demo, and reconciliation under a duplicate key is explicitly
+// undefined ("may cause children to be duplicated and/or omitted"). Keys only have
+// to be unique among SIBLINGS, so a per-component prefix keeps the remount this
+// assertion is about while removing the collision. What matters is unchanged: the
+// key still varies with `task.id`, so the menu still resets per mission.
+check('MissionExtras remounts per mission (key varies with task.id), matching ExpiryCountdown/OrderingEntry',
+  /key=\{`extras-\$\{task\.id\}`\}\s*\n\s*hasLocation=/.test(runner));
 
 // ── regression: chat unread must stay in sync WHILE the tab is open ─────────
 // The original ChatSection kept the "seen" marker in step with EVERY arriving

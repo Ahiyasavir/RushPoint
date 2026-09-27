@@ -40,6 +40,8 @@ export function isStationStatus(value: unknown): value is StationStatus {
 export interface TaskStatusView {
   id: string;
   status?: StationStatus;
+  /** Same-stage prerequisites (change: live-task-close-rules). Read only by the stage planner. */
+  unlockAfterTaskIds?: string[];
 }
 
 /** The minimum a caller must know about the stage that owns the task. */
@@ -100,8 +102,13 @@ export interface TaskStatusChangePlan {
   availableAfter: number;
   /** What the stage needs to complete: requiredTaskCount clamped to the task count. */
   requiredCount: number;
-  /** availableAfter < requiredCount — the change would dead end the stage. */
+  /** availableAfter < requiredCount — the change would dead end the stage. Never set for a
+   *  closure: the server lowers every team's requirement instead (live-task-close-rules). */
   stageUnwinnable: boolean;
+  /** Missions that wait for this one and are locked by this change (a pause), in stage order. */
+  dependentsLocked: string[];
+  /** Missions that waited for this one and no longer do (a closure), in stage order. */
+  dependentsOpened: string[];
 }
 
 export type TaskStatusChangeResult =
@@ -149,10 +156,23 @@ export function planTaskStatusChange(input: TaskStatusChangeInput): TaskStatusCh
   // so a group of alternatives counts as a single completion on each side.
   const stageShape = { tasks, exclusiveGroups: input.stage?.exclusiveGroups };
   const ceiling = maxCompletableTasks(stageShape);
-  const availableAfter = maxCompletableTasks(stageShape, {
-    isAvailable: (id) =>
-      (id === input.taskId ? to : effectiveTaskStatus(tasks.find((t) => t.id === id)!, overrides)) === 'active',
-  });
+  const statusBefore = (id: string) => effectiveTaskStatus(tasks.find((t) => t.id === id) ?? { id }, overrides);
+  const statusAfter = (id: string) => (id === input.taskId ? to : statusBefore(id));
+  const reachBefore = reachability(tasks, statusBefore);
+  const reachAfter = reachability(tasks, statusAfter);
+  const availableAfter = maxCompletableTasks(stageShape, { isAvailable: (id) => reachAfter.has(id) });
+  // A closed mission is gone for every team, and the server lowers each team's requirement to what
+  // is still attainable (live-task-close-rules), so a later pause is judged against that.
+  const ceilingWithoutClosed = maxCompletableTasks(stageShape, { isAvailable: (id) => statusBefore(id) !== 'closed' });
+  const dependents = dependentsOf(tasks, input.taskId);
+  const dependentsLocked = dependents.filter((id) => reachBefore.has(id) && !reachAfter.has(id));
+  // For a closure: the missions that wait for nothing any more (every prerequisite they have is now
+  // closed), so a team that had not done it can play them at once. A mission that still waits for
+  // another, open prerequisite is not "opened": it opens when that one is done.
+  const closedAfter = (id: string) => statusAfter(id) === 'closed';
+  const dependentsOpened = to === 'closed' && from !== 'closed'
+    ? dependents.filter((id) => reachAfter.has(id) && gateOf(tasks.find((t) => t.id === id)!).every(closedAfter))
+    : [];
 
   const requiredRaw = input.stage?.requiredTaskCount;
   const requiredCount = Math.min(
@@ -163,6 +183,7 @@ export function planTaskStatusChange(input: TaskStatusChangeInput): TaskStatusCh
     // above the ceiling is its own (Builder + server enforced) problem, and letting
     // it through here would flag every pause on such a stage as the cause.
     ceiling,
+    ceilingWithoutClosed,
   );
 
   const holdingRaw = input.teamsHolding;
@@ -182,6 +203,53 @@ export function planTaskStatusChange(input: TaskStatusChangeInput): TaskStatusCh
     teamsHolding,
     availableAfter,
     requiredCount,
-    stageUnwinnable: !noop && to !== 'active' && availableAfter < requiredCount,
+    stageUnwinnable: !noop && to === 'paused' && availableAfter < requiredCount,
+    dependentsLocked,
+    dependentsOpened,
   };
+}
+
+function gateOf(t: TaskStatusView): string[] {
+  return Array.isArray(t?.unlockAfterTaskIds) ? t.unlockAfterTaskIds.filter((x): x is string => typeof x === 'string') : [];
+}
+
+/**
+ * Which missions of the stage a team that has done none of them could still reach: active, and
+ * every prerequisite either reachable itself or CLOSED (a closure satisfies the gates behind it,
+ * change: live-task-close-rules). An unknown prerequisite id can never be met. Cycles resolve to
+ * unreachable. Total.
+ */
+function reachability(tasks: TaskStatusView[], statusOf: (id: string) => StationStatus): Set<string> {
+  const known = new Set(tasks.map((t) => t?.id).filter((id): id is string => typeof id === 'string'));
+  const memo = new Map<string, boolean>();
+  const visiting = new Set<string>();
+  const byId = new Map(tasks.filter((t) => t && typeof t.id === 'string').map((t) => [t.id, t]));
+  const reach = (id: string): boolean => {
+    const hit = memo.get(id);
+    if (hit !== undefined) return hit;
+    if (visiting.has(id) || !known.has(id)) return false;
+    visiting.add(id);
+    const ok = statusOf(id) === 'active'
+      && gateOf(byId.get(id)!).every((p) => known.has(p) && (statusOf(p) === 'closed' || reach(p)));
+    visiting.delete(id);
+    memo.set(id, ok);
+    return ok;
+  };
+  const out = new Set<string>();
+  for (const id of known) if (reach(id)) out.add(id);
+  return out;
+}
+
+/** Every mission that waits, directly or through a chain, for `taskId`, in stage order. */
+function dependentsOf(tasks: TaskStatusView[], taskId: string): string[] {
+  const found = new Set<string>();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const t of tasks) {
+      if (!t || typeof t.id !== 'string' || found.has(t.id) || t.id === taskId) continue;
+      if (gateOf(t).some((p) => p === taskId || found.has(p))) { found.add(t.id); grew = true; }
+    }
+  }
+  return tasks.map((t) => t?.id).filter((id): id is string => typeof id === 'string' && found.has(id));
 }

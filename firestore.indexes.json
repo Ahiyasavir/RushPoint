@@ -65,6 +65,14 @@
       ]
     },
     {
+      "collectionGroup": "gameShareLinks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerUid", "order": "ASCENDING" },
+        { "fieldPath": "gameId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "accessCodes",
       "queryScope": "COLLECTION",
       "fields": [

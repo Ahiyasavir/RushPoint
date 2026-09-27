@@ -65,6 +65,8 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   submitSequenceStep: { max: 40, windowMs: MIN },
   verifyStationCode: { max: 30, windowMs: MIN },
   submitStationPhoto: { max: 20, windowMs: MIN },
+  // background-media-upload: one per deferred submission, plus a retry after a lost reply.
+  attachSubmissionMedia: { max: 20, windowMs: MIN },
   completeTask: { max: 60, windowMs: MIN },
   requestTaskHint: { max: 20, windowMs: MIN },
   // Rehearsal answer reveal (change: test-drive-rehearsal-control). Only ever
@@ -99,6 +101,39 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   //   string comparisons; it is worth bounding, but not at that price.
   submitContactMessage: { max: 5, windowMs: 10 * MIN },
   submitContactMessageAttempt: { max: 120, windowMs: 10 * MIN },
+  // RushPoint Live team applications (change: rushpoint-live-signup). The THIRD
+  // unauthenticated write endpoint, and the same pair of budgets for the same
+  // reasons — see the paragraphs above, which govern both.
+  //
+  // The store budget is tighter than the contact form's because a team applies once
+  // to an event that takes ten of them, and because each stored application carries
+  // a photograph: the resource being protected is bigger per unit.
+  //
+  // The attempt budget is WIDER than the store budget by the same large factor. Nine
+  // answers and a photo is a lot to get right in one go, and a group that keeps being
+  // refused is a group actively trying to comply — locking them out over a mistyped
+  // phone number would cost the event a team it wanted.
+  submitLiveApplication: { max: 3, windowMs: 10 * MIN },
+  submitLiveApplicationAttempt: { max: 60, windowMs: 10 * MIN },
+  // Share links for an unpublished game (change: game-share-link). `getSharedGame`
+  // is the second unauthenticated callable on the platform, keyed on the
+  // connection for the same reason the contact form is: there is no uid.
+  //
+  // Generous, because the honest caller is a person READING a game — they open
+  // the link, walk the stages, reload, come back tomorrow — and a limit that
+  // interrupts that is a broken link as far as they can tell. The token is 128
+  // random bits, so this budget is not what stands between a stranger and the
+  // game; it bounds the COST of someone hammering the endpoint, nothing more.
+  getSharedGame: { max: 120, windowMs: 10 * MIN },
+  // Minting a link is an owner action (keyed by uid) and writes an audit row, so
+  // it is bounded rather than free — but a creator legitimately makes one per
+  // person they are sending it to.
+  createGameShareLink: { max: 30, windowMs: 10 * MIN },
+  // Starting a run through somebody else's share link. Tight: every call creates
+  // a run, an access code and a staff invite in the OWNER's account, and the
+  // per-link cap (MAX_LAUNCHES_PER_SHARE_LINK) bounds the total either way. A
+  // person running a real event presses this once.
+  launchSharedRun: { max: 5, windowMs: 10 * MIN },
   triggerSOS: { max: 5, windowMs: MIN },
   sendTeamChatMessage: { max: 10, windowMs: MIN }, // per-sender uid; one spammer can't starve teammates/HQ
   // Staff↔admin channel (staff-console-field-ops). Roomier than team chat: this is
@@ -110,6 +145,14 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // writes an audit row, but high enough for a marshal working a queue of teams.
   setTeamHold: { max: 30, windowMs: MIN },
   forceAssignTask: { max: 30, windowMs: MIN },
+  // send-team-back: the same field-ops shape and budget as forceAssignTask.
+  returnTeamTo: { max: 30, windowMs: MIN },
+  // staff-capabilities: organizer edits + a staff console refreshing after an edit.
+  updateStaffCode: { max: 60, windowMs: MIN },
+  // quick-dial-and-actions: an organizer editing tonight's numbers, not a hot path.
+  setRunContacts: { max: 30, windowMs: MIN },
+  removeStaffMember: { max: 30, windowMs: MIN },
+  refreshStaffSession: { max: 20, windowMs: MIN },
   requestGuardianConsent: { max: 10, windowMs: MIN }, // writes a doc per call — bound token spam
   submitRunFeedback: { max: 3, windowMs: MIN }, // one real response per run; retries have headroom
   reactToFeedItem: { max: 60, windowMs: MIN }, // taps on the live photo feed (live-photo-feed)
@@ -172,6 +215,14 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   setGameTemplateFlag: { max: 30, windowMs: MIN },
   listGameTemplates: { max: 60, windowMs: MIN },
   listAdminTemplates: { max: 60, windowMs: MIN }, // admin console poll of its own template list
+
+  // Admin editing of the smart-build mission bank (change: admin-editable-mission-bank).
+  // Same posture as the template admin buckets above: a human working through a
+  // list of 89 missions, one at a time. The list call is the more generous of the
+  // three because every mutation ends in a reload.
+  listMissionBankOverrides: { max: 60, windowMs: MIN },
+  setMissionBankOverride: { max: 60, windowMs: MIN },
+  clearMissionBankOverride: { max: 60, windowMs: MIN },
   createGameFromTemplate: { max: 20, windowMs: MIN }, // writes a whole new game per call
   getRunHeatmap: { max: 30, windowMs: MIN }, // aggregates every location ping in a run
   getRunSurveyResults: { max: 30, windowMs: MIN },
@@ -183,6 +234,11 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   deleteZone: { max: 20, windowMs: MIN },
   captureZone: { max: 30, windowMs: MIN }, // in-play action, contested by design
   joinTeamAsDevice: { max: 10, windowMs: MIN }, // matches joinRun — same "get onto a team" weight
+  // change: every-member-plays. Generous: a teammate tapping "I did my part" is a
+  // normal, repeated act, and it is idempotent by construction (a set of distinct
+  // uids), so a double tap costs nothing. The budget exists to bound abuse, not to
+  // ration participation.
+  contributeToTask: { max: 60, windowMs: MIN },
   transferController: { max: 20, windowMs: MIN },
   claimController: { max: 20, windowMs: MIN },
 };

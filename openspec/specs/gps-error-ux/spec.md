@@ -55,19 +55,45 @@ assigned task. While the request is in-flight the component SHALL show a localiz
 - **THEN** while in-flight, the loading label is shown
 
 ### Requirement: field / self_report task — GPS denial shows warning, submission still possible
-A field / self_report task SHALL display a localized warning message (`t.task.gpsWarning`) when
-a participant taps "I'm here" / "Mark complete" and `withLocation` calls `onDenied`, explaining
-that GPS is unavailable and location cannot be recorded. The button SHALL remain active so
-the participant can tap again to retry once GPS is enabled. The submission SHALL NOT be
-blocked client-side (the server decides based on trigger mode).
 
-#### Scenario: GPS denied on field task — warning shown, button remains enabled
-- **WHEN** the participant taps "I'm here" and GPS is denied
-- **THEN** `t.task.gpsWarning` message is displayed
-- **THEN** the "I'm here" button is re-enabled (not permanently disabled)
+A GPS denial on a check-in SHALL NEVER permanently block the participant client-side; the response
+depends on whether the task needs a location. When the participant taps the check-in control and
+`withLocation` invokes `onDenied` (GPS denied, unavailable, or timed out):
 
-#### Scenario: GPS succeeds on retry — warning cleared, task submitted
-- **WHEN** the participant taps "I'm here" again after granting GPS
+- For a `self_report` task, or any task marked `locationless`, the app SHALL submit the completion
+  WITHOUT coordinates (via `completeTask` with the coordinates omitted). These task types need no
+  location and the server does not enforce proximity for them, so a participant who declined the
+  location prompt can still complete a "mark complete from anywhere" task.
+- For a genuinely located `field` task (coordinates placed, not `locationless`), the app SHALL display
+  the localized warning `t.task.gpsWarning` and SHALL NOT submit blind, because the server needs
+  proximity coordinates. The button SHALL remain active so the participant can tap again once GPS is
+  available.
+
+The decision of whether a task may be completed without a location fix SHALL be a pure, fail-open
+predicate (`canCompleteWithoutLocation` in `apps/play-web/src/lib/stuckGuards.ts`) that returns true
+only for `self_report` and `locationless` tasks and defaults to false for every other or unknown task
+shape. The server remains the only authority on whether a completion is allowed.
+
+#### Scenario: GPS denied on a self_report task — completion submitted without coordinates
+
+- **WHEN** the participant taps "Mark complete" on a `self_report` task and GPS is denied
+- **THEN** `completeTask` is called with the coordinates omitted
+- **THEN** no terminal GPS warning traps the participant on the task
+
+#### Scenario: GPS denied on a locationless field task — completion submitted without coordinates
+
+- **WHEN** the participant taps the check-in control on a `locationless` task and GPS is denied
+- **THEN** `completeTask` is called with the coordinates omitted
+
+#### Scenario: GPS denied on a located field task — warning shown, button remains enabled
+
+- **WHEN** the participant taps "I'm here" on a located `field` task and GPS is denied
+- **THEN** `t.task.gpsWarning` is displayed
+- **THEN** the check-in button is re-enabled (not permanently disabled) and no blind submission is sent
+
+#### Scenario: GPS succeeds on retry — warning cleared, task submitted with coordinates
+
+- **WHEN** the participant taps the check-in control again after granting GPS
 - **THEN** the GPS warning is cleared
 - **THEN** `completeTask` is called with real coordinates
 
@@ -102,4 +128,27 @@ cleanup. The displayed distance SHALL update on each new position event.
 #### Scenario: Component unmounts — watcher is cleared
 - **WHEN** the component unmounts
 - **THEN** `clearWatch` is called with the watcher ID
+
+### Requirement: withLocation reuses a recent position fix for manual check-in
+
+`withLocation` (`apps/play-web/src/utils/withLocation.ts`) SHALL pass `maximumAge: 10000` to
+`navigator.geolocation.getCurrentPosition`, so a position fix up to ten seconds old is reused instead
+of forcing a fresh acquisition on every manual check-in, arrival, presence, or routing action. The
+`enableHighAccuracy: true` and `timeout: 5000` options and the `onDenied` contract SHALL be unchanged.
+
+This SHALL NOT affect any safety verdict: the safe-zone / out-of-bounds decision is fed by the
+`PlayScreen` position watcher (which keeps its own `watchPosition`) and not by `withLocation`, so its
+freshness requirement is untouched.
+
+#### Scenario: A recent fix is reused instead of re-acquired
+
+- **WHEN** `withLocation` requests a position and a fix from within the last ten seconds is available
+- **THEN** `getCurrentPosition` is invoked with `maximumAge: 10000` so the recent fix may be reused
+
+#### Scenario: The denial and success contracts are unchanged
+
+- **WHEN** `getCurrentPosition` succeeds
+- **THEN** `cb` is called with the fix coordinates
+- **WHEN** `getCurrentPosition` fires its error callback or the geolocation API is absent
+- **THEN** `onDenied` is called and `cb` is not
 

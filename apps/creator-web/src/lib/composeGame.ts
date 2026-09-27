@@ -265,11 +265,38 @@ export interface FitContext {
    */
   favouredTags: readonly BankTagId[];
   /**
+   * The occasion actually answered, or `undefined` when there was none.
+   *
+   * Distinct from `favouredTags`, which is a soft bias and deliberately empty
+   * for the neutral answer. This one drives a HARD filter: a mission that
+   * declares `occasions` is meaningless anywhere else (`backwards-name` says
+   * "the celebrant's name"; there is no celebrant at a corporate offsite) and no
+   * amount of good fit makes it playable. See `TaskBankEntry.occasions`.
+   */
+  occasion?: OccasionId;
+  /**
    * Does this creator prefer missions pinned to real spots? True from prep level
    * 4 ("I'll go to the site beforehand and set it up there"). A PREFERENCE, not
    * a filter: level 4 admits exactly the missions level 3 admits.
    */
   placedPreference: boolean;
+  /**
+   * May a chosen mission carry a REQUIRED Quick Setup step?
+   *
+   * False only at prep level 1, whose answer is literally "I prepare nothing at
+   * all". `prepTierOf` reads the mission's TAGS, and a tag describes the props a
+   * creator must bring — it says nothing about the fields Quick Setup will then
+   * demand. So a mission tagged `noPrep` could still open the creator's very
+   * first screen with a mandatory blank: drop a pin, attach a photo of the spot,
+   * write the emoji clue, set the numeric answer. A level-1 creator was told
+   * nothing would be asked of them and was then blocked from launching until
+   * they authored mission content.
+   *
+   * Derived from the entry's own `setup`, never from a tag, for the same reason
+   * `family` and `exclusiveStation` are declared rather than inferred: the two
+   * can drift, and only one of them is what the creator actually experiences.
+   */
+  requiredSetupAllowed: boolean;
 }
 
 /** The minimum a candidate needs to be sampled. */
@@ -551,10 +578,19 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
     // Neutral, unknown and absent all resolve to an EMPTY list — see
     // `occasionProfile`, which never guesses a bias from a malformed answer.
     favouredTags: occasionProfile(a.occasion).favouredTags,
+    // The raw answer, for the hard occasion filter in `fitScore`. Anything that
+    // is not a real occasion id becomes `undefined`, which reads as "we were not
+    // told" and therefore admits no occasion-locked mission at all.
+    occasion: isOccasionId(a.occasion) ? a.occasion : undefined,
     // Level 4 and up. Level 2-3 pin missions too (`prepWantsPlacedMissions`),
     // but only level 4 says the creator is going there beforehand, which is what
     // makes a located mission worth preferring rather than merely tolerable.
     placedPreference: prepWantsPlacedMissions(a.prepEffort) && (num(a.prepEffort) ?? 0) >= 4,
+    // Level 2 ("I'll put the missions on real spots") is already an agreement to
+    // fill something in, so only level 1 refuses. An ABSENT answer resolves via
+    // `prepToleranceOf`'s fallback (level 3) and therefore allows it — a creator
+    // who never saw the question is not the one making this promise.
+    requiredSetupAllowed: prepToleranceOf(a.prepEffort) > 0 || prepWantsPlacedMissions(a.prepEffort),
     // Sanitised the same way as preferredTags, then narrowed to real area ids, so
     // a stray tag in the answers cannot silently become an area filter.
     areas: safeTags(a.areas).filter((t): t is AreaTagId =>
@@ -568,6 +604,16 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
 // ═══════════════════════════════════════════════════════════════════════════
 // 5. Fit score
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Does this mission block its launch on a field the creator must fill in?
+ *
+ * Total: a malformed entry, or one with no setup at all, demands nothing.
+ */
+export function demandsRequiredSetup(entry: TaskBankEntry | undefined): boolean {
+  const setup = Array.isArray(entry?.setup) ? entry.setup : [];
+  return setup.some((s) => s?.required === true);
+}
 
 /**
  * How well one mission suits one slot.
@@ -597,6 +643,21 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
   // with a business" describes their world, not their taste — see
   // ComposerAnswers.prepEffort.
   if (prepTierOf(tags) > (num(ctx.prepTolerance) ?? 1)) return -Infinity;
+  // …and the same budget again, measured on what Quick Setup will REALLY ask
+  // for rather than on what the mission claims to cost. See
+  // `FitContext.requiredSetupAllowed`.
+  if (ctx.requiredSetupAllowed === false && demandsRequiredSetup(entry)) return -Infinity;
+  // A mission written for ONE kind of event. Hard, like the prep budget and for
+  // the same reason: "there is no birthday here" describes the creator's world,
+  // not their taste. And an ABSENT occasion excludes it too — "we were not told
+  // what this event is" must never resolve to "so hand them a birthday mission",
+  // which is exactly what happened before this filter existed: `backwards-name`
+  // is tagged for office, mall, forest and beach, and a park game for a mixed
+  // audience was composed with "say the celebrant's name backwards" in it.
+  if (Array.isArray(entry.occasions) && entry.occasions.length > 0
+    && (ctx.occasion === undefined || !entry.occasions.includes(ctx.occasion))) {
+    return -Infinity;
+  }
   // "No venue" makes a location-only mission literally unplayable.
   if (ctx.setting === 'fromAnywhere' && tags.includes('locationBased') && !tags.includes('fromAnywhere')) {
     return -Infinity;

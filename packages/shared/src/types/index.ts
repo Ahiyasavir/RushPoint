@@ -1,3 +1,4 @@
+import type { StaffCapability } from '../staffCapabilities';
 import type { MediaKind } from '../mediaKinds';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -39,6 +40,9 @@ export const COLLECTIONS = {
   // Join codes
   ACCESS_CODES: 'accessCodes',
 
+  // Read-only share links for an unpublished game (change: game-share-link)
+  GAME_SHARE_LINKS: 'gameShareLinks',
+
   // Smart stations
   STATION_SECRETS: 'stationSecrets',
   STATION_REVIEWS: 'stationReviews',
@@ -54,6 +58,12 @@ export const COLLECTIONS = {
 } as const;
 
 export const FIRESTORE_PATHS = {
+  // A creator's own profile doc (owner-writable). quick-dial-and-actions keeps the
+  // console's quick-actions bar here, under `consolePrefs`.
+  user:       (uid: string) => `users/${uid}`,
+
+  games:      (ownerUid: string) => `users/${ownerUid}/games`,
+
   game:       (ownerUid: string, gameId: string) =>
     `users/${ownerUid}/games/${gameId}`,
 
@@ -68,6 +78,13 @@ export const FIRESTORE_PATHS = {
 
   staffInvite: (ownerUid: string, gameId: string, runId: string, inviteId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites/${inviteId}`,
+
+  // One document per staff PERSON on a run (change: staff-capabilities): which code they joined
+  // with, and whether the organizer removed them. Written only by callables.
+  staffGrant: (ownerUid: string, gameId: string, runId: string, staffUid: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/staffGrants/${staffUid}`,
+  staffGrantsCol: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/staffGrants`,
 
   publicGame:  (gameId: string) => `publicGames/${gameId}`,
   publicTask:  (taskId: string) => `publicTasks/${taskId}`,
@@ -93,6 +110,13 @@ export const FIRESTORE_PATHS = {
   transaction: (uid: string, txId: string) => `wallets/${uid}/transactions/${txId}`,
 
   accessCode:  (code: string) => `accessCodes/${code}`,
+
+  // Share links for an unpublished game (change: game-share-link). Top-level and
+  // keyed by the token for the same reason as accessCodes: the holder resolves
+  // owner + game FROM the address, so the link can be handed out without ever
+  // naming either. Server-write-only AND server-read-only (firestore.rules).
+  gameShareLink:     (token: string) => `gameShareLinks/${token}`,
+  gameShareLinksCol: () => 'gameShareLinks',
 
   runAnnouncement: (ownerUid: string, gameId: string, runId: string, id: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/announcements/${id}`,
@@ -265,6 +289,9 @@ export interface SmartStationConfig {
   // by necessity — the recorder cannot enforce a limit it cannot see.
   videoMinSeconds?: number;
   videoMaxSeconds?: number;
+  // camera-switch D4: photo/video missions only. 'front' = a selfie mission, so the
+  // camera opens facing the players; absent = the rear camera. Participant-visible.
+  preferredCamera?: 'front';
 
   geofenceRadiusMeters?: number;
   stationCoords?: GeoPoint;  // injected by assignTask; never authored
@@ -300,6 +327,19 @@ export interface Task {
   difficulty: number;            // 1–10
   estimatedMinutes: number;
   expectedDurationMinutes?: number;  // for Dynamic Time Bonus calculation
+  // How many DISTINCT devices must each do their part before this mission can be
+  // completed (change: every-member-plays). Absent or 0 means none, which is every
+  // existing mission.
+  //
+  // A contribution is ADDITIVE: the controller still submits. This exists because the
+  // device model makes every other teammate a spectator by construction
+  // (`assertController`), which is how one person doing the mission advanced the whole
+  // team while the rest stood around.
+  //
+  // Reduced to what the team can actually achieve at completion time - see
+  // `effectiveContributorRequirement` - so a mission authored for four contributors and
+  // played by a team of two is never unwinnable.
+  requiredContributors?: number;
   pointValue: number;
   maxConcurrentTeams: number;   // real station contention — 1 for a single physical
                                  // resource, high ("no queue here") for an open space;
@@ -317,6 +357,22 @@ export interface Task {
   // A general task with no fixed map location — can be done from anywhere
   // (no travel, no map marker, no distance). Routing treats transit as zero.
   locationless?: boolean;
+  // BENCHED (change: mission-card-actions). The mission stays in the template —
+  // authored, editable, exportable, restorable in one click — and takes no part in
+  // the game: `buildInitialStages` leaves it out of every run it launches, so no
+  // team is ever routed to it, it is not published to the gallery, and readiness
+  // does not demand a name or a pin for it.
+  //
+  // Distinct from `Run.taskStatusOverrides` (live-task-pause), which says "this
+  // stop is closed TODAY" about one run and is deliberately not on the template.
+  // This says "not part of the game YET", about the template itself, and it is
+  // exactly what a creator reaches for instead of deleting a mission they may want
+  // back — which is the operation the Builder had no answer for.
+  //
+  // Read through `isTaskHidden` / `playableTasks` (shared/hiddenTask), never as a
+  // bare truthy check: absent must mean PLAYABLE everywhere, so that no reader that
+  // has never heard of this field can accidentally bench a mission.
+  hidden?: boolean;
   // Hidden-location (treasure-hunt) flag: the task keeps real `coordinates` +
   // geofence radius SERVER-SIDE, but they are NEVER sent to the participant —
   // sanitizeTaskForParticipant strips them and emits `locationHidden`. The map
@@ -388,6 +444,17 @@ export interface Task {
   // numeric: correct when |entered − numericAnswer| ≤ numericTolerance (default 0).
   numericAnswer?: number;
   numericTolerance?: number;
+  // answer-scored-question: points by answer (quiz/numeric) or by station code
+  // (smart_station, replacing smart.secretCode). SERVER-SECRET: the participant
+  // sanitizer emits button labels only. See packages/shared/src/answerOutcomes.ts.
+  answerOutcomes?: import('../answerOutcomes').AnswerOutcome[];
+  /** Absent/null: an answer matching no outcome counts as wrong. */
+  unmatchedPoints?: number | null;
+  /** Show each button's points to the players. */
+  revealOutcomePoints?: boolean;
+  /** PARTICIPANT-FACING only (sanitizer output): points per `choices` entry, present only when
+   *  the creator turned on revealOutcomePoints (answer-scored-question D4). */
+  choicePoints?: number[];
   // geofence: auto-checks-in when the participant is within this radius of
   //           `coordinates` (default 50m). Server validates the GPS distance.
   geofenceRadiusMeters?: number;
@@ -417,6 +484,13 @@ export interface Task {
   // waiting). Evaluated server-side via isExpired(); absent = never expires.
   // Carries no secret → sanitizer passthrough for the "expires in…" countdown UI.
   expiresAfterMinutes?: number;
+  // mission-time-limit: an ABSOLUTE close (ISO), the pair of `releaseAt`. With a relative close
+  // too, the earlier one wins (schedule.ts isExpired). Sanitizer passthrough, like the others.
+  expiresAt?: string;
+  // mission-time-limit: a countdown PER TEAM, in minutes from the moment that team was given the
+  // mission. Time up ⇒ skipped for that team with no points (skipCause 'timeLimit') and routed on.
+  // The phone is sent a remaining duration, never an instant (packages/shared/src/taskTimeLimit.ts).
+  timeLimitMinutes?: number;
   // Unlockable tasks (change: unlockable-tasks): ids of OTHER tasks in the SAME
   // stage that must ALL be completed before this one becomes available (AND
   // semantics). Evaluated server-side via isUnlocked(); validated at save time by
@@ -587,6 +661,37 @@ export interface Game {
   // every existing game keeps the feed on. Enforced write-side in the functions
   // (rules cannot conditionally gate feedItems reads on this flag).
   photoFeedEnabled?: boolean;
+  // A team that joins AFTER the organizer pressed start (change:
+  // late-joiner-autostart). When true, `joinRun` launches it immediately instead of
+  // leaving it registered forever. OFF by default and read as a LITERAL `true`,
+  // because taking the start button away removes the organizer's "everyone ready?"
+  // moment, and this flag starts a team playing on its own.
+  //
+  // Guardian consent is strictly upstream: a consent gated game never auto starts a
+  // late joiner, whatever this says. See shared/lateJoiner.
+  //
+  // The console's stranded team strip does NOT consult this. The organizer who never
+  // turned it on is exactly the organizer whose team sat 27 minutes.
+  autoStartLateJoiners?: boolean;
+  // Run every media submission through automatic approval (change:
+  // late-joiner-autostart). Copied onto the RUN at launch and read from there, never
+  // from the template mid run: an operational choice on the template is replayed by
+  // every later run, copied by duplicate/export/publish, and rewritten wholesale by
+  // the Builder. Equivalent to setting `smart.autoApprove` on every media mission,
+  // without touching a single task.
+  autoApproveAllMedia?: boolean;
+  // What a new staff code may do when the organizer does not choose (change: staff-capabilities).
+  // Absent = everything, which is what every game had before. Read when a code is MINTED, never
+  // afterwards, so editing the template never changes a code already handed out.
+  staffDefaults?: { capabilities: StaffCapability[] };
+  // Every declared member must be on their own phone before the team plays
+  // (change: every-member-plays). OFF by default and read as a LITERAL `true`: this
+  // holds a team out of a game they turned up to play.
+  //
+  // FAILS OPEN on an unknown headcount. `memberCount` is only meaningful when the game
+  // collects member names, so holding on it would block a team for a question they were
+  // never asked. See shared/teamParticipation.
+  requireAllMembersOnline?: boolean;
   // Power-ups (change: power-ups): when true, each completed task has a
   // seeded-deterministic ~25% chance to award a power-up (×2 next task or +15
   // flat). Default false — existing games are untouched. Never rolls on the
@@ -625,6 +730,15 @@ export interface Game {
   // introduces, changes or removes these two fields. See gameLifecycle.ts.
   deletedAt?: string;
   deletedBy?: string;
+  /**
+   * A copy made by launching through someone else's share link (change:
+   * shared-launch-opens-console): the launcher owns it so their own Run Console opens. `locked`
+   * when the link did not allow copying: then it can be operated but not edited, copied,
+   * exported, published or re-shared (assertNotShareLocked), and it is hidden from the games list.
+   * `fromToken` is the first characters of the link token, for the audit trail. SERVER-WRITTEN
+   * ONLY (firestore.rules).
+   */
+  sharedLaunch?: { locked: boolean; fromToken: string; sourceTitle?: string };
   createdAt: string;
   updatedAt: string;
   // Admin-managed game templates (change: admin-manage-game-templates). A template
@@ -653,6 +767,16 @@ export interface Game {
   // retuned. A template with no genre is simply not offered as a wizard answer —
   // it stays fully usable in the ordinary picker.
   templateGenre?: TemplateGenre;
+  // Taken out of the creator-facing picker while staying a template the admin
+  // owns, sees in their builder and can edit (change: template-visibility).
+  //
+  // ABSENT MEANS VISIBLE. Every template that exists today carries no such
+  // field, so absence has to be the ordinary case or the whole catalogue
+  // disappears on deploy — which is also why the field is named for the
+  // non-default state. Read it ONLY through `isTemplateHidden`: two of the four
+  // call sites see documents that came through a `.select()` field mask, where
+  // an omitted field is `undefined` on every row.
+  templateHidden?: boolean;
   // Task-library priority (change: task-library-priority-boost). Creator-settable
   // (unlike PublicGame/PublicTask.pinnedLast, which is admin-only and set directly
   // in Firestore). When true, every task this game publishes carries
@@ -839,6 +963,23 @@ export interface Run {
   // Routing resolves it via effectiveTaskStatus(); the completion path never reads
   // it, so a team already holding a paused task still finishes and scores it.
   taskStatusOverrides?: Record<string, StationStatus>;
+  /** Tonight's phone numbers (quick-dial-and-actions). Written only by setRunContacts;
+   *  players receive only the ones marked for them, via getMyTeamState. */
+  contacts?: import('../runContacts').RunContact[];
+  // When the organizer first started a cohort (change: late-joiner-autostart).
+  // `startTeams` is point in time and used to leave NO trace on the run, so nothing
+  // downstream could tell "joined before the start" from "joined after it and was
+  // stranded". That is how a team sat 27 minutes unnoticed in run
+  // ijI9JMITSf8C9heN1Cwp. Stamped ONCE, on the first start; a second press does not
+  // move it, because the question it answers is "has play begun", not "when was the
+  // last batch launched".
+  teamsStartedAt?: string;
+  // This run approves every media submission automatically (change:
+  // late-joiner-autostart). Copied from the game at launch so an operational choice
+  // is never written into the template later runs replay. Read by
+  // submitStationPhoto alongside the per task `smart.autoApprove`, which still wins
+  // on its own.
+  autoApproveAllMedia?: boolean;
   // Retention tombstones, written by the maintenance sweeps (server only). Both
   // make their sweep idempotent — a stamped run is never re-scanned.
   //   piiPrunedAt       raw participant PII destroyed (90 days)
@@ -886,9 +1027,30 @@ export interface StaffInvite {
   ownerUid: string;
   pin: string;
   displayName?: string;
+  /** Dead since staff-capabilities (never enforced); kept for invites minted before it. */
   permissions: StaffPermission[];
   usedAt?: string;
   createdAt: string;
+  // ── staff-capabilities: a CODE shared by several people ──
+  /** What people on this code may do. Absent on a pre-change invite, which means full. */
+  capabilities?: StaffCapability[];
+  /** The organizer's own name for the code ("north gate", "judges"). */
+  label?: string;
+  /** True for every code minted since staff-capabilities; absent = legacy single-use invite. */
+  multiUse?: boolean;
+  /** Stops NEW sign-ins; people already on the code keep working until removed. */
+  disabled?: boolean;
+  /** Bumped on every edit, so a staff console knows to refresh its session. */
+  version?: number;
+}
+
+// Stored at: users/{ownerUid}/games/{gameId}/runs/{runId}/staffGrants/{staffUid}
+export interface StaffGrant {
+  codeId: string;
+  name: string;
+  removed: boolean;
+  joinedAt: string;
+  removedAt?: string;
 }
 
 
@@ -941,10 +1103,29 @@ export interface RehearsalReveal {
   order?: string[];
 }
 
+/**
+ * WHY a task record is `skipped` (change: skip-keeps-the-stage). Only `operator`, a single mission
+ * skipped by an organizer or staff (skipTaskForTeam), satisfies the unlock gates of the missions
+ * behind it; every other cause keeps today's meaning. A record with no cause (written before this
+ * field existed) reads as NOT satisfying. The rule itself lives in gating.ts `satisfiesGate`.
+ */
+export type SkipCause =
+  | 'operator'        // skipTaskForTeam: remove ONE obstacle for ONE team
+  | 'operatorStage'   // skipStage: the organizer ended the stage
+  | 'exclusive'       // the team chose another alternative of an exclusive group
+  | 'expired'         // the task's time window closed while the team held it
+  | 'timeLimit'       // mission-time-limit: this team's own countdown ran out
+  | 'unreachable'     // retired: gated behind a task this team can never satisfy
+  | 'stageSatisfied'; // leftover: the stage's requirement was already met
+
 export interface RunTaskRecord {
   taskId: string;
   taskIndex: number;  // index into Stage.tasks for multi-task stages
   status: TaskStatus;
+  /** Set on every `skipped` record written from skip-keeps-the-stage on. */
+  skipCause?: SkipCause;
+  /** live-task-close-rules: skipped because the organizers CLOSED the mission for the run. Earns 0. */
+  closedByOrganizer?: boolean;
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;
@@ -972,6 +1153,8 @@ export interface RunTaskRecord {
   // Absent on every pre-change record and on any run started before this shipped —
   // read via a template fallback, never as 0.
   expectedDurationMinutesAtCompletion?: number;
+  /** answer-scored-question: which answer outcome the team hit (organizer-facing). */
+  outcomeId?: string;
   earnedScore?: number;
   scoreBreakdown?: TaskScoreBreakdown;
   // Smart station
@@ -988,6 +1171,13 @@ export interface RunTaskRecord {
   // so a reload / GPS loss / offline spell can never re-seal a task the player has
   // already reached. Until it is set, the sanitizer ships only the sealed stub.
   arrivedAt?: string;
+  // Was the team let through WITHOUT the fix proving it (change:
+  // arrival-needs-a-usable-fix)? Set only when the grace window opened on a fix too
+  // coarse to place them inside the radius. Purely an organizer-facing record: it
+  // changes no score, gates nothing, and is never shown to the participant - telling
+  // a player 'you got in on a technicality' would document the way through the gate
+  // this flag exists to detect.
+  arrivalUnverified?: boolean;
   // Test mode (change: test-mode-hidden-scoring): what the participant actually
   // submitted, and whether it was right. Written ONLY on a run whose game seals
   // scoring, inside the SAME transaction that scores the answer, so a submission can
@@ -1054,6 +1244,12 @@ export interface RunTeam {
   status: TeamStatus;
   stages: RunStageRecord[];
   score: number;
+  /**
+   * Every operator-made score change, with its reason (changes: send-team-back,
+   * team-dossier-and-search). Organizer-facing only: never allow-listed to participants.
+   * Written with appendScoreLedger (packages/shared/src/scoreLedger.ts), bounded, whole-array.
+   */
+  scoreLedger?: import('../scoreLedger').ScoreLedgerEntry[];
   // Sign convention: bonusPenalty is SUBTRACTED from the final score. A BONUS is a
   // NEGATIVE penalty (a decrement); a fine is a positive penalty. adjustTeamScore
   // (np = p - delta), zone-capture bonuses, and power-up bonuses all follow this.
@@ -1099,9 +1295,33 @@ export interface RunTeam {
   // Discovery POIs (change: surprise-trivia-waypoints): poiId → lifecycle state.
   discoveryState?: import('./../discoveryPoi').TeamDiscoveryState;
   activeTaskId?: string | null;  // mirror for getStationTeams query
+  /** live-task-close-rules: the mission this team was standing on when the organizers closed it,
+   *  so the phone can say why it moved on. Written only for a team that was holding it. */
+  closedTaskNotice?: { taskId: string; title: string; at: string };
+  /** mission-time-limit: the mission this team's own countdown ran out on, so the phone can say why. */
+  timeUpNotice?: { taskId: string; title: string; at: string };
   launched: boolean;
+  // When this team joined the run. Written by joinRun since long before it was
+  // typed here; declared now because the console needs it to tell a team waiting
+  // BEFORE the organizer pressed start from one stranded AFTER it
+  // (change: late-joiner-autostart). Optional: legacy documents may lack it.
+  joinedAt?: string;
   startedAt?: string;
   finishedAt?: string;
+  // When this team was FIRST refused a check-in for a coarse fix, per task
+  // (change: arrival-needs-a-usable-fix). ISO instants, keyed by taskId.
+  //
+  // A FLAT MAP ON THE TEAM, DELIBERATELY NOT A FIELD ON THE TASK RECORD. The task
+  // records live inside the `stages` array, and CLAUDE.md is explicit that an array
+  // element can never be dotted-path-updated - it coerces the array to a map. Writing
+  // one stamp would therefore need a read-modify-write of the whole stages array,
+  // inside a transaction, on a REFUSAL path that runs before any transaction exists.
+  // A plain nested object merges in one write.
+  //
+  // Not cleaned up: one short string per task a team struggled at, on a document
+  // that is pruned with the run. Clearing it on success would also throw away the
+  // only evidence that the team was ever held.
+  coarseFixSince?: Record<string, string>;
   // Smart station streak
   smartStreak?: number;
   streakMultiplier?: number;
@@ -1137,6 +1357,14 @@ export interface RunTeam {
   }>;
   // Per-sequence-task progress: taskId → number of steps completed so far.
   taskStepProgress?: Record<string, number>;
+  // Who has done their part of a mission (change: every-member-plays):
+  // taskId -> the DISTINCT device uids that contributed.
+  //
+  // A contribution is additive and never a second route to completing a mission: the
+  // controller still submits. It exists because the device model makes every other
+  // teammate a spectator by construction, which is how "one person does the mission and
+  // the team advances" happened.
+  taskContributions?: Record<string, string[]>;
   // Shared team devices (change: shared-team-devices). Absent on legacy docs —
   // the founding uid (id) is then the sole attached device and the controller.
   deviceUids?: string[];
@@ -1393,6 +1621,10 @@ export interface FeedItem {
    * the feed, so this is only ever `'photo'` or `'video'` in practice.
    */
   mediaKind?: MediaKind;
+  /** video-upload-speed D7: poster frame for a video item; absent for photos and older clips. */
+  posterUrl?: string;
+  /** video-upload-speed D7: the clip's measured length in seconds (display only). */
+  mediaDurationSec?: number;
   /** emoji → count, e.g. { '🔥': 3 }. Zero-count keys are dropped. */
   reactions: Record<string, number>;
   /** uid → emoji: dedup/switch source of truth (one reaction per uid). */
@@ -1491,6 +1723,11 @@ export interface TeamSummary {
   activeStageOrder: number | null;
   finished: boolean;
   launched: boolean;
+  /** When the team joined (change: late-joiner-autostart). Null on a legacy row. */
+  joinedAt?: string | null;
+  /** Declared people with no phone attached; null when unknowable
+   *  (change: every-member-plays). */
+  membersNotConnected?: number | null;
   startedAt: string | null;
   finishedAt: string | null;
 }
@@ -1551,6 +1788,15 @@ export interface UpdateGamePayload {
   photoFeedEnabled?: boolean;
   // Power-ups toggle (change: power-ups). Default false when absent.
   powerUpsEnabled?: boolean;
+  // Late joiner auto start + run wide media approval (change: late-joiner-autostart).
+  // Both default false when absent, so every existing game is untouched.
+  autoStartLateJoiners?: boolean;
+  autoApproveAllMedia?: boolean;
+  // staff-capabilities: what a new staff code may do.
+  staffDefaults?: { capabilities: StaffCapability[] };
+  // Every declared member on their own phone (change: every-member-plays). Default
+  // false when absent.
+  requireAllMembersOnline?: boolean;
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Default false
   // when absent ⇒ finalizeRun auto-publishes the final board, today's behaviour.
   manualLeaderboardReveal?: boolean;

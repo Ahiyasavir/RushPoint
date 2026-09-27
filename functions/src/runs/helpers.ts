@@ -55,12 +55,19 @@ export function applyStageCompletion(
   // skipStage compensation, not an automatic retirement.
   if (gameStage && Array.isArray(gameStage.tasks) && gameStage.tasks.length > 0) {
     const statusByTaskId: Record<string, TaskProgressStatus> = {};
-    for (const t of stages[stageIdx].tasks) statusByTaskId[t.taskId] = t.status;
-    const dead = new Set(unreachableTaskIds(gameStage.tasks, statusByTaskId));
+    // skip-keeps-the-stage: an OPERATOR-skipped prerequisite satisfies its dependents, so a
+    // skip of a chain's head no longer retires the chain (production run 2026-09-22).
+    const skipCauseByTaskId: Record<string, unknown> = {};
+    for (const t of stages[stageIdx].tasks) {
+      statusByTaskId[t.taskId] = t.status;
+      skipCauseByTaskId[t.taskId] = t.skipCause;
+    }
+    const dead = new Set(unreachableTaskIds(gameStage.tasks, statusByTaskId, skipCauseByTaskId));
     if (dead.size > 0) {
       for (const t of stages[stageIdx].tasks) {
         if (dead.has(t.taskId)) {
           t.status = 'skipped';
+          t.skipCause = 'unreachable';
           stampSkipExpected(t, gameStage.tasks);
         }
       }
@@ -84,6 +91,9 @@ export function applyStageCompletion(
   for (const t of stages[stageIdx].tasks) {
     if (t.status !== 'completed') {
       if (t.status === 'assigned') heldAssignedTaskIds.push(t.taskId);
+      // Stamp a cause only on a record that becomes skipped NOW: one already skipped keeps the
+      // cause it was given (an operator skip must stay an operator skip).
+      if (t.status !== 'skipped') t.skipCause = 'stageSatisfied';
       t.status = 'skipped';
       stampSkipExpected(t, gameStage?.tasks);
     }

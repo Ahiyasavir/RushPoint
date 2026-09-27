@@ -18,6 +18,7 @@ import { useT } from './LanguageContext';
 import {
   buildGalleryTaskDetail, type GalleryDetailRowKey, type GalleryTaskTypeKey,
 } from '../lib/galleryTaskDetail';
+import { TAP_TARGET } from '../lib/interaction';
 
 // MapLibre (~500 KB) is pulled by OPENING a detail, not by importing this file,
 // so the Builder's mission picker does not drag the map into its own path.
@@ -126,7 +127,7 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
         <div className="flex flex-col min-h-0 flex-1 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
             <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-wide text-[--ink-3] font-semibold">{gl.detailTitle}</p>
+              <p className="text-[13px] uppercase tracking-wide text-[--ink-3] font-semibold">{gl.detailTitle}</p>
               <h3 id={titleId} className="font-brand font-bold text-lg text-[--ink-1] leading-snug" dir="auto">
                 {detail.title}
               </h3>
@@ -136,8 +137,8 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
               onClick={onClose}
               aria-label={gl.detailClose}
               title={gl.detailClose}
-              className="shrink-0 text-[--ink-3] hover:text-[--ink-1] text-sm rounded
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+              className={`${TAP_TARGET} -me-2 shrink-0 text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-sm rounded-lg
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}
             >✕</button>
           </div>
 
@@ -194,14 +195,14 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
 
             {/* A creator evaluating a quiz mission will otherwise read the missing
                 answer list as a bug in this view rather than as the contract. */}
-            <p className="text-[11px] text-[--ink-3] leading-relaxed">{gl.detailSecretNote}</p>
+            <p className="text-[13px] text-[--ink-3] leading-relaxed">{gl.detailSecretNote}</p>
           </div>
 
           <div className="mt-3 pt-3 border-t border-[--rp-border] flex items-center gap-3 shrink-0">
             {onUse ? (
               <Button loading={useBusy} onClick={onUse} className="!py-2 !text-xs !font-semibold">{gl.detailUse}</Button>
             ) : (
-              <p className="text-[11px] text-[--ink-3] leading-relaxed">{gl.detailUseHint}</p>
+              <p className="text-[13px] text-[--ink-3] leading-relaxed">{gl.detailUseHint}</p>
             )}
             <Button variant="ghost" onClick={onClose} className="ms-auto !py-2 !text-xs">{gl.detailClose}</Button>
           </div>

@@ -22,7 +22,8 @@ import { panelPriority, type PanelId, type RunStatus } from './runConsoleLayout'
 
 export type SignalId =
   | 'sos' | 'outOfBounds' | 'photoOverdue' | 'teamsStuck' | 'heldForConsent'
-  | 'photoPending' | 'unreadChat' | 'tasksPaused' | 'nobodyJoined' | 'notStarted';
+  | 'photoPending' | 'unreadChat' | 'tasksPaused' | 'nobodyJoined' | 'notStarted'
+  | 'lateJoinerStranded' | 'membersOffline' | 'arrivalsUnverified';
 
 export type SignalSeverity = 'critical' | 'warn' | 'info';
 
@@ -59,13 +60,41 @@ export type RunSignalInput = {
   teamCount: number;
   /** Joined but not launched, so their clock has not started. */
   unstartedTeamCount: number;
+  /**
+   * Joined AFTER the organizer pressed start and still not playing (change:
+   * late-joiner-autostart). A SUBSET of `unstartedTeamCount`, and a different
+   * situation from it: "you have not pressed start yet" is calm, while "play began
+   * and this team is sitting in a car park watching nothing" is not. In run
+   * ijI9JMITSf8C9heN1Cwp that team waited 27 minutes and pressed SOS to be noticed.
+   *
+   * Comes from `pendingLateJoiners` (shared/lateJoiner), which deliberately does not
+   * consult the auto start setting: the organizer who never turned it on is exactly
+   * the one this has to reach.
+   */
+  strandedLateJoinerCount: number;
+  /**
+   * Teams with at least one declared member who has no phone attached
+   * (change: every-member-plays).
+   *
+   * The organizer of run ijI9JMITSf8C9heN1Cwp could not tell a team of six sharing one
+   * phone from a solo player, on any screen, because `memberCount` and `deviceUids`
+   * were never compared. Counts TEAMS, not people: "three teams have people standing
+   * around" is the sentence an organizer can act on.
+   *
+   * Only teams whose headcount is KNOWN can be counted, which is most of the point of
+   * making it a separate number rather than folding it into `teamsStuck`.
+   */
+  teamsWithMembersOffline: number;
+  /** Check-ins accepted on a fix that could not prove the team was there. */
+  unverifiedArrivalCount: number;
 };
 
 /** Declaration order, and the final tie break so the output is a total order. */
 export const SIGNAL_ORDER: SignalId[] = [
   'sos', 'outOfBounds', 'photoOverdue',
   'teamsStuck', 'heldForConsent', 'photoPending', 'unreadChat',
-  'tasksPaused', 'nobodyJoined', 'notStarted',
+  'lateJoinerStranded', 'tasksPaused', 'membersOffline', 'arrivalsUnverified',
+  'nobodyJoined', 'notStarted',
 ];
 
 /** Keyed by the closed union: a new signal cannot ship unranked. */
@@ -81,6 +110,9 @@ export const SIGNAL_SEVERITY: Record<SignalId, SignalSeverity> = {
   unreadChat: 'warn',
   // States the organizer chose, or the ordinary shape of a run about to start.
   tasksPaused: 'info',
+  lateJoinerStranded: 'warn',
+  membersOffline: 'info',
+  arrivalsUnverified: 'info',
   nobodyJoined: 'info',
   notStarted: 'info',
 };
@@ -95,6 +127,9 @@ export const SIGNAL_PANEL: Record<SignalId, PanelId> = {
   photoPending: 'photoReview',
   unreadChat: 'chat',
   tasksPaused: 'taskAvailability',
+  lateJoinerStranded: 'startTeams',
+  membersOffline: 'teams',
+  arrivalsUnverified: 'teams',
   nobodyJoined: 'joinShare',
   notStarted: 'startTeams',
 };
@@ -135,6 +170,9 @@ export function buildRunSignals(input: RunSignalInput): RunSignal[] {
   const pausedTasks = count(input.pausedTaskCount);
   const teams = count(input.teamCount);
   const unstarted = count(input.unstartedTeamCount);
+  const stranded = count(input.strandedLateJoinerCount);
+  const membersOffline = count(input.teamsWithMembersOffline);
+  const unverifiedArrivals = count(input.unverifiedArrivalCount);
 
   const out: RunSignal[] = [];
   if (alerts > 0) out.push(signal('sos', alerts));
@@ -147,8 +185,26 @@ export function buildRunSignals(input: RunSignalInput): RunSignal[] {
   if (pendingPhotos > 0 && overduePhotos === 0) out.push(signal('photoPending', pendingPhotos));
   if (unreadChats > 0) out.push(signal('unreadChat', unreadChats));
   if (pausedTasks > 0) out.push(signal('tasksPaused', pausedTasks));
+  // Deliberately `info`, not a warning: a team choosing to share a phone is a legitimate
+  // way to play, and crying wolf about it would teach an organizer to ignore the strip.
+  // It is surfaced because it was INVISIBLE, not because it is wrong.
+  if (membersOffline > 0) out.push(signal('membersOffline', membersOffline));
+  // Deliberately `info`, and deliberately NOT phrased as cheating (change:
+  // arrival-needs-a-usable-fix). The overwhelmingly common cause is a courtyard with
+  // no sky, not a player at home - the server let them through precisely BECAUSE
+  // refusing forever was the worse bug. This exists so an organizer who sees one team
+  // doing it at every single stop can go and look, and for nothing else.
+  if (unverifiedArrivals > 0) out.push(signal('arrivalsUnverified', unverifiedArrivals));
   // "Nobody joined" and "nobody started" are the same moment told twice.
+  //
+  // A STRANDED LATE JOINER is a third thing and outranks both (change:
+  // late-joiner-autostart). `notStarted` is info and means "you have not pressed
+  // start yet"; a team that joined after play began and is still waiting is a team
+  // watching a blank screen while everyone else plays. They are the same teams in
+  // the same counter, so telling both would put the calm sentence next to the urgent
+  // one about the same people.
   if (teams === 0) out.push(signal('nobodyJoined', 0));
+  else if (stranded > 0) out.push(signal('lateJoinerStranded', stranded));
   else if (unstarted > 0) out.push(signal('notStarted', unstarted));
 
   return out.sort((a, b) =>

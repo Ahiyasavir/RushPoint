@@ -22,8 +22,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ORIGIN_ENV_VAR, PRODUCTION_BUNDLE_CONTRACT,
-  parseEnvValue, envOverrideHazards, checkBundleOrigin, formatProblems,
+  ORIGIN_ENV_VAR, API_KEY_ENV_VAR, PRODUCTION_BUNDLE_CONTRACT,
+  parseEnvValue, envOverrideHazards, checkBundleOrigin, checkBundleApiKey, formatProblems,
 } from './lib/backendOriginGuard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,6 +73,7 @@ for (const artifact of PRODUCTION_BUNDLE_CONTRACT) {
     envText = fs.readFileSync(path.join(root, 'apps', artifact.app, '.env'), 'utf8');
   } catch { /* no .env — nothing declared, handled below */ }
   const expectedOrigin = parseEnvValue(envText, ORIGIN_ENV_VAR);
+  const expectedKey = parseEnvValue(envText, API_KEY_ENV_VAR);
 
   // Concatenate the built JS. The origin lands in whichever chunk holds the
   // Firebase wiring, and which chunk that is is a build detail we must not encode.
@@ -96,6 +97,19 @@ for (const artifact of PRODUCTION_BUNDLE_CONTRACT) {
   } else {
     failures += 1;
     console.error(formatProblems([res.problem]));
+  }
+
+  // The API key is asserted separately from the origin: a missing key breaks AUTH,
+  // which fails earlier and harder than a missing backend origin (2026-08-27 —
+  // both live apps shipped the "emulator-key" fallback and nobody could sign in).
+  const keyRes = checkBundleApiKey({ label, bundleText, expectedKey });
+  if (keyRes.skipped) {
+    console.log(`  ·  ${label.padEnd(30)} declares no ${API_KEY_ENV_VAR} — fallback absent, nothing to compare`);
+  } else if (keyRes.ok) {
+    console.log(`  ✓  ${label.padEnd(30)} carries its real ${API_KEY_ENV_VAR}`);
+  } else {
+    failures += 1;
+    console.error(formatProblems([keyRes.problem]));
   }
 }
 

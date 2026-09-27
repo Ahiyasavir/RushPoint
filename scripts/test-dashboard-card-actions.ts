@@ -29,7 +29,7 @@ function eq<T>(label: string, got: T, want: T): void {
     `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 }
 
-const ALL_SIX: DashboardCardActionId[] = ['edit', 'launch', 'testRun', 'history', 'share', 'delete'];
+const ALL_SIX: DashboardCardActionId[] = ['edit', 'launch', 'testRun', 'history', 'shareLink', 'delete'];
 // (publish|unpublish counts as the remaining one; asserted per-case below.)
 
 // ── inline is always Edit + Launch ───────────────────────────────────────────
@@ -43,15 +43,26 @@ for (const g of [undefined, null, {}, { visibility: 'public' }, { visibility: 'p
 console.log('\n── overflow ──');
 // `history` (change: post-run-player-report) sits with the other post-launch
 // verbs and BEFORE share/delete: it is a read, not a publication or a destruction.
-eq('a private game overflows [testRun, history, publish, share, delete]',
+// `shareLink` (change: game-share-link) REPLACED the public promo share. Two
+// entries both called "share" shipped for one deploy and the wrong one was the
+// one people pressed: it opens a URL that resolves only for a PUBLISHED game and,
+// on a published game with instant play, starts a solo demo run instead of
+// showing the reader the game. There is one share verb now, and it works whether
+// or not the game was ever published.
+eq('a private game overflows [testRun, history, publish, shareLink, delete]',
   dashboardCardActions({ visibility: 'private' }).overflow,
-  ['testRun', 'history', 'publish', 'share', 'delete']);
+  ['testRun', 'history', 'publish', 'shareLink', 'delete']);
 eq('a game with no visibility overflows the publish variant',
   dashboardCardActions({}).overflow,
-  ['testRun', 'history', 'publish', 'share', 'delete']);
-eq('a public game overflows [testRun, history, unpublish, share, delete]',
+  ['testRun', 'history', 'publish', 'shareLink', 'delete']);
+eq('a public game overflows [testRun, history, unpublish, shareLink, delete]',
   dashboardCardActions({ visibility: 'public' }).overflow,
-  ['testRun', 'history', 'unpublish', 'share', 'delete']);
+  ['testRun', 'history', 'unpublish', 'shareLink', 'delete']);
+// The share entry is IDENTICAL for both, which is the fix: it is the one action
+// on this menu whose behaviour does not depend on the game's visibility.
+eq('sharing does not depend on whether the game is published',
+  dashboardCardActions({ visibility: 'private' }).overflow.filter((a) => a === 'shareLink'),
+  dashboardCardActions({ visibility: 'public' }).overflow.filter((a) => a === 'shareLink'));
 
 // ── delete is always last ────────────────────────────────────────────────────
 console.log('\n── delete last ──');
@@ -69,7 +80,7 @@ function coverageOk(g: unknown): boolean {
   // Normalize the publish/unpublish slot to a single "publishToggle" bucket so
   // the six actions can be counted regardless of visibility.
   const norm = all.map((id) => (id === 'publish' || id === 'unpublish' ? 'publishToggle' : id));
-  const want = ['edit', 'launch', 'testRun', 'history', 'publishToggle', 'share', 'delete'];
+  const want = ['edit', 'launch', 'testRun', 'history', 'publishToggle', 'shareLink', 'delete'];
   if (norm.length !== want.length) return false;
   return want.every((id) => norm.filter((x) => x === id).length === 1);
 }

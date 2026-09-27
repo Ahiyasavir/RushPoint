@@ -43,13 +43,15 @@ export interface ReportExportLabels {
   wrong: string;
   yes: string;
   no: string;
+  /** answer-scored-question: the catch-all outcome ("anything else earns N"). */
+  outcomeOther: string;
   columns: {
     player: string; members: string; rank: string; score: string; penalty: string;
     status: string; started: string; finished: string; durationMinutes: string;
     missionsDone: string; missionsSkipped: string; hints: string;
     wrongAnswers: string; media: string;
     stage: string; mission: string; type: string; question: string;
-    expected: string; theirAnswer: string; verdict: string; attempts: string;
+    expected: string; theirAnswer: string; outcome: string; verdict: string; attempts: string;
     points: string; minutes: string; mediaLink: string;
     players: string; completed: string; skipped: string;
     completionRate: string; medianMinutes: string;
@@ -149,6 +151,14 @@ function verdictCell(row: ReportAnswerRow, labels: ReportExportLabels): string {
   return labels.noAnswerNeeded;
 }
 
+/** Which answer outcome the row hit (answer-scored-question), '' when the mission has none. */
+export function outcomeCell(row: Pick<ReportAnswerRow, 'outcomeId' | 'outcomeLabel'>, labels: ReportExportLabels): string {
+  const id = typeof row.outcomeId === 'string' ? row.outcomeId : '';
+  if (!id) return '';
+  if (id === 'unmatched') return safeText(labels.outcomeOther);
+  return safeText(row.outcomeLabel || id);
+}
+
 /**
  * Build the whole workbook: three sheets, header row first.
  *
@@ -193,10 +203,10 @@ export function buildReportWorkbook(
 
   const answersSheet: ReportSheet = {
     id: 'answers',
-    columnWidths: [22, 14, 26, 14, 34, 24, 40, 10, 10, 10, 10, 40],
+    columnWidths: [22, 14, 26, 14, 34, 24, 40, 18, 10, 10, 10, 10, 40],
     rows: [
       [
-        c.player, c.stage, c.mission, c.type, c.question, c.expected, c.theirAnswer,
+        c.player, c.stage, c.mission, c.type, c.question, c.expected, c.theirAnswer, c.outcome,
         c.verdict, c.attempts, c.points, c.minutes, c.mediaLink,
       ],
       ...answers.map((row) => [
@@ -207,6 +217,7 @@ export function buildReportWorkbook(
         safeText(row.question),
         safeText(row.expectedAnswer),
         formatAnswerCell(row, labels),
+        outcomeCell(row, labels),
         verdictCell(row, labels),
         safeNumber(row.attempts),
         safeNumber(row.earnedScore),

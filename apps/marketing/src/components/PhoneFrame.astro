@@ -1,0 +1,103 @@
+---
+/**
+ * A phone, drawn in CSS, with whatever you put in it on the screen.
+ *
+ * WHY A FRAME AT ALL. The product is a thing people hold while walking around a
+ * real place. A screenshot floating on a page is a picture of software; the same
+ * picture inside a handset is a picture of somebody playing, and that is the
+ * difference between describing a field game and showing one. It is the cheapest
+ * context a marketing page can buy.
+ *
+ * PURELY DECORATIVE, and marked so. The frame carries no information a reader
+ * needs, so the bezel and the speaker slot are `aria-hidden` and the SLOT is
+ * where anything meaningful goes. A screen reader should hear the map's label,
+ * never "phone".
+ *
+ * No image. The whole handset is border radius, a ring and a shadow, so it costs
+ * nothing to load and it is sharp at any density, on a component that sits in
+ * the hero where the largest paint on the page is decided.
+ *
+ * Change: marketing-home-cro-redesign.
+ */
+export interface Props {
+  /** Extra classes for the outer frame, e.g. a rotation or a max width. */
+  class?: string;
+}
+
+const { class: className = '' } = Astro.props;
+---
+
+<div class={`rp-phone ${className}`}>
+  <div class="rp-phone-bezel" aria-hidden="true"></div>
+  <div class="rp-phone-screen">
+    <slot />
+  </div>
+</div>
+
+<style>
+  .rp-phone {
+    position: relative;
+    width: 100%;
+    max-width: 17.5rem;
+    /*
+     * Fixed here rather than left to the content, so a video and the drawn map
+     * produce the same silhouette and swapping one for the other does not
+     * reflow the hero.
+     *
+     * SHORTER THAN A REAL HANDSET (9:17.5 rather than 9:19.5), measured rather
+     * than styled. The hero is a two column grid with its items centred, so the
+     * TALLEST column decides where the headline sits: at true handset
+     * proportions the phone came out 642px tall, which pushed the h1 down to
+     * 346px and the primary action to 563px on a 1280x720 laptop, a hundred
+     * pixels off the fold. Nothing looked wrong in isolation. The phone reads as
+     * a phone either way; the call to action only reads at all if it is on
+     * screen.
+     */
+    aspect-ratio: 9 / 17.5;
+    margin-inline: auto;
+    border-radius: 2.75rem;
+    /* The body of the phone. A warm near black in both modes: this is a physical
+       object, and an object that changes colour with the page theme stops
+       reading as one. */
+    background: linear-gradient(160deg, #2e2a24 0%, #14110d 55%, #1e1a15 100%);
+    padding: 0.55rem;
+    box-shadow:
+      0 2px 4px rgb(20 17 13 / 18%),
+      0 24px 48px -12px rgb(20 17 13 / 38%),
+      0 0 0 1px rgb(255 255 255 / 8%) inset;
+  }
+
+  /* The speaker slot. One element rather than a notch cut out of the screen,
+     because a real cutout would clip the content and this only has to read as a
+     phone at a glance. */
+  .rp-phone-bezel {
+    position: absolute;
+    top: 1.05rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4.25rem;
+    height: 0.3rem;
+    border-radius: 9999px;
+    background: rgb(255 255 255 / 14%);
+    z-index: 2;
+  }
+
+  .rp-phone-screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 2.25rem;
+    overflow: hidden;
+    background: var(--aw-color-bg-page);
+  }
+
+  /* Whatever is on the screen fills it. A <video> has no intrinsic ratio known
+     to CSS until its metadata loads, so without this the frame collapses for a
+     moment on a slow connection and the hero jumps. */
+  .rp-phone-screen :global(> *) {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+</style>

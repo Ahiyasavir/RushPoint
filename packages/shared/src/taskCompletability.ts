@@ -8,6 +8,7 @@
 // fail forever (matchesTaskAnswer/verifyStationCode/submitSequenceStep all
 // reject an empty answer key). Kept pure + dependency-free so both the client
 // Wizard and the server validators can share the identical rule (no drift).
+import { answerOutcomesProblem } from './answerOutcomes';
 import type { Task } from './types';
 import { validateOrderItems } from './ordering';
 
@@ -18,7 +19,13 @@ import { validateOrderItems } from './ordering';
  */
 export function isTaskCompletable(task: Pick<Task,
   'type' | 'answers' | 'orderItems' | 'numericAnswer' | 'smart' | 'steps'
->): boolean {
+> & Partial<Pick<Task, 'answerOutcomes' | 'unmatchedPoints'>>): boolean {
+  // answer-scored-question: points by answer / by station code REPLACE the single
+  // answer or code, so a valid outcome list alone makes the mission completable.
+  if ((task.type === 'quiz' || task.type === 'numeric' || task.type === 'smart_station')
+    && Array.isArray(task.answerOutcomes) && task.answerOutcomes.length > 0) {
+    return answerOutcomesProblem(task as never) === null;
+  }
   if (task.type === 'quiz') {
     // Ordering variant (change: quiz-ordering): valid orderItems replace answers.
     if (task.orderItems && task.orderItems.length > 0) {
@@ -41,9 +48,12 @@ export function isTaskCompletable(task: Pick<Task,
 /** Human-readable reason a task isn't completable (or null when it is), for error messages. */
 export function taskCompletabilityError(task: Pick<Task,
   'type' | 'title' | 'id' | 'answers' | 'orderItems' | 'numericAnswer' | 'smart' | 'steps'
->): string | null {
+> & Partial<Pick<Task, 'answerOutcomes' | 'unmatchedPoints'>>): string | null {
   if (isTaskCompletable(task)) return null;
   const label = `Task "${task.title || task.id}"`;
+  if (Array.isArray(task.answerOutcomes) && task.answerOutcomes.length > 0) {
+    return `${label}: points by answer: ${answerOutcomesProblem(task as never)}`;
+  }
   switch (task.type) {
     case 'quiz': return `${label}: a quiz needs at least one non-empty accepted answer (or valid ordering items)`;
     case 'numeric': return `${label}: a numeric task needs a numeric answer`;

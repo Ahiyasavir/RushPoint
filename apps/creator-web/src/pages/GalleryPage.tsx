@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { PublicGame, PublicTask, GameMode, TaskType, GalleryGameSort, GalleryTaskSort } from '@rushpoint/shared';
+import type { PublicGame, GameMode, TaskType, GalleryGameSort, GalleryTaskSort } from '@rushpoint/shared';
 import { searchGallery, searchTaskLibrary, duplicateGame, setPublicLike, loadPopularTags } from '../services/calls';
 import { deriveLikeView, applyOptimisticLike, reconcileLike, type LikeView } from '../lib/likeState';
 import { Badge, Button, Card, EmptyState, Input, Skeleton, TagChips } from '../components/ui';
@@ -10,9 +10,13 @@ import { LoadingState } from '../components/LoadingState';
 import GalleryMap, { type MapPoint } from '../components/GalleryMap';
 import GalleryTaskDetailModal from '../components/GalleryTaskDetailModal';
 import GalleryGameDetailModal from '../components/GalleryGameDetailModal';
-import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage, isCoarsePublicPoint } from '@rushpoint/shared';
+import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage, isCoarsePublicPoint, applyGalleryFacets } from '@rushpoint/shared';
 import { useAsyncAction } from '../hooks/useAsyncAction';
-import { useT } from '../components/LanguageContext';
+import { useT, useLanguage } from '../components/LanguageContext';
+// The hand-authored mission bank, listed alongside published missions and kept in
+// step with it automatically (change: mission-bank-in-library).
+import { loadMissionBank } from '../lib/missionBank';
+import { bankRowsFor, mergeLibraryRows, filterBankRowsByFacets, type LibraryRow } from '../lib/libraryBankRows';
 
 // Fetch limits mirror the server HARD_CAPs in functions/src/gallery/index.ts
 // (searchTaskLibrary: 100, searchGallery: 50) so the map/list cover as many
@@ -23,6 +27,7 @@ const GALLERY_FETCH_LIMIT = 50;
 export default function GalleryPage() {
   const nav = useNavigate();
   const t = useT();
+  const { lang } = useLanguage();
   const gl = t.gallery;
   const b = t.builder;
   // Localized labels so gallery cards never surface raw English enum values in a
@@ -69,12 +74,12 @@ export default function GalleryPage() {
     else { setTaskTags([]); setTaskType(''); setTaskDifficulty(0); setTaskLocation(''); setTaskSort('popular'); }
   }
   const [games, setGames] = useState<PublicGame[] | null>(null);
-  const [tasks, setTasks] = useState<PublicTask[] | null>(null);
+  const [tasks, setTasks] = useState<LibraryRow[] | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   // The mission whose full detail is open (change: gallery-mission-detail). The
   // whole sanitized document is already in `tasks`, so pressing a card opens the
   // detail from memory and fetches nothing.
-  const [detailTask, setDetailTask] = useState<PublicTask | null>(null);
+  const [detailTask, setDetailTask] = useState<LibraryRow | null>(null);
   // The game whose full detail is open (change: gallery-game-card-preview). The
   // whole sanitized document is already in `games`, so pressing a card opens the
   // detail from memory and fetches nothing — the mission-card pattern, for games.
@@ -132,7 +137,12 @@ export default function GalleryPage() {
   // "none of these has a published area" — true, unexplained, and unactionable.
   // The classifier shares `isPlottablePublicTask` with the marker filter above, so
   // "none plottable" can never be claimed while a pin is on the map.
-  const taskCoverage = publicTaskMapCoverage(tasks ?? []);
+  // The map is a PUBLISHED-mission concept: a bank row is unplaced by design (the
+  // creator drops its pin per event), so it is neither a pin nor evidence that
+  // "nothing here has a published area". Coverage — which drives the
+  // publish-your-game explainer — is judged over the published rows alone
+  // (change: mission-bank-in-library).
+  const taskCoverage = publicTaskMapCoverage((tasks ?? []).filter((tk) => !tk.bankKey));
 
   // Show the loading skeleton whenever a query is in flight (search-as-you-type).
   const [searching, setSearching] = useState(false);
@@ -151,15 +161,53 @@ export default function GalleryPage() {
         setGames(games);
         setLikes((prev) => ({ ...prev, ...Object.fromEntries(games.map((g) => [g.id, deriveLikeView(g, likedIds)])) }));
       } else {
-        const { tasks, likedIds } = await searchTaskLibrary({
-          query: q, limit: TASK_LIBRARY_FETCH_LIMIT,
-          tags: taskTags.length ? taskTags : undefined,
+        const facets = {
           type: taskType || undefined,
           difficulty: taskDifficulty || undefined,
           hasLocation: taskLocation === '' ? undefined : taskLocation === 'on',
           sort: taskSort,
+        };
+        // The hand-authored bank is loaded alongside the published window and
+        // merged into one ranked list (change: mission-bank-in-library). The bank
+        // load never throws — it falls back to the bundled `TASK_BANK` — so it
+        // cannot take the gallery search down with it, and it is usually a memo
+        // hit rather than a read.
+        const [{ tasks, likedIds }, bankEntries] = await Promise.all([
+          searchTaskLibrary({
+            query: q, limit: TASK_LIBRARY_FETCH_LIMIT,
+            tags: taskTags.length ? taskTags : undefined,
+            ...facets,
+          }),
+          loadMissionBank(),
+        ]);
+        // The published rows were faceted by the callable; the bank rows never
+        // reach it, so the SAME shared pass is run over them here. `sort` is
+        // deliberately left out — ordering is decided once, over the MERGED list.
+        const bank = filterBankRowsByFacets(bankRowsFor(bankEntries, lang), {
+          type: facets.type, difficulty: facets.difficulty, hasLocation: facets.hasLocation,
+          tags: taskTags,
         });
-        setTasks(tasks);
+        const merged = mergeLibraryRows(tasks as LibraryRow[], bank, q);
+        // ORDERING, and why this is not simply the server's post-rank sort.
+        //
+        // `searchTaskLibrary` ranks by relevance and then re-sorts by `sort`, so
+        // its default ('popular') overrides relevance even while the creator is
+        // typing. On the server that is invisible — every row there has a real
+        // popularity score. Here it would be decisive: a bank row scores 0 on
+        // every engagement term by construction, so a blanket popularity re-sort
+        // would pin the entire bank below every published mission no matter how
+        // exactly a search matched it, which is the one thing this change exists
+        // to prevent.
+        //
+        // So an EXPLICIT sort choice is honoured verbatim, and the default is
+        // left to the merge — which is pure popularity order when there is no
+        // query (identical to before) and relevance-first when there is, exactly
+        // as `rankGalleryResults` argues for and as this tab's own "sorted by
+        // best match" label already promises.
+        setTasks(taskSort === 'popular' ? merged : applyGalleryFacets(merged, { sort: taskSort }, 'task'));
+        // Only published missions have a like document. A bank row has no
+        // `publicTasks` id to like, so it is deliberately absent from this map and
+        // its card renders no like control.
         setLikes((prev) => ({ ...prev, ...Object.fromEntries(tasks.map((tk) => [tk.id, deriveLikeView(tk, likedIds)])) }));
       }
     } catch (e) {
@@ -192,7 +240,7 @@ export default function GalleryPage() {
   useEffect(() => {
     const id = setTimeout(() => void runRef.current(), 350);
     return () => clearTimeout(id);
-  }, [q, tab, gameTags, gameMode, gameSort, taskTags, taskType, taskDifficulty, taskLocation, taskSort]);
+  }, [q, tab, gameTags, gameMode, gameSort, taskTags, taskType, taskDifficulty, taskLocation, taskSort, lang]);
 
   async function copy(g: PublicGame) {
     try {
@@ -243,7 +291,7 @@ export default function GalleryPage() {
           {(['games', 'tasks'] as const).map((tb) => (
             <button key={tb} onClick={() => setTab(tb)}
               className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                tab === tb ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
+                tab === tb ? 'bg-rp-fire/12 text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
               {tb === 'games' ? gl.tabGames : gl.tabTasks}
             </button>
           ))}
@@ -252,7 +300,7 @@ export default function GalleryPage() {
           {(['list', 'map'] as const).map((v) => (
             <button key={v} onClick={() => setView(v)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                view === v ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
+                view === v ? 'bg-rp-fire/12 text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
               {v === 'list' ? gl.viewList : gl.viewMap}
             </button>
           ))}
@@ -269,13 +317,13 @@ export default function GalleryPage() {
       <div className="mb-5 flex flex-col gap-3">
         {popularTags.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-[--ink-3] me-1">{gl.filterPopularTags}</span>
+            <span className="text-[13px] font-semibold text-[--ink-3] me-1">{gl.filterPopularTags}</span>
             {popularTags.map((tag) => {
               const on = activeTags.includes(tag);
               return (
                 <button key={tag} type="button" onClick={() => toggleTag(tag)} aria-pressed={on}
-                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
-                    on ? 'border-rp-fire/40 bg-rp-fire/12 text-rp-fire'
+                  className={`rounded-full border px-2.5 py-0.5 text-[13px] font-semibold transition-colors ${
+                    on ? 'border-rp-fire/40 bg-rp-fire/12 text-ink-fire'
                        : 'border-[--rp-border] text-[--ink-3] hover:text-[--ink-1]'}`}>
                   {tag}
                 </button>
@@ -307,7 +355,7 @@ export default function GalleryPage() {
           )}
           {filtersActive && (
             <button type="button" onClick={clearFilters}
-              className="text-[11px] font-semibold text-[--ink-3] underline-offset-2 hover:text-rp-fire hover:underline">
+              className="text-[13px] font-semibold text-[--ink-3] underline-offset-2 hover:text-ink-fire hover:underline">
               {gl.filterClear}
             </button>
           )}
@@ -366,7 +414,7 @@ export default function GalleryPage() {
                   <Badge color="cyan">{MODE_LABEL[pg.mode] ?? pg.mode}</Badge>
                 </div>
                 <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{pg.description}</p>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[--ink-3] font-medium">
                   <span>{gl.stages(pg.stageCount)}</span>
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                   <span>{gl.tasks(pg.taskCount)}</span>
@@ -379,7 +427,7 @@ export default function GalleryPage() {
                     the gallery existed; nothing had ever rendered them. */}
                 <TagChips tags={pg.tags} more={gl.moreTags} />
                 <div><LikeButton {...likeProps('game', pg.id)} /></div>
-                {pg.approxLocation?.label && <span className="text-[11px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
+                {pg.approxLocation?.label && <span className="text-[13px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
                 {/* stopPropagation so a Copy tap duplicates the game WITHOUT also
                     opening the detail behind it. */}
                 <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-auto !py-2 !text-xs !font-semibold" onClick={(e) => { e.stopPropagation(); void copyAction.run(pg); }}>{gl.copyBtn}</Button>
@@ -415,23 +463,42 @@ export default function GalleryPage() {
                 className="p-4 flex flex-col gap-2.5 h-full cursor-pointer rounded-2xl
                   focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
               >
-                <h3 id={`task-${tk.id}`} className="font-brand font-bold text-sm text-[--ink-1] leading-snug">{tk.title}</h3>
-                <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{tk.description}</p>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                <div className="flex items-start gap-2">
+                  <h3 id={`task-${tk.id}`} className="flex-1 font-brand font-bold text-sm text-[--ink-1] leading-snug" dir="auto">{tk.title}</h3>
+                  {/* Where the mission comes from — the meta line and footer below
+                      carry no copies, no author and no source game for a bank
+                      mission, and a row with all three blank reads as broken
+                      (change: mission-bank-in-library). */}
+                  {tk.bankKey && (
+                    <span title={gl.bankRowBadgeHelp}
+                      className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold
+                        bg-rp-fire/10 text-rp-fire border border-rp-fire/25">
+                      {gl.bankRowBadge}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed" dir="auto">{tk.description}</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[--ink-3] font-medium">
                   <span>{TASK_TYPE_LABEL[tk.type] ?? tk.type}</span>
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                   <span>{gl.metaDiff(tk.difficulty)}</span>
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                   <span>{gl.metaPts(tk.pointValue)}</span>
-                  <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                  <span>{gl.metaCopies(tk.copyCount)}</span>
+                  {!tk.bankKey && <>
+                    <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                    <span>{gl.metaCopies(tk.copyCount)}</span>
+                  </>}
                 </div>
                 {/* Tags (change: game-task-tags) — searchTaskLibrary already returns
                     them; TaskLibrary only ever copied them into the new task. */}
                 <TagChips tags={tk.tags} more={gl.moreTags} />
                 <div className="flex items-center justify-between gap-2 mt-auto">
-                  <span className="text-[11px] text-[--ink-3]">{gl.from(tk.sourceGameTitle ?? '')}</span>
-                  <LikeButton {...likeProps('task', tk.id)} />
+                  {/* A bank mission has no source game and nothing to like — its
+                      footer says what it is instead of showing two empty controls. */}
+                  <span className="text-[13px] text-[--ink-3]" dir="auto">
+                    {tk.bankKey ? gl.bankRowSource : gl.from(tk.sourceGameTitle ?? '')}
+                  </span>
+                  {!tk.bankKey && <LikeButton {...likeProps('task', tk.id)} />}
                 </div>
               </div>
             </Card>
@@ -481,8 +548,8 @@ function LikeButton({ view, busy, gl, onToggle }: {
       aria-pressed={view.liked}
       aria-label={label}
       title={label}
-      className={`inline-flex items-center gap-1 rounded-full border border-[--rp-border] px-2 py-0.5 text-[11px] font-semibold transition-colors disabled:opacity-60 ${
-        view.liked ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}
+      className={`inline-flex items-center gap-1 rounded-full border border-[--rp-border] px-2 py-0.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
+        view.liked ? 'bg-rp-fire/12 text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}
     >
       <span aria-hidden="true">{view.liked ? '♥' : '♡'}</span>
       <span>{gl.likes(view.likeCount)}</span>
@@ -505,7 +572,7 @@ function FacetSelect({ label, value, onChange, options, title }: {
   title?: string;
 }) {
   return (
-    <label title={title} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[--ink-3]">
+    <label title={title} className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[--ink-3]">
       <span>{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="rounded-lg border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] px-2 py-1 text-xs font-medium text-[--ink-1] focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">

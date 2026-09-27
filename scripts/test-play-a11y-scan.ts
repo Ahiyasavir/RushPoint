@@ -27,6 +27,7 @@ import {
   parseColorTokens,
   playWebTsxFiles,
 } from './lib/playA11yScan';
+import { INK } from '@rushpoint/brand';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PLAY = join(ROOT, 'apps', 'play-web');
@@ -140,16 +141,28 @@ const SURFACES: Record<string, string> = { 'app-surface': '#FFFFFF', 'app-bg': '
 const AA = 4.5;
 const tw = readFileSync(join(PLAY, 'tailwind.config.js'), 'utf8');
 const tokens = parseColorTokens(tw);
-const INK = ['ink-fire', 'ink-warm', 'ink-amber', 'ink-alert', 'ink-go'];
-for (const name of INK) {
-  const hex = tokens[name];
-  ok(typeof hex === 'string', `tailwind.config.js defines "${name}"`);
-  if (!hex) continue;
+// The ink scale itself now lives in packages/brand/tokens.mjs — creator-web
+// needed it too, and a value used by two apps has to have one source or the
+// two can quietly drift apart (which is exactly how creator-web ended up
+// never adopting this in the first place). Read from THERE, not from
+// tailwind.config.js's text: the config just spreads `tailwindInkColors()`,
+// so the literal `'ink-fire': '#...'` pairs this used to regex out of that
+// file are gone from its source on purpose, replaced by a function call.
+ok(
+  Object.keys(INK).length >= 5,
+  'the shared ink scale actually loaded (not an empty/broken import)',
+  Object.keys(INK).join(', '),
+);
+for (const [name, hex] of Object.entries(INK)) {
+  const tokenName = `ink-${name}`;
   for (const [sname, shex] of Object.entries(SURFACES)) {
     const r = contrastRatio(hex, shex);
-    ok(r >= AA, `${name} (${hex}) clears AA on ${sname}`, `${r.toFixed(2)}:1`);
+    ok(r >= AA, `${tokenName} (${hex}) clears AA on ${sname}`, `${r.toFixed(2)}:1`);
   }
 }
+// And the config really does wire the scale in, even though its literal
+// hex values no longer appear there to regex-match on.
+ok(/tailwindInkColors\s*\(\s*\)/.test(tw), 'tailwind.config.js spreads tailwindInkColors()');
 
 // ── D2. White text on a brand fill ────────────────────────────────────────────
 // The mirror of D: D fixed coloured text on a light surface, this catches white

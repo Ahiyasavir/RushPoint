@@ -30,8 +30,35 @@
 //   • scripts/test-backend-origin-guard.ts — synthetic fixtures (in `npm test`)
 //   • scripts/check-backend-origin.mjs     — the real files (`npm run origin:check`)
 
+// THE SECOND INCIDENT (2026-08-27), which is why tripwire 3 below exists. Both
+// live apps were serving a bundle built with NO `.env` present at all — so EVERY
+// `VITE_*` variable fell back to its emulator-safe default. creator-web shipped
+// `apiKey: "emulator-key"` and every sign-in died on
+// `auth/api-key-not-valid.-please-pass-a-valid-api-key.`; play-web shipped the
+// same key, so no participant could sign in anonymously either. Nobody could log
+// in and nobody could join a game.
+//
+// `origin:check` would have caught it — a bundle with no `.env` also has no
+// VITE_API_ORIGIN — but ONLY if it had run, and `deploy:hosting` did not run it.
+// Two changes came out of that: the deploy script now runs base:check +
+// origin:check before `firebase deploy`, and the API key gets its own assertion
+// rather than being caught by accident as a side effect of the origin one. The
+// key is the variable whose absence breaks AUTH, which fails earlier and harder
+// than a missing backend origin, so it deserves to be named in its own right.
+
 /** The variable that routes callables away from the default Functions endpoint. */
 export const ORIGIN_ENV_VAR = 'VITE_API_ORIGIN';
+
+/** The Firebase Web API key. Absent ⇒ the app cannot authenticate anyone. */
+export const API_KEY_ENV_VAR = 'VITE_FIREBASE_API_KEY';
+
+/**
+ * The emulator-safe fallback both apps' `services/firebase.ts` use when
+ * VITE_FIREBASE_API_KEY is undefined. Harmless locally (the Auth emulator accepts
+ * any non-empty string); fatal in production, where Google rejects it outright.
+ * Its presence in a DEPLOYED bundle is proof the build saw no key.
+ */
+export const FALLBACK_API_KEY = 'emulator-key';
 
 /**
  * Env files Vite applies to EVERY mode, production included. A local-only override
@@ -135,6 +162,56 @@ export function checkBundleOrigin({ label, bundleText, expectedOrigin } = {}) {
         + `the app loads and returns 200 while no data ever arrives. Most likely an env `
         + `override applied to the production build (see ${SAFE_DEV_OVERRIDE}), or a stale `
         + `${'dist'} from an earlier build. Rebuild and re-check before deploying.`,
+    };
+  }
+  return { ok: true, problem: null, skipped: false };
+}
+
+/**
+ * Does a built production bundle carry a REAL Firebase API key?
+ *
+ * Fails on the `emulator-key` fallback (the build saw no key at all) and on a key
+ * that disagrees with the one `.env` declares (a stale dist, or a build from a
+ * checkout carrying different env files).
+ *
+ * `expectedKey` null/empty ⇒ the app declares no key, so there is nothing to
+ * compare against — but the FALLBACK is still refused, because a deployed bundle
+ * containing it is broken regardless of what any env file says. That asymmetry is
+ * deliberate: "I can't verify this" and "I can see this is wrong" are different
+ * verdicts, and only the second one should fail a build that declared nothing.
+ */
+export function checkBundleApiKey({ label, bundleText, expectedKey } = {}) {
+  const name = label ?? '(unknown artifact)';
+  if (typeof bundleText !== 'string' || bundleText === '') {
+    return {
+      ok: false,
+      problem: `${name}: no bundle text could be read, so its Firebase API key cannot be verified.`,
+    };
+  }
+
+  if (bundleText.includes(`"${FALLBACK_API_KEY}"`) || bundleText.includes(`'${FALLBACK_API_KEY}'`)) {
+    return {
+      ok: false,
+      problem:
+        `${name}: built WITHOUT ${API_KEY_ENV_VAR} — it carries the "${FALLBACK_API_KEY}" `
+        + `fallback. Firebase Auth rejects that key in production, so EVERY sign-in fails `
+        + `with auth/api-key-not-valid and no participant can join. The build saw no `
+        + `apps/<app>/.env (it is gitignored, so a fresh clone, a git worktree or a CI `
+        + `runner has none). Restore the env file, rebuild, and re-check before deploying.`,
+    };
+  }
+
+  if (expectedKey === null || expectedKey === undefined || expectedKey === '') {
+    return { ok: true, problem: null, skipped: true };
+  }
+
+  if (!bundleText.includes(expectedKey)) {
+    return {
+      ok: false,
+      problem:
+        `${name}: does not contain the ${API_KEY_ENV_VAR} its own .env declares. `
+        + `The bundle was built against different env files, or dist is stale. `
+        + `Rebuild and re-check before deploying.`,
     };
   }
   return { ok: true, problem: null, skipped: false };

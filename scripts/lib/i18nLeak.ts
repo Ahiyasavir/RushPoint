@@ -37,10 +37,27 @@ export const DIGIT_CODE_RE = /[A-Za-z]*\d[A-Za-z\d]*/g;
  * copy, the language-toggle label, and the structural direction values.
  */
 export const LATIN_WHITELIST = [
+  // ⚠ ORDER MATTERS: stripAll removes these in array order, so a multi-word name
+  // must come BEFORE any shorter name it contains. 'RushPoint Live' listed after
+  // 'RushPoint' would have its first word eaten and leave a bare "Live" behind,
+  // which then reads as an English leak in Hebrew copy — a false failure on a
+  // proper noun, reported against a page that is perfectly correct.
+  //
+  // 'RushPoint Live' is the flagship event's own name (change: rushpoint-live-signup),
+  // the same class of thing as 'Creator Pro': a product name that is not translated
+  // in either language, because it is what the event is CALLED.
+  'RushPoint Live',
+  // The social handles. A handle is a proper NOUN that is identical in both
+  // languages by definition — it is an address, and translating it would point
+  // at a profile that does not exist. The TikTok one carries digits, which the
+  // digit-code rule would strip anyway; it is listed for the same reason the
+  // Instagram one is, so a reader of this list sees the whole set.
+  'ahiyasavir09', 'ahiyasavir',
   'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA',
-  // A file format acronym, same class as QR/GPS above: Hebrew speakers read and write
-  // "CSV", and translating it would make the export button LESS clear, not more.
-  'CSV',
+  // File format acronyms, same class as QR/GPS above: Hebrew speakers read and write
+  // "CSV" and "JPG", and translating them would make the control LESS clear, not
+  // more. WebP first, so the bare 'P' cases cannot eat half of it.
+  'CSV', 'WebP', 'JPG', 'JPEG', 'PNG',
   'English', 'rtl', 'ltr', '₪',
 ];
 

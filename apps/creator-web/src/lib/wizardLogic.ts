@@ -11,6 +11,7 @@
 // blocks. Naming remains the ONLY forward gate, so it now guards the 2 → 3
 // transition instead of 1 → 2. An unplaced task is still reported by the readiness
 // surface (lib/gameReadiness), which also refuses the launch.
+import { answerOutcomesProblem } from '@rushpoint/shared';
 import type { Game, Task, TaskType } from '@rushpoint/shared';
 import { validateOrderItems, defaultEstimatedMinutes } from '@rushpoint/shared';
 
@@ -121,6 +122,12 @@ export function canGoBack(step: WizardStep): boolean {
 //   sequence — submitSequenceStep throws failed-precondition on empty steps
 // Other types self-validate or have safe defaults.
 export function isTaskInteractionValid(task: Task): boolean {
+  // answer-scored-question: points by answer / several station codes replace the
+  // single answer or code; valid by the same rule the server enforces.
+  if ((task.type === 'quiz' || task.type === 'numeric' || task.type === 'smart_station')
+    && Array.isArray(task.answerOutcomes) && task.answerOutcomes.length > 0) {
+    return answerOutcomesProblem(task) === null;
+  }
   if (task.type === 'quiz') {
     // Ordering variant (change: quiz-ordering): valid orderItems replace answers.
     if (task.orderItems && task.orderItems.length > 0) {

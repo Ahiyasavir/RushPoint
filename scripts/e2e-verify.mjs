@@ -29,7 +29,13 @@ import adminSdk from 'firebase-admin';
 // GAME_FILE_FORMAT/CURRENT_GAME_FILE_VERSION come along so the export/import
 // scenario asserts against the SAME envelope the server writes (a version bump
 // can never silently pass an outdated assertion).
-import { popularityScore, GAME_FILE_FORMAT, CURRENT_GAME_FILE_VERSION, MAX_RUN_DEVICES } from '@rushpoint/shared';
+import {
+  popularityScore, GAME_FILE_FORMAT, CURRENT_GAME_FILE_VERSION, MAX_RUN_DEVICES,
+  // How long the server holds a coarse fix before letting it through anyway.
+  // Imported, never restated: a hardcoded 10000 here would keep passing after
+  // somebody widened the window, which is the bug this suite exists to catch.
+  COARSE_FIX_GRACE_MS,
+} from '@rushpoint/shared';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -171,7 +177,20 @@ async function expectError(label, promise, opts = {}) {
   }
 }
 
+// DEV AID ONLY (change: spark-tier-location-load): `--only=<substring>` runs just the
+// scenarios whose name matches, so a red-green loop on one scenario does not cost a full
+// suite run. The gate NEVER passes it, and an active filter is announced loudly on both
+// ends of the run — a filtered pass must never be mistakable for a full pass.
+const ONLY = (process.argv.find((a) => a.startsWith('--only=')) ?? '').split('=')[1] || '';
+// `--skip=a|b` leaves out every scenario whose name contains one of the alternatives (the mirror of
+// --only), e.g. to run the rest of the suite while one scenario is investigated on its own.
+const SKIP = (process.argv.find((a) => a.startsWith('--skip=')) ?? '').split('=')[1] || '';
+let skippedByFilter = 0;
+
 async function scenario(name, fn) {
+  // `a|b|c` runs every scenario matching any of the alternatives.
+  if (ONLY && !ONLY.toLowerCase().split('|').some((alt) => alt && name.toLowerCase().includes(alt))) { skippedByFilter++; return; }
+  if (SKIP && SKIP.toLowerCase().split('|').some((alt) => alt && name.toLowerCase().includes(alt))) { skippedByFilter++; return; }
   console.log(`\n━━ ${name} ━━`);
   const rec = { name, ms: 0, checks: 0, failures: 0 };
   currentScenario = rec;
@@ -189,6 +208,10 @@ async function scenario(name, fn) {
 }
 
 function printSummary() {
+  if (ONLY) {
+    console.log(`\n⚠  FILTERED RUN — --only="${ONLY}" skipped ${skippedByFilter} scenario(s).`);
+    console.log('   This is NOT a full pass and must never be reported as one.');
+  }
   console.log('\n── Scenario summary ─────────────────────────────────────────');
   for (const s of scenarios) {
     console.log(
@@ -266,14 +289,19 @@ const ALLOWED_TASK_KEYS = new Set([
   'estimatedMinutes', 'expectedDurationMinutes', 'pointValue',
   'maxConcurrentTeams', 'currentTeamCount', 'status', 'maxDurationMinutes',
   'smart', 'triggerMode', 'locationless', 'hideLocation', 'locationClue',
-  'locationClueHe', 'hintPenalty', 'choices', 'numericTolerance',
+  'locationClueHe', 'hintPenalty', 'choices', 'choicePoints', 'numericTolerance',
   'geofenceRadiusMeters', 'steps', 'tags', 'media',
   // pause-clock-tasks: the participant is TOLD the clock is stopped (that is the
   // whole point — a team that does not know will still hurry), so the flag is
   // deliberately participant-visible. It reveals no answer and no secret.
   'pausesTimer',
+  // every-member-plays: how many DISTINCT teammates must each do their part. The
+  // participant is told, because a mission the team cannot finish without three of them
+  // is one they need to know about - and it reveals no answer and no secret.
+  'requiredContributors',
   'releaseAt', 'releaseAfterMinutes',
   'expiresAfterMinutes', // task-expiry: the countdown UI needs it — no secret
+  'expiresAt', 'timeLimitMinutes', // mission-time-limit: the countdown needs them — no secret
   'unlockAfterTaskIds',  // unlockable-tasks: the locked row names prerequisites — no secret
   // hint-auto-escalation: free-hint thresholds — they never reveal the hint text
   'hintAutoRevealMinutes', 'hintAutoRevealAttempts',
@@ -319,6 +347,8 @@ const ALLOWED_SMART_KEYS = new Set([
   // The video clip-length range passes for the same reason: a recorder cannot
   // enforce a limit it cannot see.
   'captureKind', 'videoMinSeconds', 'videoMaxSeconds',
+  // camera-switch: which camera the viewfinder opens on ('front' = selfie mission).
+  'preferredCamera',
 ]);
 
 function assertTaskPayloadAllowlisted(label, task) {
@@ -329,8 +359,11 @@ function assertTaskPayloadAllowlisted(label, task) {
     check(`${label}: task.smart keys are allowlisted`, badSmart.length === 0, badSmart.join(','));
   }
   if (task?.steps) {
-    const badStep = task.steps.flatMap((s) => Object.keys(s).filter((k) => k !== 'id' && k !== 'prompt'));
-    check(`${label}: step keys are allowlisted (id+prompt only)`, badStep.length === 0, badStep.join(','));
+    // `hasAnswer` is a derived BOOLEAN, never the key itself: the runner needs it to
+    // render a tap-to-confirm step as a confirm button instead of an empty input.
+    const okStepKeys = new Set(['id', 'prompt', 'hasAnswer']);
+    const badStep = task.steps.flatMap((s) => Object.keys(s).filter((k) => !okStepKeys.has(k)));
+    check(`${label}: step keys are allowlisted (id+prompt+hasAnswer only)`, badStep.length === 0, badStep.join(','));
   }
 }
 
@@ -355,6 +388,25 @@ const ALLOWED_RUN_TEAM_ROW_KEYS = new Set([
   'updatedAt', 'answerLockoutUntil', 'lastLocationAt',
   // held-team-visibility: a BOOLEAN, never the guardian's name or contact.
   'heldForConsent',
+  // late-joiner-autostart: WHEN the team joined. Consciously classified rather than
+  // waved through: it is a timestamp the organizer already sees as "joined at" in
+  // their own console, it is not a position, not an answer key and not a guardian
+  // record, and the console cannot tell a team waiting BEFORE the start from one
+  // stranded AFTER it without it.
+  'joinedAt',
+  // every-member-plays: how many declared members have no phone attached. A COUNT, and
+  // consciously classified rather than waved through: it is not a name, not a position
+  // and not a guardian record - it is the difference between two numbers the organizer
+  // already sees (team size and devices), which nothing in the product compared until
+  // now. Null when the headcount is unknowable.
+  'membersNotConnected',
+  // arrival-needs-a-usable-fix: how many missions this team was let into WITHOUT the
+  // fix proving it. A COUNT, and consciously classified rather than waved through: it
+  // is deliberately NOT the places - a list of where a team's GPS was weak would be a
+  // position record about children, which is exactly what this allowlist exists to
+  // stop. The number alone answers the only question an organizer has (is ONE team
+  // doing this at every stop?) and answers nothing else. Zero on an ordinary run.
+  'unverifiedArrivals',
 ]);
 
 function assertRunTeamRowAllowlisted(label, row) {
@@ -1038,6 +1090,89 @@ async function main() {
     emuOtherTeamRejected = e.code === 'functions/invalid-argument';
   }
   check('submitStationPhoto still rejects ANOTHER team folder on an emulator URL', emuOtherTeamRejected);
+
+  // [attached-phone-uploads] An ATTACHED phone that holds control must be able to send media.
+  // The client used to upload into the TEAM folder (runs/{run}/teams/{teamId}/…), which every
+  // server gate refuses for a device whose uid is not the team id. These assertions pin the
+  // server contract the fixed client relies on: the device's OWN folder uploads and submits,
+  // the team folder is refused for it.
+  {
+    await player.call('transferController', {
+      ownerUid: creatorCred.user.uid, gameId, runId, toUid: device2Cred.user.uid,
+    });
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    let teamFolderRefused = false;
+    try {
+      await device2.uploadBytesAt(`runs/${runId}/teams/${playerCred.user.uid}/d2-wrong.jpg`, jpeg, 'image/jpeg');
+    } catch { teamFolderRefused = true; }
+    check('an attached phone cannot upload into the TEAM folder (the server half of the bug)', teamFolderRefused);
+    let ownFolderUploaded = false;
+    try {
+      await device2.uploadBytesAt(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`, jpeg, 'image/jpeg');
+      ownFolderUploaded = true;
+    } catch (e) { console.error('      own-folder upload failed:', e?.code ?? e); }
+    check('an attached phone uploads into its OWN folder', ownFolderUploaded);
+    let d2Submit = null;
+    try {
+      d2Submit = await device2.call('submitStationPhoto', {
+        ownerUid: creatorCred.user.uid, gameId, runId,
+        teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+        photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`),
+      });
+    } catch (e) { d2Submit = { error: e?.code ?? String(e) }; }
+    check('an attached phone holding control submits a photo from its own folder',
+      d2Submit?.submitted === true, JSON.stringify(d2Submit));
+    await player.call('claimController', { ownerUid: creatorCred.user.uid, gameId, runId });
+
+    // [team-phones-simple D2] media from ANY attached phone, answers from one. A photo is
+    // evidence, not a guess: a viewing phone may send it, and the record says who did.
+    let viewerSubmit = null;
+    try {
+      viewerSubmit = await device2.call('submitStationPhoto', {
+        ownerUid: creatorCred.user.uid, gameId, runId,
+        teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+        photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`),
+      });
+    } catch (e) { viewerSubmit = { error: e?.code ?? String(e), message: e?.message }; }
+    check('a VIEWING attached phone may send a photo for its team', viewerSubmit?.submitted === true, JSON.stringify(viewerSubmit));
+    const afterViewer = await player.call('getMyTeamState', { code: accessCode });
+    const byWho = afterViewer?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.submittedBy;
+    check('the submission records which phone sent it (and its name)',
+      byWho?.uid === device2Cred.user.uid && byWho?.name === 'Second Phone', JSON.stringify(byWho));
+    let viewerCode = null;
+    try {
+      await device2.call('verifyStationCode', {
+        ownerUid: creatorCred.user.uid, gameId, runId, teamId: playerCred.user.uid, taskId: CODE_TASK_ID, code: 'WHATEVER',
+      });
+    } catch (e) { viewerCode = e?.message ?? ''; }
+    check('a viewing phone still cannot ANSWER (answers stay on one phone)', /not-controller/.test(viewerCode ?? ''), viewerCode);
+    let strangerSubmit = null;
+    try {
+      await stranger.call('submitStationPhoto', {
+        ownerUid: creatorCred.user.uid, gameId, runId,
+        teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+        photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/${device2Cred.user.uid}/d2.jpg`),
+      });
+    } catch (e) { strangerSubmit = e?.code; }
+    check('a phone NOT attached to the team cannot send its media', typeof strangerSubmit === 'string' && strangerSubmit !== '',
+      String(strangerSubmit));
+    // [team-phones-simple D5] presence: both phones are known to the server, from memory only.
+    await device2.call('getMyTeamState', { code: accessCode });
+    const presence = (await player.call('getMyTeamState', { code: accessCode }))?.devicePresence ?? [];
+    const presentUids = presence.map((p) => p.uid).sort();
+    check('getMyTeamState reports when each phone was last seen',
+      presentUids.includes(playerCred.user.uid) && presentUids.includes(device2Cred.user.uid)
+      && presence.every((p) => typeof p.lastSeenSec === 'number' && p.lastSeenSec >= 0 && p.lastSeenSec < 60),
+      JSON.stringify(presence));
+    // [team-phones-simple D1] the join screen can name the team from its device code, and nothing else.
+    const named = await stranger.call('getJoinInfo', { code: accessCode, deviceCode: teamCode.toLowerCase() });
+    check('getJoinInfo with a device code names the team', named?.deviceTeam?.displayName === 'The Test Lions',
+      JSON.stringify(named?.deviceTeam));
+    check('and carries nothing else about it', Object.keys(named?.deviceTeam ?? {}).join(',') === 'displayName',
+      Object.keys(named?.deviceTeam ?? {}).join(','));
+    const unnamed = await stranger.call('getJoinInfo', { code: accessCode, deviceCode: 'ZZZZZZ' });
+    check('a wrong device code names nobody (and is not an error)', unnamed?.deviceTeam === null, JSON.stringify(unnamed?.deviceTeam));
+  }
 
   const photoSubmit = await player.call('submitStationPhoto', {
     ownerUid: creatorCred.user.uid, gameId, runId,
@@ -2163,6 +2298,16 @@ async function main() {
   check('control task without thresholds still charges 25', paidHint?.penalty === 25 && paidHint?.free !== true, JSON.stringify(paidHint));
   const sE4 = await playerE.call('getMyTeamState', { code: cE });
   check('control charge landed on bonusPenalty', (sE4?.team?.bonusPenalty ?? 0) === bonusBefore + 25, String(sE4?.team?.bonusPenalty));
+  // team-dossier-and-search D2: a paid hint is a score change the organizer should see.
+  {
+    const eUid = playerE.auth.currentUser.uid;
+    const eTeam = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gE}/runs/${rE}/teams/${eUid}`)).data ?? {};
+    const hintLed = (eTeam.scoreLedger ?? []).filter((l) => l.kind === 'hint');
+    check('ledger: a paid hint appends one hint entry of -25 (the free one appends nothing)',
+      hintLed.length === 1 && hintLed[0].delta === -25 && hintLed[0].taskId === 'e-2', JSON.stringify(eTeam.scoreLedger));
+    check('ledger: getMyTeamState never ships the ledger to the player', sE4?.team?.scoreLedger === undefined,
+      JSON.stringify(Object.keys(sE4?.team ?? {})));
+  }
 
   }); // scenario: hint auto escalation
 
@@ -2908,6 +3053,17 @@ async function main() {
     const rejSub = rejTeam.data?.taskSubmissions?.['rq-rej'];
     check('queue reject: status flips to rejected and keeps the review note',
       rejSub?.status === 'rejected' && rejSub?.reviewNote === 'Too dark, try again', JSON.stringify(rejSub));
+    // [submission-status-truth] The PLAYER's screen is built from this record (waiting card,
+    // rejection card, "sent at"). Pin that the participant payload really carries every field it
+    // reads, so a sanitizer that one day drops one breaks here instead of silently on a phone.
+    {
+      const mine = await rqP.call('getMyTeamState', { code: rqCode });
+      const s = mine?.team?.taskSubmissions?.['rq-rej'];
+      check('participant payload carries the rejection, its note, the sent time and the media url',
+        s?.status === 'rejected' && s?.reviewNote === 'Too dark, try again'
+          && typeof s?.submittedAt === 'string' && s?.photoUrl === rqUrl('r1.jpg'),
+        JSON.stringify(s));
+    }
     check('queue reject: rejection awards NO points',
       (rejTeam.data?.score ?? 0) === scoreBeforeReject, `${rejTeam.data?.score} vs ${scoreBeforeReject}`);
     const rejFeed = await rqP.getColAt(rqFeedCol);
@@ -3123,26 +3279,46 @@ async function main() {
     const vFeedCol = `users/${OWNER}/games/${vg}/runs/${vr}/feedItems`;
 
     // 1) autoApprove video → feeds with mediaKind:'video'.
-    const autoVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-auto', photoUrl: feedPhotoUrl(vr, vUid, 'auto.webm'), contentType: 'video/webm' });
+    // video-upload-speed D7: a poster frame + the clip's measured length ride along, so the
+    // console can show many clips without pulling video. A poster in ANOTHER team's folder is
+    // refused exactly like a photoUrl there.
+    await expectError('video-poster: a poster in another team\'s folder is refused',
+      vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-auto', photoUrl: feedPhotoUrl(vr, vUid, 'auto.webm'), contentType: 'video/webm',
+        posterUrl: feedPhotoUrl(vr, 'someone-else', 'auto.poster.jpg') }),
+      { codeIn: ['functions/invalid-argument'] });
+    const autoVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-auto', photoUrl: feedPhotoUrl(vr, vUid, 'auto.webm'), contentType: 'video/webm',
+      posterUrl: feedPhotoUrl(vr, vUid, 'auto.poster.jpg'), mediaDurationSec: 12.34 });
     check('video-feed: autoApprove video is approved', autoVideo?.autoApproved === true, JSON.stringify(autoVideo));
     const afterAutoVideo = await vp.getColAt(vFeedCol);
     const autoItem = afterAutoVideo.find((d) => d.taskId === 'vf-auto');
     check('video-feed: autoApprove video broadcasts a feed item', !!autoItem, JSON.stringify(afterAutoVideo.map((d) => d.taskId)));
     check('video-feed: the autoApprove feed item carries mediaKind "video"', autoItem?.mediaKind === 'video', JSON.stringify(autoItem));
+    check('video-poster: the feed item carries the poster and the length', autoItem?.posterUrl === feedPhotoUrl(vr, vUid, 'auto.poster.jpg') && autoItem?.mediaDurationSec === 12.3, JSON.stringify(autoItem));
+    const vTeamPath = `users/${OWNER}/games/${vg}/runs/${vr}/teams/${vUid}`;
+    const autoSub = (await creator.getDocAt(vTeamPath)).data?.taskSubmissions?.['vf-auto'];
+    check('video-poster: the submission stores the poster and the length', autoSub?.posterUrl === feedPhotoUrl(vr, vUid, 'auto.poster.jpg') && autoSub?.mediaDurationSec === 12.3, JSON.stringify(autoSub));
 
     // 2) staff-reviewed video → feeds with mediaKind:'video'.
-    await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-rev', photoUrl: feedPhotoUrl(vr, vUid, 'rev.webm'), contentType: 'video/webm' });
+    // An out-of-range length is DROPPED, never a refusal: it is a display hint.
+    await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-rev', photoUrl: feedPhotoUrl(vr, vUid, 'rev.webm'), contentType: 'video/webm',
+      posterUrl: feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), mediaDurationSec: 9999 });
+    const revSub = (await creator.getDocAt(`users/${OWNER}/games/${vg}/runs/${vr}/teams/${vUid}`)).data?.taskSubmissions?.['vf-rev'];
+    check('video-poster: an out-of-range length is dropped, the poster kept', revSub?.mediaDurationSec === undefined && revSub?.posterUrl === feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), JSON.stringify(revSub));
     const revVideo = await creator.call('reviewStationSubmission', { ...VCTX, teamId: vUid, taskId: 'vf-rev', approved: true });
     check('video-feed: staff approves the video submission', revVideo?.approved === true, JSON.stringify(revVideo));
     const afterRevVideo = await creator.getColAt(vFeedCol);
     const revItem = afterRevVideo.find((d) => d.taskId === 'vf-rev');
     check('video-feed: staff-approved video broadcasts a feed item', !!revItem, JSON.stringify(afterRevVideo.map((d) => d.taskId)));
     check('video-feed: the staff-approved feed item carries mediaKind "video"', revItem?.mediaKind === 'video', JSON.stringify(revItem));
+    check('video-poster: the staff-approved feed item carries the poster', revItem?.posterUrl === feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), JSON.stringify(revItem));
 
     // 3) hidden-location video → still excluded, exactly like a hidden photo.
     const vArr = await vp.call('reportArrival', { ...VCTX, taskId: 'vf-hidden', lat: 31.78, lng: 35.21 });
     check('video-feed: arrival at the hidden spot latches', vArr?.arrived === true, JSON.stringify(vArr));
-    const autoHiddenVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-hidden', photoUrl: feedPhotoUrl(vr, vUid, 'hidden.webm'), contentType: 'video/webm' });
+    // A null poster from an older client is ABSENT, never a refusal (the undefined-to-null transport
+    // trap). The length is given: an auto-approved clip must prove it (see the clip-length scenario).
+    const autoHiddenVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-hidden', photoUrl: feedPhotoUrl(vr, vUid, 'hidden.webm'), contentType: 'video/webm',
+      posterUrl: null, mediaDurationSec: 12 });
     check('video-feed: hidden video still auto-approves (completion unaffected)', autoHiddenVideo?.autoApproved === true, JSON.stringify(autoHiddenVideo));
     const afterHiddenVideo = await vp.getColAt(vFeedCol);
     check('video-feed: the hidden-location video is excluded from the feed',
@@ -3157,6 +3333,141 @@ async function main() {
     check('video-feed: audio submissions still never reach the feed',
       !afterAudio.some((d) => d.taskId === 'vf-audio'), JSON.stringify(afterAudio.map((d) => d.taskId)));
   }); // scenario: video enters the live feed
+
+  // Owner (2026-09-26): an AUTO-APPROVED clip must still meet the mission's length range. Outside it
+  // (or with no length to check) it is not approved automatically: it waits for the organizers, and
+  // the reply says why so the phone can tell the team.
+  await scenario('auto-approve respects the clip length range', async () => {
+    const OWNER = creatorCred.user.uid;
+    const url = (rid, uid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rid}/teams/${uid}/${name}`)}?alt=media`;
+    const clipTask = (id) => ({
+      id, title: `Clip ${id}`, type: 'photo', locationless: true, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 9,
+      smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', autoApprove: true, videoMinSeconds: 10, videoMaxSeconds: 30 },
+    });
+    const { gameId: lg } = await creator.call('createGame', { title: 'Clip Length Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: lg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'cl-s', order: 0, title: 'Clips', isFinal: true, requiredTaskCount: 1, tasks: [clipTask('cl-short'), clipTask('cl-none'), clipTask('cl-long'), clipTask('cl-ok')] },
+    ] });
+    const { runId: lr, accessCode: lc } = await creator.call('launchRun', { gameId: lg });
+    const lp = makeParty('clipLengthPlayer');
+    const lUid = (await signInAnonymously(lp.auth)).user.uid;
+    await lp.call('joinRun', { code: lc, displayName: 'Clip Length' });
+    await creator.call('startTeams', { gameId: lg, runId: lr });
+    const LC = { ownerUid: OWNER, gameId: lg, runId: lr, teamId: lUid };
+    const send = (taskId, mediaDurationSec) => lp.call('submitStationPhoto', { ...LC, taskId, photoUrl: url(lr, lUid, `${taskId}.webm`), contentType: 'video/webm', ...(mediaDurationSec === undefined ? {} : { mediaDurationSec }) });
+    const short = await send('cl-short', 4);
+    check('clip-length: a clip under the minimum is NOT auto-approved', short?.autoApproved === false && short?.lengthHold === 'short', JSON.stringify(short));
+    const none = await send('cl-none', undefined);
+    check('clip-length: a clip with no length is not approved blind', none?.autoApproved === false && none?.lengthHold === 'unknown', JSON.stringify(none));
+    const long = await send('cl-long', 45);
+    check('clip-length: a clip over the maximum is NOT auto-approved', long?.autoApproved === false && long?.lengthHold === 'long', JSON.stringify(long));
+    const lTeam = (await creator.getDocAt(`users/${OWNER}/games/${lg}/runs/${lr}/teams/${lUid}`)).data ?? {};
+    check('clip-length: the held clips wait for the organizers (pending), nothing scored',
+      ['cl-short', 'cl-none', 'cl-long'].every((id) => lTeam.taskSubmissions?.[id]?.status === 'pending') && (lTeam.score ?? 0) === 0, JSON.stringify(lTeam.taskSubmissions));
+    const ok = await send('cl-ok', 20);
+    check('clip-length: a clip inside the range IS auto-approved', ok?.autoApproved === true && ok?.lengthHold === undefined, JSON.stringify(ok));
+  }); // scenario: auto-approve respects the clip length range
+
+  // Owner (2026-09-26): an auto-approved photo or video is approved FIRST and uploads in the
+  // background while the team moves on (change: background-media-upload). The phone submits with
+  // `mediaDeferred` and no file; the server approves only when it would have approved anyway, and
+  // the phone attaches the file later with `attachSubmissionMedia`.
+  await scenario('deferred media: approve first, attach the file later', async () => {
+    const OWNER = creatorCred.user.uid;
+    const url = (rid, uid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rid}/teams/${uid}/${name}`)}?alt=media`;
+    const mediaTask = (id, kind, autoApprove) => ({
+      id, title: `Media ${id}`, type: 'photo', locationless: true, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 9,
+      smart: { enabled: true, verificationType: 'photo_upload', captureKind: kind, autoApprove,
+        ...(kind === 'video' ? { videoMinSeconds: 5, videoMaxSeconds: 30 } : {}) },
+    });
+    const { gameId: dg } = await creator.call('createGame', { title: 'Deferred Media Game', mode: 'team' });
+    await creator.call('updateGame', { gameId: dg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'dm-s', order: 0, title: 'Media', tasks: [
+        mediaTask('dm-photo', 'photo', true), mediaTask('dm-video', 'video', true),
+        mediaTask('dm-long', 'video', true), mediaTask('dm-review', 'photo', false),
+      ] },
+      { id: 'dm-end', order: 1, title: 'End', isFinal: true, tasks: [{
+        id: 'dm-last', title: 'Last', type: 'self_report', locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+      }] },
+    ] });
+    const { runId: dr, accessCode: dc } = await creator.call('launchRun', { gameId: dg });
+    const dp = makeParty('deferredPlayer');
+    const dUid = (await signInAnonymously(dp.auth)).user.uid;
+    await dp.call('joinRun', { code: dc, displayName: 'Deferred' });
+    await creator.call('startTeams', { gameId: dg, runId: dr });
+    const DC = { ownerUid: OWNER, gameId: dg, runId: dr };
+    const teamPath = `users/${OWNER}/games/${dg}/runs/${dr}/teams/${dUid}`;
+    const feedCol = `users/${OWNER}/games/${dg}/runs/${dr}/feedItems`;
+    const codeOf = async (fn) => { try { await fn(); return 'ok'; } catch (e) { return e.code; } };
+
+    const st0 = await dp.call('getMyTeamState', { code: dc });
+    check('deferred: the phone is told whether the run approves every media mission', st0?.run?.autoApproveAllMedia === false, JSON.stringify(st0?.run));
+
+    // 1) An auto-approved photo: approved and routed on with no file yet, no feed item yet.
+    const p = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-photo', mediaDeferred: true, contentType: 'image/jpeg' });
+    check('deferred: an auto-approved photo is approved with no file', p?.autoApproved === true && p?.deferred === true, JSON.stringify(p));
+    let team = (await creator.getDocAt(teamPath)).data ?? {};
+    const pRec = team.stages?.flatMap((s) => s.tasks ?? []).find((t) => t.taskId === 'dm-photo');
+    const pSub = team.taskSubmissions?.['dm-photo'];
+    check('deferred: the task is completed and scored at once', pRec?.status === 'completed' && (team.score ?? 0) > 0, JSON.stringify(pRec));
+    check('deferred: the submission is approved and marked as still uploading',
+      pSub?.status === 'approved' && pSub?.mediaPending === true && !pSub?.photoUrl && pSub?.mediaKind === 'photo' && pSub?.submittedBy?.uid === dUid, JSON.stringify(pSub));
+    check('deferred: no feed item before the file exists', !(await creator.getColAt(feedCol)).some((d) => d.taskId === 'dm-photo'));
+
+    // 2) Attach: refused for another folder, a wrong content type and another team.
+    check('attach: a url in another folder is refused',
+      await codeOf(() => dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, 'someoneElse', 'x.jpg'), contentType: 'image/jpeg' })) === 'functions/invalid-argument');
+    check('attach: a content type that does not match the mission is refused',
+      await codeOf(() => dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, dUid, 'x.webm'), contentType: 'video/webm' })) === 'functions/invalid-argument');
+    const other = makeParty('deferredOther');
+    const oUid = (await signInAnonymously(other.auth)).user.uid;
+    await other.call('joinRun', { code: dc, displayName: 'Other Team' });
+    check('attach: another team has no such submission',
+      await codeOf(() => other.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, oUid, 'x.jpg'), contentType: 'image/jpeg' })) === 'functions/not-found');
+    // A second phone of the SAME team may not attach the first phone's submission.
+    const teamCode = (await dp.call('getMyTeamState', { code: dc }))?.team?.deviceJoinCode;
+    const d2 = makeParty('deferredSecondPhone');
+    const d2Uid = (await signInAnonymously(d2.auth)).user.uid;
+    await d2.call('joinTeamAsDevice', { code: dc, teamCode, memberName: 'Second' });
+    check('attach: another phone of the same team is refused',
+      await codeOf(() => d2.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, d2Uid, 'x.jpg'), contentType: 'image/jpeg' })) === 'functions/permission-denied');
+
+    const att = await dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, dUid, 'p.jpg'), contentType: 'image/jpeg' });
+    check('attach: the sending phone attaches its file', att?.attached === true, JSON.stringify(att));
+    team = (await creator.getDocAt(teamPath)).data ?? {};
+    const pSub2 = team.taskSubmissions?.['dm-photo'];
+    check('attach: the submission now holds the file and is no longer pending',
+      pSub2?.photoUrl === url(dr, dUid, 'p.jpg') && pSub2?.mediaPending === undefined && pSub2?.feedPending === undefined && pSub2?.status === 'approved', JSON.stringify(pSub2));
+    const again = await dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-photo', photoUrl: url(dr, dUid, 'p2.jpg'), contentType: 'image/jpeg' });
+    const feed1 = await creator.getColAt(feedCol);
+    check('attach: the feed item is posted once, with the file', feed1.filter((d) => d.taskId === 'dm-photo').length === 1
+      && feed1.find((d) => d.taskId === 'dm-photo')?.photoUrl === url(dr, dUid, 'p.jpg'), JSON.stringify(feed1));
+    check('attach: a repeat is a no-op that moves nothing', again?.attached === false && again?.already === true
+      && (await creator.getDocAt(teamPath)).data?.taskSubmissions?.['dm-photo']?.photoUrl === url(dr, dUid, 'p.jpg'), JSON.stringify(again));
+
+    // 3) A clip inside the range: deferred, and the poster + length ride along.
+    const v = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-video', mediaDeferred: true, contentType: 'video/webm', mediaDurationSec: 12 });
+    check('deferred: a clip inside the length range is approved with no file', v?.autoApproved === true && v?.deferred === true, JSON.stringify(v));
+    await dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-video', photoUrl: url(dr, dUid, 'v.webm'), contentType: 'video/webm', posterUrl: url(dr, dUid, 'v.jpg') });
+    const vSub = (await creator.getDocAt(teamPath)).data?.taskSubmissions?.['dm-video'];
+    const vItem = (await creator.getColAt(feedCol)).find((d) => d.taskId === 'dm-video');
+    check('attach: a clip keeps its poster and length, in the submission and the feed',
+      vSub?.photoUrl === url(dr, dUid, 'v.webm') && vSub?.posterUrl === url(dr, dUid, 'v.jpg') && vSub?.mediaDurationSec === 12
+      && vItem?.posterUrl === url(dr, dUid, 'v.jpg') && vItem?.mediaKind === 'video', JSON.stringify({ vSub, vItem }));
+
+    // 4) Not approved automatically ⇒ nothing is written and the phone uploads first.
+    const long = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-long', mediaDeferred: true, contentType: 'video/webm', mediaDurationSec: 60 });
+    const review = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-review', mediaDeferred: true, contentType: 'image/jpeg' });
+    team = (await creator.getDocAt(teamPath)).data ?? {};
+    check('deferred: a clip outside the range is not deferred, and says why', long?.deferred === false && long?.submitted === false && long?.lengthHold === 'long', JSON.stringify(long));
+    check('deferred: a mission that needs review is not deferred', review?.deferred === false && review?.submitted === false, JSON.stringify(review));
+    check('deferred: a refused deferral writes nothing',
+      team.taskSubmissions?.['dm-long'] === undefined && team.taskSubmissions?.['dm-review'] === undefined, JSON.stringify(team.taskSubmissions));
+    check('attach: nothing to attach to for a mission that was never deferred',
+      await codeOf(() => dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-review', photoUrl: url(dr, dUid, 'r.jpg'), contentType: 'image/jpeg' })) === 'functions/not-found');
+  }); // scenario: deferred media
 
   await scenario('task types: quiz · numeric · geofence · sequence · trigger modes', async () => {
 
@@ -3227,13 +3538,22 @@ async function main() {
   const geoNear = await player4.call('completeTask', { ...C4, taskId: 'gf1', lat: 31.78, lng: 35.21 });
   check('geofence: in-radius check-in accepted', geoNear?.ok === true);
 
-  // exact (triggerMode): tight 4m radius — 10m away rejected, 3m accepted.
+  // exact (triggerMode): authored at a tight 4m radius.
+  //
+  // THIS EXPECTATION CHANGED ON PURPOSE (change: arrival-needs-a-usable-fix). It used
+  // to assert that 10m away was rejected, which honoured the authored 4m literally —
+  // and that is precisely the bug: no consumer handset resolves 4m, so the mission was
+  // unwinnable by anybody standing on the exact spot. Every radius is now floored at
+  // ARRIVAL_RADIUS_FLOOR_M, so `exact` means "at this spot" rather than a promise the
+  // hardware cannot keep. The gate is still a gate: past the floor it still refuses.
   let exFar = false;
-  try { await player4.call('completeTask', { ...C4, taskId: 'ex1', lat: 31.7801, lng: 35.21 }); }
+  try { await player4.call('completeTask', { ...C4, taskId: 'ex1', lat: 31.7806, lng: 35.21 }); }
   catch (e) { exFar = /too far/i.test(e.message); }
-  check('exact: 10m-away check-in rejected', exFar);
-  const exNear = await player4.call('completeTask', { ...C4, taskId: 'ex1', lat: 31.78, lng: 35.21 });
-  check('exact: within-4m check-in accepted', exNear?.ok === true);
+  check('exact: a check-in well beyond the floor is still rejected', exFar);
+  // 10m away, which the authored 4m would have refused forever.
+  const exFloor = await player4.call('completeTask', { ...C4, taskId: 'ex1', lat: 31.7801, lng: 35.21 });
+  check('exact: a 10m-away check-in is accepted, because 4m is not a radius a phone can prove',
+    exFloor?.ok === true, JSON.stringify(exFloor));
 
   // instant (triggerMode): completes with no GPS at all.
   const inst = await player4.call('completeTask', { ...C4, taskId: 'in1' });
@@ -3244,6 +3564,12 @@ async function main() {
   const seqTask = sSeq?.activeStageTasks?.find((t) => t.id === 'sq1');
   check('sequence: step prompts sent without answers',
     Array.isArray(seqTask?.steps) && seqTask.steps.length === 3 && seqTask.steps.every((s) => s.answer === undefined),
+    JSON.stringify(seqTask?.steps));
+  // Whether a step HAS an answer key is not a secret, and the runner cannot render a
+  // tap-to-confirm step without it (it would show an input and tell the player to
+  // leave it blank). The answer itself stays server-side — asserted just above.
+  check('sequence: hasAnswer marks the tap-to-confirm step',
+    seqTask?.steps?.map((s) => s.hasAnswer).join(',') === 'true,false,true',
     JSON.stringify(seqTask?.steps));
   const seq0 = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 0, answer: 'open' });
   check('sequence: step 1 (answer) accepted', seq0?.stepCorrect === true && seq0?.stepsDone === 1);
@@ -3688,6 +4014,15 @@ async function main() {
       clearedAccepted = true;
     } catch (e) { console.log('  cleared err ::', e.message); }
     check('updateGame accepts a cleared range (null === absent over the wire)', clearedAccepted);
+
+    // camera-switch: a selfie mission ('front'), a cleared toggle (null) and an absent
+    // one are all valid; anything else is refused where the creator can fix it.
+    await rejects('an unknown preferredCamera', { preferredCamera: 'sideways' });
+    let camOk = false;
+    try { await save({ preferredCamera: 'front' }); await save({ preferredCamera: null }); camOk = true; } catch (e) {
+      console.log('  preferredCamera err ::', e.message);
+    }
+    check('updateGame accepts preferredCamera "front" and a cleared toggle', camOk);
   }); // scenario: video mission duration range
 
   await scenario('task expiry (timed close + in-flight auto-skip)', async () => {
@@ -3946,14 +4281,36 @@ async function main() {
     await creator.call('startTeams', { gameId: gH, runId: rH });
     const CH = { ownerUid: creatorCred.user.uid, gameId: gH, runId: rH };
 
-    // The controlling phone pings a few nearby positions (builds the track).
-    for (const [lat, lng] of [[31.7801, 35.2101], [31.7802, 35.2102], [31.7803, 35.2103]]) {
+    // The controlling phone WALKS: each position is ~111m from the last, comfortably beyond
+    // TRACK_RETENTION_METERS (100m), so every one is a genuine new history point.
+    // Spacing matters — this scenario used to ping three points 11-15m apart and assert three
+    // retained points, which encoded the old per-PING retention. Retention is now per ~100m
+    // TRAVELLED (change: spark-tier-location-load), because a per-ping track made the places
+    // teams stood STILL the hottest cells on a movement heatmap. Points this close now
+    // correctly collapse to one.
+    for (const [lat, lng] of [[31.7800, 35.2100], [31.7810, 35.2100], [31.7820, 35.2100]]) {
       await pH.call('updateLocation', { ...CH, lat, lng });
     }
 
+    // ⚠️ THIS SCENARIO IS ALSO THE FIRESTORE-FALLBACK GUARD (change: vps-track-storage).
+    // getRunHeatmap now prefers a VPS-local disk track and falls back to the Firestore
+    // locationTrack collection when there is no disk file. The emulator has no stable local
+    // disk and leaves RUSHPOINT_TRACK_DIR unset, so everything asserted here is the FALLBACK
+    // path — which is exactly what must keep working for runs recorded before that shipped and
+    // for any deployment without disk storage. If this scenario ever goes green because the
+    // disk path silently took over, the fallback has stopped being covered.
+    //
     // Owner reads the density; non-owner is refused.
     const heat = await creator.call('getRunHeatmap', { code: cH });
-    check('heatmap: track retained → non-zero point count', (heat?.pointCount ?? 0) >= 3, JSON.stringify(heat?.pointCount));
+    check('heatmap: walked track retained → one point per ~100m travelled', (heat?.pointCount ?? 0) >= 3, JSON.stringify(heat?.pointCount));
+
+    // The other half of the contract: standing still must NOT keep growing the track.
+    const beforeIdle = heat?.pointCount ?? 0;
+    for (let i = 0; i < 3; i += 1) await pH.call('updateLocation', { ...CH, lat: 31.7820, lng: 35.2100 });
+    const idleHeat = await creator.call('getRunHeatmap', { code: cH });
+    check('heatmap: standing still adds no history points',
+      (idleHeat?.pointCount ?? -1) === beforeIdle,
+      `pointCount ${beforeIdle} → ${idleHeat?.pointCount}`);
     check('heatmap: density cells returned', Array.isArray(heat?.cells) && heat.cells.length >= 1 && heat.cells[0].weight >= 1, JSON.stringify(heat?.cells?.slice(0, 2)));
     await expectError('heatmap: non-owner is denied',
       pH.call('getRunHeatmap', { code: cH }),
@@ -4262,6 +4619,29 @@ async function main() {
   await expectError('reportArrival: refused with no coordinates',
     playerHL.call('reportArrival', { ...CHL, taskId: 'hl-1' }),
     { match: /location required/i });
+
+  // A COARSE FIX MUST NOT UNSEAL A HIDDEN MISSION EITHER (change:
+  // arrival-needs-a-usable-fix). Revealing the spot to somebody who is not there is the
+  // same defect wearing the treasure-hunt costume, and `reportArrival` carries its own
+  // copy of the gate — a second copy is exactly the kind of thing that drifts, so it
+  // gets its own assertions rather than riding on completeTask's.
+  const coarseProbe = await playerHL.call('reportArrival', {
+    ...CHL, taskId: 'hl-1', lat: 31.78, lng: 35.21, accuracyMeters: 400,
+  });
+  check('reportArrival: a fix too coarse to prove anything does NOT unseal',
+    coarseProbe?.arrived === false, JSON.stringify(coarseProbe));
+  check('reportArrival: and it says so retriably, not as a rejection',
+    coarseProbe?.retriable === true, JSON.stringify(coarseProbe?.retriable));
+  // The digit-free contract still holds on this path. A "hold still" message that
+  // carried a distance would make the secret point triangulable by polling, which is
+  // the whole reason this task type has its own reason strings.
+  check('reportArrival: the coarse reason leaks NO distance digits',
+    !/\d/.test(coarseProbe?.reason ?? '') && !/m away/i.test(coarseProbe?.reason ?? ''),
+    coarseProbe?.reason);
+  const sHLcoarse = await playerHL.call('getMyTeamState', { code: cHL });
+  check('reportArrival: the task is STILL sealed after a coarse probe',
+    sHLcoarse?.activeStageTasks?.find((t) => t.id === 'hl-1')?.title === undefined,
+    'title revealed by a coarse probe');
 
   // Out-of-range check-in on the hidden task: rejected with NO distance leaked.
   let hiddenFarMsg = '';
@@ -4993,6 +5373,109 @@ async function main() {
     JSON.stringify(noConsentRows.map((t) => [t.id, t.heldForConsent])));
 
   }); // scenario: guardian consent
+
+  await scenario('location ping economy (suppressed pin, sampled track, safety intact)', async () => {
+
+  // ── Location ping economy (change: spark-tier-location-load) ───────────────
+  // MEASURED baseline before this change: updateLocation cost 3 reads + 2 writes on EVERY
+  // ping. At play-web's 20s cadence that is 225 pings per participant, which for 120
+  // participants projected to 81,000 reads / 54,000 writes against Spark ceilings of
+  // 50,000 / 20,000 — location alone put the run over BOTH quotas.
+  //
+  // The pin now writes at most once per minute (or immediately on a real move), and the
+  // history track is retained by distance travelled rather than per ping.
+  //
+  // ⚠️ THE ASSERTION THAT MATTERS MOST is the last one: a stationary team OUTSIDE the safe
+  // zone must still raise a breach alert while its position write is suppressed. Write
+  // suppression must never reach the safety path — if it ever does, this change has traded
+  // a quota problem for a lost-child problem.
+  const { gameId: gLE } = await creator.call('createGame', { title: 'Ping Economy', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gLE, scoringPreset: 'time_only',
+    safeZone: { center: { lat: 31.78, lng: 35.21 }, radiusMeters: 200 },
+    stages: [{ id: 'le-s', order: 0, title: 'Play', isFinal: true, requiredTaskCount: 1, tasks: [
+      { id: 'le-a', title: 'A', type: 'self_report', triggerMode: 'locationless', coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+    ] }],
+  });
+  const { runId: rLE, accessCode: cLE } = await creator.call('launchRun', { gameId: gLE });
+  const pinger = makeParty('pinger');
+  await signInAnonymously(pinger.auth);
+  const pingerUid = pinger.auth.currentUser.uid;   // uid == teamId
+  await pinger.call('joinRun', { code: cLE, displayName: 'Pinger' });
+  await creator.call('startTeams', { gameId: gLE, runId: rLE });
+  const CLE = { ownerUid: creatorCred.user.uid, gameId: gLE, runId: rLE };
+
+  const IN = { lat: 31.78, lng: 35.21 };            // centre of the safe zone
+  const locPath = `users/${creatorCred.user.uid}/games/${gLE}/runs/${rLE}/teamLocations/${pingerUid}`;
+  const trackPath = `users/${creatorCred.user.uid}/games/${gLE}/runs/${rLE}/locationTrack`;
+  const pinAt = async () => (await creator.getDocAt(locPath))?.data?.updatedAt;
+  const trackSize = async () => (await creator.getColAt(trackPath)).length;
+
+  // First ping establishes the pin — there is no prior fix, so it must write.
+  const first = await pinger.call('updateLocation', { ...CLE, ...IN, accuracyMeters: 10 });
+  check('ping economy: the return shape is unchanged (ok + outOfBounds)',
+    first?.ok === true && typeof first?.outOfBounds === 'boolean', JSON.stringify(first));
+  const pinAfterFirst = await pinAt();
+  check('ping economy: the first ping writes the pin', typeof pinAfterFirst === 'string', String(pinAfterFirst));
+  const trackAfterFirst = await trackSize();
+
+  // Four more pings from the same spot, all inside the one-minute interval. Before this
+  // change every one of them wrote the pin AND appended a track point.
+  for (let i = 0; i < 4; i++) {
+    await pinger.call('updateLocation', { ...CLE, ...IN, accuracyMeters: 10 });
+  }
+  check('ping economy: repeated stationary pings do NOT rewrite the pin',
+    (await pinAt()) === pinAfterFirst, `updatedAt moved: ${pinAfterFirst} → ${await pinAt()}`);
+  check('ping economy: a stationary team appends no history points',
+    (await trackSize()) === trackAfterFirst,
+    `locationTrack grew ${trackAfterFirst} → ${await trackSize()} while standing still`);
+
+  // GPS jitter well inside the fix's own error radius is not movement either.
+  await pinger.call('updateLocation', { ...CLE, lat: IN.lat + 18 / 111_320, lng: IN.lng, accuracyMeters: 25 });
+  check('ping economy: jitter within the error radius does not rewrite the pin',
+    (await pinAt()) === pinAfterFirst, String(await pinAt()));
+
+  // A real move beyond the jump threshold must write IMMEDIATELY, without waiting out the
+  // interval — otherwise a moving team would go stale on the staff map.
+  const JUMPED = { lat: IN.lat + 150 / 111_320, lng: IN.lng };
+  await pinger.call('updateLocation', { ...CLE, ...JUMPED, accuracyMeters: 10 });
+  const pinAfterJump = await pinAt();
+  check('ping economy: a significant move writes the pin immediately',
+    typeof pinAfterJump === 'string' && pinAfterJump !== pinAfterFirst,
+    `${pinAfterFirst} → ${pinAfterJump}`);
+  check('ping economy: a real move DOES append a history point',
+    (await trackSize()) > trackAfterFirst,
+    `locationTrack ${trackAfterFirst} → ${await trackSize()} after moving 150m`);
+
+  // ── Safety: suppression must never reach the safe-zone path ────────────────
+  // A team sits motionless well outside the boundary and keeps pinging. Its position
+  // write is suppressed (it is not moving), but the breach MUST still be detected.
+  const OUT = { lat: 32.5, lng: 35.9 };
+  const breachLE = await pinger.call('updateLocation', { ...CLE, ...OUT, accuracyMeters: 10 });
+  check('ping economy: leaving the zone still flags outOfBounds',
+    breachLE?.outOfBounds === true, JSON.stringify(breachLE));
+
+  const pinWhileOut = await pinAt();
+  const alertsPath = `users/${creatorCred.user.uid}/games/${gLE}/runs/${rLE}/alerts`;
+  const alertsAfterBreach = (await creator.getColAt(alertsPath)).length;
+  check('ping economy: the breach raised an alert', alertsAfterBreach > 0, String(alertsAfterBreach));
+
+  // Keep pinging from exactly the same out-of-bounds spot. The pin write is suppressed...
+  for (let i = 0; i < 3; i++) {
+    const still = await pinger.call('updateLocation', { ...CLE, ...OUT, accuracyMeters: 10 });
+    // ...but the boundary verdict is recomputed every single time and still says "outside".
+    check('ping economy: a SUPPRESSED ping still evaluates the safe zone',
+      still?.outOfBounds === true, JSON.stringify(still));
+  }
+  check('ping economy: those stationary out-of-bounds pings did not rewrite the pin',
+    (await pinAt()) === pinWhileOut, String(await pinAt()));
+
+  // And returning inside must clear the flag even though the write may be suppressed.
+  const backLE = await pinger.call('updateLocation', { ...CLE, ...IN, accuracyMeters: 10 });
+  check('ping economy: returning inside clears outOfBounds under suppression',
+    backLE?.outOfBounds === false, JSON.stringify(backLE));
+
+  }); // scenario: location ping economy
 
   await scenario('safe-zone boundary (out-of-bounds soft pause)', async () => {
 
@@ -7347,6 +7830,14 @@ async function main() {
       ['participant', pl, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['stranger', str, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['other-run staff', staffB, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      // send-team-back: reopening a mission or stage moves ONE team's score and route.
+      ['participant', pl, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
+      // quick-dial-and-actions: the run's phone numbers are the owner's to set.
+      ['participant', pl, 'setRunContacts', { ownerUid: OWNER, gameId: ag, runId: ar, contacts: [] }],
+      ['stranger', str, 'setRunContacts', { ownerUid: OWNER, gameId: ag, runId: ar, contacts: [] }],
+      ['other-run staff', staffB, 'setRunContacts', { ownerUid: OWNER, gameId: ag, runId: ar, contacts: [] }],
+      ['stranger', str, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
+      ['other-run staff', staffB, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
       // post-run-player-report: getRunPlayerReport returns team-level identity
       // TOGETHER with what each player submitted and the game's answer keys —
       // everything getRunAnalytics is careful to keep out of an anonymous
@@ -7562,6 +8053,134 @@ async function main() {
   // A template is an ordinary Game flagged isTemplate: true, owned by whichever
   // admin authored it — the admin edits it with the same updateGame every
   // creator uses. These callables project/instantiate it for everyone else.
+  // ── Mission-bank overrides (change: admin-editable-mission-bank) ────────────
+  //
+  // The smart-build mission bank is NOT stored here: it is a static array in
+  // creator-web (`src/taskBank.ts`) and the composer merges it in the browser.
+  // What the server owns is the DELTA — one `missionBankOverrides/{key}` document
+  // per mission an admin has edited or removed. So the assertions below are about
+  // the three things the server is actually responsible for: who may write these
+  // rows, that a write replaces rather than accumulates, and that `null` really
+  // clears an optional field instead of being stored as a malformed value.
+  await scenario('mission bank overrides (admin edit · replace · clear)', async () => {
+    const key = `e2e-bank-${Date.now()}`;
+
+    // 1. AUTHZ. These rows decide what every creator on the platform is offered,
+    //    so an ordinary creator must not be able to read or write them, and a
+    //    participant certainly must not.
+    await expectError('listMissionBankOverrides: a non-admin creator is denied',
+      creator.call('listMissionBankOverrides', {}),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('setMissionBankOverride: a non-admin creator is denied',
+      creator.call('setMissionBankOverride', { key, title: 'nope' }),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('clearMissionBankOverride: a non-admin creator is denied',
+      creator.call('clearMissionBankOverride', { key }),
+      { codeIn: ['functions/permission-denied'] });
+
+    // 2. A row with no usable content is refused rather than stored: an empty
+    //    override is indistinguishable from an unedited mission to the merge,
+    //    while still showing as "edited" in the admin list.
+    await expectError('setMissionBankOverride: a row with nothing to store is refused',
+      platformAdmin.call('setMissionBankOverride', { key }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('setMissionBankOverride: a missing key is refused',
+      platformAdmin.call('setMissionBankOverride', { title: 'x' }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('setMissionBankOverride: a key that would address a subcollection is refused',
+      platformAdmin.call('setMissionBankOverride', { key: 'a/b', title: 'x' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // 3. A real edit round-trips.
+    const wrote = await platformAdmin.call('setMissionBankOverride', {
+      key, title: 'משימה ערוכה', description: 'הוראות חדשות',
+      tags: ['camera', 'teamwork'], difficulty: 8, minAge: 12, transitMinutes: 4,
+    });
+    check('setMissionBankOverride: stores the edit',
+      wrote?.ok === true && wrote?.override?.title === 'משימה ערוכה' && wrote?.override?.difficulty === 8,
+      JSON.stringify(wrote?.override));
+    check('setMissionBankOverride: records who edited it',
+      typeof wrote?.override?.updatedBy === 'string' && wrote.override.updatedBy.length > 0,
+      String(wrote?.override?.updatedBy));
+
+    const listed = await platformAdmin.call('listMissionBankOverrides', {});
+    const row = (listed?.overrides ?? []).find((o) => o.key === key);
+    check('listMissionBankOverrides: the edit is in the admin list', !!row, JSON.stringify(listed?.overrides?.length));
+    check('listMissionBankOverrides: the key is the document id',
+      row?.key === key, String(row?.key));
+
+    // 4. THE REPLACE RULE. One call carries the WHOLE edited state of a mission,
+    //    so a field the admin cleared has to DISAPPEAR from the document. A merge
+    //    write would leave the old minAge alive under a form that no longer shows
+    //    it — the mission would keep an age floor nobody could see or remove.
+    await platformAdmin.call('setMissionBankOverride', {
+      key, title: 'משימה ערוכה', tags: ['camera'], difficulty: 3,
+      minAge: null, transitMinutes: null,
+    });
+    const afterClear = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('setMissionBankOverride: an explicit null CLEARS the optional field',
+      afterClear?.minAge === null && afterClear?.transitMinutes === null,
+      JSON.stringify({ a: afterClear?.minAge, t: afterClear?.transitMinutes }));
+    check('setMissionBankOverride: a field left out of the new write is gone, not merged',
+      afterClear?.description === undefined, String(afterClear?.description));
+    check('setMissionBankOverride: the new values are stored',
+      afterClear?.difficulty === 3 && JSON.stringify(afterClear?.tags) === JSON.stringify(['camera']),
+      JSON.stringify({ d: afterClear?.difficulty, t: afterClear?.tags }));
+
+    // 5. Out-of-range values are dropped, not stored — the merge would ignore
+    //    them anyway, and a stored 99 would render in the admin form as if real.
+    await platformAdmin.call('setMissionBankOverride', { key, title: 'ok', difficulty: 99, minAge: -5 });
+    const bounded = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('setMissionBankOverride: an out-of-range difficulty is not stored',
+      bounded?.difficulty === undefined, String(bounded?.difficulty));
+    check('setMissionBankOverride: a negative minAge is not stored',
+      bounded?.minAge === undefined, String(bounded?.minAge));
+
+    // 6. A deletion is just a row with `deleted: true` — the mission itself still
+    //    exists in the bundle, which is what makes "put it back" one call.
+    await platformAdmin.call('setMissionBankOverride', { key, deleted: true });
+    const deleted = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('setMissionBankOverride: a deletion is stored as a flag',
+      deleted?.deleted === true, JSON.stringify(deleted));
+
+    // 6b. CURATION FLAGS. `reviewedCopy` / `verifiedSetup` record that a person
+    //     has looked at a mission. A row carrying ONLY a flag has to be storable
+    //     — most missions have never been edited, and the whole point is being
+    //     able to resume a pass over a hundred of them.
+    await platformAdmin.call('clearMissionBankOverride', { key });
+    const flagged = await platformAdmin.call('setMissionBankOverride', { key, reviewedCopy: true });
+    check('setMissionBankOverride: a flag-only row is accepted',
+      flagged?.ok === true && flagged?.override?.reviewedCopy === true, JSON.stringify(flagged?.override));
+    check('setMissionBankOverride: a flag-only row carries no content',
+      flagged?.override?.title === undefined && flagged?.override?.tags === undefined,
+      JSON.stringify(flagged?.override));
+    const bothFlags = await platformAdmin.call('setMissionBankOverride',
+      { key, reviewedCopy: true, verifiedSetup: true });
+    check('setMissionBankOverride: both flags together',
+      bothFlags?.override?.reviewedCopy === true && bothFlags?.override?.verifiedSetup === true,
+      JSON.stringify(bothFlags?.override));
+    // Only `true` is stored: an untick is the ABSENCE of the field, so a row of
+    // nothing but `false` says nothing and must be refused rather than kept.
+    await expectError('setMissionBankOverride: a row of nothing but false flags is refused',
+      platformAdmin.call('setMissionBankOverride', { key, reviewedCopy: false, verifiedSetup: false }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // 7. Reset. Clearing an override that is already absent is a no-op, not an
+    //    error: two admins pressing reset is not a conflict.
+    const cleared = await platformAdmin.call('clearMissionBankOverride', { key });
+    check('clearMissionBankOverride: removes the row', cleared?.cleared === true, JSON.stringify(cleared));
+    const gone = ((await platformAdmin.call('listMissionBankOverrides', {}))?.overrides ?? [])
+      .find((o) => o.key === key);
+    check('clearMissionBankOverride: the mission is back to its authored content',
+      gone === undefined, JSON.stringify(gone));
+    const again = await platformAdmin.call('clearMissionBankOverride', { key });
+    check('clearMissionBankOverride: clearing an absent row is a no-op',
+      again?.ok === true && again?.cleared === false, JSON.stringify(again));
+  });
+
   await scenario('game templates', async () => {
     const unlockTask = (id, over = {}) => ({
       id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
@@ -7985,6 +8604,127 @@ async function main() {
       JSON.stringify((junkGame?.stages ?? []).map((s) => (s.tasks ?? []).map((t) => t.maxConcurrentTeams))));
   });
 
+  // ── template visibility (change: template-visibility) ─────────────────────
+  //
+  // An admin can take a template out of the creator picker while keeping it in
+  // their own builder. Before this, `isTemplate: false` was the only lever and it
+  // removed the template from BOTH lists.
+  //
+  // Four of these assertions exist because the obvious implementations fail
+  // silently rather than loudly:
+  //   • a `where('templateHidden','==',false)` clause would drop every template
+  //     authored before the field existed — hence the legacy-template assertion;
+  //   • a field missing from TEMPLATE_LIST_FIELDS arrives `undefined`, so the
+  //     filter would pass everything and this scenario is what notices;
+  //   • hiding a row from a LIST is not an access control, hence the two
+  //     createGameFromTemplate refusals;
+  //   • a non-sticky field would mean an emoji edit un-hides a parked template.
+  await scenario('template visibility (hidden from creators, kept in the builder)', async () => {
+    const tplTask = (id) => ({
+      id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10,
+      maxConcurrentTeams: 9,
+    });
+    const authorTemplate = async (title) => {
+      const { gameId } = await platformAdmin.call('createGame', { title, mode: 'team' });
+      await platformAdmin.call('updateGame', {
+        gameId, scoringPreset: 'time_only',
+        stages: [{ id: `${gameId}-s1`, order: 0, title: 'S1', isFinal: true, tasks: [tplTask(`${gameId}-t1`)] }],
+      });
+      await platformAdmin.call('setGameTemplateFlag', {
+        gameId, isTemplate: true, templateEmoji: '👁', templateOrder: 40,
+      });
+      return gameId;
+    };
+    const offeredIds = async () => {
+      const list = await creator.call('listGameTemplates', {});
+      return (list?.templates ?? []).flatMap((g) => Object.values(g.variants ?? {})).map((v) => v.id);
+    };
+
+    const visible = await authorTemplate('Visibility: stays visible');
+    const hidden = await authorTemplate('Visibility: gets hidden');
+
+    // 1. Both are offered while neither carries the field at all — which is also
+    //    the regression guard: every template that predates this change has NO
+    //    `templateHidden`, and a query-level equality filter would drop them.
+    const before = await offeredIds();
+    check('listGameTemplates: a template with no visibility field is offered',
+      before.includes(visible) && before.includes(hidden), JSON.stringify(before));
+
+    // 2. Hide one.
+    const hid = await platformAdmin.call('setGameTemplateFlag', {
+      gameId: hidden, isTemplate: true, templateHidden: true,
+    });
+    check('setGameTemplateFlag: accepts templateHidden', hid?.ok === true || hid?.isTemplate === true,
+      JSON.stringify(hid));
+
+    const after = await offeredIds();
+    check('listGameTemplates: the hidden template is no longer offered',
+      !after.includes(hidden), JSON.stringify(after));
+    check('listGameTemplates: its sibling is untouched',
+      after.includes(visible), JSON.stringify(after));
+
+    // 3. …but it is STILL in the admin's own builder, and says so.
+    const adminList = await platformAdmin.call('listAdminTemplates', {});
+    const row = (adminList?.games ?? []).find((g) => g.id === hidden);
+    check('listAdminTemplates: the hidden template is still listed', !!row, JSON.stringify(row?.id));
+    check('listAdminTemplates: the row carries the visibility state',
+      row?.templateHidden === true, JSON.stringify(row?.templateHidden));
+
+    // 4. Hiding a row from a list is not an access control. A creator holding the
+    //    id — from a stale cached menu, or from before it was hidden — is refused,
+    //    and so is the OWNER: an admin edits a parked template in the Builder,
+    //    never by instantiating it.
+    await expectError('createGameFromTemplate: a creator cannot instantiate a hidden template',
+      creator.call('createGameFromTemplate', { templateGameId: hidden, title: 'Should not exist' }),
+      { codeIn: ['functions/failed-precondition'] });
+    await expectError('createGameFromTemplate: not even the owner can',
+      platformAdmin.call('createGameFromTemplate', { templateGameId: hidden, title: 'Should not exist' }),
+      { codeIn: ['functions/failed-precondition'] });
+    const creatorGames = await creator.call('listGames', {});
+    check('createGameFromTemplate: the refused call created nothing',
+      !(creatorGames?.games ?? []).some((g) => g.title === 'Should not exist'),
+      JSON.stringify((creatorGames?.games ?? []).map((g) => g.title)));
+
+    // 5. The field is STICKY: editing unrelated metadata must not un-hide it.
+    //    Getting this wrong is the `updateGame` cleared-optional-field bug from
+    //    the other direction — an emoji edit silently republishing a template.
+    await platformAdmin.call('setGameTemplateFlag', {
+      gameId: hidden, isTemplate: true, templateEmoji: '🙈', templateOrder: 41,
+    });
+    const stillHidden = await offeredIds();
+    check('setGameTemplateFlag: an unrelated edit does not un-hide',
+      !stillHidden.includes(hidden), JSON.stringify(stillHidden));
+
+    // 6. A malformed value is refused rather than coerced. `null` matters
+    //    specifically: the callable transport turns `undefined` into it.
+    await expectError('setGameTemplateFlag: a non-boolean visibility is refused',
+      platformAdmin.call('setGameTemplateFlag', {
+        gameId: hidden, isTemplate: true, templateHidden: 'yes',
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('setGameTemplateFlag: null is refused, not read as visible',
+      platformAdmin.call('setGameTemplateFlag', {
+        gameId: hidden, isTemplate: true, templateHidden: null,
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    const afterJunk = await offeredIds();
+    check('setGameTemplateFlag: a refused call changed nothing',
+      !afterJunk.includes(hidden), JSON.stringify(afterJunk));
+
+    // 7. Unhiding puts it back, and it can be instantiated again.
+    await platformAdmin.call('setGameTemplateFlag', {
+      gameId: hidden, isTemplate: true, templateHidden: false,
+    });
+    const restored = await offeredIds();
+    check('setGameTemplateFlag: unhiding restores it to the picker',
+      restored.includes(hidden), JSON.stringify(restored));
+    const made = await creator.call('createGameFromTemplate', {
+      templateGameId: hidden, title: 'From an unhidden template',
+    });
+    check('createGameFromTemplate: works again once visible', !!made?.gameId, JSON.stringify(made));
+  });
+
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════
   // Pins the edge semantics of answer matching and geo triggers where
   // off-by-one regressions live.
@@ -8312,6 +9052,11 @@ async function main() {
       const notice = (await creator.getColAt(annCol)).find((a) => a.kind === 'score' && a.teamId === cvUid && a.delta === 50);
       check('adjustTeamScore wrote a kind:score notice', !!notice, JSON.stringify(notice));
       check('score notice carries a bilingual message', !!notice?.message && !!notice?.messageHe && notice?.active === true, JSON.stringify(notice));
+      // team-dossier-and-search D2: the reason now lives on the team, not only in auditLogs.
+      const led = (teamDoc.data?.scoreLedger ?? []).find((l) => l.kind === 'adjust');
+      check('ledger: adjustTeamScore appends {delta, reason, by} to the team',
+        led?.delta === 50 && led?.reason === 'great teamwork' && led?.by === 'organizer' && typeof led?.at === 'string',
+        JSON.stringify(teamDoc.data?.scoreLedger));
     }
 
     const deactAnn = await creator.call('deactivateAnnouncement', { ...CV, announcementId: ann.announcementId });
@@ -8695,8 +9440,14 @@ async function main() {
       ] }],
     });
     const { runId: rc } = await creator.call('launchRun', { gameId: gc });
-    const { pin } = await creator.call('inviteStaff', {
-      ownerUid: OWNER, gameId: gc, runId: rc, name: 'Solo Marshal', permissions: ['review_photos'],
+    // staff-capabilities made every NEW code multi-use (several marshals share one PIN), so the
+    // single-use guarantee now belongs to invites minted BEFORE that change, which still exist in
+    // runs that were live at deploy time. Written directly, in exactly the legacy shape.
+    const legacyRef = adminSdk.firestore().collection(`users/${OWNER}/games/${gc}/runs/${rc}/staffInvites`).doc();
+    const pin = '482913';
+    await legacyRef.set({
+      id: legacyRef.id, ownerUid: OWNER, gameId: gc, runId: rc, name: 'Solo Marshal',
+      permissions: ['review_photos'], pin, used: false, createdAt: new Date().toISOString(),
     });
 
     // Fire N concurrent staffSignIn calls from distinct identities with the same PIN.
@@ -8716,6 +9467,25 @@ async function main() {
     check('the rest are rejected (single-use enforced)',
       results.filter((r) => r.status === 'rejected').length === N - 1,
       `rejected=${results.filter((r) => r.status === 'rejected').length}`);
+
+    // And the opposite, on purpose: a code minted today is SHARED, and concurrent sign-ins with it
+    // all succeed, each with its own person record.
+    const shared = await creator.call('inviteStaff', { ownerUid: OWNER, gameId: gc, runId: rc, name: 'Shared gate' });
+    const crowd = [];
+    for (let i = 0; i < 4; i++) {
+      const pty = makeParty(`sharedRacer${i}`);
+      await signInAnonymously(pty.auth);
+      crowd.push(pty);
+    }
+    const sharedResults = await Promise.allSettled(
+      crowd.map((pty) => pty.call('staffSignIn', { ownerUid: OWNER, gameId: gc, runId: rc, pin: shared.pin })),
+    );
+    check('a new multi-use code admits every concurrent sign-in',
+      sharedResults.every((r) => r.status === 'fulfilled' && r.value?.customToken),
+      sharedResults.map((r) => r.status).join(','));
+    const grants = await adminSdk.firestore().collection(`users/${OWNER}/games/${gc}/runs/${rc}/staffGrants`)
+      .where('codeId', '==', shared.inviteId).get();
+    check('each person on a shared code gets their own grant', grants.size === 4, String(grants.size));
   });
 
   // ═══ startTeams scales with team count (perf: run-perf-scale, Task 10) ═══════
@@ -9852,6 +10622,42 @@ async function main() {
       && smuggled?.credits === undefined && smuggled?.wallet === undefined,
       JSON.stringify({ deletedAt: smuggled?.deletedAt, hook: smuggled?.integrationWebhookUrl,
         credits: smuggled?.credits, wallet: smuggled?.wallet }));
+
+    // game-file-full-settings (2026-09-27): every authored setting survives export → import, on
+    // both doors, including the ones the export used to drop.
+    const { gameId: gSet } = await creator.call('createGame', { title: 'All Settings Game', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: gSet, scoringPreset: 'fixed_points_speed',
+      autoApproveAllMedia: true, autoStartLateJoiners: true, requireAllMembersOnline: true,
+      stages: [{ id: 'as-s', order: 0, title: 'S', isFinal: true, tasks: [
+        { id: 'as-q', title: 'Pick', type: 'quiz', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1,
+          estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, choices: ['sage', 'thyme'],
+          answerOutcomes: [{ id: 'o1', label: 'sage', answers: ['sage'], points: 100 }, { id: 'o2', label: 'thyme', answers: ['thyme'], points: 50 }],
+          unmatchedPoints: 5, revealOutcomePoints: true, requiredContributors: 2, timeLimitMinutes: 3 },
+        { id: 'as-v', title: 'Film', type: 'photo', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1,
+          estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', preferredCamera: 'front' } },
+      ] }],
+    });
+    const { file: setFile } = await creator.call('exportGameFile', { gameId: gSet });
+    const settingsOf = (g) => {
+      const q = (g?.stages ?? [])[0]?.tasks?.find((t) => t.id === 'as-q');
+      const v = (g?.stages ?? [])[0]?.tasks?.find((t) => t.id === 'as-v');
+      return {
+        run: [g?.autoApproveAllMedia, g?.autoStartLateJoiners, g?.requireAllMembersOnline],
+        outcomes: q?.answerOutcomes?.length, unmatched: q?.unmatchedPoints, reveal: q?.revealOutcomePoints,
+        contributors: q?.requiredContributors, limit: q?.timeLimitMinutes, camera: v?.smart?.preferredCamera,
+      };
+    };
+    const expected = JSON.stringify({ run: [true, true, true], outcomes: 2, unmatched: 5, reveal: true, contributors: 2, limit: 3, camera: 'front' });
+    check('game file: the export carries every authored setting', JSON.stringify(settingsOf(setFile?.game)) === expected, JSON.stringify(settingsOf(setFile?.game)));
+    const { gameId: gSetNew } = await creator.call('importGameFile', { file: setFile });
+    const { game: setNew } = await creator.call('getGame', { gameId: gSetNew });
+    check('game file: a NEW game from the file keeps every setting', JSON.stringify(settingsOf(setNew)) === expected, JSON.stringify(settingsOf(setNew)));
+    const { gameId: gBlank } = await creator.call('createGame', { title: 'Blank Target', mode: 'team' });
+    await creator.call('importGameFile', { file: setFile, targetGameId: gBlank });
+    const { game: setInPlace } = await creator.call('getGame', { gameId: gBlank });
+    check('game file: loading the file INTO a game keeps every setting', JSON.stringify(settingsOf(setInPlace)) === expected, JSON.stringify(settingsOf(setInPlace)));
   }); // scenario: game file export/import
 
   // ═══ Live task pause (change: live-task-pause) ══════════════════════════════
@@ -10131,12 +10937,688 @@ async function main() {
       plainEntry?.forced === false, JSON.stringify(plainEntry));
   });
 
+  // ═══ Closing a mission mid-run (change: live-task-close-rules) ═══════════════
+  //
+  // Owner (2026-09-27): a CLOSED mission is gone. The team standing on it loses it with a message
+  // and no points and is routed on; missions that waited for it open, but any OTHER prerequisite
+  // they have still holds; no team is left in a stage it can never finish (its requirement shrinks);
+  // a team that joins after the closure gets the same treatment. A PAUSE is temporary and keeps the
+  // old contract (a holder finishes and scores; see the scenario above), but what waits for a
+  // paused mission now counts as unavailable when the stage is judged.
+  await scenario('closing a mission mid-run (holder · dependents · shrink · late joiner)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const t = (id, after) => ({
+      id, title: `Mission ${id}`, type: 'self_report', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9,
+      ...(after ? { unlockAfterTaskIds: after } : {}),
+    });
+    const { gameId: cg } = await creator.call('createGame', { title: 'Close Rules Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: cg, scoringPreset: 'fixed_points_speed', stages: [
+      // Every mission required. B waits for A; C waits for A AND D.
+      { id: 'cl-s1', order: 0, title: 'Chain', tasks: [t('cl-a'), t('cl-b', ['cl-a']), t('cl-c', ['cl-a', 'cl-d']), t('cl-d')] },
+      { id: 'cl-s2', order: 1, title: 'End', isFinal: true, tasks: [t('cl-end')] },
+    ] });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const C = { ownerUid: OWNER, gameId: cg, runId: cr };
+    const teamPath = (uid) => `users/${OWNER}/games/${cg}/runs/${cr}/teams/${uid}`;
+    const rec = (team, id) => (team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === id);
+
+    const p1 = makeParty('closeHolder');
+    const p1Uid = (await signInAnonymously(p1.auth)).user.uid;
+    await p1.call('joinRun', { code: cc, displayName: 'Standing On A' });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+    const held0 = (await p1.call('getMyTeamState', { code: cc }))?.team?.activeTaskId;
+    if (held0 !== 'cl-a') await creator.call('forceAssignTask', { ...C, teamId: p1Uid, taskId: 'cl-a' });
+    check('close precondition: the team is on A',
+      (await p1.call('getMyTeamState', { code: cc }))?.team?.activeTaskId === 'cl-a');
+    const scoreBefore = (await creator.getDocAt(teamPath(p1Uid))).data?.score ?? 0;
+
+    // Every mission is required, yet closing A is NOT refused: no team is stranded by it.
+    const closed = await creator.call('setRunTaskStatus', { ...C, taskId: 'cl-a', status: 'closed', reason: 'street blocked' });
+    check('close: accepted without force, and never reported as unwinnable',
+      closed?.ok === true && closed?.status === 'closed' && closed?.stageUnwinnable === false, JSON.stringify(closed));
+    check('close: the response says who was moved and what opened',
+      closed?.teamsMoved === 1 && JSON.stringify(closed?.dependentsOpened) === JSON.stringify(['cl-b']), JSON.stringify(closed));
+
+    let s1 = await p1.call('getMyTeamState', { code: cc });
+    let team1 = (await creator.getDocAt(teamPath(p1Uid))).data ?? {};
+    const aRec = rec(team1, 'cl-a');
+    check('close: the holder lost A, marked as closed by the organizers, with no points',
+      aRec?.status === 'skipped' && aRec?.closedByOrganizer === true && (aRec?.earnedScore ?? 0) === 0 && (team1.score ?? 0) === scoreBefore,
+      JSON.stringify({ aRec, score: team1.score }));
+    check('close: the holder was routed on to another mission', !!s1?.team?.activeTaskId && s1.team.activeTaskId !== 'cl-a', String(s1?.team?.activeTaskId));
+    check('close: the phone is told why (a notice naming the mission)',
+      s1?.team?.closedTaskNotice?.taskId === 'cl-a' && s1.team.closedTaskNotice.title === 'Mission cl-a', JSON.stringify(s1?.team?.closedTaskNotice));
+    check('close: the stage now asks for the three missions that remain',
+      team1.stages?.[0]?.requiredTaskCount === 3, JSON.stringify(team1.stages?.[0]?.requiredTaskCount));
+    check('close: C still waits for D (its OTHER prerequisite holds)',
+      (s1?.lockedTaskIds ?? []).includes('cl-c') && !(s1?.lockedTaskIds ?? []).includes('cl-b'), JSON.stringify(s1?.lockedTaskIds));
+    let refusedA = false;
+    try { const r = await p1.call('completeTask', { ...C, taskId: 'cl-a' }); refusedA = r?.already === true || r?.ok === false; }
+    catch { refusedA = true; }
+    check('close: the closed mission cannot be completed any more', refusedA
+      && ((await creator.getDocAt(teamPath(p1Uid))).data?.score ?? 0) === scoreBefore);
+
+    // Play the rest: B, D, then C opens; the stage ends and the final stage starts.
+    for (let i = 0; i < 4; i++) {
+      const cur = (await p1.call('getMyTeamState', { code: cc }))?.team?.activeTaskId;
+      if (!cur || cur === 'cl-end') break;
+      await p1.call('completeTask', { ...C, taskId: cur });
+    }
+    team1 = (await creator.getDocAt(teamPath(p1Uid))).data ?? {};
+    check('close: the shrunk stage completes and the team moves to the final stage',
+      team1.stages?.[0]?.status === 'completed' && ['cl-b', 'cl-c', 'cl-d'].every((id) => rec(team1, id)?.status === 'completed'),
+      JSON.stringify(team1.stages?.[0]));
+
+    // A team that joins AFTER the closure starts without A, and can play B at once.
+    const p2 = makeParty('closeLateJoiner');
+    const p2Uid = (await signInAnonymously(p2.auth)).user.uid;
+    await p2.call('joinRun', { code: cc, displayName: 'Came Later' });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+    const team2 = (await creator.getDocAt(teamPath(p2Uid))).data ?? {};
+    const s2 = await p2.call('getMyTeamState', { code: cc });
+    check('close: a late joiner starts with A already closed and the stage shrunk',
+      rec(team2, 'cl-a')?.closedByOrganizer === true && team2.stages?.[0]?.requiredTaskCount === 3, JSON.stringify(team2.stages?.[0]));
+    check('close: a late joiner is never told about a mission it never had',
+      !s2?.team?.closedTaskNotice, JSON.stringify(s2?.team?.closedTaskNotice));
+    check('close: a late joiner is not locked out of B', !(s2?.lockedTaskIds ?? []).includes('cl-b'), JSON.stringify(s2?.lockedTaskIds));
+
+    // A PAUSE locks what waits for it, and the stage check counts that.
+    const { gameId: pg } = await creator.call('createGame', { title: 'Pause Chain Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: pg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'pc-s', order: 0, title: 'Chain', isFinal: true, requiredTaskCount: 2, tasks: [t('pc-a'), t('pc-b', ['pc-a']), t('pc-c')] },
+    ] });
+    const { runId: pr } = await creator.call('launchRun', { gameId: pg });
+    const pausedErr = await expectError('pause: pausing a prerequisite its stage cannot spare is refused',
+      creator.call('setRunTaskStatus', { ownerUid: OWNER, gameId: pg, runId: pr, taskId: 'pc-a', status: 'paused' }),
+      { codeIn: ['functions/failed-precondition'] });
+    check('pause: the refusal counts the locked dependent as unavailable (1 of 2)',
+      pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
+  }); // scenario: closing a mission mid-run
+
+  // ═══ Mission time limits (change: mission-time-limit) ═══════════════════════
+  //
+  // Owner (2026-09-27): two kinds. A countdown PER TEAM from the moment it got the mission (time up
+  // ⇒ it moves on with no points and a message), and a clock window for everyone (now with an
+  // absolute close, `expiresAt`). Time is judged when the team SUBMITS: a photo sent in time and
+  // reviewed later still counts.
+  await scenario('mission time limits (per team countdown · absolute close · judged at submit)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const base = (id, extra = {}) => ({ id, title: `Mission ${id}`, type: 'self_report', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9, ...extra });
+    const LIMIT = 0.05; // 3 seconds; the server adds a 5 second grace.
+
+    // Save-time validation.
+    const { gameId: vg } = await creator.call('createGame', { title: 'Time Limit Validation', mode: 'individual' });
+    for (const [label, extra] of [['a zero limit', { timeLimitMinutes: 0 }], ['a huge limit', { timeLimitMinutes: 9999 }], ['an unreadable close', { expiresAt: 'soon' }]]) {
+      await expectError(`time limit: ${label} is refused at save time`,
+        creator.call('updateGame', { gameId: vg, stages: [{ id: 'v-s', order: 0, title: 'S', isFinal: true, tasks: [base('v-t', extra)] }] }),
+        { codeIn: ['functions/invalid-argument'] });
+    }
+
+    // A. Per team countdown on a quiz.
+    const { gameId: tg } = await creator.call('createGame', { title: 'Time Limit Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: tg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'tl-s1', order: 0, title: 'Timed', tasks: [
+        base('tl-quiz', { type: 'quiz', choices: ['yes', 'no'], answers: ['yes'], timeLimitMinutes: LIMIT }),
+        base('tl-other'),
+      ] },
+      { id: 'tl-s2', order: 1, title: 'End', isFinal: true, tasks: [base('tl-end')] },
+    ] });
+    const { runId: tr, accessCode: tc } = await creator.call('launchRun', { gameId: tg });
+    const T = { ownerUid: OWNER, gameId: tg, runId: tr };
+    const tp = makeParty('timeLimitPlayer');
+    const tUid = (await signInAnonymously(tp.auth)).user.uid;
+    await tp.call('joinRun', { code: tc, displayName: 'On The Clock' });
+    await creator.call('startTeams', { gameId: tg, runId: tr });
+    if ((await tp.call('getMyTeamState', { code: tc }))?.team?.activeTaskId !== 'tl-quiz') {
+      await creator.call('forceAssignTask', { ...T, teamId: tUid, taskId: 'tl-quiz' });
+    }
+    const s0 = await tp.call('getMyTeamState', { code: tc });
+    const quizPayload = (s0?.activeStageTasks ?? []).find((x) => x.id === 'tl-quiz');
+    check('time limit: the phone is told the mission has a limit', quizPayload?.timeLimitMinutes === LIMIT, JSON.stringify(quizPayload?.timeLimitMinutes));
+    check('time limit: the phone gets the time LEFT as a duration, never an instant',
+      typeof s0?.activeTaskTimeLeftMs === 'number' && s0.activeTaskTimeLeftMs > 0 && s0.activeTaskTimeLeftMs <= 3000, JSON.stringify(s0?.activeTaskTimeLeftMs));
+
+    await sleep(8600);
+    await expectError('time limit: a right answer after the time is up is refused',
+      tp.call('submitTaskAnswer', { ...T, taskId: 'tl-quiz', answer: 'yes' }),
+      { codeIn: ['functions/failed-precondition'] });
+    await tp.call('getMyTeamState', { code: tc }); // the poll sweeps the timed out mission
+    await tp.call('requestNextTask', { ...T, lat: 0, lng: 0 }); // what the phone does next
+    const s1 = await tp.call('getMyTeamState', { code: tc });
+    const tTeam = (await creator.getDocAt(`users/${OWNER}/games/${tg}/runs/${tr}/teams/${tUid}`)).data ?? {};
+    const qRec = (tTeam.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === 'tl-quiz');
+    check('time limit: the mission is skipped for this team as time up, with no points',
+      qRec?.status === 'skipped' && qRec?.skipCause === 'timeLimit' && (qRec?.earnedScore ?? 0) === 0 && (tTeam.score ?? 0) === 0, JSON.stringify({ qRec, score: tTeam.score }));
+    check('time limit: the team was routed on to the next mission', s1?.team?.activeTaskId === 'tl-other', String(s1?.team?.activeTaskId));
+    check('time limit: the phone is told why', s1?.team?.timeUpNotice?.taskId === 'tl-quiz' && s1.team.timeUpNotice.title === 'Mission tl-quiz', JSON.stringify(s1?.team?.timeUpNotice));
+    check('time limit: a mission without a limit sends no countdown', s1?.activeTaskTimeLeftMs === null, JSON.stringify(s1?.activeTaskTimeLeftMs));
+    await tp.call('completeTask', { ...T, taskId: 'tl-other' });
+    const s2 = await tp.call('getMyTeamState', { code: tc });
+    check('time limit: the stage still completes (a timed out mission does not strand the team)',
+      s2?.team?.stages?.[0]?.status === 'completed' && s2?.team?.activeTaskId === 'tl-end', JSON.stringify(s2?.team?.stages?.[0]?.status));
+
+    // B. Judged at submit: a photo sent in time and reviewed later still counts.
+    const { gameId: pg } = await creator.call('createGame', { title: 'Time Limit Photo Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: pg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'tp-s1', order: 0, title: 'Photo', isFinal: true, tasks: [
+        base('tp-photo', { type: 'photo', timeLimitMinutes: LIMIT, smart: { enabled: true, verificationType: 'photo_upload' } }),
+      ] },
+    ] });
+    const { runId: pr, accessCode: pc } = await creator.call('launchRun', { gameId: pg });
+    const P = { ownerUid: OWNER, gameId: pg, runId: pr };
+    const pp = makeParty('timeLimitPhoto');
+    const pUid = (await signInAnonymously(pp.auth)).user.uid;
+    await pp.call('joinRun', { code: pc, displayName: 'Sent In Time' });
+    await creator.call('startTeams', { gameId: pg, runId: pr });
+    const photoUrl = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${pr}/teams/${pUid}/tp.jpg`)}?alt=media`;
+    await pp.call('submitStationPhoto', { ...P, teamId: pUid, taskId: 'tp-photo', photoUrl });
+    await sleep(8600);
+    await pp.call('getMyTeamState', { code: pc });
+    const pTeam = (await creator.getDocAt(`users/${OWNER}/games/${pg}/runs/${pr}/teams/${pUid}`)).data ?? {};
+    const pRec = (pTeam.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === 'tp-photo');
+    check('time limit: a submission waiting for review is NOT timed out', pRec?.status === 'assigned', JSON.stringify(pRec));
+    const rev = await creator.call('reviewStationSubmission', { ...P, teamId: pUid, taskId: 'tp-photo', approved: true });
+    const pTeam2 = (await creator.getDocAt(`users/${OWNER}/games/${pg}/runs/${pr}/teams/${pUid}`)).data ?? {};
+    check('time limit: approving it after the limit still scores it', rev?.approved === true && (pTeam2.score ?? 0) > 0, JSON.stringify({ rev, score: pTeam2.score }));
+
+    // C. An absolute close already in the past: never handed out, refused on completion.
+    const { gameId: ag } = await creator.call('createGame', { title: 'Absolute Close Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: ag, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'ac-s1', order: 0, title: 'Window', isFinal: true, requiredTaskCount: 1, tasks: [
+        base('ac-closed', { expiresAt: new Date(Date.now() - 60_000).toISOString() }), base('ac-open'),
+      ] },
+    ] });
+    const { runId: ar, accessCode: ac } = await creator.call('launchRun', { gameId: ag });
+    const A = { ownerUid: OWNER, gameId: ag, runId: ar };
+    const ap = makeParty('absoluteClose');
+    await signInAnonymously(ap.auth);
+    await ap.call('joinRun', { code: ac, displayName: 'Late' });
+    await creator.call('startTeams', { gameId: ag, runId: ar });
+    check('absolute close: a mission past its close time is never handed out',
+      (await ap.call('getMyTeamState', { code: ac }))?.team?.activeTaskId === 'ac-open');
+    await expectError('absolute close: completing it by hand is refused',
+      ap.call('completeTask', { ...A, taskId: 'ac-closed' }), { codeIn: ['functions/failed-precondition'] });
+  }); // scenario: mission time limits
+
   // ═══ Single-task skip (change: skip-single-task) ════════════════════════════
   // The bug this closes: the console's only skip was `skipStage`, so removing ONE
   // unreachable mission destroyed every OTHER mission that team still had in the
   // stage. The load-bearing assertions here are the NEGATIVES — after the skip the
   // stage is STILL ACTIVE and the siblings are STILL PLAYABLE — because that is
   // exactly what the old behaviour destroyed.
+  // ── Everyone does their part (change: every-member-plays) ──────────────────
+  //
+  // The device model makes every teammate but the controller a SPECTATOR by
+  // construction (`assertController`), which is how one person did the mission while
+  // the rest of the team stood around in run ijI9JMITSf8C9heN1Cwp. `contributeToTask`
+  // is the single exception, and it is additive: it records that a device did its part
+  // and does NOT complete, score or route anything.
+  // ── The six server behaviours this session added that NOTHING executed ──────
+  //
+  // `npm run e2e` passing after a change means "nothing regressed". It does NOT mean
+  // "the new code works": a path no test ever reaches is indistinguishable from a
+  // broken one, and six of this session's new server behaviours were in exactly that
+  // state — implemented, typechecked, and never once run.
+  //
+  // This scenario runs each of them at least once, against the real emulator.
+  await scenario('new server paths (late joiners, attendance, auto approve, reversal, fix quality)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const photoUrl = (path) =>
+      `http://127.0.0.1:${EMU.storage}/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token`;
+
+    // ── 1. teamsStartedAt is stamped ONCE ────────────────────────────────────
+    // A second press must not move it: the question it answers is "has play begun",
+    // and moving it would silently un-strand every team already waiting.
+    const { gameId: lg } = await creator.call('createGame', { title: 'Late Joiners', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: lg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'lj-s', order: 0, title: 'One stop', isFinal: true, tasks: [
+        { id: 'lj-a', title: 'Stop', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: lr, accessCode: lc } = await creator.call('launchRun', { gameId: lg });
+    const lRunPath = `users/${OWNER}/games/${lg}/runs/${lr}`;
+
+    const early = makeParty('ljEarly');
+    await signInAnonymously(early.auth);
+    await early.call('joinRun', { code: lc, displayName: 'Early' });
+
+    check('newpaths: the run carries no start stamp before startTeams',
+      !(await creator.getDocAt(lRunPath)).data?.teamsStartedAt);
+    await creator.call('startTeams', { gameId: lg, runId: lr });
+    const stamp1 = (await creator.getDocAt(lRunPath)).data?.teamsStartedAt;
+    check('newpaths: startTeams stamps teamsStartedAt', !!stamp1, String(stamp1));
+    await creator.call('startTeams', { gameId: lg, runId: lr });
+    const stamp2 = (await creator.getDocAt(lRunPath)).data?.teamsStartedAt;
+    check('newpaths: a SECOND startTeams does not move the stamp', stamp1 === stamp2,
+      JSON.stringify({ stamp1, stamp2 }));
+
+    // ── 2. A late joiner is REPORTED even with auto start off ───────────────
+    // The safety net must fire for the organizer who never turned auto start on -
+    // that organizer is exactly the one whose team sat 27 minutes.
+    //
+    // THE WAIT IS LOAD-BEARING, DO NOT REMOVE IT. `LATE_JOIN_GRACE_MS` is 30s on
+    // purpose: a team joining in the same moment the organizer presses start is not
+    // "late" in any sense a human would recognise, and flagging them would make the
+    // console cry wolf during the busiest ten seconds of a run. So a test that joins
+    // immediately gets `notLate` - which is CORRECT behaviour and proves nothing.
+    // The first version of this scenario did exactly that and reported a passing
+    // feature that had never run. Waiting the window out once, in a suite that already
+    // takes ten minutes, is what makes the rest of this section mean anything.
+    const graceMs = 31_000;
+    await new Promise((r) => setTimeout(r, graceMs));
+
+    const late = makeParty('ljLate');
+    await signInAnonymously(late.auth);
+    const lateJoin = await late.call('joinRun', { code: lc, displayName: 'Latecomer' });
+    check('newpaths: a team joining after the start is REPORTED as late',
+      lateJoin?.lateJoined === true, JSON.stringify(lateJoin));
+    check('newpaths: and the reason names the SETTING, not consent',
+      lateJoin?.lateJoinBlockedBy === 'setting', String(lateJoin?.lateJoinBlockedBy));
+    check('newpaths: with auto start off it is NOT launched',
+      lateJoin?.selfStarted !== true, JSON.stringify(lateJoin?.selfStarted));
+    const lateRow = (await creator.call('listRunTeams', { gameId: lg, runId: lr }))
+      .teams.find((t) => t.id === lateJoin.teamId);
+    check('newpaths: the console sees it unlaunched, with a join time to measure',
+      lateRow?.launched === false && !!lateRow?.joinedAt, JSON.stringify(lateRow?.joinedAt));
+    // The projection must carry a REAL instant, after the start. It shipped as null
+    // for every team until this run caught it: RunTeam had no top-level joinedAt at
+    // all, only one nested inside devices[0], so the console's stranded-team strip was
+    // reading a field that did not exist.
+    check('newpaths: and that join time is a real instant AFTER the start stamp',
+      Number.isFinite(Date.parse(lateRow?.joinedAt ?? '')) &&
+      Date.parse(lateRow.joinedAt) > Date.parse(stamp1),
+      JSON.stringify({ joinedAt: lateRow?.joinedAt, startedAt: stamp1 }));
+
+    // ── 3. Auto start ON launches the next late joiner immediately ──────────
+    await creator.call('updateGame', { gameId: lg, autoStartLateJoiners: true });
+    const late2 = makeParty('ljLate2');
+    await signInAnonymously(late2.auth);
+    const autoJoin = await late2.call('joinRun', { code: lc, displayName: 'Auto' });
+    check('newpaths: with the setting ON a late joiner self starts',
+      autoJoin?.selfStarted === true && autoJoin?.lateJoinBlockedBy === 'none',
+      JSON.stringify(autoJoin));
+    const autoState = await late2.call('getMyTeamState', { code: lc });
+    check('newpaths: and it is actually playing, with a mission in hand',
+      autoState?.team?.launched === true && !!autoState?.team?.activeTaskId,
+      JSON.stringify({ launched: autoState?.team?.launched, task: autoState?.team?.activeTaskId }));
+
+    // ── 4. The attendance hold, and that it FAILS OPEN ──────────────────────
+    const { gameId: ag } = await creator.call('createGame', { title: 'All Members', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: ag, scoringPreset: 'fixed_points_speed', requireAllMembersOnline: true,
+      stages: [{ id: 'am-s', order: 0, title: 'One stop', isFinal: true, tasks: [
+        { id: 'am-a', title: 'Stop', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: ar, accessCode: ac } = await creator.call('launchRun', { gameId: ag });
+    const short = makeParty('amShort');
+    await signInAnonymously(short.auth);
+    await short.call('joinRun', { code: ac, displayName: 'Short', memberNames: ['A', 'B', 'C'] });
+    // A team whose game collects NO member names cannot be held: memberCount is 1,
+    // which is indistinguishable from the default, so the gate must not fire.
+    const unknown = makeParty('amUnknown');
+    await signInAnonymously(unknown.auth);
+    await unknown.call('joinRun', { code: ac, displayName: 'Unknown' });
+
+    const started = await creator.call('startTeams', { gameId: ag, runId: ar });
+    check('newpaths: the short team is HELD for its missing members',
+      started?.heldForMembers === 1, JSON.stringify(started));
+    check('newpaths: and the team with an unknown headcount is NOT held (fails open)',
+      started?.launched === 1, JSON.stringify(started));
+    const shortState = await short.call('getMyTeamState', { code: ac });
+    check('newpaths: the held team is TOLD why, with the new reason',
+      shortState?.holdReason === 'members_offline', String(shortState?.holdReason));
+    const unknownState = await unknown.call('getMyTeamState', { code: ac });
+    check('newpaths: the unknown-headcount team is playing, not held',
+      unknownState?.team?.launched === true && !unknownState?.holdReason,
+      JSON.stringify({ launched: unknownState?.team?.launched, hold: unknownState?.holdReason }));
+
+    // ── 5. Run wide auto approve, and the approval REVERSAL ─────────────────
+    const { gameId: pg } = await creator.call('createGame', { title: 'Auto Approve All', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: pg, scoringPreset: 'fixed_points_speed', autoApproveAllMedia: true,
+      stages: [{ id: 'pa-s', order: 0, title: 'Photo stop', isFinal: true, tasks: [
+        // NOTE: no `smart.autoApprove` on the task. The RUN level flag is what must
+        // approve this, which is the whole point of the assertion below.
+        { id: 'pa-a', title: 'Photo stop', type: 'photo', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 60,
+          maxConcurrentTeams: 9, smart: { enabled: true, verificationType: 'photo_upload' } },
+      ] }],
+    });
+    const { runId: pr, accessCode: pc } = await creator.call('launchRun', { gameId: pg });
+    const P = { ownerUid: OWNER, gameId: pg, runId: pr };
+    const shooter = makeParty('paShooter');
+    await signInAnonymously(shooter.auth);
+    const shot = await shooter.call('joinRun', { code: pc, displayName: 'Shooter' });
+    await creator.call('startTeams', { gameId: pg, runId: pr });
+
+    const objectPath = `runs/${pr}/teams/${shot.teamId}/pa.jpg`;
+    await shooter.uploadBytesAt(objectPath, new Uint8Array([0xff, 0xd8, 0xff, 0xdb]), 'image/jpeg');
+    const submitted = await shooter.call('submitStationPhoto', {
+      ...P, teamId: shot.teamId, taskId: 'pa-a', photoUrl: photoUrl(objectPath), contentType: 'image/jpeg',
+    });
+    check('newpaths: the RUN level flag approves a task that never asked for it',
+      submitted?.autoApproved === true, JSON.stringify(submitted));
+    check('newpaths: and it says WHICH rule approved it',
+      submitted?.autoApproveSource === 'run', String(submitted?.autoApproveSource));
+
+    const teamPath = `users/${OWNER}/games/${pg}/runs/${pr}/teams/${shot.teamId}`;
+    const scored = (await creator.getDocAt(teamPath)).data ?? {};
+    const award = ((scored.stages ?? [])[0]?.tasks ?? []).find((t) => t.taskId === 'pa-a')?.earnedScore ?? 0;
+    check('newpaths: the auto approved photo actually scored', award > 0, String(award));
+    const scoreBefore = scored.score ?? 0;
+
+    // THE REVERSAL. This used to be refused outright, which is how a photo of
+    // somebody's hand kept full points with nothing an organizer could do.
+    const reversed = await creator.call('reviewStationSubmission', {
+      ...P, teamId: shot.teamId, taskId: 'pa-a', approved: false, note: 'a photo of a hand',
+    });
+    check('newpaths: an APPROVED submission can now be rejected',
+      reversed?.reversal === 'reversed', JSON.stringify(reversed));
+    check('newpaths: and the clawback removes exactly what it awarded',
+      reversed?.scoreDelta === -award, JSON.stringify({ delta: reversed?.scoreDelta, award }));
+    const after = (await creator.getDocAt(teamPath)).data ?? {};
+    check('newpaths: the team score fell by exactly the award',
+      (after.score ?? 0) === scoreBefore - award,
+      JSON.stringify({ before: scoreBefore, after: after.score, award }));
+    check('newpaths: and the task RECORD was zeroed too, so live and final agree',
+      (((after.stages ?? [])[0]?.tasks ?? []).find((t) => t.taskId === 'pa-a')?.earnedScore ?? -1) === 0);
+    // And the STAGE total with it. Nothing ranks on this field - every scorer reads the
+    // task-level earnedScore - but runs/helpers.ts recomputes it as the sum of its tasks
+    // on every completion, so a reversal that left it high made the stored document
+    // disagree with itself. Caught by reading the document after an undo in the console.
+    check('newpaths: and the STAGE total was recomputed, so the document agrees with itself',
+      ((after.stages ?? [])[0]?.earnedScore ?? -1)
+        === ((after.stages ?? [])[0]?.tasks ?? []).reduce((n, t) => n + (t.earnedScore ?? 0), 0),
+      JSON.stringify({ stage: (after.stages ?? [])[0]?.earnedScore,
+        tasks: ((after.stages ?? [])[0]?.tasks ?? []).map((t) => t.earnedScore) }));
+    check('newpaths: the submission reads rejected',
+      after.taskSubmissions?.['pa-a']?.status === 'rejected',
+      String(after.taskSubmissions?.['pa-a']?.status));
+    {
+      const led = (after.scoreLedger ?? []).filter((l) => l.kind === 'reversal' && l.taskId === 'pa-a');
+      check('ledger: undoing an approval records the clawback and the note',
+        led.length === 1 && led[0].delta === -award && led[0].reason === 'a photo of a hand',
+        JSON.stringify(after.scoreLedger));
+    }
+
+    // Reversing twice takes nothing further.
+    const again = await creator.call('reviewStationSubmission', {
+      ...P, teamId: shot.teamId, taskId: 'pa-a', approved: false,
+    });
+    const after2 = (await creator.getDocAt(teamPath)).data ?? {};
+    check('newpaths: reversing twice equals reversing once',
+      again?.reversal === 'alreadyRejected' && (after2.score ?? 0) === (after.score ?? 0),
+      JSON.stringify({ outcome: again?.reversal, score: after2.score }));
+
+    // ── The durable trail. A review moves a score, and a REVERSAL moves it back
+    //    off a team that already saw the points. `reviewStationSubmission` wrote
+    //    nothing at all until this change: reviewedBy/reviewedAt live on the team
+    //    document, which the next review overwrites, so the reversal erased its own
+    //    only evidence.
+    const revLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    const revRows = (revLogs?.logs ?? []).filter((l) => l.runId === pr && l.taskId === 'pa-a');
+    const revRow = revRows.find((l) => l.actionType === 'submission_approval_reversed');
+    check('audit: the reversal is recorded with the team, the mission and the operator',
+      !!revRow && revRow.teamId === shot.teamId && !!revRow.operatorId,
+      JSON.stringify(revRow));
+    check('audit: the record says it went from approved to rejected, and how much came off',
+      revRow?.previousValue === 'approved' && revRow?.newValue === 'rejected'
+      && revRow?.pointsRemoved === award,
+      JSON.stringify({ prev: revRow?.previousValue, next: revRow?.newValue, off: revRow?.pointsRemoved, award }));
+    check("audit: the reason given by the operator rides along",
+      revRow?.reason === 'a photo of a hand', JSON.stringify(revRow?.reason));
+    check('audit: a plain rejection is recorded too, and is NOT labelled a reversal',
+      revRows.some((l) => l.actionType === 'submission_rejected' && !l.pointsRemoved),
+      JSON.stringify(revRows.map((l) => l.actionType)));
+
+    // ── 6. A fix too coarse to prove arrival is REFUSED, and retriable ──────
+    const { gameId: fg } = await creator.call('createGame', { title: 'Fix Quality', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: fg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'fq-s', order: 0, title: 'Real place', isFinal: true, tasks: [
+        { id: 'fq-a', title: 'Real place', type: 'field', triggerMode: 'radius',
+          coordinates: { lat: 31.7683, lng: 35.2137 }, geofenceRadiusMeters: 40,
+          difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: fr, accessCode: fc } = await creator.call('launchRun', { gameId: fg });
+    const F = { ownerUid: OWNER, gameId: fg, runId: fr };
+    const walker = makeParty('fqWalker');
+    await signInAnonymously(walker.auth);
+    await walker.call('joinRun', { code: fc, displayName: 'Walker' });
+    await creator.call('startTeams', { gameId: fg, runId: fr });
+
+    // Standing ON the spot, but with a 200m fix. The reported POINT is inside the
+    // 40m radius; the fix cannot actually place anybody within 40m of anything.
+    let coarseRefused = '';
+    try {
+      await walker.call('completeTask', {
+        ...F, taskId: 'fq-a', lat: 31.7683, lng: 35.2137, accuracyMeters: 200,
+      });
+    } catch (e) { coarseRefused = String(e?.code ?? e?.message ?? ''); }
+    check('newpaths: a 200m fix against a 40m radius is REFUSED',
+      /unavailable/.test(coarseRefused), coarseRefused);
+    check('newpaths: and refused as UNAVAILABLE, not failed-precondition, so the app can say "stand still"',
+      !/failed-precondition/.test(coarseRefused), coarseRefused);
+
+    // The same player, same place, once the phone reports a usable fix.
+    const okNow = await walker.call('completeTask', {
+      ...F, taskId: 'fq-a', lat: 31.7683, lng: 35.2137, accuracyMeters: 12,
+    });
+    check('newpaths: a retry with a GOOD fix from the same spot succeeds',
+      okNow?.ok === true, JSON.stringify(okNow));
+
+    // And a client that sends NO accuracy behaves exactly as it always did.
+    const { gameId: ng } = await creator.call('createGame', { title: 'No Accuracy', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: ng, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'na-s', order: 0, title: 'Real place', isFinal: true, tasks: [
+        { id: 'na-a', title: 'Real place', type: 'field', triggerMode: 'radius',
+          coordinates: { lat: 31.7683, lng: 35.2137 }, geofenceRadiusMeters: 40,
+          difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: nr, accessCode: nc } = await creator.call('launchRun', { gameId: ng });
+    const legacy = makeParty('naLegacy');
+    await signInAnonymously(legacy.auth);
+    await legacy.call('joinRun', { code: nc, displayName: 'Legacy' });
+    await creator.call('startTeams', { gameId: ng, runId: nr });
+    const legacyOk = await legacy.call('completeTask', {
+      ownerUid: OWNER, gameId: ng, runId: nr, taskId: 'na-a', lat: 31.7683, lng: 35.2137,
+    });
+    check('newpaths: a client that sends NO accuracy is unaffected',
+      legacyOk?.ok === true, JSON.stringify(legacyOk));
+
+    // ── THE CORRECTION: a coarse fix DELAYS, it must never WALL ────────────────
+    //
+    // The first version of this gate refused `accuracy > radius` unconditionally, so
+    // a mission authored at 4m — or any courtyard with no sky — was unwinnable
+    // forever. Ahiya caught it before it shipped. Two bounds now: the radius is
+    // floored at ARRIVAL_RADIUS_FLOOR_M, and COARSE_FIX_GRACE_MS after the first
+    // refusal the gate opens regardless and records an unverified arrival.
+    const { gameId: tg } = await creator.call('createGame', { title: 'Tight Radius', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: tg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'tr-s', order: 0, title: 'Pinpoint', isFinal: true, tasks: [
+        // FOUR METRES. The exact case that was permanently unwinnable.
+        { id: 'tr-a', title: 'Pinpoint', type: 'field', triggerMode: 'radius',
+          coordinates: { lat: 31.7683, lng: 35.2137 }, geofenceRadiusMeters: 4,
+          difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+        { id: 'tr-b', title: 'Blind alley', type: 'field', triggerMode: 'radius',
+          coordinates: { lat: 31.7683, lng: 35.2137 }, geofenceRadiusMeters: 40,
+          difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: tr, accessCode: tc } = await creator.call('launchRun', { gameId: tg });
+    const T = { ownerUid: OWNER, gameId: tg, runId: tr };
+    const pinpoint = makeParty('tightRadius');
+    await signInAnonymously(pinpoint.auth);
+    const pj = await pinpoint.call('joinRun', { code: tc, displayName: 'Pinpoint' });
+    await creator.call('startTeams', { gameId: tg, runId: tr });
+
+    // An ORDINARY handset fix — 18m, which is a good one outdoors — against a 4m
+    // authored radius. Before the floor this was refused on every press, forever.
+    const tight = await pinpoint.call('completeTask', {
+      ...T, taskId: 'tr-a', lat: 31.7683, lng: 35.2137, accuracyMeters: 18,
+    }).catch((e) => ({ error: String(e?.code ?? e) }));
+    check('arrivalfloor: a 4m mission accepts an ordinary 18m fix instead of refusing forever',
+      tight?.ok === true, JSON.stringify(tight));
+
+    const tightTeam = `users/${OWNER}/games/${tg}/runs/${tr}/teams/${pj.teamId}`;
+    const afterTight = (await creator.getDocAt(tightTeam)).data ?? {};
+    const tightRec = ((afterTight.stages ?? [])[0]?.tasks ?? []).find((t) => t.taskId === 'tr-a');
+    check('arrivalfloor: and that arrival is PROVEN, not merely permitted',
+      tightRec?.arrivalUnverified === undefined, JSON.stringify(tightRec?.arrivalUnverified));
+
+    // Now the hopeless-reception case, on the 40m mission: a 300m fix.
+    const refused = await pinpoint.call('completeTask', {
+      ...T, taskId: 'tr-b', lat: 31.7683, lng: 35.2137, accuracyMeters: 300,
+    }).then(() => ({ code: 'accepted' })).catch((e) => ({ code: String(e?.code ?? e) }));
+    check('arrivalgrace: the FIRST press on a useless fix is still refused, retriably',
+      String(refused.code).includes('unavailable'), JSON.stringify(refused));
+
+    // The clock must have been stamped — that is what makes the window reachable.
+    const stamped = (await creator.getDocAt(tightTeam)).data ?? {};
+    check('arrivalgrace: and the refusal starts the clock, per task',
+      typeof stamped.coarseFixSince?.['tr-b'] === 'string',
+      JSON.stringify(stamped.coarseFixSince ?? null));
+
+    // Pressing again INSIDE the window must not push the window away.
+    const insideWindow = await pinpoint.call('completeTask', {
+      ...T, taskId: 'tr-b', lat: 31.7683, lng: 35.2137, accuracyMeters: 300,
+    }).then(() => ({ code: 'accepted' })).catch((e) => ({ code: String(e?.code ?? e) }));
+    check('arrivalgrace: pressing again inside the window is refused the same way',
+      String(insideWindow.code).includes('unavailable'), JSON.stringify(insideWindow));
+    const stamped2 = (await creator.getDocAt(tightTeam)).data ?? {};
+    check('arrivalgrace: and the clock was NOT restarted, or the window would never arrive',
+      stamped2.coarseFixSince?.['tr-b'] === stamped.coarseFixSince?.['tr-b'],
+      JSON.stringify({ first: stamped.coarseFixSince?.['tr-b'], second: stamped2.coarseFixSince?.['tr-b'] }));
+
+    // WAIT THE WINDOW OUT. Load-bearing and deliberately commented, exactly like the
+    // late-joiner grace wait above: a test that presses again too early gets the
+    // CORRECT refusal and would report a passing feature that never ran.
+    await new Promise((r) => setTimeout(r, COARSE_FIX_GRACE_MS + 1500));
+
+    const through = await pinpoint.call('completeTask', {
+      ...T, taskId: 'tr-b', lat: 31.7683, lng: 35.2137, accuracyMeters: 300,
+    }).catch((e) => ({ error: String(e?.code ?? e) }));
+    check('arrivalgrace: once the window has passed the team gets through regardless',
+      through?.ok === true, JSON.stringify(through));
+
+    const afterGrace = (await creator.getDocAt(tightTeam)).data ?? {};
+    const graceRec = ((afterGrace.stages ?? [])[0]?.tasks ?? []).find((t) => t.taskId === 'tr-b');
+    check('arrivalgrace: and it is RECORDED as unverified for the organizer',
+      graceRec?.arrivalUnverified === true, JSON.stringify(graceRec?.arrivalUnverified));
+
+    // The count the console strip reads.
+    const rows = await creator.call('listRunTeams', { gameId: tg, runId: tr });
+    const row = (rows?.teams ?? []).find((t) => t.id === pj.teamId);
+    check('arrivalgrace: listRunTeams reports the count, so the console can show it',
+      row?.unverifiedArrivals === 1, JSON.stringify(row?.unverifiedArrivals));
+
+    // AND THE PLAYER IS NEVER TOLD. Surfacing it would document the way through.
+    const mine = await pinpoint.call('getMyTeamState', { ...T });
+    const mineRec = (mine?.team?.stages ?? []).flatMap((s) => s.tasks ?? [])
+      .find((t) => t.taskId === 'tr-b');
+    check('arrivalgrace: the participant payload withholds the flag entirely',
+      mineRec !== undefined && mineRec.arrivalUnverified === undefined,
+      JSON.stringify(mineRec ?? null));
+
+    // THE WINDOW FORGIVES AN IMPRECISE FIX, NEVER A DISTANT ONE. Same team, same
+    // wide-open clock, but standing in a different city.
+    const farAway = await pinpoint.call('completeTask', {
+      ...T, taskId: 'tr-a', lat: 32.0853, lng: 34.7818, accuracyMeters: 300,
+    }).then(() => ({ code: 'accepted' })).catch((e) => ({ code: String(e?.code ?? e) }));
+    // NOTE what this does and does NOT prove. The clock was stamped for `tr-b`, not
+    // `tr-a`, so this exercises the FIRST-refusal path: a distant player with a useless
+    // fix is refused. The open-window-and-still-too-far case is not reachable here
+    // without a second 10s wait, and is covered exhaustively by the pure sweep instead
+    // (2,054 of 2,633 open windows still refused on distance).
+    check('arrivalgrace: a player in another city is refused, not carried by a stale window',
+      !String(farAway.code).includes('accepted'), JSON.stringify(farAway));
+  });
+
+  await scenario('every member plays (contributions gate a mission, distinct devices only)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: cg } = await creator.call('createGame', { title: 'Everyone Plays', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: cg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'cn-s', order: 0, title: 'Together', isFinal: true, tasks: [
+        { id: 'cn-a', title: 'Together stop', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50,
+          maxConcurrentTeams: 5, requiredContributors: 2 },
+      ] }],
+    });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const C = { ownerUid: OWNER, gameId: cg, runId: cr };
+
+    const lead = makeParty('contribLead');
+    await signInAnonymously(lead.auth);
+    const joined = await lead.call('joinRun', { code: cc, displayName: 'Together', memberNames: ['A', 'B', 'C'] });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+
+    const teamPath = `users/${OWNER}/games/${cg}/runs/${cr}/teams/${joined.teamId}`;
+    const teamCode = (await creator.getDocAt(teamPath)).data?.deviceJoinCode;
+    check('contrib: the founding team has a device join code', !!teamCode, String(teamCode));
+
+    // A FOURTH device on a team of three would exceed the old fixed cap of 3; a team
+    // that declared three may hold the floor of three. Attach a second and a third.
+    const mate = makeParty('contribMate');
+    await signInAnonymously(mate.auth);
+    const attached = await mate.call('joinTeamAsDevice', { code: cc, teamCode, memberName: 'B' });
+    check('contrib: a teammate attaches as a VIEWER, not a controller',
+      attached?.role === 'viewer', JSON.stringify(attached?.role));
+
+    // The viewer still may not submit — that is the rule this change does NOT relax.
+    let viewerRefused = false;
+    try { await mate.call('completeTask', { ...C, taskId: 'cn-a' }); }
+    catch (e) { viewerRefused = /not-controller/.test(e.message ?? ''); }
+    check('contrib: a non-controller still cannot submit', viewerRefused);
+
+    // The controller cannot complete yet: two distinct contributors are required.
+    let blocked = false;
+    try { await lead.call('completeTask', { ...C, taskId: 'cn-a' }); }
+    catch (e) { blocked = /waiting-for-teammates/.test(e.message ?? ''); }
+    check('contrib: the controller is refused while the requirement is unmet', blocked);
+
+    // ONE device contributing twice is ONE contributor. This is the assertion that
+    // makes the requirement real rather than decorative.
+    const first = await lead.call('contributeToTask', { ...C, taskId: 'cn-a' });
+    const again = await lead.call('contributeToTask', { ...C, taskId: 'cn-a' });
+    check('contrib: a first contribution is recorded', first?.contributors === 1, JSON.stringify(first));
+    check('contrib: the SAME device contributing twice counts once',
+      again?.contributors === 1 && again?.already === true, JSON.stringify(again));
+    check('contrib: and the requirement is still unmet', again?.satisfied === false, JSON.stringify(again));
+
+    let stillBlocked = false;
+    try { await lead.call('completeTask', { ...C, taskId: 'cn-a' }); }
+    catch (e) { stillBlocked = /waiting-for-teammates/.test(e.message ?? ''); }
+    check('contrib: one device twice does not unlock the mission', stillBlocked);
+
+    // A DISTINCT device satisfies it — and a viewer may make this call, which is the
+    // whole point of the callable existing.
+    const second = await mate.call('contributeToTask', { ...C, taskId: 'cn-a' });
+    check('contrib: a NON-CONTROLLER device may contribute',
+      second?.contributors === 2 && second?.satisfied === true, JSON.stringify(second));
+
+    const done = await lead.call('completeTask', { ...C, taskId: 'cn-a' });
+    check('contrib: the controller can now complete', done?.ok === true, JSON.stringify(done));
+    const after = (await creator.getDocAt(teamPath)).data ?? {};
+    const rec = ((after.stages ?? [])[0]?.tasks ?? []).find((t) => t.taskId === 'cn-a');
+    check('contrib: the mission is completed and scored once',
+      rec?.status === 'completed' && (rec?.earnedScore ?? 0) > 0, JSON.stringify(rec));
+    check('contrib: the contribution set survives on the team doc',
+      new Set(after.taskContributions?.['cn-a'] ?? []).size === 2,
+      JSON.stringify(after.taskContributions));
+  });
+
   await scenario('single task skip (one mission, same stage, no stage jump)', async () => {
     const OWNER = creatorCred.user.uid;
     const { gameId: sg } = await creator.call('createGame', { title: 'Skip One Mission', mode: 'individual' });
@@ -10188,12 +11670,24 @@ async function main() {
     const stageAfter = (teamAfter.stages ?? [])[0] ?? {};
     const recOf = (id) => (stageAfter.tasks ?? []).find((t) => t.taskId === id);
     check('skip-task: the skipped record is `skipped`', recOf(held)?.status === 'skipped', recOf(held)?.status);
-    check('skip-task: the skipped mission earned exactly 0 (no consolation award)',
-      (recOf(held)?.earnedScore ?? 0) === 0, JSON.stringify(recOf(held)?.earnedScore));
+    // live-ops-feedback-loop: a single-mission skip now pays the SAME consolation
+    // skipStage pays. This game is fixed_points_speed with pointValue 50, so
+    // skipAward is 50. This used to assert 0 — and in run ijI9JMITSf8C9heN1Cwp the
+    // organizer answered that 0 by computing the fair value in his head mid-run and
+    // paying it as an untraceable manual bonus. The workaround was the bug.
+    check('skip-task: the skipped mission earned the preset consolation (50)',
+      (recOf(held)?.earnedScore ?? 0) === 50, JSON.stringify(recOf(held)?.earnedScore));
     check('skip-task: the stage is STILL ACTIVE', stageAfter.status === 'active', stageAfter.status);
     check('skip-task: the lowered requirement is stored on the TEAM\'s stage record',
       stageAfter.requiredTaskCount === 2, JSON.stringify(stageAfter.requiredTaskCount));
-    check('skip-task: the team\'s score did not move', (teamAfter.score ?? 0) === 0, String(teamAfter.score));
+    check('skip-task: the team\'s score moved by exactly the consolation',
+      (teamAfter.score ?? 0) === 50, String(teamAfter.score));
+    {
+      const led = (teamAfter.scoreLedger ?? []).filter((l) => l.kind === 'skipAward');
+      check('ledger: the skip consolation is recorded with its mission and reason',
+        led.length === 1 && led[0].delta === 50 && led[0].taskId === held && led[0].reason === 'shop shuttered',
+        JSON.stringify(teamAfter.scoreLedger));
+    }
     const siblings = ['sk-a', 'sk-b', 'sk-c'].filter((id) => id !== held);
     check('skip-task: both sibling missions are STILL PLAYABLE (skipStage would have killed them)',
       siblings.every((id) => ['unassigned', 'assigned'].includes(recOf(id)?.status)),
@@ -10217,7 +11711,7 @@ async function main() {
       (countsRepeat[held] ?? 0) === 0, JSON.stringify(countsRepeat));
     const teamRepeat = (await creator.getDocAt(sTeamPath)).data ?? {};
     check('skip-task: the refused repeat did not touch the score or the requirement',
-      (teamRepeat.score ?? 0) === 0 && (teamRepeat.stages ?? [])[0]?.requiredTaskCount === 2,
+      (teamRepeat.score ?? 0) === 50 && (teamRepeat.stages ?? [])[0]?.requiredTaskCount === 2,
       JSON.stringify({ score: teamRepeat.score, req: (teamRepeat.stages ?? [])[0]?.requiredTaskCount }));
 
     // ── A mission that is not in the team's active stage is not found.
@@ -10272,8 +11766,10 @@ async function main() {
     check('skip-all: skipping the LAST playable mission completes the stage',
       third?.stageCompleted === true, JSON.stringify(third));
     const team2 = (await creator.getDocAt(`${`users/${OWNER}/games/${sg}/runs/${sr2}`}/teams/${sp2Uid}`)).data ?? {};
-    check('skip-all: the team is finished with a zero score (nothing was awarded)',
-      team2.status === 'finished' && (team2.score ?? 0) === 0,
+    // Three missions skipped at 50 each: the consolation is per mission, and a team
+    // that skipped everything still finishes, having earned only what it was given.
+    check('skip-all: the team is finished having earned only the consolations',
+      team2.status === 'finished' && (team2.score ?? 0) === 150,
       JSON.stringify({ status: team2.status, score: team2.score }));
     const counts2 = (await creator.getDocAt(`users/${OWNER}/games/${sg}/runs/${sr2}`)).data?.taskCounts ?? {};
     check('skip-all: every station counter is back to zero (no leaked capacity)',
@@ -10299,6 +11795,13 @@ async function main() {
     check('regression: skipStage still marks EVERY task of the stage skipped',
       (stage3.tasks ?? []).every((t) => t.status === 'skipped') && stage3.status === 'completed',
       JSON.stringify((stage3.tasks ?? []).map((t) => [t.taskId, t.status])));
+    {
+      const led = (team3.scoreLedger ?? []).filter((l) => l.kind === 'skipAward');
+      const total = led.reduce((n, l) => n + l.delta, 0);
+      check('ledger: skipStage records its consolation, and the ledger sums to the score it paid',
+        led.length >= 1 && total === (team3.score ?? 0) && total > 0,
+        JSON.stringify({ ledger: team3.scoreLedger, score: team3.score }));
+    }
 
     // ── The durable trail: a skip removes a scoring opportunity from ONE team.
     const skipLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
@@ -10312,6 +11815,211 @@ async function main() {
     check('audit: the record states whether the stage ended and whether the requirement dropped',
       entry?.stageCompleted === false && entry?.requirementLowered === true,
       JSON.stringify({ stageCompleted: entry?.stageCompleted, requirementLowered: entry?.requirementLowered }));
+  });
+
+  // skip-keeps-the-stage: production run oNaUvNrCWRia4Y1b9xOO (2026-09-22). ONE operator skip of
+  // the head of a chained stage was logged `stageCompleted: true` and the team lost the whole
+  // stage, because the missions gated behind the skipped one were retired as unreachable. This is
+  // that exact chain: A, then B (after A), then C (after A and B).
+  await scenario('skip keeps a chained stage (operator skip opens the next link)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: cg } = await creator.call('createGame', { title: 'Chained Skip', mode: 'individual' });
+    const stop = (id, title, after) => ({
+      id, title, type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+      difficulty: 2, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 3,
+      ...(after ? { unlockAfterTaskIds: after } : {}),
+    });
+    await creator.call('updateGame', {
+      gameId: cg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'ch-s1', order: 0, title: 'The chain', tasks: [
+          stop('ch-a', 'Head', null), stop('ch-b', 'Middle', ['ch-a']), stop('ch-c', 'Tail', ['ch-b', 'ch-a']),
+        ] },
+        { id: 'ch-s2', order: 1, title: 'After', isFinal: true, tasks: [stop('ch-z', 'Next stage', null)] },
+      ],
+    });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const C = { ownerUid: OWNER, gameId: cg, runId: cr };
+    const cp = makeParty('chainPlayer');
+    await signInAnonymously(cp.auth);
+    await cp.call('joinRun', { code: cc, displayName: 'Chainers' });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+    const cpUid = cp.auth.currentUser.uid;
+    const teamPath = `users/${OWNER}/games/${cg}/runs/${cr}/teams/${cpUid}`;
+
+    const held = (await cp.call('getMyTeamState', { code: cc }))?.team?.activeTaskId ?? null;
+    check('chain: routing hands out the head first (the only unlocked link)', held === 'ch-a', String(held));
+
+    // The dry run: the plan, and nothing written.
+    const before = JSON.stringify((await creator.getDocAt(teamPath)).data ?? {});
+    const dry = await creator.call('skipTaskForTeam', { ...C, teamId: cpUid, dryRun: true });
+    const after = JSON.stringify((await creator.getDocAt(teamPath)).data ?? {});
+    check('chain dry run: reports that the stage continues', dry?.dryRun === true && dry?.stageCompletes === false, JSON.stringify(dry));
+    check('chain dry run: names exactly the link it opens',
+      JSON.stringify((dry?.dependentsOpened ?? []).map((d) => d.id)) === '["ch-b"]', JSON.stringify(dry?.dependentsOpened));
+    check('chain dry run: writes NOTHING to the team', before === after);
+
+    // The real skip.
+    const res = await creator.call('skipTaskForTeam', { ...C, teamId: cpUid, reason: 'head stop closed' });
+    check('chain: the skip did NOT complete the stage (the 2026-09-22 bug)', res?.stageCompleted === false, JSON.stringify(res));
+    check('chain: the response names the link it opened',
+      JSON.stringify((res?.dependentsOpened ?? []).map((d) => d.id)) === '["ch-b"]', JSON.stringify(res?.dependentsOpened));
+    check('chain: the team is routed to the next link', res?.nextTaskId === 'ch-b', JSON.stringify({ next: res?.nextTaskId, why: res?.nextReason }));
+    const team = (await creator.getDocAt(teamPath)).data ?? {};
+    const s1 = (team.stages ?? []).find((s) => s.stageId === 'ch-s1') ?? {};
+    const rec = (id) => (s1.tasks ?? []).find((t) => t.taskId === id);
+    check('chain: the head is recorded as an OPERATOR skip',
+      rec('ch-a')?.status === 'skipped' && rec('ch-a')?.skipCause === 'operator', JSON.stringify(rec('ch-a')));
+    check('chain: the tail is still playable, not retired',
+      rec('ch-c')?.status === 'unassigned', JSON.stringify(rec('ch-c')));
+    check('chain: stage 1 is still active and stage 2 still locked',
+      s1.status === 'active' && (team.stages ?? []).find((s) => s.stageId === 'ch-s2')?.status === 'locked',
+      JSON.stringify((team.stages ?? []).map((s) => [s.stageId, s.status])));
+
+    // The player's own view agrees: the skip cause arrives, and nothing opened reads as locked.
+    const mine = await cp.call('getMyTeamState', { code: cc });
+    const mineHead = (mine?.team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((t) => t.taskId === 'ch-a');
+    check('chain: the participant payload carries the skip cause', mineHead?.skipCause === 'operator', JSON.stringify(mineHead));
+    check('chain: the opened link is not reported as locked',
+      !(mine?.lockedTaskIds ?? []).includes('ch-b'), JSON.stringify(mine?.lockedTaskIds));
+  });
+
+  // send-team-back: "I have no button at all to send a team back" (Ahiya, 2026-09-25). Nothing
+  // could reopen a skipped/completed mission or an earlier stage. This covers the callable the
+  // console's new button drives: a single mission, a whole stage (the 2026-09-22 recovery case),
+  // the dry run, the score and the station slots, and the refusals.
+  await scenario('send team back (reopen a mission, reopen a stage)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: bg } = await creator.call('createGame', { title: 'Send Back', mode: 'individual' });
+    const stop = (id, title) => ({
+      id, title, type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+      difficulty: 2, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 3,
+    });
+    await creator.call('updateGame', {
+      gameId: bg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'sb-s1', order: 0, title: 'First', tasks: [stop('sb-a', 'Alpha'), stop('sb-b', 'Bravo')] },
+        { id: 'sb-s2', order: 1, title: 'Second', isFinal: true, tasks: [stop('sb-x', 'Xray'), stop('sb-y', 'Yankee')] },
+      ],
+    });
+    const { runId: br, accessCode: bc } = await creator.call('launchRun', { gameId: bg });
+    const B = { ownerUid: OWNER, gameId: bg, runId: br };
+    const bp = makeParty('sendBackPlayer');
+    await signInAnonymously(bp.auth);
+    await bp.call('joinRun', { code: bc, displayName: 'Boomerangs' });
+    await creator.call('startTeams', { gameId: bg, runId: br });
+    const bpUid = bp.auth.currentUser.uid;
+    const teamPath = `users/${OWNER}/games/${bg}/runs/${br}/teams/${bpUid}`;
+    const runDoc = `users/${OWNER}/games/${bg}/runs/${br}`;
+    const team = async () => (await creator.getDocAt(teamPath)).data ?? {};
+    const rec = (t, id) => (t.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === id);
+
+    // Skip the mission they hold, so there is something to send them back to.
+    const first = (await bp.call('getMyTeamState', { code: bc }))?.team?.activeTaskId;
+    const other = first === 'sb-a' ? 'sb-b' : 'sb-a';
+    await creator.call('skipTaskForTeam', { ...B, teamId: bpUid });
+    const afterSkip = await team();
+    check('send-back setup: the skipped mission paid its consolation', (afterSkip.score ?? 0) === 40, String(afterSkip.score));
+    check('send-back setup: the team moved on to the other mission', afterSkip.activeTaskId === other, String(afterSkip.activeTaskId));
+
+    // Dry run: the plan, nothing written.
+    const before = JSON.stringify(afterSkip);
+    const dry = await creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'task', taskId: first }, dryRun: true });
+    check('send-back dry run: names the reopened mission and the points it removes',
+      dry?.dryRun === true && dry?.pointsRemoved === 40 && JSON.stringify((dry?.reopened ?? []).map((r) => r.id)) === JSON.stringify([first]),
+      JSON.stringify(dry));
+    check('send-back dry run: writes NOTHING', JSON.stringify(await team()) === before);
+
+    // The real return to ONE mission.
+    const res = await creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'task', taskId: first }, reason: 'wrong team skipped' });
+    const t1 = await team();
+    check('send-back: the team is on the mission it was sent back to', res?.assignedTaskId === first && t1.activeTaskId === first,
+      JSON.stringify({ res: res?.assignedTaskId, doc: t1.activeTaskId }));
+    check('send-back: the reopened mission is assigned and no longer skipped',
+      rec(t1, first)?.status === 'assigned' && rec(t1, first)?.skipCause === undefined, JSON.stringify(rec(t1, first)));
+    check('send-back: the mission they were holding went back to unassigned', rec(t1, other)?.status === 'unassigned', JSON.stringify(rec(t1, other)));
+    check('send-back: the consolation was taken back (40 → 0)', (t1.score ?? 0) === 0, String(t1.score));
+    check('send-back: the score ledger records the reversal with its reason',
+      (t1.scoreLedger ?? []).some((l) => l.kind === 'reversal' && l.delta === -40 && l.reason === 'wrong team skipped'),
+      JSON.stringify(t1.scoreLedger));
+    const counts = (await creator.getDocAt(runDoc)).data?.taskCounts ?? {};
+    check('send-back: the station slot moved with the team (held 1, released 0, never negative)',
+      (counts[first] ?? 0) === 1 && (counts[other] ?? 0) === 0 && Object.values(counts).every((n) => (n ?? 0) >= 0),
+      JSON.stringify(counts));
+    const notices = await bp.getColAt(`users/${OWNER}/games/${bg}/runs/${br}/announcements`).catch(() => []);
+    check('send-back: the team is told where it was sent',
+      notices.some((n) => n.kind === 'returned' && n.teamId === bpUid), JSON.stringify(notices.map((n) => [n.kind, n.teamId])));
+
+    // The 2026-09-22 recovery: a whole stage lost, then returned to.
+    await creator.call('skipStage', { gameId: bg, runId: br, teamId: bpUid });
+    const t2 = await team();
+    check('send-back setup: stage 1 skipped, stage 2 active',
+      t2.stages?.[0]?.status === 'completed' && t2.stages?.[1]?.status === 'active', JSON.stringify((t2.stages ?? []).map((s) => s.status)));
+    const back = await creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s1' } });
+    const t3 = await team();
+    check('send-back to a stage: stage 1 active again, stage 2 waits',
+      t3.stages?.[0]?.status === 'active' && t3.stages?.[1]?.status === 'locked', JSON.stringify((t3.stages ?? []).map((s) => s.status)));
+    check('send-back to a stage: both missions of stage 1 are playable again',
+      ['sb-a', 'sb-b'].every((id) => ['unassigned', 'assigned'].includes(rec(t3, id)?.status)),
+      JSON.stringify(['sb-a', 'sb-b'].map((id) => rec(t3, id)?.status)));
+    check('send-back to a stage: the stage-skip awards were taken back', (t3.score ?? 0) === 0 && back?.pointsRemoved > 0,
+      JSON.stringify({ score: t3.score, removed: back?.pointsRemoved }));
+    const routed = await bp.call('requestNextTask', { ...B });
+    check('send-back to a stage: routing hands out a mission of stage 1',
+      ['sb-a', 'sb-b'].includes(routed?.taskId ?? (await team()).activeTaskId), JSON.stringify(routed));
+
+    // getRunOutline (send-team-back): the staff app has no read of the game document, so it could
+    // only show raw mission ids. The outline carries NAMES and nothing secret.
+    {
+      const outline = await creator.call('getRunOutline', { ...B });
+      const s1 = (outline?.stages ?? []).find((st) => st.id === 'sb-s1');
+      check('outline: stages and missions come back with their names',
+        s1?.title === 'First' && JSON.stringify((s1?.tasks ?? []).map((tk) => tk.title)) === '["Alpha","Bravo"]', JSON.stringify(outline));
+      const raw = JSON.stringify(outline);
+      check('outline: carries no answer key, hint or secret code',
+        !/"answers"|"numericAnswer"|"secretCode"|"hint"|"coordinates"/.test(raw), raw.slice(0, 200));
+      await expectError('outline: a participant is refused',
+        bp.call('getRunOutline', { ...B }), { codeIn: ['functions/permission-denied'] });
+    }
+
+    // staff-event-map (2026-09-27): the staff map shows where the missions are. The outline carries
+    // a mission's SPOT (named `spot`, never the authored `coordinates`), flags a hidden one, and
+    // leaves out a mission with no real location.
+    {
+      const { gameId: mg } = await creator.call('createGame', { title: 'Staff Map Spots', mode: 'individual' });
+      await creator.call('updateGame', { gameId: mg, scoringPreset: 'fixed_points_speed', stages: [
+        { id: 'sm-s', order: 0, title: 'Spots', isFinal: true, tasks: [
+          { id: 'sm-open', title: 'Open spot', type: 'field', triggerMode: 'radius', coordinates: { lat: 31.7767, lng: 35.2345 },
+            geofenceRadiusMeters: 40, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+          { id: 'sm-hidden', title: 'Hidden spot', type: 'field', triggerMode: 'radius', hideLocation: true, locationClue: 'near the gate',
+            coordinates: { lat: 31.7801, lng: 35.2299 }, geofenceRadiusMeters: 40, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+          { id: 'sm-none', title: 'Anywhere', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 },
+            difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ] },
+      ] });
+      const { runId: mr } = await creator.call('launchRun', { gameId: mg });
+      const mo = await creator.call('getRunOutline', { ownerUid: OWNER, gameId: mg, runId: mr });
+      const tasks = (mo?.stages ?? [])[0]?.tasks ?? [];
+      const byId = Object.fromEntries(tasks.map((tk) => [tk.id, tk]));
+      check('staff map: a located mission carries its spot',
+        byId['sm-open']?.spot?.lat === 31.7767 && byId['sm-open']?.spot?.lng === 35.2345 && !byId['sm-open']?.spot?.hidden, JSON.stringify(byId['sm-open']));
+      check('staff map: a hidden mission is flagged as hidden', byId['sm-hidden']?.spot?.hidden === true, JSON.stringify(byId['sm-hidden']));
+      check('staff map: a mission with no location has no spot', byId['sm-none'] && byId['sm-none'].spot === undefined, JSON.stringify(byId['sm-none']));
+      check('staff map: still no authored coordinates, answers or secrets', !/"coordinates"|"answers"|"secretCode"|"hint"|"locationClue"/.test(JSON.stringify(mo)), JSON.stringify(mo).slice(0, 200));
+    }
+
+    // Refusals.
+    await expectError('send-back: a stage the team has not reached is refused',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s2' } }), { codeIn: ['functions/failed-precondition'] });
+    await expectError('send-back: a mission still unplayed is refused',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'task', taskId: 'sb-x' } }), { codeIn: ['functions/failed-precondition'] });
+    await expectError('send-back: an empty target is refused',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid }), { codeIn: ['functions/invalid-argument'] });
+    await expectError('send-back: a participant cannot send their own team back',
+      bp.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s1' } }), { codeIn: ['functions/permission-denied'] });
+    await creator.call('finalizeRun', { gameId: bg, runId: br });
+    await expectError('send-back: a finalized run is frozen',
+      creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s1' } }), { codeIn: ['functions/failed-precondition'] });
   });
 
   // staff-console-field-ops: setTeamHold (pause/resume a team's race clock) and
@@ -10496,6 +12204,171 @@ async function main() {
     await creator.call('finalizeRun', { gameId: gReal, runId: rReal });
     check('re-finalizing leaves the email claim set exactly once (no double-send)',
       (await claimOf(gReal, rReal)) === true);
+  });
+
+  // ═══ Staff capabilities (change: staff-capabilities) ════════════════════════
+  // The reported gap: an invite's `permissions` were never read, so any staff PIN could add points.
+  // Now: a game default, multi-use codes each with its own capabilities, live edits, removal of one
+  // person, disabling a code for NEW sign-ins only, and the legacy paths kept working.
+  await scenario('staff capabilities (game default · shared codes · live edit · remove · disable · legacy)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const aDb = adminSdk.firestore();
+    const { gameId: g } = await creator.call('createGame', { title: 'Staff caps', mode: 'individual' });
+    // The Builder's save payload ALWAYS carries the staffDefaults key, and for a game
+    // that never set one its value is undefined, which the callable transport sends
+    // as null. Refusing that refused EVERY Builder autosave of such a game (found in
+    // the browser, 2026-09-26). null means "not set", exactly like absent.
+    let nullAccepted = false;
+    try { await creator.call('updateGame', { gameId: g, title: 'Staff caps', staffDefaults: null }); nullAccepted = true; }
+    catch (e) { console.log('  staffDefaults null err ::', e.message); }
+    check('updateGame accepts staffDefaults: null (the Builder autosave of a game without defaults)', nullAccepted);
+    await expectError('updateGame refuses an unknown staff capability (a typo must not widen anything)',
+      creator.call('updateGame', { gameId: g, staffDefaults: { capabilities: ['chat', 'godmode'] } }),
+      { codeIn: ['functions/invalid-argument'] });
+    await creator.call('updateGame', {
+      gameId: g,
+      scoringPreset: 'fixed_points_speed',
+      staffDefaults: { capabilities: ['chat', 'hold'] },
+      stages: [{
+        id: 'sc-s1', order: 0, title: 'Only', isFinal: true,
+        tasks: [
+          { id: 'sc-t1', title: 'Check in', type: 'self_report', triggerMode: 'instant', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+          { id: 'sc-t2', title: 'Second', type: 'self_report', triggerMode: 'instant', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ],
+      }],
+    });
+    const stored = (await aDb.doc(`users/${OWNER}/games/${g}`).get()).data();
+    check('the game stores its staff default', JSON.stringify(stored?.staffDefaults?.capabilities) === JSON.stringify(['hold', 'chat']),
+      JSON.stringify(stored?.staffDefaults));
+    const { runId: r, accessCode: code } = await creator.call('launchRun', { gameId: g });
+    const CTX = { ownerUid: OWNER, gameId: g, runId: r };
+    const player = makeParty('capsPlayer');
+    await signInAnonymously(player.auth);
+    await player.call('joinRun', { code, displayName: 'CapsTeam' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    const teamId = player.auth.currentUser.uid;
+
+    // A code with no explicit capabilities inherits the game default: no score.
+    const marshals = await creator.call('inviteStaff', { ...CTX, name: 'North gate' });
+    check('a new code inherits the game default (no score)',
+      Array.isArray(marshals?.capabilities) && !marshals.capabilities.includes('score') && marshals.capabilities.includes('chat'),
+      JSON.stringify(marshals?.capabilities));
+
+    // TWO people join with the SAME code (multi-use).
+    const signIn = async (label, pin, name) => {
+      const p = makeParty(label);
+      await signInAnonymously(p.auth);
+      const tok = await p.call('staffSignIn', { ...CTX, pin, name });
+      await signInWithCustomToken(p.auth, tok.customToken);
+      return { p, tok, uid: p.auth.currentUser.uid };
+    };
+    const s1 = await signIn('capsStaff1', marshals.pin, 'Dana');
+    const s2 = await signIn('capsStaff2', marshals.pin, 'Noa');
+    check('a staff code is multi-use: two people signed in with one PIN', !!s1.tok.customToken && !!s2.tok.customToken);
+    check('sign-in reports what the code may do', !s1.tok.capabilities.includes('score') && s1.tok.capabilities.includes('safety'),
+      JSON.stringify(s1.tok.capabilities));
+
+    // The reported case: no points without `score`, with a structured reason (not message text).
+    for (const s of [s1, s2]) {
+      const e = await expectError(`staff without score cannot add points (${s.tok.name ?? s.uid.slice(0, 4)})`,
+        s.p.call('adjustTeamScore', { ...CTX, teamId, delta: 5, reason: 'nope' }),
+        { codeIn: ['functions/permission-denied'] });
+      check('the refusal carries the capability reason in details',
+        e?.details?.reason === 'staff-capability-missing' && e?.details?.capability === 'score', JSON.stringify(e?.details));
+    }
+    // Always-granted still works.
+    const ch = await s1.p.call('sendStaffChannelMessage', { ...CTX, text: 'at the gate' });
+    check('the staff channel is always allowed', !!ch);
+    const outline = await s1.p.call('getRunOutline', CTX);
+    check('mission names are always allowed', Array.isArray(outline?.stages));
+    // A granted capability works.
+    await s1.p.call('setTeamHold', { ...CTX, teamId, held: true, reason: 'caps probe' });
+    await s1.p.call('setTeamHold', { ...CTX, teamId, held: false });
+    check('a granted capability (hold) works', true);
+
+    // Live edit: add score → both may now adjust, with no new PIN.
+    await creator.call('updateStaffCode', { ...CTX, codeId: marshals.inviteId, capabilities: ['chat', 'hold', 'score'] });
+    const adj1 = await s1.p.call('adjustTeamScore', { ...CTX, teamId, delta: 5, reason: 'granted live' });
+    const adj2 = await s2.p.call('adjustTeamScore', { ...CTX, teamId, delta: -5, reason: 'granted live' });
+    check('after the organizer adds score, both people on the code can adjust (no new PIN)', !!adj1 && !!adj2);
+    const codeDoc = (await aDb.doc(`users/${OWNER}/games/${g}/runs/${r}/staffInvites/${marshals.inviteId}`).get()).data();
+    check('an edit bumps the code version (the staff console refreshes on it)', codeDoc?.version === 2, String(codeDoc?.version));
+    const refreshed = await s1.p.call('refreshStaffSession', CTX);
+    check('refreshStaffSession re-mints with the current capabilities',
+      !!refreshed?.customToken && refreshed.capabilities.includes('score'), JSON.stringify(refreshed?.capabilities));
+
+    // A second code with ONLY review.
+    const judges = await creator.call('inviteStaff', { ...CTX, name: 'Judges', capabilities: ['review'] });
+    check('a code with explicit capabilities keeps them', JSON.stringify(judges?.capabilities) === JSON.stringify(['review']),
+      JSON.stringify(judges?.capabilities));
+    check('two codes of one run never share a PIN', judges.pin !== marshals.pin);
+    const j1 = await signIn('capsJudge', judges.pin, 'Avi');
+    await expectError('a review-only code cannot route (skip a mission)',
+      j1.p.call('skipTaskForTeam', { ...CTX, teamId }), { codeIn: ['functions/permission-denied'] });
+    const surveys = await j1.p.call('getRunSurveyResults', CTX);
+    check('a review code may read survey results', Array.isArray(surveys?.results));
+    await expectError('a marshal code without review cannot read survey results (teams\' own answers)',
+      s1.p.call('getRunSurveyResults', CTX), { codeIn: ['functions/permission-denied'] });
+
+    // Remove ONE person: they are refused; the other on the same code is not.
+    const removed = await creator.call('removeStaffMember', { ...CTX, staffUid: s1.uid });
+    check('removeStaffMember removes exactly one person', removed?.removed === 1, JSON.stringify(removed));
+    const eRm = await expectError('a removed person cannot act any more',
+      s1.p.call('adjustTeamScore', { ...CTX, teamId, delta: 5, reason: 'after removal' }),
+      { codeIn: ['functions/permission-denied'] });
+    check('the removal refusal says removed', eRm?.details?.reason === 'staff-removed', JSON.stringify(eRm?.details));
+    await expectError('a removed person cannot even acknowledge safety alerts',
+      s1.p.call('clearTeamOutOfBounds', { ...CTX, teamId }), { codeIn: ['functions/permission-denied'] });
+    const still = await s2.p.call('adjustTeamScore', { ...CTX, teamId, delta: 1, reason: 'still in' });
+    check('the other person on the same code keeps working', !!still);
+    // Rejoining with the same identity is refused.
+    await expectError('sign-in refuses a removed identity',
+      s1.p.call('staffSignIn', { ...CTX, pin: marshals.pin }), { codeIn: ['functions/permission-denied'] });
+
+    // Disable the code: NEW sign-ins refused, people already in keep working.
+    await creator.call('updateStaffCode', { ...CTX, codeId: marshals.inviteId, disabled: true });
+    const late = makeParty('capsLate');
+    await signInAnonymously(late.auth);
+    await expectError('a disabled code refuses a new sign-in',
+      late.call('staffSignIn', { ...CTX, pin: marshals.pin }), { codeIn: ['functions/failed-precondition'] });
+    const afterDisable = await s2.p.call('adjustTeamScore', { ...CTX, teamId, delta: 1, reason: 'disabled keeps me' });
+    check('a disabled code keeps the people already in', !!afterDisable);
+
+    // Only the owner manages codes.
+    await expectError('a staff member cannot edit codes',
+      s2.p.call('updateStaffCode', { ...CTX, codeId: marshals.inviteId, capabilities: ['score'] }),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('a participant cannot remove staff',
+      player.call('removeStaffMember', { ...CTX, staffUid: s2.uid }), { codeIn: ['functions/permission-denied'] });
+    await expectError('refreshStaffSession refuses a non-staff caller',
+      player.call('refreshStaffSession', CTX), { codeIn: ['functions/permission-denied'] });
+
+    // Remove everyone on a code.
+    const all = await creator.call('removeStaffMember', { ...CTX, codeId: judges.inviteId });
+    check('removing everyone on a code removes its people', all?.removed === 1, JSON.stringify(all));
+    await expectError('and they are refused',
+      j1.p.call('getRunSurveyResults', CTX), { codeIn: ['functions/permission-denied'] });
+
+    // Rules: a staff member reads their own grant, not someone else's.
+    const own = await s2.p.getDocAt(`users/${OWNER}/games/${g}/runs/${r}/staffGrants/${s2.uid}`).catch((e) => ({ err: e.code }));
+    check('rules: staff read their own grant', own?.exists === true && own?.data?.codeId === marshals.inviteId, JSON.stringify(own));
+    const other = await s2.p.getDocAt(`users/${OWNER}/games/${g}/runs/${r}/staffGrants/${s1.uid}`).catch((e) => ({ err: e.code }));
+    check('rules: staff cannot read another person\'s grant', !!other?.err, JSON.stringify(other));
+
+    // Legacy: an invite minted before this change (no capabilities, single-use) still works fully,
+    // and is still single-use.
+    const legacyRef = aDb.collection(`users/${OWNER}/games/${g}/runs/${r}/staffInvites`).doc();
+    await legacyRef.set({ id: legacyRef.id, ownerUid: OWNER, gameId: g, runId: r, name: 'Old invite',
+      permissions: ['review_photos'], pin: '654321', used: false, createdAt: new Date().toISOString() });
+    const lg = await signIn('capsLegacy', '654321', 'Old');
+    const lgAdj = await lg.p.call('adjustTeamScore', { ...CTX, teamId, delta: 1, reason: 'legacy is full' });
+    check('a pre-change invite (no capabilities) is full', !!lgAdj);
+    const lg2 = makeParty('capsLegacy2');
+    await signInAnonymously(lg2.auth);
+    await expectError('a pre-change invite is still single-use',
+      lg2.call('staffSignIn', { ...CTX, pin: '654321' }), { codeIn: ['functions/not-found'] });
   });
 
   // ═══ Callable coverage guard ════════════════════════════════════════════════
@@ -10893,6 +12766,282 @@ async function main() {
       JSON.stringify({ before: scoreBefore, after: afterPrune?.players?.[0]?.score }));
   });
 
+  // ── game share links (change: game-share-link) ──────────────────────────────
+  // A creator hands ONE person a URL to an UNPUBLISHED game: read-only, and
+  // optionally copyable. The three things that must hold are (1) the game never
+  // reaches the gallery, (2) the read is sealed unless the LINK opted in, and
+  // (3) every way a link can die actually kills it.
+  await scenario('share links (unpublished read-only link, copy, revoke, expiry)', async () => {
+    const { gameId: gShare } = await creator.call('createGame', { title: 'Shared Draft', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gShare,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 'st-sh', order: 0, title: 'Chapter one', isFinal: true,
+        tasks: [{
+          id: 'sh-1', title: 'The fountain riddle', type: 'quiz',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 6,
+          pointValue: 100, maxConcurrentTeams: 3,
+          choices: ['1948', '1967'], answers: ['1948'],
+          hint: 'SHARE-HINT-TEXT', hintPenalty: 20,
+        }, {
+          id: 'sh-2', title: 'The station', type: 'smart_station',
+          coordinates: { lat: 31.79, lng: 35.22 }, difficulty: 3, estimatedMinutes: 4,
+          pointValue: 80, maxConcurrentTeams: 3,
+          smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'SHARE-CODE' },
+        }],
+      }],
+    });
+
+    // A party with NO account at all — the actual condition of a link recipient.
+    const linkVisitor = makeParty('shareLinkVisitor');
+
+    const created = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: true });
+    const token = created?.link?.token;
+    check('createGameShareLink returns a token', typeof token === 'string' && token.length >= 22, String(token));
+    check('a new link starts un-revoked and never-expiring',
+      !created?.link?.revokedAt && !created?.link?.expiresAt, JSON.stringify(created?.link));
+
+    // (1) The game is still private. Sharing must not touch the gallery.
+    const gallery = await creator.call('searchGallery', { query: 'Shared Draft' });
+    check('sharing does NOT publish the game to the gallery',
+      !(gallery?.games ?? []).some((g) => g.id === gShare),
+      (gallery?.games ?? []).map((g) => g.id).join(','));
+
+    // (2) The read: everything an author needs, no answer key.
+    const view = await linkVisitor.call('getSharedGame', { token });
+    const shared = view?.game;
+    check('an unauthenticated visitor can read the shared game', shared?.title === 'Shared Draft', JSON.stringify(view).slice(0, 160));
+    check('the shared view carries the stages and missions',
+      shared?.stageCount === 1 && shared?.taskCount === 2, JSON.stringify({ s: shared?.stageCount, t: shared?.taskCount }));
+    const sharedTask = shared?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1');
+    check('the mission carries its authored map point (the builder view needs one)',
+      sharedTask?.coordinates?.lat === 31.78, JSON.stringify(sharedTask?.coordinates));
+    check('quiz choices are visible', (sharedTask?.choices ?? []).length === 2, JSON.stringify(sharedTask?.choices));
+    const raw = JSON.stringify(view);
+    check('no answer key reaches the sealed view', !raw.includes('1948') || !raw.includes('"answers"'), 'answers present');
+    check('the hint TEXT does not reach the sealed view', !raw.includes('SHARE-HINT-TEXT'), 'hint leaked');
+    check('the station secret code does not reach the sealed view', !raw.includes('SHARE-CODE'), 'secretCode leaked');
+    check('the hint EXISTENCE is still reported', sharedTask?.hasHint === true, JSON.stringify(sharedTask?.hasHint));
+    check('the owner uid is never disclosed to the viewer',
+      !raw.includes(creatorCred.user.uid), 'ownerUid leaked');
+
+    // A revealing link is a deliberate, per-link opt-in — and it is the LINK that
+    // decides, never the caller's payload.
+    const openLink = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: false, revealAnswers: true });
+    const openView = await linkVisitor.call('getSharedGame', { token: openLink?.link?.token });
+    const openTask = openView?.game?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1');
+    check('a revealing link carries the answer key', (openTask?.answers ?? [])[0] === '1948', JSON.stringify(openTask?.answers));
+    check('a revealing link carries the hint text', openTask?.hint === 'SHARE-HINT-TEXT', String(openTask?.hint));
+    check('a viewer cannot ask a SEALED link to reveal answers',
+      (await linkVisitor.call('getSharedGame', { token, revealAnswers: true }))
+        ?.game?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1')?.answers === undefined,
+      'payload flag honoured');
+    check('a revealing link still hides the owner uid',
+      !JSON.stringify(openView).includes(creatorCred.user.uid), 'ownerUid leaked');
+
+    // (3) Copying: allowed only when the link says so, and only with an account.
+    const copier = makeParty('shareCopier');
+    const copierCred = await signInAnonymously(copier.auth);
+    await expectError('a copy through a NON-copyable link is refused',
+      copier.call('duplicateGame', { shareToken: openLink?.link?.token }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('a stranger cannot copy the private game directly, token or not',
+      copier.call('duplicateGame', { gameId: gShare, sourceOwnerUid: creatorCred.user.uid }),
+      { codeIn: ['functions/permission-denied'] });
+
+    const copied = await copier.call('duplicateGame', { shareToken: token });
+    check('a copyable link yields a copy in the copier’s own account', !!copied?.gameId, JSON.stringify(copied));
+    const copiedGame = (await copier.call('getGame', { gameId: copied?.gameId }))?.game;
+    check('the copy is owned by the copier', copiedGame?.ownerUid === copierCred.user.uid, String(copiedGame?.ownerUid));
+    check('the copy is PRIVATE, never published by the copy', copiedGame?.visibility === 'private', String(copiedGame?.visibility));
+    // The copy is a WORKING game: the copier gets the answer keys even though the
+    // sealed VIEW never showed them. That is the point of copying server-side.
+    const copiedTask = copiedGame?.stages?.[0]?.tasks?.find((t) => t.id === 'sh-1');
+    check('the copy carries the answer key the view withheld', (copiedTask?.answers ?? [])[0] === '1948', JSON.stringify(copiedTask?.answers));
+    check('the copy counter is visible to the owner',
+      ((await creator.call('listGameShareLinks', { gameId: gShare }))?.links ?? [])
+        .find((l) => l.token === token)?.copyCount === 1, 'copyCount');
+
+    // The owner's list, and the states it reports.
+    const listed = await creator.call('listGameShareLinks', { gameId: gShare });
+    check('the owner sees both links', (listed?.links ?? []).length === 2, String((listed?.links ?? []).length));
+    check('a live link reports no refusal',
+      (listed?.links ?? []).every((l) => l.refusal === null || l.refusal === undefined),
+      JSON.stringify((listed?.links ?? []).map((l) => l.refusal)));
+    await expectError('a stranger cannot list the owner’s share links',
+      copier.call('listGameShareLinks', { gameId: gShare }),
+      { codeIn: ['functions/not-found', 'functions/permission-denied'] });
+
+    // Revocation kills the link, and says so.
+    await expectError('a stranger cannot revoke a link they merely hold',
+      copier.call('revokeGameShareLink', { token }),
+      { codeIn: ['functions/permission-denied'] });
+    const revoked = await creator.call('revokeGameShareLink', { token });
+    check('revokeGameShareLink stamps a revokedAt', !!revoked?.revokedAt, JSON.stringify(revoked));
+    await expectError('a revoked link no longer reads',
+      linkVisitor.call('getSharedGame', { token }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('a revoked link no longer copies',
+      copier.call('duplicateGame', { shareToken: token }),
+      { codeIn: ['functions/not-found'] });
+
+    // A garbage token must be refused before any document path is built.
+    for (const bad of ['', 'short', 'a/b/c', null, 42, { token: 'x' }]) {
+      await expectError(`a malformed token (${JSON.stringify(bad)}) is refused`,
+        linkVisitor.call('getSharedGame', { token: bad }),
+        { codeIn: ['functions/not-found', 'functions/invalid-argument'] });
+    }
+
+    // Expiry. A one-day link is alive now; the stored instant is what kills it
+    // later, so the assertion here is that the field is set and in the future.
+    const dated = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: true, expiresInDays: 1 });
+    check('an expiring link stores a future expiresAt',
+      !!dated?.link?.expiresAt && Date.parse(dated.link.expiresAt) > Date.now(), String(dated?.link?.expiresAt));
+    check('an expiring link still reads while it is alive',
+      (await linkVisitor.call('getSharedGame', { token: dated?.link?.token }))?.game?.title === 'Shared Draft');
+
+    // A tombstoned game reads as gone through EVERY door, this one included.
+    const { gameId: gTomb } = await creator.call('createGame', { title: 'Doomed Draft', mode: 'individual' });
+    const tombLink = await creator.call('createGameShareLink', { gameId: gTomb, allowCopy: true });
+    await creator.call('deleteGame', { gameId: gTomb });
+    await expectError('a link to a TRASHED game stops reading',
+      linkVisitor.call('getSharedGame', { token: tombLink?.link?.token }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('a trashed game cannot be shared with a NEW link either',
+      creator.call('createGameShareLink', { gameId: gTomb }),
+      { codeIn: ['functions/failed-precondition', 'functions/not-found'] });
+
+    // ---- Launching a run through the link (change: game-share-link) ----------
+    // The permission that WRITES into the owner's account, so every assertion
+    // here is about it being refused unless the owner said yes, and about the
+    // launcher getting something that can actually be operated.
+    const launcher = makeParty('shareLauncher');
+    await signInAnonymously(launcher.auth);
+
+    await expectError('a link that does not allow launching refuses',
+      launcher.call('launchSharedRun', { token }),
+      { codeIn: ['functions/not-found'] });
+    check('a non-launch link reports allowLaunch=false to the viewer',
+      (await linkVisitor.call('getSharedGame', { token: dated?.link?.token }))?.allowLaunch === false);
+
+    const launchLink = await creator.call('createGameShareLink', {
+      gameId: gShare, allowCopy: false, allowLaunch: true,
+    });
+    const launchToken = launchLink?.link?.token;
+    check('allowLaunch is stored as granted', launchLink?.link?.allowLaunch === true, JSON.stringify(launchLink?.link));
+    check('the viewer is TOLD they may launch',
+      (await linkVisitor.call('getSharedGame', { token: launchToken }))?.allowLaunch === true);
+
+    const started = await launcher.call('launchSharedRun', { token: launchToken });
+    check('launchSharedRun returns a game, a run and an access code',
+      !!started?.gameId && !!started?.runId && typeof started?.accessCode === 'string' && started.accessCode.length > 0,
+      JSON.stringify(started));
+    // shared-launch-opens-console: the LAUNCHER gets their own copy and the real Run Console. No
+    // codes panel, no staff PIN to copy (the product owner: "they only see a panel of codes, very
+    // clumsy and unclear").
+    check('no staff PIN is minted any more (the launcher owns the copy)', started?.staff === undefined, JSON.stringify(started));
+    check('the run is in a NEW game, not the owner\'s', started?.gameId !== gShare, started?.gameId);
+    const launcherUid = launcher.auth.currentUser?.uid;
+    const launcherRuns = await launcher.call('listLiveRuns', {});
+    check('the run lands in the LAUNCHER account, so their own console can open it',
+      (launcherRuns?.runs ?? []).some((r) => r.runId === started?.runId && r.gameId === started?.gameId),
+      JSON.stringify((launcherRuns?.runs ?? []).map((r) => [r.gameId, r.runId])));
+    const ownerRunsAfter = await creator.call('listLiveRuns', {});
+    check('...and NOT in the owner account',
+      !(ownerRunsAfter?.runs ?? []).some((r) => r.runId === started?.runId));
+    const launchCopy = (await launcher.getDocAt(`users/${launcherUid}/games/${started?.gameId}`)).data;
+    check('the copy belongs to the launcher and carries the source tasks',
+      launchCopy?.ownerUid === launcherUid && Array.isArray(launchCopy?.stages) && launchCopy.stages.length > 0,
+      JSON.stringify({ owner: launchCopy?.ownerUid, stages: launchCopy?.stages?.length }));
+    check('a copy from a NO-COPY link is locked', launchCopy?.sharedLaunch?.locked === true, JSON.stringify(launchCopy?.sharedLaunch));
+    check('the lock does not reveal the whole token', typeof launchCopy?.sharedLaunch?.fromToken === 'string' && launchCopy.sharedLaunch.fromToken.length <= 8);
+    const launcherGames = await launcher.call('listGames', {});
+    check('a launch copy is not in the launcher\'s games list',
+      !((launcherGames?.games ?? []).some((g) => g.id === started?.gameId)), JSON.stringify((launcherGames?.games ?? []).map((g) => g.id)));
+    // Every door that would turn "may run it" into "may have it" is shut on a locked copy.
+    for (const [name, payload] of [
+      ['updateGame', { gameId: started?.gameId, title: 'mine now' }],
+      ['duplicateGame', { gameId: started?.gameId }],
+      ['exportGameFile', { gameId: started?.gameId }],
+      ['publishGame', { gameId: started?.gameId, visibility: 'public' }],
+      ['translateGame', { gameId: started?.gameId, targetLang: 'en' }],
+      ['createGameShareLink', { gameId: started?.gameId, allowCopy: true }],
+    ]) {
+      await expectError(`a locked launch copy refuses ${name}`,
+        launcher.call(name, payload), { codeIn: ['functions/failed-precondition'], match: /share-launch-locked/ });
+    }
+    // The launcher can still OPERATE it: finalize is an owner action on the copy's run.
+    const launcherPlayer = makeParty('shareLaunchOwnPlayer');
+    await signInAnonymously(launcherPlayer.auth);
+    await launcherPlayer.call('joinRun', { code: started.accessCode, displayName: 'Own team' });
+    const startedTeams = await launcher.call('startTeams', { gameId: started.gameId, runId: started.runId });
+    check('the launcher can start the teams from their console', (startedTeams?.launched ?? 0) >= 1, JSON.stringify(startedTeams));
+
+    // Players can join the run that was started this way.
+    const guestPlayer = makeParty('shareLaunchPlayer');
+    await signInAnonymously(guestPlayer.auth);
+    const joined = await guestPlayer.call('joinRun', { code: started.accessCode, displayName: 'Guest team' });
+    check('a player can join the run started through the link', !!joined?.teamId, JSON.stringify(joined));
+
+    // A launch is counted on the link, and a revoked link cannot start any more.
+    check('the launch is counted on the link',
+      ((await creator.call('listGameShareLinks', { gameId: gShare }))?.links ?? [])
+        .find((l) => l.token === launchToken)?.launchCount === 1, 'launchCount');
+    await creator.call('revokeGameShareLink', { token: launchToken });
+    await expectError('a revoked link cannot start a run',
+      launcher.call('launchSharedRun', { token: launchToken }),
+      { codeIn: ['functions/not-found'] });
+    await expectError('an unauthenticated caller cannot start a run at all',
+      linkVisitor.call('launchSharedRun', { token: launchToken }),
+      { codeIn: ['functions/unauthenticated', 'functions/not-found'] });
+
+    // ---- Changing what an EXISTING link allows (updateGameShareLink) ---------
+    // A link is a URL somebody already holds. Without this, widening it means
+    // minting a second one and chasing whoever has the first, which in practice
+    // means creators grant everything up front -- the opposite of an opt-in.
+    const editable = await creator.call('createGameShareLink', { gameId: gShare, allowCopy: false });
+    const editToken = editable?.link?.token;
+    check('a fresh link starts with launching refused',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowLaunch === false);
+
+    await creator.call('updateGameShareLink', { token: editToken, allowLaunch: true });
+    check('the owner can grant launching on a link already sent',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowLaunch === true);
+    check('...and the untouched permissions are left alone',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowCopy === false);
+
+    // An omitted flag means "not changing", never "set to false" -- the transport
+    // sends null for both undefined and an absent key.
+    await creator.call('updateGameShareLink', { token: editToken, revealAnswers: true });
+    const afterPartial = await linkVisitor.call('getSharedGame', { token: editToken });
+    check('a partial update does not silently revoke the other permissions',
+      afterPartial?.allowLaunch === true && afterPartial?.game?.answersRevealed === true,
+      JSON.stringify({ launch: afterPartial?.allowLaunch, answers: afterPartial?.game?.answersRevealed }));
+
+    await creator.call('updateGameShareLink', { token: editToken, allowLaunch: false });
+    check('a granted permission can be taken back',
+      (await linkVisitor.call('getSharedGame', { token: editToken }))?.allowLaunch === false);
+    await expectError('a link whose launch permission was withdrawn refuses to start a run',
+      copier.call('launchSharedRun', { token: editToken }),
+      { codeIn: ['functions/not-found'] });
+
+    await expectError('a stranger cannot change what someone else link allows',
+      copier.call('updateGameShareLink', { token: editToken, allowLaunch: true }),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('an update naming no permission at all is refused',
+      creator.call('updateGameShareLink', { token: editToken }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('an update on a malformed token is refused',
+      creator.call('updateGameShareLink', { token: 'nope', allowLaunch: true }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // The owner-side callables are owner-only at the door.
+    await expectError('a stranger cannot mint a link for a game they do not own',
+      copier.call('createGameShareLink', { gameId: gShare }),
+      { codeIn: ['functions/not-found', 'functions/permission-denied'] });
+  }); // scenario: share links
+
   // ── contact messages (change: marketing-site) ───────────────────────────────
   // The marketing site's contact form. Unauthenticated by necessity: the sender
   // is by definition someone who does not have an account yet. That makes it the
@@ -11008,6 +13157,369 @@ async function main() {
       (listed?.messages ?? []).every((m) => typeof m.receivedAt === 'number' && m.receivedAt > 0),
       JSON.stringify((listed?.messages ?? [])[0] ?? {}).slice(0, 140));
   });
+
+  // ── RushPoint Live applications (change: rushpoint-live-signup) ────────────
+  // The event's application form, and the platform's THIRD unauthenticated write
+  // endpoint. Everything asserted for the contact form above applies here, plus
+  // the two things that are new: a photo travelling inside the callable, and a
+  // read path split in two so the sensitive half is its own audited act.
+  await scenario('live applications (public submit, photo bounded, admin only read)', async () => {
+    // No sign in at all, which is the actual condition on the marketing site.
+    const applicant = makeParty('liveApplicant');
+
+    // A tiny but REAL data URL, built the way the browser builds one. 64 base64
+    // characters, a multiple of four, so it is well formed rather than merely short.
+    const photo = `data:image/jpeg;base64,${'A'.repeat(64)}`;
+
+    const valid = {
+      teamName: 'הנשרים',
+      teamSize: 6,
+      sectors: ['religious', 'secular'],
+      location: 'ירושלים',
+      howTheyMet: 'נפגשנו בתנועת הנוער לפני חמש שנים.',
+      ageRange: '16-18',
+      motivation: 'כי אנחנו מכירים כל סמטה בעיר ולא נוותר עד השורה האחרונה.',
+      cameraComfort: 4,
+      phone: '054-123-4567',
+      photo,
+      language: 'he',
+    };
+
+    const ok = await applicant.call('submitLiveApplication', valid);
+    check('an unauthenticated team can apply', ok?.ok === true, JSON.stringify(ok));
+    check('the response reveals no document id or storage path',
+      !/liveApplications|\//i.test(JSON.stringify(ok ?? {})),
+      JSON.stringify(ok));
+
+    // The event's own rule. A team outside 5-8 cannot compete as a team, so the
+    // server must refuse it rather than leaving it to the form to remember.
+    await expectError('a team of four is refused',
+      applicant.call('submitLiveApplication', { ...valid, teamSize: 4 }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a team of nine is refused',
+      applicant.call('submitLiveApplication', { ...valid, teamSize: 9 }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    await expectError('an unknown sector is refused',
+      applicant.call('submitLiveApplication', { ...valid, sectors: ['pirates'] }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a team naming no sector is refused',
+      applicant.call('submitLiveApplication', { ...valid, sectors: [] }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a phone number that cannot be dialled is refused',
+      applicant.call('submitLiveApplication', { ...valid, phone: '02-1234567' }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('an off-scale camera answer is refused',
+      applicant.call('submitLiveApplication', { ...valid, cameraComfort: 9 }),
+      { codeIn: ['functions/invalid-argument'] });
+    // The photo is OPTIONAL (change: rushpoint-live-optional-photo). A team that
+    // cannot get everyone into one picture tonight must still be able to apply
+    // tonight, so all three spellings of "absent" have to be ACCEPTED.
+    const noPhoto = await applicant.call('submitLiveApplication', {
+      ...valid, teamName: 'בלי תמונה', photo: null,
+    });
+    check('a team can apply without a photo', noPhoto?.ok === true, JSON.stringify(noPhoto));
+    // The OTHER two spellings of absent — an empty string and an omitted key — are
+    // asserted exhaustively in the pure lane (scripts/test-live-application.ts),
+    // not here. This scenario shares ONE store budget of three with everything
+    // below it, and spending it on three ways of saying the same thing refuses the
+    // fourth submission, aborts the scenario, and takes the admin read assertions
+    // down with it. What e2e uniquely proves is that the SERVER path accepts an
+    // absent photo end to end; one case does that.
+    // A filename is a claim the sender makes about bytes we already hold; the
+    // content type is read from the data URL itself, so a non-image is refused
+    // however it is labelled.
+    // Optional means "may be ABSENT", never "may be anything": a photo that IS sent
+    // is held to exactly the standard it always was.
+    await expectError('a non-image data URL is refused',
+      applicant.call('submitLiveApplication', { ...valid, photo: `data:application/pdf;base64,${'A'.repeat(64)}` }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // The refusal has to NAME the field. Nine answers and a photo is a lot to get
+    // right, and "something was wrong" is not a thing an applicant can act on.
+    let named = null;
+    try {
+      await applicant.call('submitLiveApplication', { ...valid, teamSize: 4 });
+    } catch (e) {
+      named = e;
+    }
+    check('a refusal names the field the applicant must fix',
+      /teamSize/.test(named?.message ?? ''),
+      named?.message ?? 'no error at all');
+
+    // Eight refusals have just happened. Charged against the budget that governs
+    // STORED applications, a team actively trying to comply would now be locked
+    // out of the event. The two budgets exist precisely so this still works.
+    const afterMistakes = await applicant.call('submitLiveApplication', {
+      ...valid, teamName: 'אחרי הטעויות',
+    });
+    check('a refused application does not consume the budget for accepted ones',
+      afterMistakes?.ok === true, JSON.stringify(afterMistakes));
+
+    // Reading them back is admin only, in BOTH halves.
+    await expectError('a stranger cannot list applications',
+      applicant.call('listLiveApplications', {}),
+      { codeIn: ['functions/permission-denied', 'functions/unauthenticated'] });
+    await expectError('an ordinary signed in creator cannot list applications',
+      creator.call('listLiveApplications', {}),
+      { codeIn: ['functions/permission-denied'] });
+    await expectError('a stranger cannot fetch a group photo',
+      applicant.call('getLiveApplicationPhoto', { applicationId: 'anything' }),
+      { codeIn: ['functions/permission-denied', 'functions/unauthenticated'] });
+
+    const listed = await platformAdmin.call('listLiveApplications', {});
+    check('an admin can list the applications', Array.isArray(listed?.applications),
+      JSON.stringify(listed).slice(0, 120));
+    const mine = (listed?.applications ?? []).find((a) => a.teamName === 'הנשרים');
+    check('the application that was accepted is actually there', Boolean(mine),
+      `${(listed?.applications ?? []).length} application(s)`);
+    check('every spelling of one phone number is stored as one number',
+      mine?.phoneNormalized === '972541234567', String(mine?.phoneNormalized));
+    check('ordering does not depend on a value the sender supplied',
+      typeof mine?.receivedAt === 'number' && mine.receivedAt > 0, String(mine?.receivedAt));
+
+    // The list must not drag the images through it. Half a megabyte per row would
+    // make the admin screen unusable, and the photo is the sensitive half.
+    // The detail is printed on a PASS too, so it states what was MEASURED rather
+    // than what would have been wrong — a pass line reading like a failure is how a
+    // green run gets misread as a red one.
+    const listedJson = JSON.stringify(listed?.applications ?? []);
+    check('the list carries no image bytes',
+      !/[A-Za-z0-9+/]{200,}/.test(listedJson),
+      `${listedJson.length} chars for ${(listed?.applications ?? []).length} application(s)`);
+
+    const withoutPhoto = (listed?.applications ?? []).find((a) => a.teamName === 'בלי תמונה');
+    check('an application with no photo says so', withoutPhoto?.hasPhoto === false,
+      JSON.stringify({ hasPhoto: withoutPhoto?.hasPhoto, bytes: withoutPhoto?.photoBytes }));
+    check('an application WITH a photo says so', mine?.hasPhoto === true, String(mine?.hasPhoto));
+    // A missing photo must be an honest not-found rather than a zero-length image.
+    await expectError('fetching the photo of an application that has none is refused',
+      platformAdmin.call('getLiveApplicationPhoto', { applicationId: withoutPhoto?.id }),
+      { codeIn: ['functions/not-found'] });
+
+    const fetched = await platformAdmin.call('getLiveApplicationPhoto', { applicationId: mine?.id });
+    check('an admin can fetch one group photo by id',
+      fetched?.base64?.length === 64 && fetched?.contentType === 'image/jpeg',
+      JSON.stringify({ type: fetched?.contentType, len: fetched?.base64?.length }));
+    await expectError('a photo request naming no application is refused',
+      platformAdmin.call('getLiveApplicationPhoto', {}),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('a photo request for an application that does not exist is refused',
+      platformAdmin.call('getLiveApplicationPhoto', { applicationId: 'no-such-application' }),
+      { codeIn: ['functions/not-found'] });
+
+    // The rate limit, and that nothing in the payload can move it: a key the sender
+    // chooses is a key the sender can rotate.
+    let exhausted = null;
+    for (let i = 0; i < 20 && !exhausted; i++) {
+      try {
+        await applicant.call('submitLiveApplication', { ...valid, teamName: `Flood ${i}` });
+      } catch (e) {
+        exhausted = e;
+      }
+    }
+    check('a flood of applications is eventually refused',
+      exhausted?.code === 'functions/resource-exhausted',
+      exhausted ? `${exhausted.code} :: ${exhausted.message}` : 'never refused');
+    await expectError('a forged client identifier does not reset the limit',
+      applicant.call('submitLiveApplication', {
+        ...valid, teamName: 'Forged', clientId: 'someone-else', ip: '10.0.0.1', uid: 'not-me',
+      }),
+      { codeIn: ['functions/resource-exhausted'] });
+  });
+
+  await scenario('run contacts (quick dial: owner sets, players see only theirs)', async () => {
+    // quick-dial-and-actions D2: tonight's phone numbers live on the RUN, written
+    // only by the owner, and each player sees only what is marked for players.
+    const { gameId: cg } = await creator.call('createGame', { title: 'Contacts Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: cg,
+      stages: [{ id: 'ct-s', order: 0, title: 'One', isFinal: true, tasks: [
+        { id: 'ct-a', title: 'Stop', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 5 },
+      ] }],
+    });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const pc = makeParty('contactsPlayer');
+    await signInAnonymously(pc.auth);
+    await pc.call('joinRun', { code: cc, displayName: 'Callers' });
+
+    const refused = async (label, contacts) => {
+      let ok = false;
+      try { await creator.call('setRunContacts', { gameId: cg, runId: cr, contacts }); } catch (e) { ok = e.code === 'functions/invalid-argument'; }
+      check(`setRunContacts refuses ${label}`, ok);
+    };
+    await refused('a number that does not parse', [{ label: 'HQ', phone: 'call me', visibleTo: ['players'] }]);
+    await refused('an empty label', [{ label: ' ', phone: '052-1234567', visibleTo: ['players'] }]);
+    await refused('nobody to see it', [{ label: 'HQ', phone: '052-1234567', visibleTo: [] }]);
+    await refused('more than five', Array.from({ length: 6 }, (_, i) => ({ label: `c${i}`, phone: '052-1234567', visibleTo: ['staff'] })));
+
+    const res = await creator.call('setRunContacts', { gameId: cg, runId: cr, contacts: [
+      { label: 'המארגן', phone: '052-1234567', visibleTo: ['players', 'staff'] },
+      { label: 'רכז צוות', phone: '054-7654321', visibleTo: ['staff'] },
+    ] });
+    check('setRunContacts saves the list', res?.ok === true && res?.count === 2, JSON.stringify(res));
+    const runDoc = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${cg}/runs/${cr}`)).data ?? {};
+    check('the contacts are stored on the RUN with an id each',
+      Array.isArray(runDoc.contacts) && runDoc.contacts.length === 2 && runDoc.contacts.every((c) => typeof c.id === 'string' && c.id),
+      JSON.stringify(runDoc.contacts));
+
+    const st = await pc.call('getMyTeamState', { code: cc });
+    const seen = st?.contacts ?? [];
+    check('a player sees ONLY the player-visible contact', seen.length === 1 && seen[0].label === 'המארגן' && seen[0].phone === '052-1234567',
+      JSON.stringify(seen));
+    check('the player copy carries no visibility list or other fields', seen.every((c) => Object.keys(c).sort().join() === 'id,label,phone'),
+      JSON.stringify(seen));
+
+    // quick-dial-and-actions 2.5: staff get the STAFF-visible contacts at sign in (they cannot read
+    // the run document), and a refresh brings the current list.
+    const { pin: ctPin } = await creator.call('inviteStaff', { ownerUid: creatorCred.user.uid, gameId: cg, runId: cr, name: 'Marshal' });
+    const cStaff = makeParty('contactsStaff');
+    await signInAnonymously(cStaff.auth);
+    const signed = await cStaff.call('staffSignIn', { ownerUid: creatorCred.user.uid, gameId: cg, runId: cr, pin: ctPin, name: 'Marshal' });
+    check('staff sign in returns the staff-visible contacts (both)',
+      (signed?.contacts ?? []).map((c) => c.label).join('|') === 'המארגן|רכז צוות', JSON.stringify(signed?.contacts));
+    check('the staff copy carries no visibility list', (signed?.contacts ?? []).every((c) => Object.keys(c).sort().join() === 'id,label,phone'));
+
+    await creator.call('setRunContacts', { gameId: cg, runId: cr, contacts: [] });
+    await signInWithCustomToken(cStaff.auth, signed.customToken);
+    const refreshed = await cStaff.call('refreshStaffSession', { ownerUid: creatorCred.user.uid, gameId: cg, runId: cr });
+    check('a staff refresh returns the CURRENT list (now empty)', Array.isArray(refreshed?.contacts) && refreshed.contacts.length === 0, JSON.stringify(refreshed?.contacts));
+    const cleared = await pc.call('getMyTeamState', { code: cc });
+    check('an empty list clears them', (cleared?.contacts ?? []).length === 0, JSON.stringify(cleared?.contacts));
+
+    let denied = false;
+    try { await pc.call('setRunContacts', { gameId: cg, runId: cr, contacts: [] }); } catch (e) { denied = /permission|not-found|unauthenticated/i.test(String(e.code)); }
+    check('a player cannot set the run contacts', denied);
+  }); // scenario: run contacts
+
+  await scenario('points by answer (station codes and questions)', async () => {
+    // answer-scored-question. The field example first: the operator at a station
+    // hands out a code, "זעתר" earns 50 and "מרווה" earns 100. The mission's own
+    // pointValue is 30, so an award of 30 would mean the outcome was ignored.
+    const OWNER = creatorCred.user.uid;
+    const { gameId: og } = await creator.call('createGame', { title: 'Points By Answer', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: og, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'ob-s', order: 0, title: 'Codes', isFinal: true, tasks: [
+        { id: 'ob-st', title: 'Spice stall', type: 'smart_station', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'code_verification' },
+          answerOutcomes: [
+            { id: 'zaatar', label: 'זעתר', accepts: ['זעתר'], points: 50 },
+            { id: 'marva', label: 'מרווה', accepts: ['מרווה'], points: 100, message: 'הקוד הכי טוב!' },
+          ] },
+      ] }],
+    });
+    const { runId: or1, accessCode: oc1 } = await creator.call('launchRun', { gameId: og });
+    const players = {};
+    for (const name of ['A', 'B', 'C', 'D']) {
+      const p = makeParty(`outcome${name}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: oc1, displayName: `Team ${name}` });
+      players[name] = p;
+    }
+    await creator.call('startTeams', { gameId: og, runId: or1 });
+    const OC = { ownerUid: OWNER, gameId: og, runId: or1, taskId: 'ob-st' };
+    const earned = async (p) => {
+      const t = (await creator.getDocAt(`users/${OWNER}/games/${og}/runs/${or1}/teams/${p.auth.currentUser.uid}`)).data ?? {};
+      return (t.stages ?? [])[0]?.tasks?.find((x) => x.taskId === 'ob-st') ?? {};
+    };
+
+    const a = await players.A.call('verifyStationCode', { ...OC, code: 'זעתר' });
+    check('station outcome: "זעתר" is accepted', a?.verified === true, JSON.stringify(a));
+    const recA = await earned(players.A);
+    check('station outcome: "זעתר" earned 50, not the mission\'s 30', recA.earnedScore === 50 && recA.outcomeId === 'zaatar', JSON.stringify(recA));
+
+    const b = await players.B.call('verifyStationCode', { ...OC, code: 'מרווה' });
+    const recB = await earned(players.B);
+    check('station outcome: "מרווה" earned 100', recB.earnedScore === 100 && recB.outcomeId === 'marva', JSON.stringify(recB));
+    check('station outcome: the outcome message reaches the team', b?.message === 'הקוד הכי טוב!', JSON.stringify(b));
+
+    await players.C.call('verifyStationCode', { ...OC, code: ' זַעְתָּר ' });
+    check('station outcome: niqqud and padding still earn 50', (await earned(players.C)).earnedScore === 50);
+
+    let wrong = '';
+    try { await players.D.call('verifyStationCode', { ...OC, code: 'נענע' }); } catch (e) { wrong = `${e.code} ${e.message}`; }
+    check('station outcome: an unknown code is "Incorrect code"', /failed-precondition/.test(wrong) && /Incorrect code/.test(wrong), wrong);
+    check('station outcome: the wrong code completed nothing', (await earned(players.D)).status !== 'completed');
+
+    const stA = await players.A.call('getMyTeamState', { code: oc1 });
+    check('station outcome: the player payload never carries the codes or their points',
+      !JSON.stringify(stA).includes('מרווה') && !JSON.stringify(stA).includes('answerOutcomes'), 'payload leaked outcomes');
+
+    // The award is rolled up onto the stage total the rankings read (a stored
+    // number, so live and final standings cannot re-derive it differently). Not an
+    // ordering claim: the ranking also normalises time, so a faster 50 can beat a 100.
+    {
+      const tB = (await creator.getDocAt(`users/${OWNER}/games/${og}/runs/${or1}/teams/${players.B.auth.currentUser.uid}`)).data ?? {};
+      check('station outcome: the stage total carries the outcome award', (tB.stages ?? [])[0]?.earnedScore === 100, JSON.stringify((tB.stages ?? [])[0]?.earnedScore));
+    }
+
+    // ── A question graded by answer ─────────────────────────────────────────
+    const { gameId: qg } = await creator.call('createGame', { title: 'Question By Answer', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: qg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'oq-s', order: 0, title: 'Q', isFinal: true, tasks: [
+        { id: 'oq-q', title: 'Best capital', type: 'quiz', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+          answerOutcomes: [
+            { id: 'jlm', label: 'ירושלים', points: 50 },
+            { id: 'tlv', label: 'תל אביב', points: 20 },
+          ] },
+      ] }],
+    });
+    const { runId: or2, accessCode: oc2 } = await creator.call('launchRun', { gameId: qg });
+    const qp = makeParty('outcomeQuiz');
+    await signInAnonymously(qp.auth);
+    await qp.call('joinRun', { code: oc2, displayName: 'Quiz team' });
+    await creator.call('startTeams', { gameId: qg, runId: or2 });
+    const QC = { ownerUid: OWNER, gameId: qg, runId: or2 };
+    await qp.call('requestNextTask', QC);
+    const qs = await qp.call('getMyTeamState', { code: oc2 });
+    const qTask = qs?.activeStageTasks?.find((x) => x.id === 'oq-q');
+    check('question outcome: the buttons are the outcome labels', JSON.stringify(qTask?.choices) === JSON.stringify(['ירושלים', 'תל אביב']), JSON.stringify(qTask?.choices));
+    check('question outcome: no points or accepts reach the player', !JSON.stringify(qTask ?? {}).includes('points') && !JSON.stringify(qTask ?? {}).includes('answerOutcomes'), JSON.stringify(qTask));
+    const miss = await qp.call('submitTaskAnswer', { ...QC, taskId: 'oq-q', answer: 'חיפה' }).catch((e) => ({ err: String(e.code) }));
+    check('question outcome: an answer matching no outcome counts as wrong', miss?.correct === false, JSON.stringify(miss));
+    const qa = await qp.call('submitTaskAnswer', { ...QC, taskId: 'oq-q', answer: 'תל אביב' });
+    check('question outcome: "תל אביב" is accepted', qa?.correct === true, JSON.stringify(qa));
+    const qTeam = (await creator.getDocAt(`users/${OWNER}/games/${qg}/runs/${or2}/teams/${qp.auth.currentUser.uid}`)).data ?? {};
+    const qRec = (qTeam.stages ?? [])[0]?.tasks?.find((x) => x.taskId === 'oq-q') ?? {};
+    check('question outcome: "תל אביב" earned 20 (its outcome), not 30', qRec.earnedScore === 20 && qRec.outcomeId === 'tlv', JSON.stringify(qRec));
+    // D4: points on the buttons only when the creator turns it on, parallel to the choices.
+    await creator.call('updateGame', { gameId: qg, stages: [{ id: 'oq-s', order: 0, title: 'Q', isFinal: true, tasks: [
+      { id: 'oq-q', title: 'Best capital', type: 'quiz', triggerMode: 'instant',
+        coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+        revealOutcomePoints: true,
+        answerOutcomes: [{ id: 'jlm', label: 'ירושלים', points: 50 }, { id: 'tlv', label: 'תל אביב', points: 20 }] },
+    ] }] });
+    // A fresh team (the first one has finished the game, so the mission is no longer active for it).
+    const qp2 = makeParty('outcomeQuizReveal');
+    await signInAnonymously(qp2.auth);
+    await qp2.call('joinRun', { code: oc2, displayName: 'Quiz team 2' });
+    await creator.call('startTeams', { gameId: qg, runId: or2 });
+    await qp2.call('requestNextTask', QC);
+    const qs2 = await qp2.call('getMyTeamState', { code: oc2 });
+    const qTask2 = qs2?.activeStageTasks?.find((x) => x.id === 'oq-q');
+    check('question outcome: revealed points ride alongside the buttons', JSON.stringify(qTask2?.choicePoints) === JSON.stringify([50, 20]), JSON.stringify(qTask2));
+    // 2.7: the owner's report names WHICH answer earned the points.
+    const qReport = await creator.call('getRunPlayerReport', { gameId: qg, runId: or2 });
+    const qRow = (qReport?.answers ?? []).find((r) => r.taskId === 'oq-q' && r.teamId === qp.auth.currentUser.uid);
+    check('question outcome: the report names the outcome the team hit', qRow?.outcomeId === 'tlv' && qRow?.outcomeLabel === 'תל אביב', JSON.stringify(qRow));
+    check('question outcome: the report lists every outcome as the answer key', qRow?.expectedAnswer === 'ירושלים 50 · תל אביב 20', qRow?.expectedAnswer);
+
+    // ── Validation where the creator can fix it ──────────────────────────────
+    let overlapRefused = false;
+    try {
+      await creator.call('updateGame', { gameId: qg, stages: [{ id: 'oq-s', order: 0, title: 'Q', isFinal: true, tasks: [
+        { id: 'oq-q', title: 'Best capital', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+          difficulty: 2, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9,
+          answerOutcomes: [{ id: 'a', accepts: ['x'], points: 5 }, { id: 'b', accepts: [' X '], points: 1 }] },
+      ] }] });
+    } catch (e) { overlapRefused = e.code === 'functions/invalid-argument'; }
+    check('question outcome: updateGame refuses the same answer in two outcomes', overlapRefused);
+  }); // scenario: points by answer
 
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();

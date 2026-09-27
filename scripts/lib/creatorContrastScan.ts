@@ -182,7 +182,14 @@ const VAR_RE = /(--[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\s*;/g;
  */
 export function parseThemeTokens(css: string): ThemeTokens {
   const src = String(css ?? '');
-  const darkStart = src.indexOf('html.dark');
+  // The real rule opener, not the bare substring: a comment that happens to
+  // MENTION "html.dark" (documenting the very split this does) matches
+  // `indexOf('html.dark')` just as well as the actual block does, and whichever
+  // one comes first silently wins — which is exactly how this broke once
+  // already (a doc comment above the light block that used the phrase in
+  // backticks moved the split point up into the middle of :root). Requiring
+  // the brace is what a comment can't accidentally contain.
+  const darkStart = src.search(/html\.dark\s*\{/);
   const lightSrc = darkStart >= 0 ? src.slice(0, darkStart) : src;
   const darkSrc = darkStart >= 0 ? src.slice(darkStart) : '';
   const collect = (text: string) => {
@@ -210,6 +217,19 @@ export const INK_MINIMUMS: Record<string, number> = {
   '--ink-2': 4.5,
   '--ink-3': 4.5,
   '--ink-4': 3,
+  // The brand-accent ink scale (change: brand-design-system): darkened-for-text
+  // variants of --rp-fire/warm/amber/alert/go/plasma/signal, values in
+  // index.css (light-mode from packages/brand/tokens.mjs INK; dark-mode is its
+  // own per-token choice — see the comment beside the dark block). All carry
+  // real text (labels, stats, links), so all hold the 4.5 AA bar; none of these
+  // is a bare glyph the way --ink-4 is.
+  '--rp-ink-fire': 4.5,
+  '--rp-ink-warm': 4.5,
+  '--rp-ink-amber': 4.5,
+  '--rp-ink-alert': 4.5,
+  '--rp-ink-go': 4.5,
+  '--rp-ink-plasma': 4.5,
+  '--rp-ink-signal': 4.5,
 };
 
 // ── The blocking dialog must outrank every other overlay ─────────────────────

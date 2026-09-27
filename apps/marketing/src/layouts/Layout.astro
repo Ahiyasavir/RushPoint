@@ -4,6 +4,7 @@ import '~/assets/styles/tailwind.css';
 import { Font } from 'astro:assets';
 
 import CommonMeta from '~/components/common/CommonMeta.astro';
+import PlayerDeepLink from '~/components/common/PlayerDeepLink.astro';
 import Favicons from '~/components/Favicons.astro';
 import CustomStyles from '~/components/CustomStyles.astro';
 import ApplyColorMode from '~/components/common/ApplyColorMode.astro';
@@ -11,6 +12,8 @@ import Metadata from '~/components/common/Metadata.astro';
 import SiteVerification from '~/components/common/SiteVerification.astro';
 import Analytics from '~/components/common/Analytics.astro';
 import Intersect from '~/components/common/Intersect.astro';
+
+import { FONTS } from '@rushpoint/brand';
 
 import { DIRECTION, type Alternate, type Language } from '~/utils/i18n';
 
@@ -40,9 +43,23 @@ const textDirection = DIRECTION[language];
 <html lang={language} dir={textDirection} class="2xl:text-[20px]">
   <head>
     <CommonMeta />
+    {
+      /*
+        Immediately after <meta charset> (which CommonMeta carries) and before the
+        analytics tag: this can send a visitor to the participant app, and a
+        page_view recorded first would be a view of a page they never saw. See the
+        component for why the apex receives player links at all.
+      */
+    }
+    <PlayerDeepLink />
     <Favicons />
-    <Font cssVariable="--font-inter" preload />
-    <Font cssVariable="--font-space-grotesk" />
+    {/*
+      Body face is preloaded because it sets the first paragraph a reader sees;
+      the display face is not, so a heading is not allowed to hold up the text
+      under it. Both come from the brand package (packages/brand/tokens.mjs).
+    */}
+    <Font cssVariable={FONTS.body.cssVariable} preload />
+    <Font cssVariable={FONTS.display.cssVariable} />
     <CustomStyles />
     <ApplyColorMode />
     <Metadata {...metadata} />

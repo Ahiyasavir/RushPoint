@@ -189,9 +189,15 @@ describe('decideReview', () => {
     });
   });
 
-  it('refuses to reject an approved row, because the server has no score clawback', () => {
+  // change: approval-can-be-undone. This used to assert a REFUSAL, because the server
+  // had no score clawback path and rejecting an approved row would have flipped a
+  // status string while the points silently stayed. The server now removes exactly what
+  // the approval awarded, so the refusal's reason is gone - and it mattered, because
+  // bank photo missions default to autoApprove and the alternative blocks the team, so
+  // "approved" meant "unreviewable" and a photo of somebody's hand kept full points.
+  it('SENDS a reject on an approved row now that the server can take the points back', () => {
     expect(decideReview('approved', 'reject')).toEqual({
-      send: false, nextStatus: 'approved', reason: 'alreadyApproved',
+      send: true, nextStatus: 'rejected', reason: 'ok',
     });
   });
 

@@ -8,6 +8,8 @@ import { toast } from './toast';
 import { finalizeRun } from '../services/calls';
 import { useLiveRuns } from '../hooks/useLiveRuns';
 import { barMode, runConsolePath, selectFeaturedRun, shouldShowBar } from '../hooks/liveRunsPolling';
+import { useIsMobile } from '../hooks/useMediaQuery';
+import { TAP_INLINE } from '../lib/interaction';
 
 // Persistent floating control bar for a creator's live run (docs/wave-a/active-run-bar.md).
 // Mounted app-wide as a sibling of DialogHost/ToastHost so it survives route changes:
@@ -26,6 +28,7 @@ export default function ActiveRunBar() {
   const { runs, refresh } = useLiveRuns();
   const [ending, setEnding] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const isMobile = useIsMobile();
 
   const featured = selectFeaturedRun(runs);
   const mode = barMode(pathname);
@@ -58,6 +61,17 @@ export default function ActiveRunBar() {
   }
 
   // ── Collapsed pill (Builder) ──
+  // Not rendered at phone width (change: builder-mobile-simplification). It is a
+  // `fixed z-30` element, but the Builder lives inside `<main class="relative
+  // z-10">`, so its own sheets — which declare z-40 — can never paint above this
+  // pill however high they set it: the whole subtree competes at z-10. On a phone
+  // the Builder's bottom edge is now the tab bar, the add-mission tiles and the
+  // mission sheet, and the pill landed on all three. Hiding it here costs a
+  // creator nothing they cannot see elsewhere: on every OTHER route the phone
+  // still gets the full bar (`mode === 'full'`), so they are told about a live run
+  // the moment they leave the editor, and the run console is a tap away from the
+  // dashboard. Desktop is unchanged — there the pill sits in an empty corner.
+  if (mode === 'compact' && isMobile) return null;
   if (mode === 'compact' && !expanded) {
     return (
       <button
@@ -82,13 +96,13 @@ export default function ActiveRunBar() {
     >
       <span aria-hidden="true" className="w-2 h-2 rounded-full bg-rp-alert animate-pulse shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="text-[10px] uppercase tracking-wide text-rp-alert font-bold">{r.barBadge}</div>
+        <div className="text-[12px] uppercase tracking-wide text-ink-alert font-bold">{r.barBadge}</div>
         <div className="text-sm font-semibold text-[--ink-1] truncate" dir="auto">{title}</div>
         {extra > 0 && (
           <button
             type="button"
             onClick={() => nav('/live')}
-            className="text-[11px] text-[--ink-3] hover:text-rp-fire transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+            className="text-[13px] text-[--ink-3] hover:text-ink-fire transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
           >
             {r.moreRuns({ n: extra })}
           </button>
@@ -108,7 +122,7 @@ export default function ActiveRunBar() {
           onClick={() => setExpanded(false)}
           aria-label={r.collapseBar}
           title={r.collapseBar}
-          className="shrink-0 w-8 h-8 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+          className={`${TAP_INLINE} shrink-0 rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}
         >
           <span aria-hidden="true">✕</span>
         </button>

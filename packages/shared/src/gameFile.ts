@@ -37,6 +37,7 @@ import { isValidCoord } from './geo';
 import { stripUnsafeDisplayChars } from './validation';
 import { validateUnlockGraph } from './gating';
 import { validateAvailabilityWindow } from './schedule';
+import { timeLimitProblem } from './taskTimeLimit';
 import { validateOrderItems } from './ordering';
 import { validateSurveyChoices } from './survey';
 
@@ -120,6 +121,13 @@ export const EXPORTED_GAME_KEYS = [
   // authored field. It points at stage/task ids, which import preserves verbatim,
   // so the pointers survive the round trip without a remap.
   'wizardSteps',
+  // What a new staff code may do (change: staff-capabilities). An authored organizer choice ("my
+  // marshals never add points"), so it round trips; a file that dropped it would quietly restore
+  // a game whose staff can do everything.
+  'staffDefaults',
+  // game-file-full-settings (2026-09-27): three run behaviours an organizer sets once and expects
+  // back. They were missing here, so an exported and re-imported game quietly lost them.
+  'autoApproveAllMedia', 'autoStartLateJoiners', 'requireAllMembersOnline',
 ] as const satisfies readonly (keyof Game)[];
 
 /**
@@ -143,6 +151,13 @@ export const EXPORTED_GAME_KEYS = [
 export const DELIBERATELY_EXCLUDED_GAME_KEYS = [
   'id', 'ownerUid', 'visibility', 'playCount', 'createdAt', 'updatedAt',
   'deletedAt', 'deletedBy', 'integrationWebhookUrl', 'integrationPlatform',
+  // Admin template curation: set only by setGameTemplateFlag. A file that could carry them would
+  // let anyone publish a template into every creator's new-game menu.
+  'isTemplate', 'pinnedFirst', 'templateEmoji', 'templateGenre', 'templateGroupKey', 'templateHidden',
+  'templateLang', 'templateOrder',
+  // game-share-link: the "run only" lock of a shared launch copy. Written only by launchSharedRun;
+  // a file must neither carry nor strip it (exportGameFile already refuses a locked copy).
+  'sharedLaunch',
 ] as const satisfies readonly (keyof Game)[];
 
 export const EXPORTED_STAGE_KEYS = [
@@ -156,7 +171,7 @@ export const DELIBERATELY_EXCLUDED_STAGE_KEYS: readonly (keyof Stage)[] = [];
 export const EXPORTED_TASK_KEYS = [
   'id', 'title', 'description', 'type', 'coordinates', 'difficulty',
   'estimatedMinutes', 'expectedDurationMinutes', 'pointValue', 'maxConcurrentTeams',
-  'status', 'maxDurationMinutes', 'smart', 'triggerMode', 'locationless',
+  'status', 'maxDurationMinutes', 'smart', 'triggerMode', 'locationless', 'hidden',
   'hideLocation', 'locationClue', 'locationClueHe', 'hint', 'hintPenalty',
   'hintAutoRevealMinutes', 'hintAutoRevealAttempts', 'choices', 'answers',
   'orderItems', 'surveyChoices', 'numericAnswer', 'numericTolerance',
@@ -165,6 +180,10 @@ export const EXPORTED_TASK_KEYS = [
   // pause-clock-tasks: pure authorship (the run-side `excludedMs` lives on the
   // team record, not here), so it round trips like any other authored flag.
   'pausesTimer',
+  // mission-time-limit: the absolute close and the per team countdown.
+  'expiresAt', 'timeLimitMinutes',
+  // game-file-full-settings (2026-09-27): authored mission fields the export used to drop.
+  'answerOutcomes', 'unmatchedPoints', 'revealOutcomePoints', 'wrongAnswerPenalty', 'requiredContributors',
 ] as const satisfies readonly (keyof Task)[];
 
 /** `currentTeamCount` is, in the type's own words, a "runtime counter maintained
@@ -172,6 +191,8 @@ export const EXPORTED_TASK_KEYS = [
  *  fresh game with phantom occupancy and starve routing. */
 export const DELIBERATELY_EXCLUDED_TASK_KEYS = [
   'currentTeamCount',
+  // Derived by the participant sanitizer from answerOutcomes, never authored.
+  'choicePoints',
 ] as const satisfies readonly (keyof Task)[];
 
 export const EXPORTED_SMART_KEYS = [
@@ -182,7 +203,18 @@ export const EXPORTED_SMART_KEYS = [
   'codeInputLabel', 'hasCode', 'secretCode', 'attemptLimit', 'hintCount',
   'photoReviewRequired', 'allowRetry', 'showIntroScreen', 'showSuccessScreen',
   'showFailureScreen', 'showPendingReviewScreen', 'showHintsOverTime',
+  // camera-switch: an authored choice (open the selfie camera first).
+  'preferredCamera',
 ] as const satisfies readonly (keyof SmartStationConfig)[];
+
+// game-file-full-settings: the drift guard is a TYPE error, not only a test. A field added to Game,
+// Stage, Task or SmartStationConfig and left in neither list fails `npm run typecheck` here, which
+// is how the three run behaviours above went missing: the test's own field list had gone stale too.
+type Unclassified<T, A extends readonly string[], B extends readonly string[]> = Exclude<keyof T, A[number] | B[number]>;
+function assertAllClassified<T extends never>(): T | undefined { return undefined; }
+assertAllClassified<Unclassified<Game, typeof EXPORTED_GAME_KEYS, typeof DELIBERATELY_EXCLUDED_GAME_KEYS>>();
+assertAllClassified<Unclassified<Task, typeof EXPORTED_TASK_KEYS, typeof DELIBERATELY_EXCLUDED_TASK_KEYS>>();
+assertAllClassified<Unclassified<SmartStationConfig, typeof EXPORTED_SMART_KEYS, typeof DELIBERATELY_EXCLUDED_SMART_KEYS>>();
 
 /** `stationCoords` is, in the type's own words, "injected by assignTask; never
  *  authored" — per-run routing state that happens to live on the config object. */
@@ -374,12 +406,20 @@ const TASK_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   hintAutoRevealAttempts: 'number',
   releaseAfterMinutes: 'number',
   expiresAfterMinutes: 'number',
+  timeLimitMinutes: 'number',
   locationless: 'boolean',
+  // mission-card-actions: a benched mission must stay benched across an
+  // export/import round trip — a file that silently un-benched every hidden
+  // mission would put them all back into the next run.
+  hidden: 'boolean',
   hideLocation: 'boolean',
   requirePresence: 'boolean',
   // pause-clock-tasks: a boolean or nothing. A file saying `"yes"` is REFUSED by
   // name here rather than coerced — the flag decides how a whole run is timed.
   pausesTimer: 'boolean',
+  revealOutcomePoints: 'boolean',
+  requiredContributors: 'number',
+  answerOutcomes: 'objectList',
   smart: 'object',
   coordinates: 'object',
 };
@@ -403,7 +443,11 @@ const GAME_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   powerUpsEnabled: 'boolean',
   manualLeaderboardReveal: 'boolean',
   testMode: 'boolean',
+  autoApproveAllMedia: 'boolean',
+  autoStartLateJoiners: 'boolean',
+  requireAllMembersOnline: 'boolean',
   wizardSteps: 'objectList',
+  staffDefaults: 'object',
 };
 
 /** Every wrongly-typed PRESENT field of `bag`, as `label: field must be …`. */
@@ -683,8 +727,10 @@ export function parseGameFile(input: unknown): ParsedGameFile {
       errors.push(...fieldTypeProblems(task, tLabel, TASK_FIELD_TYPES));
 
       // Pure structural rules — the same functions the Builder save path runs.
-      const windowError = validateAvailabilityWindow(task as { releaseAfterMinutes?: number; expiresAfterMinutes?: number });
+      const windowError = validateAvailabilityWindow(task as { releaseAfterMinutes?: number; expiresAfterMinutes?: number; releaseAt?: string; expiresAt?: string });
       if (windowError) errors.push(`${tLabel}: ${windowError}`);
+      const limitError = timeLimitProblem(task as { timeLimitMinutes?: unknown });
+      if (limitError) errors.push(`${tLabel}: ${limitError}`);
 
       if (task.orderItems !== undefined) {
         if (task.type !== 'quiz') {

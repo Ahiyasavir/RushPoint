@@ -27,7 +27,7 @@
 //   npx tsx scripts/test-backend-origin-guard.ts
 import {
   ORIGIN_ENV_VAR, SAFE_DEV_OVERRIDE, PRODUCTION_BUNDLE_CONTRACT,
-  parseEnvValue, envOverrideHazards, checkBundleOrigin,
+  parseEnvValue, envOverrideHazards, checkBundleOrigin, checkBundleApiKey, FALLBACK_API_KEY,
 } from './lib/backendOriginGuard.mjs';
 
 let failures = 0;
@@ -102,6 +102,51 @@ check('an app whose .env declares an EMPTY origin is not failed either',
 // Totality — it runs in a gate; a throw here reads as a broken build.
 check('a missing bundle body fails cleanly rather than throwing',
   checkBundleOrigin({ label: 'x', bundleText: undefined as never, expectedOrigin: 'https://a' }).ok === false);
+
+// ── checkBundleApiKey: the 2026-08-27 outage ─────────────────────────────────
+// Both live apps served a bundle built with NO apps/*/.env, so every VITE_* fell
+// back to its emulator default. creator-web shipped apiKey "emulator-key" and every
+// sign-in died on auth/api-key-not-valid; play-web shipped it too, so no participant
+// could sign in anonymously. Nobody could log in and nobody could join.
+{
+  const REAL = 'AIzaSyDN-realish-key-0123456789';
+  const good = checkBundleApiKey({
+    label: 'creator-web/dist',
+    bundleText: `const c={apiKey:"${REAL}",projectId:"rushpoint-pwa-7daaa"}`,
+    expectedKey: REAL,
+  });
+  check('a bundle carrying its declared API key passes', good.ok === true, JSON.stringify(good));
+
+  // The exact shape of the outage: the fallback compiled into the deployed bundle.
+  for (const quoted of [`apiKey:"${FALLBACK_API_KEY}"`, `apiKey:'${FALLBACK_API_KEY}'`]) {
+    const bad = checkBundleApiKey({
+      label: 'creator-web/dist',
+      bundleText: `const c={${quoted},projectId:"rushpoint-pwa-7daaa"}`,
+      expectedKey: REAL,
+    });
+    check(`the "${FALLBACK_API_KEY}" fallback is REFUSED (${quoted.includes('"') ? 'double' : 'single'}-quoted)`,
+      bad.ok === false, JSON.stringify(bad));
+    check('...and the message names the env var so the fix is obvious',
+      (bad.problem ?? '').includes('VITE_FIREBASE_API_KEY'), bad.problem ?? '');
+    check('...and the message explains the user-visible symptom',
+      (bad.problem ?? '').includes('auth/api-key-not-valid'), bad.problem ?? '');
+  }
+
+  // The fallback is refused even when nothing is declared to compare against: a
+  // deployed bundle containing it is broken regardless of what any env file says.
+  check('the fallback is refused even when the app declares no key',
+    checkBundleApiKey({ label: 'x', bundleText: `apiKey:"${FALLBACK_API_KEY}"`, expectedKey: null }).ok === false);
+  // But "cannot verify" must not be conflated with "is wrong".
+  check('an app declaring no key, with no fallback present, is not failed',
+    checkBundleApiKey({ label: 'x', bundleText: 'apiKey:"AIzaSomethingElse"', expectedKey: null }).ok === true);
+  check('a stale dist carrying a DIFFERENT key than .env declares is refused',
+    checkBundleApiKey({ label: 'x', bundleText: 'apiKey:"AIzaOldKey"', expectedKey: REAL }).ok === false);
+  // Totality — it runs in a gate; a throw here reads as a broken build.
+  check('a missing bundle body fails cleanly rather than throwing',
+    checkBundleApiKey({ label: 'x', bundleText: undefined as never, expectedKey: REAL }).ok === false);
+  check('no argument at all fails cleanly rather than throwing',
+    checkBundleApiKey().ok === false);
+}
 
 // ── The contract itself ──────────────────────────────────────────────────────
 check('the production contract covers BOTH shipped apps',

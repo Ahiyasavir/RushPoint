@@ -157,8 +157,12 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
   ok(nextStatus('rejected', 'approve') === 'approved', 'rejected + approve = approved (it was never scored)');
   ok(nextStatus('rejected', 'reject') === 'rejected', 'rejected + reject is a no op');
   ok(nextStatus('approved', 'approve') === 'approved', 'approved + approve is a no op (server returns completed:false)');
-  ok(nextStatus('approved', 'reject') === 'approved',
-    'approved + reject does NOT flip: there is no score clawback path on the server');
+  // change: approval-can-be-undone. This asserted the OPPOSITE until the server gained
+  // a clawback. The refusal existed because flipping a status while the points stayed
+  // would have made the submission and the scoreboard disagree; planApprovalReversal
+  // now removes exactly what the approval awarded, so the edge is honest.
+  ok(nextStatus('approved', 'reject') === 'rejected',
+    'approved + reject DOES flip now: the server takes the award back with it');
 }
 {
   // Idempotence as an algebraic property over the whole table.
@@ -174,7 +178,10 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
 }
 {
   ok(canReject('pending') && canReject('rejected'), 'reject stays available while unscored');
-  ok(!canReject('approved'), 'reject is refused on an approved row (disable it and say why)');
+  // change: approval-can-be-undone. Bank photo missions default to autoApprove and the
+  // alternative BLOCKS the team, so disabling this button meant an organizer looking at
+  // an auto-approved photo of somebody's hand had nothing to press.
+  ok(canReject('approved'), 'reject is available on an approved row: an approval can be undone');
   ok(canApprove('pending') && canApprove('rejected'), 'approve is available while unscored');
   ok(!canApprove('approved'), 'approve is pointless on an already approved row');
 }
@@ -243,6 +250,20 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
   ok(!isRenderableMedia(''), 'an empty URL is not renderable');
   ok(!isRenderableMedia('javascript:alert(1)'), 'a javascript: URL is never fed to a media tag');
   ok(!isRenderableMedia('gs://bucket/x.jpg'), 'a gs:// path is not renderable');
+}
+
+// ── 11. Who sent it (team-phones-simple D2) ─────────────────────────────────
+// Any attached phone may send media now, so the reviewer sees WHICH phone did.
+// The founding phone's name IS the team name — repeating it is noise, so it is ''.
+{
+  const [second] = flattenSubmissions([team('t1', { a: sub({ submittedBy: { uid: 'd2', name: 'Noa' } }) })]);
+  ok(second.senderName === 'Noa', 'a second phone\'s submission carries its sender name');
+  const [founder] = flattenSubmissions([{ id: 't1', displayName: 'Lions', taskSubmissions: { a: sub({ submittedBy: { uid: 't1', name: 'Lions' } }) } }]);
+  ok(founder.senderName === '', 'the founding phone (name == team name) shows no sender');
+  const [legacy] = flattenSubmissions([team('t1', { a: sub() })]);
+  ok(legacy.senderName === '', 'a submission without submittedBy has an empty sender name');
+  const [junk] = flattenSubmissions([team('t1', { a: sub({ submittedBy: { uid: 5, name: { x: 1 } } as never }) })]);
+  ok(junk.senderName === '', 'a malformed submittedBy never reaches the screen');
 }
 
 console.log(`\nphoto approval queue: ${passed} passed, ${failed} failed`);

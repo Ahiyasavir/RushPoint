@@ -21,8 +21,15 @@
     <script>
       (function () {
         var CANONICAL = {
-          'rushpoint-play.web.app': 'rush-point.com',
-          'rushpoint-play.firebaseapp.com': 'rush-point.com'
+          'rushpoint-play.web.app': 'player.rush-point.com',
+          'rushpoint-play.firebaseapp.com': 'player.rush-point.com',
+          // The apex serves the MARKETING site now (change: marketing-to-apex).
+          // Anything that still reaches this app there is a stale front door:
+          // an installed pre-v5 TWA, an old bookmark, a printed QR code. Send it
+          // to the participant host with its query intact, so a join link that
+          // was shared before the move still opens the right game.
+          'rush-point.com': 'player.rush-point.com',
+          'www.rush-point.com': 'player.rush-point.com'
         };
         var target = CANONICAL[location.hostname];
         if (target) {
@@ -72,6 +79,13 @@
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#F97316" />
+    <!-- Both spellings, deliberately. `apple-mobile-web-app-capable` is the one iOS
+         actually reads and it is what makes an added-to-home-screen install run
+         without Safari chrome; Chrome now logs it as deprecated and wants the
+         standard `mobile-web-app-capable`. Dropping the apple one to silence the
+         warning would un-standalone the app on iPhone, which is most of the
+         audience, so ship both. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -87,32 +101,32 @@
     <!-- Fonts: preconnect first so the stylesheet request is non-blocking -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@200..800&family=Rubik:wght@300..900&family=JetBrains+Mono:wght@400;500&display=swap" />
     <!-- NO HYPHEN OR DASH in any copy below (change: ui-no-dashes). Enforced by PART C
          of scripts/test-no-dashes.ts, which exists because em dashes reached the live
          Google result from exactly these fields. -->
-    <title>RushPoint: join a live real world field game</title>
-    <meta name="description" content="Enter your access code to join a live field game. RushPoint routes your team to real world missions on your phone and scores every stop as you go." />
+    <title>הצטרפו למירוץ חי עם קוד הכניסה, RushPoint</title>
+    <meta name="description" content="מזינים קוד כניסה ומצטרפים למירוץ חי. RushPoint מנווט את הקבוצה שלכם בין משימות אמיתיות בטלפון ומנקד כל תחנה תוך כדי." />
     <!-- Canonical URL: this site also answers on its *.web.app and *.firebaseapp.com
          defaults, so name the one address that should carry the ranking signals. -->
-    <link rel="canonical" href="https://rush-point.com/" />
+    <link rel="canonical" href="https://player.rush-point.com/" />
     <!-- Rich link previews (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RushPoint" />
-    <meta property="og:url" content="https://rush-point.com/" />
+    <meta property="og:url" content="https://player.rush-point.com/" />
     <meta property="og:locale" content="he_IL" />
     <meta property="og:locale:alternate" content="en_US" />
-    <meta property="og:title" content="Join a live field game on RushPoint" />
-    <meta property="og:description" content="Tap in with your access code and play a real world team game on your phone." />
-    <meta property="og:image" content="https://rush-point.com/og.jpg" />
+    <meta property="og:title" content="הצטרפו למירוץ חי עם RushPoint" />
+    <meta property="og:description" content="נכנסים עם קוד הכניסה ומשחקים מירוץ קבוצתי אמיתי, מהטלפון." />
+    <meta property="og:image" content="https://player.rush-point.com/og.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Join a RushPoint field game" />
+    <meta property="og:image:alt" content="הצטרפות למירוץ החי של RushPoint" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Join a live field game on RushPoint" />
-    <meta name="twitter:description" content="Tap in with your access code and play a real world team game on your phone." />
-    <meta name="twitter:image" content="https://rush-point.com/og.jpg" />
+    <meta name="twitter:title" content="הצטרפו למירוץ חי עם RushPoint" />
+    <meta name="twitter:description" content="נכנסים עם קוד הכניסה ומשחקים מירוץ קבוצתי אמיתי, מהטלפון." />
+    <meta name="twitter:image" content="https://player.rush-point.com/og.jpg" />
     <!-- Structured data. The brand name collides with an unrelated Roblox shooter that
          dominates the query, so state plainly what THIS is: a free web game people play
          outdoors, in Hebrew, no install. -->
@@ -121,11 +135,11 @@
         "@context": "https://schema.org",
         "@type": "WebApplication",
         "name": "RushPoint",
-        "url": "https://rush-point.com/",
+        "url": "https://player.rush-point.com/",
         "applicationCategory": "GameApplication",
         "operatingSystem": "Any",
         "inLanguage": ["he", "en"],
-        "description": "Join a live real world team field game with an access code. Get routed between geolocated missions on your phone and watch the leaderboard update as your team scores.",
+        "description": "מירוץ קבוצתי חי שמצטרפים אליו עם קוד כניסה. הטלפון מנווט אתכם בין משימות עם מיקום אמיתי והטבלה מתעדכנת תוך כדי שהקבוצה צוברת נקודות.",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "ILS" },
         "browserRequirements": "Requires a modern mobile browser with location access"
       }

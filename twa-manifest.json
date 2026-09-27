@@ -1,6 +1,6 @@
 {
   "packageId": "com.rushpoint.app",
-  "host": "rush-point.com",
+  "host": "player.rush-point.com",
   "name": "RushPoint Field Game",
   "launcherName": "RushPoint",
   "display": "standalone",
@@ -13,18 +13,18 @@
   "backgroundColor": "#FBF7F0",
   "enableNotifications": true,
   "startUrl": "/",
-  "iconUrl": "https://rush-point.com/icon-512.png",
-  "maskableIconUrl": "https://rush-point.com/icon-512-maskable.png",
+  "iconUrl": "https://player.rush-point.com/icon-512.png",
+  "maskableIconUrl": "https://player.rush-point.com/icon-512-maskable.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
     "path": "C:\\Users\\savir\\Projects\\Rushpoint\\android.keystore",
     "alias": "rushpoint"
   },
-  "appVersionName": "4",
-  "appVersionCode": 4,
+  "appVersionName": "5",
+  "appVersionCode": 5,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
-  "webManifestUrl": "https://rush-point.com/manifest.webmanifest",
+  "webManifestUrl": "https://player.rush-point.com/manifest.webmanifest",
   "fallbackType": "customtabs",
   "features": {},
   "alphaDependencies": {
@@ -33,7 +33,7 @@
   "enableSiteSettingsShortcut": true,
   "isChromeOSOnly": false,
   "isMetaQuest": false,
-  "fullScopeUrl": "https://rush-point.com/",
+  "fullScopeUrl": "https://player.rush-point.com/",
   "minSdkVersion": 21,
   "orientation": "portrait",
   "fingerprints": [],
@@ -43,5 +43,5 @@
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "4"
+  "appVersion": "5"
 }

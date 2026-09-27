@@ -65,9 +65,25 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(steps?.[0]).not.toHaveProperty('answer');
 
     // Renderable fields survive so the UI still works:
-    expect(steps?.[0]).toMatchObject({ id: 's1', prompt: 'Open the box' });
+    expect(steps?.[0]).toMatchObject({ id: 's1', prompt: 'Open the box', hasAnswer: true });
     expect(smart).toMatchObject({ hasCode: true, codeInputLabel: 'Enter code', attemptLimit: 3 });
     expect(out.hasHint).toBe(false);
+  });
+
+  test('a step with no answer key is marked hasAnswer:false (tap-to-confirm)', () => {
+    // The runner renders this step as a plain "confirm" button rather than an empty
+    // input, so the flag has to survive sanitization even though the answer never does.
+    const out = sanitizeTaskForParticipant(baseTask({
+      type: 'sequence',
+      steps: [
+        { id: 's1', prompt: 'Say the word', answer: 'TWIST' },
+        { id: 's2', prompt: 'Tap when you are at the door' },
+        { id: 's3', prompt: 'Blank answers do not count', answer: '   ' },
+      ],
+    })) as Record<string, unknown>;
+    const steps = out.steps as Array<Record<string, unknown>>;
+    expect(steps.map((s) => s.hasAnswer)).toEqual([true, false, false]);
+    for (const s of steps) expect(s).not.toHaveProperty('answer');
   });
 
   // survey-tasks: a survey has no answer key, so its surveyChoices are
@@ -126,6 +142,75 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(smart?.videoMaxSeconds).toBe(30);
     expect(smart?.secretCode).toBeUndefined();
     expect(smart?.adminNotes).toBeUndefined();
+  });
+
+  // camera-switch D4: a "selfie" mission opens the front camera, so the phone must
+  // be told. Not a secret.
+  test('smart.preferredCamera survives sanitization', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'photo',
+        smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', preferredCamera: 'front' },
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    expect((out.smart as Record<string, unknown> | undefined)?.preferredCamera).toBe('front');
+  });
+
+  // answer-scored-question D4: the accepted texts and their points are the answer
+  // key. The player gets only the button labels.
+  test('answerOutcomes never reach the player; labels become choices', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'quiz',
+        answerOutcomes: [
+          { id: 'a', label: 'ירושלים', accepts: ['ירושלים', 'jerusalem'], points: 50 },
+          { id: 'b', label: 'תל אביב', points: 20 },
+        ],
+        unmatchedPoints: 5,
+        revealOutcomePoints: false,
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    expect(out.answerOutcomes).toBeUndefined();
+    expect(out.unmatchedPoints).toBeUndefined();
+    expect(out.revealOutcomePoints).toBeUndefined();
+    expect(out.choices).toEqual(['ירושלים', 'תל אביב']);
+    expect(JSON.stringify(out)).not.toContain('jerusalem');
+  });
+
+  // D4: points are shown on the buttons ONLY when the creator chose to reveal them, and only as a
+  // list parallel to `choices`; the accepted alternates stay secret either way.
+  test('revealOutcomePoints: points ride alongside the choices, nothing else leaks', () => {
+    const task = baseTask({
+      type: 'quiz',
+      answerOutcomes: [
+        { id: 'a', label: 'ירושלים', accepts: ['ירושלים', 'jerusalem'], points: 50 },
+        { id: 'b', label: 'תל אביב', points: 20 },
+      ],
+      unmatchedPoints: 5,
+      revealOutcomePoints: true,
+    } as Partial<Task>);
+    const out = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    expect(out.choices).toEqual(['ירושלים', 'תל אביב']);
+    expect(out.choicePoints).toEqual([50, 20]);
+    expect(JSON.stringify(out)).not.toContain('jerusalem');
+    expect(out.unmatchedPoints).toBeUndefined();
+    const hidden = sanitizeTaskForParticipant({ ...task, revealOutcomePoints: false } as Task) as Record<string, unknown>;
+    expect(hidden.choicePoints).toBeUndefined();
+    const junk = sanitizeTaskForParticipant({ ...task, revealOutcomePoints: 'yes' as never } as Task) as Record<string, unknown>;
+    expect(junk.choicePoints).toBeUndefined();
+  });
+
+  test('a station with several codes ships no codes and no choices', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'smart_station',
+        smart: { enabled: true, verificationType: 'code_verification' },
+        answerOutcomes: [{ id: 'z', label: 'זעתר', points: 50 }, { id: 'm', label: 'מרווה', points: 100 }],
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    expect(out.answerOutcomes).toBeUndefined();
+    expect(out.choices).toBeUndefined();
+    expect(JSON.stringify(out)).not.toContain('מרווה');
   });
 
   // task-media-attachments: general media is participant-visible (no secret) and

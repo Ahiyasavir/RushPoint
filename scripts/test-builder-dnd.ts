@@ -13,6 +13,7 @@ import { isValidDropTarget } from '../apps/creator-web/src/components/StageRail'
 // step and can never assert against a stale artifact — same rule as
 // scripts/test-mutual-exclusion.ts.
 import { effectiveExclusiveGroups, maxAttainableCompletions } from '../packages/shared/src/mutualExclusion';
+import { validateUnlockGraph } from '../packages/shared/src/gating';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -25,6 +26,7 @@ const stage = (id: string, taskIds: string[], requiredTaskCount?: number): S => 
   id, title: id, requiredTaskCount, tasks: taskIds.map((t) => ({ id: t })),
 });
 const ids = (s: ReorderStage) => s.tasks.map((t) => t.id).join(',');
+const gateOf = (s: ReorderStage, id: string) => s.tasks.find((t) => t.id === id)?.unlockAfterTaskIds;
 
 // ── 1. clampRequiredTaskCount ───────────────────────────────────────────────
 check('clamp: undefined stays undefined', clampRequiredTaskCount(undefined, 5) === undefined);
@@ -405,6 +407,41 @@ const gstage = (id: string, taskIds: string[], groups?: GroupLike[], requiredTas
     check(`drop: ${active} drag never accepts BOTH co-located rail droppables`,
       !(stageOk && stageDropOk), `${stageOk} / ${stageDropOk}`);
   }
+}
+
+// -- 9. Cross-stage move leaves NO dangling prerequisite --------------------
+// A prerequisite id is STAGE SCOPED, so a move breaks it in both directions: the
+// mission that leaves keeps ids of the ones it left behind, and they keep its id.
+// Either dangling id is a save-BLOCKING validateUnlockGraph error, so the whole
+// game stops autosaving -- with nothing on screen the creator can undo, because
+// the prerequisite selector lists same-stage missions only.
+{
+  const before: S[] = [
+    { id: 'A', title: 'A', tasks: [{ id: 't1' }, { id: 't2', unlockAfterTaskIds: ['t1'] }, { id: 't3', unlockAfterTaskIds: ['t1', 't2'] }] },
+    { id: 'B', title: 'B', tasks: [{ id: 'u1' }] },
+  ];
+  const after = moveTaskBetweenStages(before, 'A', 't2', 'B');
+  check('moved mission arrives with no prerequisite from the stage it left',
+    gateOf(after[1], 't2') === undefined, JSON.stringify(gateOf(after[1], 't2')));
+  check('the missions left behind lose the id of the one that went',
+    JSON.stringify(gateOf(after[0], 't3')) === '["t1"]', JSON.stringify(gateOf(after[0], 't3')));
+  check('a prerequisite still in the same stage survives the move',
+    gateOf(after[0], 't3')?.includes('t1') === true);
+  check('cross move does not mutate the input gates',
+    JSON.stringify(before[0].tasks[2].unlockAfterTaskIds) === '["t1","t2"]');
+  const graphErrors = after.flatMap((st) => validateUnlockGraph({ tasks: st.tasks }).errors);
+  check('neither stage is left in a state the save door refuses',
+    graphErrors.length === 0, graphErrors.join(' - '));
+}
+
+// A same-stage reorder changes no gate at all.
+{
+  const before: S[] = [
+    { id: 'A', title: 'A', tasks: [{ id: 't1' }, { id: 't2', unlockAfterTaskIds: ['t1'] }] },
+  ];
+  const after = moveTaskBetweenStages(before, 'A', 't2', 'A', 0);
+  check('same-stage reorder keeps every prerequisite',
+    JSON.stringify(gateOf(after[0], 't2')) === '["t1"]', JSON.stringify(gateOf(after[0], 't2')));
 }
 
 console.log(`\n${failures === 0 ? 'ALL BUILDER-DND TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);

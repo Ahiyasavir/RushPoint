@@ -24,6 +24,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useT } from '../i18nContext';
+import { locationAge, type MissionSpot } from '../lib/staffMap';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -45,22 +46,32 @@ interface TeamLoc {
   teamId: string;
   lat: number;
   lng: number;
+  updatedAt?: string;
 }
 
 export default function StaffTeamMap({
-  ctx, teams,
+  ctx, teams, spots = [],
 }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: { id: string; displayName: string }[];
+  /** staff-event-map: where the missions are (getRunOutline `spot`), drawn under the teams. */
+  spots?: MissionSpot[];
 }) {
   const { t } = useT();
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   // One persistent marker per team, updated in place rather than torn down on each
   // ping — a full rebuild every few seconds closes any popup the marshal just opened.
-  const markersById = useRef<Map<string, maplibregl.Marker>>(new Map());
+  const markersById = useRef<Map<string, { marker: maplibregl.Marker; el: HTMLDivElement; popup: maplibregl.Popup }>>(new Map());
+  const spotMarkers = useRef<maplibregl.Marker[]>([]);
   const framedKey = useRef<string>('');
   const [locs, setLocs] = useState<TeamLoc[]>([]);
+  // Re-renders the "updated N min ago" lines and the faded dots once a minute.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const nameOf = useMemo(() => {
     const m = new Map(teams.map((tm) => [tm.id, tm.displayName]));
@@ -98,10 +109,38 @@ export default function StaffTeamMap({
     // lib/recenter.ts) and a second watcher here would double the GPS drain on a
     // phone that has to survive a whole event.
     const m = map.current;
-    return () => { m.remove(); map.current = null; markersById.current.clear(); };
+    const markers = markersById.current;
+    return () => { m.remove(); map.current = null; markers.clear(); spotMarkers.current = []; };
   }, []);
 
-  // Sync markers to the live positions.
+  // staff-event-map: the missions, as small numbered squares UNDER the team dots. Rebuilt only
+  // when the set of spots changes (the outline is fetched once).
+  const spotsKey = spots.map((sp) => `${sp.id}:${sp.lat}:${sp.lng}:${sp.hidden ? 1 : 0}`).join('|');
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    for (const mk of spotMarkers.current) mk.remove();
+    spotMarkers.current = spots.map((sp) => {
+      const el = document.createElement('div');
+      el.textContent = String(sp.stage);
+      el.style.cssText = `width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;font:700 11px system-ui;color:#fff;background:${sp.hidden ? '#6b7280' : '#b45309'};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);opacity:.9`;
+      el.setAttribute('aria-label', sp.title);
+      const popup = new maplibregl.Popup({ offset: 12, closeButton: false }).setHTML(
+        `<div dir="auto" style="font-size:13px;font-weight:600">${escapeHtml(sp.title)}</div>`
+        + `<div dir="auto" style="font-size:12px;opacity:.75">${escapeHtml(sp.hidden ? t.staff.teamMapHiddenMission : t.staff.teamMapMissionStage({ stage: sp.stage }))}</div>`,
+      );
+      return new maplibregl.Marker({ element: el }).setLngLat([sp.lng, sp.lat]).setPopup(popup).addTo(m);
+    });
+    // Frame the missions before any team has reported, so the map opens on the event, not on a default city.
+    if (framedKey.current === '' && spots.length > 0 && locs.length === 0) {
+      const b = new maplibregl.LngLatBounds();
+      for (const sp of spots) b.extend([sp.lng, sp.lat]);
+      if (spots.length === 1) m.easeTo({ center: [spots[0].lng, spots[0].lat], zoom: 15 });
+      else m.fitBounds(b, { padding: 40, maxZoom: 16, duration: 0 });
+    }
+  }, [spotsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync team markers to the live positions: a name label beside each dot, faded when stale.
   useEffect(() => {
     const m = map.current;
     if (!m) return;
@@ -109,31 +148,47 @@ export default function StaffTeamMap({
 
     for (const loc of locs) {
       seen.add(loc.teamId);
+      const age = locationAge(loc.updatedAt, now);
+      const name = nameOf(loc.teamId);
+      const dir = `https://www.google.com/maps/dir/?api=1&destination=${loc.lat},${loc.lng}&travelmode=walking`;
+      const html = `<div dir="auto" style="font-size:13px;font-weight:600;margin-bottom:2px">${escapeHtml(name)}</div>`
+        + `<div dir="auto" style="font-size:12px;opacity:.75;margin-bottom:4px">${escapeHtml(t.staff.teamMapUpdated({ min: age.minutes }))}</div>`
+        // The popup carries the one action a marshal actually wants from a pin:
+        // walking directions. Reuses the same maps deep-link shape the SOS alert
+        // rows already use, so there is one "navigate there" convention in the app.
+        + `<a href="${dir}" target="_blank" rel="noreferrer" style="font-size:12px;text-decoration:underline">${escapeHtml(t.staff.teamMapOpen)}</a>`;
       const existing = markersById.current.get(loc.teamId);
       if (existing) {
-        existing.setLngLat([loc.lng, loc.lat]);
+        existing.marker.setLngLat([loc.lng, loc.lat]);
+        existing.popup.setHTML(html);
+        // On the dot and label, never the marker element: MapLibre owns that element's opacity.
+        for (const child of Array.from(existing.el.children) as HTMLElement[]) child.style.opacity = age.stale ? '0.45' : '1';
+        existing.el.dataset.stale = age.stale ? '1' : '0';
+        const label = existing.el.querySelector('span');
+        if (label) label.textContent = name;
         continue;
       }
       const el = document.createElement('div');
-      el.style.cssText = `width:18px;height:18px;border-radius:9999px;border:2px solid #fff;background:${colorForTeam(loc.teamId)};box-shadow:0 1px 4px rgba(0,0,0,.4)`;
-      el.setAttribute('aria-label', nameOf(loc.teamId));
-      // The popup carries the one action a marshal actually wants from a pin:
-      // walking directions. Reuses the same maps deep-link shape the SOS alert
-      // rows already use, so there is one "navigate there" convention in the app.
-      const dir = `https://www.google.com/maps/dir/?api=1&destination=${loc.lat},${loc.lng}&travelmode=walking`;
-      const popup = new maplibregl.Popup({ offset: 14, closeButton: false }).setHTML(
-        `<div dir="auto" style="font-size:13px;font-weight:600;margin-bottom:4px">${escapeHtml(nameOf(loc.teamId))}</div>`
-        + `<a href="${dir}" target="_blank" rel="noreferrer" style="font-size:12px;text-decoration:underline">${escapeHtml(t.staff.teamMapOpen)}</a>`,
-      );
-      markersById.current.set(
-        loc.teamId,
-        new maplibregl.Marker({ element: el }).setLngLat([loc.lng, loc.lat]).setPopup(popup).addTo(m),
-      );
+      el.style.cssText = 'display:flex;align-items:center;gap:4px;pointer-events:auto';
+      el.dataset.stale = age.stale ? '1' : '0';
+      const dot = document.createElement('div');
+      dot.style.cssText = `width:18px;height:18px;border-radius:9999px;border:2px solid #fff;background:${colorForTeam(loc.teamId)};box-shadow:0 1px 4px rgba(0,0,0,.4);flex:none`;
+      const label = document.createElement('span');
+      label.textContent = name;
+      label.setAttribute('dir', 'auto');
+      label.style.cssText = 'font:600 11px system-ui;color:#111;background:rgba(255,255,255,.9);border-radius:6px;padding:1px 5px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.25)';
+      el.append(dot, label);
+      // On the dot and label, never the marker element: MapLibre owns that element's opacity.
+      for (const child of [dot, label]) child.style.opacity = age.stale ? '0.45' : '1';
+      el.setAttribute('aria-label', name);
+      const popup = new maplibregl.Popup({ offset: 14, closeButton: false }).setHTML(html);
+      const marker = new maplibregl.Marker({ element: el, anchor: 'left', offset: [-9, 0] }).setLngLat([loc.lng, loc.lat]).setPopup(popup).addTo(m);
+      markersById.current.set(loc.teamId, { marker, el, popup });
     }
 
     // Drop markers for teams that no longer report (e.g. after a data prune).
-    for (const [teamId, marker] of markersById.current) {
-      if (!seen.has(teamId)) { marker.remove(); markersById.current.delete(teamId); }
+    for (const [teamId, entry] of markersById.current) {
+      if (!seen.has(teamId)) { entry.marker.remove(); markersById.current.delete(teamId); }
     }
 
     // Frame the group only when the SET of teams changes, not on every ping —
@@ -143,19 +198,48 @@ export default function StaffTeamMap({
       framedKey.current = key;
       const bounds = new maplibregl.LngLatBounds();
       for (const loc of locs) bounds.extend([loc.lng, loc.lat]);
-      if (locs.length === 1) {
+      for (const sp of spots) bounds.extend([sp.lng, sp.lat]);
+      if (locs.length === 1 && spots.length === 0) {
         m.easeTo({ center: [locs[0].lng, locs[0].lat], zoom: 15 });
       } else if (!bounds.isEmpty()) {
         m.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 400 });
       }
     }
-  }, [locs, nameOf, t.staff.teamMapOpen]);
+  }, [locs, nameOf, now, spotsKey, t]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const showTeam = (loc: TeamLoc) => {
+    const entry = markersById.current.get(loc.teamId);
+    map.current?.flyTo({ center: [loc.lng, loc.lat], zoom: 16, duration: 500 });
+    if (entry && !entry.popup.isOpen()) entry.marker.togglePopup();
+  };
+  const reported = new Set(locs.map((l) => l.teamId));
+  const noFix = teams.filter((tm) => !reported.has(tm.id)).length;
+  const rows = [...locs].sort((a, b) => nameOf(a.teamId).localeCompare(nameOf(b.teamId)));
 
   return (
     <div>
-      <div ref={ref} className="h-56 w-full rounded-xl overflow-hidden border border-glass-border" />
-      {locs.length === 0 && (
+      <div ref={ref} className="h-80 w-full rounded-xl overflow-hidden border border-glass-border" data-testid="staff-map" />
+      {locs.length === 0 ? (
         <p className="text-zinc-500 text-sm mt-2">{t.staff.teamMapEmpty}</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-glass-border rounded-xl border border-glass-border bg-app-card" data-testid="staff-map-teams" aria-label={t.staff.teamMapLegendTeams}>
+          {rows.map((loc) => {
+            const age = locationAge(loc.updatedAt, now);
+            return (
+              <li key={loc.teamId}>
+                <button type="button" onClick={() => showTeam(loc)} aria-label={t.staff.teamMapShowTeam({ name: nameOf(loc.teamId) })}
+                  className={`w-full min-h-[44px] flex items-center gap-2 px-3 text-start ${age.stale ? 'opacity-60' : ''}`}>
+                  <span aria-hidden className="w-3 h-3 rounded-full shrink-0 border border-white" style={{ background: colorForTeam(loc.teamId) }} />
+                  <span dir="auto" className="flex-1 truncate text-sm text-zinc-100">{nameOf(loc.teamId)}</span>
+                  <span dir="auto" className="text-xs text-zinc-500 shrink-0">{t.staff.teamMapUpdated({ min: age.minutes })}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {noFix > 0 && locs.length > 0 && (
+        <p className="text-zinc-500 text-xs mt-1" dir="auto">{t.staff.teamMapNoFix({ n: noFix })}</p>
       )}
     </div>
   );

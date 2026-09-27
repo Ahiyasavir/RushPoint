@@ -38,6 +38,7 @@ import {
   whoChoice,
   SMART_BUILD_DIFFICULTIES,
   SMART_BUILD_PREFERRED_TAGS,
+  preferredTagOptions,
   initialSmartBuildState,
   drawSmartBuildSeed,
   smartBuildReducer,
@@ -53,7 +54,7 @@ import {
   type ComposerDescriptionCopy,
 } from '../apps/creator-web/src/lib/composeGame';
 import { TASK_BANK } from '../apps/creator-web/src/taskBank';
-import { BANK_TAGS, AUDIENCE_TAG_IDS, SETTING_TAG_IDS } from '../apps/creator-web/src/bankTags';
+import { BANK_TAGS, AUDIENCE_TAG_IDS, SETTING_TAG_IDS, ACTIVITY_TAG_IDS } from '../apps/creator-web/src/bankTags';
 import { OCCASION_IDS } from '../apps/creator-web/src/lib/occasions';
 import { translations } from '../apps/creator-web/src/i18n';
 
@@ -520,6 +521,97 @@ console.log('\n── 11. the seed is fixed for the questionnaire\'s life ──
   eq('a misbehaving rng still yields a usable seed', seedThrew, '');
 }
 
+
+// ── 13. `chores` is offered only when the game happens at home ──────────────
+//
+// The one activity chip that is not universally playable: a mission that has the
+// family clear a real surface or match a real pile of socks exists only indoors,
+// in a home. Three things have to hold together, and the third is the one that
+// is easy to miss — a preference the creator can no longer SEE must not keep
+// being scored.
+console.log('\n── 13. the chores chip follows the areas answer ────────────');
+{
+  const withoutHome = preferredTagOptions(['park', 'cityCenter']);
+  ok('not offered when the game is not at home', !withoutHome.includes('chores'));
+  ok('the other activities are still all offered',
+    ACTIVITY_TAG_IDS.every((t) => t === 'chores' || withoutHome.includes(t)));
+
+  const withHome = preferredTagOptions(['home']);
+  ok('offered once `home` is picked', withHome.includes('chores'));
+  eq('offering it adds exactly one option', withHome.length, withoutHome.length + 1);
+
+  ok('offered when home is one area among several',
+    preferredTagOptions(['park', 'home']).includes('chores'));
+
+  // Total, and conservative in the right direction: anything that is not a real
+  // list of areas hides the chip, because a creator who never said `home` has
+  // not asked for housework.
+  for (const junk of [undefined, null, 'home', 42, {}, [null], ['HOME']]) {
+    ok(`junk areas ${JSON.stringify(junk)} hide the chip`,
+      !preferredTagOptions(junk as never).includes('chores'));
+  }
+}
+
+// ── 14. turning `home` off retracts a chores preference with it ─────────────
+//
+// Without this the answer becomes invisible AND still scored: the chip is gone
+// from the screen (§13) while `preferredTags` still carries it into the composer,
+// which is an answer nobody can see or take back.
+console.log('\n── 14. a chores preference cannot outlive `home` ───────────');
+{
+  let st = initialSmartBuildState();
+  st = smartBuildReducer(st, { type: 'toggleArea', area: 'home' });
+  st = smartBuildReducer(st, { type: 'togglePreferred', tag: 'chores' });
+  ok('it can be picked while home is on', st.answers.preferredTags.includes('chores'));
+
+  st = smartBuildReducer(st, { type: 'toggleArea', area: 'home' });   // home back off
+  ok('turning home off drops it', !st.answers.preferredTags.includes('chores'));
+
+  // …and only it. Un-picking an area must not clear unrelated preferences.
+  let st2 = initialSmartBuildState();
+  st2 = smartBuildReducer(st2, { type: 'toggleArea', area: 'home' });
+  st2 = smartBuildReducer(st2, { type: 'togglePreferred', tag: 'chores' });
+  st2 = smartBuildReducer(st2, { type: 'togglePreferred', tag: 'thinking' });
+  st2 = smartBuildReducer(st2, { type: 'toggleArea', area: 'home' });
+  eq('unrelated preferences survive', st2.answers.preferredTags, ['thinking']);
+}
+
+// ── 15. a chip that is not offered cannot be turned on ──────────────────────
+console.log('\n── 15. an un-offered chip cannot be picked ─────────────────');
+{
+  let st = initialSmartBuildState();
+  st = smartBuildReducer(st, { type: 'togglePreferred', tag: 'chores' });
+  ok('chores is refused while home is off', !st.answers.preferredTags.includes('chores'));
+
+  // Turning one OFF stays legal whatever the areas say, so a value that arrived
+  // some other way is always retractable rather than stuck.
+  let st2 = initialSmartBuildState();
+  st2 = smartBuildReducer(st2, { type: 'toggleArea', area: 'home' });
+  st2 = smartBuildReducer(st2, { type: 'togglePreferred', tag: 'chores' });
+  st2 = smartBuildReducer(st2, { type: 'togglePreferred', tag: 'chores' });
+  ok('and it can always be turned back off', !st2.answers.preferredTags.includes('chores'));
+}
+
+// ── 16. the chores chip has a pool behind it ────────────────────────────────
+//
+// bankTags.ts's own warning: a tag no mission carries is invisible at runtime,
+// because filtering on it yields an empty pool silently. This is that check.
+console.log('\n── 16. the chores chip is backed by real missions ──────────');
+{
+  const chores = TASK_BANK.filter((e) => e.tags.includes('chores'));
+  ok(`the bank carries chore missions :: ${chores.length}`, chores.length >= 8);
+  eq('every chore mission is playable at home', chores.filter((e) => !e.tags.includes('home')).map((e) => e.key), []);
+  eq('every chore mission needs no venue', chores.filter((e) => !e.tags.includes('fromAnywhere')).map((e) => e.key), []);
+  eq('no chore mission demands prep', chores.filter((e) => !e.tags.includes('noPrep')).map((e) => e.key), []);
+
+  // The age ladder the owner asked for: the band a creator picks has to select
+  // along it, so the floors must actually span the child bands rather than all
+  // sitting at one value.
+  const floors = [...new Set(chores.map((e) => e.minAge ?? 0))].sort((a, b) => a - b);
+  ok(`the floors really span the age bands :: ${floors.join(', ')}`, floors.length >= 3);
+  ok('something is playable by the youngest band', chores.some((e) => (e.minAge ?? 0) <= 6));
+  ok('something is reserved for the oldest', chores.some((e) => (e.minAge ?? 0) >= 10));
+}
 console.log('');
 if (failures > 0) {
   console.error(`\x1b[31m✗ smart-game-composer/smart-build-wizard: ${failures} assertion(s) failed\x1b[0m`);

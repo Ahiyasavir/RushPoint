@@ -27,14 +27,18 @@ export default function LegalScreen({ doc: type }: { doc: LegalDocType }) {
 
   return (
     <div className="min-h-screen bg-app-bg">
-      <div className="max-w-2xl mx-auto px-5 py-8 rp-safe-b">
+      <div className="max-w-2xl mx-auto px-5 pb-8 rp-safe-t rp-safe-b">
         <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
           <div>
             <button
               type="button"
               onClick={() => { window.location.href = '/'; }}
               aria-label={t.legal.backAria}
-              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors mb-3 flex items-center gap-1.5"
+              /* A real 44px target, and the negative inline margin keeps the label
+                 optically flush with the heading below it so the padding buys hit
+                 area rather than indentation. This is the ONLY way out of the legal
+                 page and it measured 48x22 — the height of its own text. */
+              className="min-h-[44px] -ms-2 px-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors mb-1 inline-flex items-center gap-1.5"
             >
               <span aria-hidden>←</span>
               {t.legal.back}
@@ -51,7 +55,10 @@ export default function LegalScreen({ doc: type }: { doc: LegalDocType }) {
                 type="button"
                 onClick={() => setActiveLang(l)}
                 aria-pressed={activeLang === l}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                /* min-h-[44px] rather than py-1: these measured 26px tall, and a
+                   language switch that is hard to hit is worst for exactly the
+                   person who needs it, who cannot read the label beside it. */
+                className={`inline-flex items-center justify-center min-h-[44px] px-4 rounded-md text-xs font-medium transition-all ${
                   activeLang === l ? 'bg-white text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-200'
                 }`}
               >
