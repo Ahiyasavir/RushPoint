@@ -55,6 +55,7 @@ import { useT } from '../i18nContext';
 import { feedback } from '../lib/sound';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { classifyStaffError, announcementPayload, type StaffFailure } from '../lib/failureCopy';
+import { missionSpots, type MissionSpot } from '../lib/staffMap';
 import { dialog } from '../components/dialog';
 
 // ── A flattened pending photo submission row (one per team×task) ──
@@ -102,7 +103,8 @@ interface TeamRow {
 
 /** Stage and mission names for the run (getRunOutline), since staff cannot read the game. */
 type RunOutline = {
-  stages: { id: string; title: string; tasks: { id: string; title: string }[] }[];
+  // staff-event-map: `spot` is where a located mission is (absent when it has none).
+  stages: { id: string; title: string; tasks: { id: string; title: string; spot?: { lat: number; lng: number; hidden?: boolean } }[] }[];
   /** quick-dial-and-actions 2.5: the game's phone-type registration fields (ids + labels). */
   phoneFields?: { id: string; label: string }[];
 };
@@ -719,7 +721,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       </section>
 
       {/* ── Live map of every team's last known position ── */}
-      {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} />}
+      {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} spots={missionSpots(outline)} />}
 
       {/* ── Staff ↔ admin channel ── */}
       {can('staffChannel') && <StaffAdminChannelSection ctx={ctx} senderName={staff.name} />}
@@ -1444,13 +1446,22 @@ function StaffAdminChannelSection({
 const StaffTeamMap = lazyWithRetry('staff-team-map', () => import('../components/StaffTeamMap'));
 
 function StaffTeamMapSection({
-  ctx, teams,
+  ctx, teams, spots,
 }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: TeamRow[];
+  spots: MissionSpot[];
 }) {
   const { t } = useT();
-  const [open, setOpen] = useState(false);
+  // staff-event-map: once opened it stays open on this phone for this run, so a marshal who uses
+  // the map does not have to unfold it after every reload.
+  const openKey = `rp-staff-map-open:${ctx.runId}`;
+  const [open, setOpenState] = useState(() => { try { return localStorage.getItem(openKey) === '1'; } catch { return false; } });
+  const setOpen = (fn: (o: boolean) => boolean) => setOpenState((o) => {
+    const next = fn(o);
+    try { localStorage.setItem(openKey, next ? '1' : '0'); } catch { /* memory only */ }
+    return next;
+  });
   return (
     <section className="mb-6 scroll-mt-4" id="staff-map">
       <Collapsible
@@ -1459,7 +1470,7 @@ function StaffTeamMapSection({
         header={<span>🗺️ {t.staff.teamMap}</span>}
       >
         <Suspense fallback={<div className="h-56 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <StaffTeamMap ctx={ctx} teams={teams} />
+          <StaffTeamMap ctx={ctx} teams={teams} spots={spots} />
         </Suspense>
       </Collapsible>
     </section>

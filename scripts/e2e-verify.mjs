@@ -11978,6 +11978,32 @@ async function main() {
         bp.call('getRunOutline', { ...B }), { codeIn: ['functions/permission-denied'] });
     }
 
+    // staff-event-map (2026-09-27): the staff map shows where the missions are. The outline carries
+    // a mission's SPOT (named `spot`, never the authored `coordinates`), flags a hidden one, and
+    // leaves out a mission with no real location.
+    {
+      const { gameId: mg } = await creator.call('createGame', { title: 'Staff Map Spots', mode: 'individual' });
+      await creator.call('updateGame', { gameId: mg, scoringPreset: 'fixed_points_speed', stages: [
+        { id: 'sm-s', order: 0, title: 'Spots', isFinal: true, tasks: [
+          { id: 'sm-open', title: 'Open spot', type: 'field', triggerMode: 'radius', coordinates: { lat: 31.7767, lng: 35.2345 },
+            geofenceRadiusMeters: 40, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+          { id: 'sm-hidden', title: 'Hidden spot', type: 'field', triggerMode: 'radius', hideLocation: true, locationClue: 'near the gate',
+            coordinates: { lat: 31.7801, lng: 35.2299 }, geofenceRadiusMeters: 40, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+          { id: 'sm-none', title: 'Anywhere', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 },
+            difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ] },
+      ] });
+      const { runId: mr } = await creator.call('launchRun', { gameId: mg });
+      const mo = await creator.call('getRunOutline', { ownerUid: OWNER, gameId: mg, runId: mr });
+      const tasks = (mo?.stages ?? [])[0]?.tasks ?? [];
+      const byId = Object.fromEntries(tasks.map((tk) => [tk.id, tk]));
+      check('staff map: a located mission carries its spot',
+        byId['sm-open']?.spot?.lat === 31.7767 && byId['sm-open']?.spot?.lng === 35.2345 && !byId['sm-open']?.spot?.hidden, JSON.stringify(byId['sm-open']));
+      check('staff map: a hidden mission is flagged as hidden', byId['sm-hidden']?.spot?.hidden === true, JSON.stringify(byId['sm-hidden']));
+      check('staff map: a mission with no location has no spot', byId['sm-none'] && byId['sm-none'].spot === undefined, JSON.stringify(byId['sm-none']));
+      check('staff map: still no authored coordinates, answers or secrets', !/"coordinates"|"answers"|"secretCode"|"hint"|"locationClue"/.test(JSON.stringify(mo)), JSON.stringify(mo).slice(0, 200));
+    }
+
     // Refusals.
     await expectError('send-back: a stage the team has not reached is refused',
       creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s2' } }), { codeIn: ['functions/failed-precondition'] });

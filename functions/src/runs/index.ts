@@ -2674,7 +2674,17 @@ export const getRunOutline = loggedCallable('getRunOutline', async (data, contex
     stages: (game.stages ?? []).map((s) => ({
       id: s.id,
       title: typeof s.title === 'string' ? s.title : '',
-      tasks: (s.tasks ?? []).map((tk) => ({ id: tk.id, title: typeof tk.title === 'string' ? tk.title : '' })),
+      tasks: (s.tasks ?? []).map((tk) => ({
+        id: tk.id,
+        title: typeof tk.title === 'string' ? tk.title : '',
+        // staff-event-map: where the mission is, for the staff map. Named `spot`, never the
+        // authored `coordinates`; absent for a mission with no real location. A hidden mission is
+        // flagged so the map can say so (staff run the event; the players are the ones it hides from).
+        ...(!tk.locationless && tk.coordinates && isValidCoord(tk.coordinates.lat, tk.coordinates.lng)
+          && !(tk.coordinates.lat === 0 && tk.coordinates.lng === 0)
+          ? { spot: { lat: tk.coordinates.lat, lng: tk.coordinates.lng, ...(tk.hideLocation ? { hidden: true } : {}) } }
+          : {}),
+      })),
     })),
     // quick-dial-and-actions 2.5: which registration fields hold a phone (ids + labels, not the
     // numbers: those are on the team documents staff already read). Lets the staff app offer a
