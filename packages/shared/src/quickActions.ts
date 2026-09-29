@@ -85,3 +85,21 @@ export function readStaffQuickActions(saved: unknown, can: (capability: string) 
   }
   return out;
 }
+
+/**
+ * How many things wait behind each staff quick-bar chip (overnight 2026-09-29): a marshal should see
+ * "3 SOS" at the top of the screen, the way the console's "now" list shows it, not find out by
+ * scrolling. An SOS is always urgent; submissions are urgent once one has waited past the review
+ * alarm's threshold (the caller passes that count from `reviewWaitAlarm`). Junk counts read as zero:
+ * the quiet direction, since the sections themselves still show everything.
+ */
+export function staffQuickBadges(input: { alerts: number; pendingReviews: number; overdueReviews: number }):
+  Partial<Record<StaffQuickActionId, { count: number; urgent: boolean }>> {
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  const out: Partial<Record<StaffQuickActionId, { count: number; urgent: boolean }>> = {};
+  const alerts = n(input?.alerts);
+  const reviews = n(input?.pendingReviews);
+  if (alerts > 0) out.alerts = { count: alerts, urgent: true };
+  if (reviews > 0) out.review = { count: reviews, urgent: n(input?.overdueReviews) > 0 };
+  return out;
+}

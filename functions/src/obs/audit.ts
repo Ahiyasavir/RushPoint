@@ -99,6 +99,16 @@ export const AUDIT_SUBMISSION_APPROVAL_REVERSED = 'submission_approval_reversed'
 // flag buried in the record.
 export const AUDIT_TEAM_HELD          = 'team_held';
 export const AUDIT_TEAM_RESUMED       = 'team_resumed';
+// team-lifecycle-controls: the organizer took a team out of the game, or brought it back.
+export const AUDIT_TEAM_REMOVED       = 'team_removed';
+export const AUDIT_TEAM_RESTORED      = 'team_restored';
+// route-team-to-mission: routed with a per-blocker waiver; queued for after the current mission;
+// a queued route dropped because what blocked it changed.
+export const AUDIT_TASK_ROUTED        = 'task_routed';
+export const AUDIT_ROUTE_QUEUED       = 'route_queued';
+export const AUDIT_ROUTE_QUEUE_DROPPED = 'route_queue_dropped';
+// located-mission-arrival: an operator let a team in where its GPS could not prove arrival.
+export const AUDIT_TEAM_ARRIVAL_MARKED = 'team_arrival_marked';
 export const AUDIT_TASK_FORCE_ASSIGNED = 'task_force_assigned';
 export const AUDIT_TASK_FORCE_ASSIGNED_OVERRIDE = 'task_force_assigned_override';
 // send-team-back: an operator reopened a mission or a stage for one team.

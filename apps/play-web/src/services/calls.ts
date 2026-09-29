@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay, RehearsalReveal, DevicePresence } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay, RehearsalReveal, DevicePresence, MissionPin, RouteBlockers, WaivableKind } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -184,6 +184,9 @@ export interface MyTeamState {
   // active mission is a still-sealed hidden target. Locationless/coordinate-less
   // completed tasks are omitted, so this can be shorter than the completed count.
   completedTaskPins: { id: string; coordinates: { lat: number; lng: number }; title: string }[];
+  // located-mission-arrival: every located mission of the game, locked ones too (hidden excluded).
+  // Optional: an older backend sends none and the map simply shows fewer pins.
+  missionPins?: MissionPin[];
   // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
   // GENUINELY gated (release-scheduled and not yet released, or unlock-gated with
   // an unmet prerequisite) — i.e. routing cannot hand them out yet. Ids only, no
@@ -209,7 +212,7 @@ export const getMyTeamState = callable<
   MyTeamState
 >('getMyTeamState');
 
-type Ctx = { ownerUid: string; gameId: string; runId: string };
+export type Ctx = { ownerUid: string; gameId: string; runId: string };
 
 // `reason` explains why routing handed back no task: 'stationsFull' (transient —
 // every eligible station is at cap; wait and retry), 'allLocked' (only gated
@@ -225,7 +228,7 @@ export type SafeZoneBlockReason =
   | 'override' | 'inside' | 'no_zone' | 'unverifiable';
 
 export const completeTask = callable<
-  Ctx & { taskId: string; lat?: number; lng?: number },
+  Ctx & { taskId: string; lat?: number; lng?: number; accuracyMeters?: number },
   { ok: boolean; nextTaskId: string | null; already?: boolean; nextReason?: NoAssignmentReason | null }
 >('completeTask');
 
@@ -253,9 +256,19 @@ export const requestTaskHint = callable<
 // task. The server re-checks GPS against the secret coordinates with the same
 // rule as a check-in and latches the verdict, so a reload / GPS dropout can
 // never re-seal a spot the team already found. Never returns a distance.
+// flash-missions-v2: take a flash mission, do it, or give it up.
+export const claimFlashMission = callable<Ctx & { flashId: string }, { ok: boolean }>('claimFlashMission');
+export const releaseFlashMission = callable<Ctx & { flashId: string }, { ok: boolean }>('releaseFlashMission');
+export const submitFlashMission = callable<Ctx & { flashId: string; mediaUrl?: string; posterUrl?: string }, { ok: boolean; approved: boolean }>('submitFlashMission');
+// Staff app (overnight 2026-09-29): approve/reject a sent flash mission (capability `review`) and end
+// one early (capability `broadcast`), the same callables the console uses.
+export const reviewFlashMission = callable<Ctx & { flashId: string; teamId: string; action: 'approve' | 'reject' }, { ok: boolean; awarded: number }>('reviewFlashMission');
+export const deactivateFlashMission = callable<Ctx & { flashId: string }, { ok: boolean }>('deactivateFlashMission');
 export const reportArrival = callable<
-  Ctx & { taskId: string; lat?: number; lng?: number },
-  { arrived: boolean; reason?: string }
+  // accuracyMeters: the fix's own error radius. Without it the server reads the fix as precise and
+  // cannot refuse a coarse one (overnight 2026-09-29; scripts/test-arrival-sends-accuracy.ts).
+  Ctx & { taskId: string; lat?: number; lng?: number; accuracyMeters?: number },
+  { arrived: boolean; reason?: string; retriable?: boolean }
 >('reportArrival');
 
 export const submitTaskAnswer = callable<
@@ -475,6 +488,17 @@ export const forceAssignTask = callable<
   Ctx & { teamId: string; taskId: string; override?: boolean; reason?: string },
   { ok: boolean; taskId: string; displacedTaskId: string | null; override: boolean }
 >('forceAssignTask');
+// route-team-to-mission, staff half: the same callable, asked first (dryRun, nothing written) and
+// then told exactly which blockers the marshal accepted and when. The server recomputes the list and
+// refuses if it changed in between.
+export const previewRoute = callable<
+  Ctx & { teamId: string; taskId: string; dryRun: true },
+  { dryRun: true; blockers: RouteBlockers; missingTitles: string[]; teamBusy: boolean }
+>('forceAssignTask');
+export const routeTeam = callable<
+  Ctx & { teamId: string; taskId: string; accept: WaivableKind[]; when: 'now' | 'after'; reason?: string },
+  { ok: true; taskId: string; displacedTaskId: string | null; waived: WaivableKind[]; queued: boolean }
+>('forceAssignTask');
 
 // Send ONE team back to a skipped/completed mission or an earlier stage (change: send-team-back).
 export type SendBackTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
@@ -491,8 +515,15 @@ export const returnTeamTo = callable<
 // document, so without this every mission appeared as a raw id.
 export const getRunOutline = callable<
   Ctx,
-  { stages: { id: string; title: string; tasks: { id: string; title: string }[] }[]; phoneFields?: { id: string; label: string }[] }
+  { stages: { id: string; title: string; tasks: { id: string; title: string }[] }[]; phoneFields?: { id: string; label: string }[]; arrivalGate?: boolean }
 >('getRunOutline');
+
+// located-mission-arrival: open a located mission for a team whose GPS will not (indoors, bad fix).
+// Sticky and idempotent on the server; audited.
+export const markTeamArrived = callable<
+  Ctx & { teamId: string; taskId: string; reason?: string },
+  { ok: true; changed: boolean }
+>('markTeamArrived');
 
 // Release a team from the safety-zone latch — previously reachable only from the
 // desktop run console, which meant a marshal had to find a laptop to unstick a team.

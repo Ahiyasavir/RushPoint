@@ -57,6 +57,19 @@ export function assertAdmin(context: functions.https.CallableContext): string {
 
 
 /**
+ * The game's owner or a platform admin, and nobody else: not staff of the run, whatever their
+ * capabilities (change: team-lifecycle-controls, for removing a team from the game). Lives here,
+ * not in index.ts, so the runs module can use it without an import cycle.
+ */
+export function assertOwnerOrPlatformAdmin(context: functions.https.CallableContext, ownerUid: string): string {
+  const uid = requireAuth(context);
+  if (uid !== ownerUid && !context.auth?.token.admin) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the game owner can do this');
+  }
+  return uid;
+}
+
+/**
  * Owner / admin / staff WITH THIS CAPABILITY (change: staff-capabilities).
  *
  * `assertStaffOrOwner` let every staff token through every staff callable: the invite's

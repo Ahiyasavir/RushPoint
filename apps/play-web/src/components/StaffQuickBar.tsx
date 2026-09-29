@@ -14,6 +14,11 @@ import { TAP_TARGET } from '../lib/interaction';
 
 const storageKey = (runId: string) => `rp-staff-quick:${runId}`;
 
+// Two whole static strings (Tailwind only sees static class strings, and the contrast scan reads each
+// literal as one surface): red for an SOS or an overdue submission, calm otherwise.
+const BADGE_URGENT = 'ms-0.5 inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-1.5 text-xs font-bold bg-ink-alert text-white';
+const BADGE_CALM = 'ms-0.5 inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-1.5 text-xs font-bold bg-app-raised text-zinc-100';
+
 function load(runId: string): unknown {
   try {
     const raw = window.localStorage.getItem(storageKey(runId));
@@ -23,7 +28,12 @@ function load(runId: string): unknown {
   }
 }
 
-export default function StaffQuickBar({ runId, can }: { runId: string; can: (capability: string) => boolean }) {
+export default function StaffQuickBar({ runId, can, badges }: {
+  runId: string;
+  can: (capability: string) => boolean;
+  /** How many things wait behind a chip (staffQuickBadges): the marshal's "now" at a glance. */
+  badges?: Partial<Record<StaffQuickActionId, { count: number; urgent: boolean }>>;
+}) {
   const { t } = useT();
   const q = t.staff.quick;
   const [saved, setSaved] = useState<unknown>(() => load(runId));
@@ -54,6 +64,13 @@ export default function StaffQuickBar({ runId, can }: { runId: string; can: (cap
           <button key={id} type="button" onClick={() => jump(id)}
             className="shrink-0 inline-flex items-center gap-1.5 min-h-[44px] rounded-full border border-glass-border bg-app-card px-3 text-[13px] font-semibold text-zinc-100">
             <span aria-hidden="true">{q.icon[id]}</span>{q.label[id]}
+            {badges?.[id] && (
+              <span data-testid={`staff-quick-badge-${id}`}
+                className={badges[id]!.urgent ? BADGE_URGENT : BADGE_CALM}>
+                <span aria-hidden="true">{badges[id]!.count}</span>
+                <span className="sr-only">{q.waiting({ n: badges[id]!.count })}</span>
+              </span>
+            )}
           </button>
         ))}
        </div>

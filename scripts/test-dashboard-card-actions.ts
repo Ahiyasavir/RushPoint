@@ -127,8 +127,12 @@ const dash = readFileSync(join(root, 'apps/creator-web/src/pages/DashboardPage.t
 const runc = readFileSync(join(root, 'apps/creator-web/src/pages/RunConsolePage.tsx'), 'utf8');
 check('DashboardPage imports the shared OverflowMenu',
   /import\s+\{[^}]*OverflowMenu[^}]*\}\s+from\s+'\.\.\/components\/OverflowMenu'/.test(dash));
-check('RunConsolePage imports the shared OverflowMenu',
-  /import\s+\{[^}]*OverflowMenu[^}]*\}\s+from\s+'\.\.\/components\/OverflowMenu'/.test(runc));
+// run-console-simplify D4 removed the team row's ⋯ on purpose (every action lives on the team page,
+// grouped). The console may use the shared menu or none at all; what it may never do is grow its
+// own copy again, which the next check still forbids.
+check('RunConsolePage uses the shared OverflowMenu or none',
+  !/OverflowMenu/.test(runc)
+  || /import\s+\{[^}]*OverflowMenu[^}]*\}\s+from\s+'\.\.\/components\/OverflowMenu'/.test(runc));
 check('RunConsolePage no longer declares a local OverflowMenu',
   !/function OverflowMenu\(/.test(runc));
 check('DashboardPage uses the dashboardCardActions helper',

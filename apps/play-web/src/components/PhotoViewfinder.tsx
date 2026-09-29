@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { applyOrientationIntent } from '../lib/orientation';
 import { useT } from '../i18nContext';
 import {
   canSwitchCamera, initialFacing, planCameraSwitch, readCameraChoice, shouldMirror, stillSize,
@@ -32,6 +33,8 @@ export default function PhotoViewfinder({ selfie, runId, onShot, onClose, onFall
   onClose: () => void;
   onFallback: () => void;
 }) {
+  // capture-rotation: the phone may be turned while this camera is open; portrait again after.
+  useEffect(() => { applyOrientationIntent('free'); return () => applyOrientationIntent('portrait'); }, []);
   const { t } = useT();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);

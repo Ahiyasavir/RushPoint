@@ -11,6 +11,8 @@
 // the page; this module only decides what exists and how much of it there is.
 
 export type PanelId =
+  // run-console-simplify: "עכשיו", the one list of everything waiting for the organizer.
+  | 'inbox'
   | 'joinShare' | 'stationQr' | 'startTeams' | 'alerts' | 'broadcast' | 'liveMap'
   | 'teams' | 'liveStandings' | 'finalStandings'
   | 'hotZone' | 'flashMission' | 'trackables' | 'zones' | 'taskAvailability'
@@ -76,8 +78,11 @@ export type RunConsoleGroup = {
 export type RunConsolePlan = { groups: RunConsoleGroup[] };
 
 /** Rendering order of the groups, top to bottom. */
+// run-console-simplify (field report 2026-09-27): organised by what the organizer is DOING. The ids
+// are kept so no panel had to be rewritten, and their MEANING changed: `moderation` is "עכשיו" (Now),
+// `teamsAndScores` is "קבוצות" (Teams), `gameMechanics` is "משחק" (Game). Setup and reports step back.
 export const GROUP_ORDER: GroupId[] = [
-  'primary', 'teamsAndScores', 'moderation', 'gameMechanics', 'shareAndScreens', 'afterTheRun',
+  'primary', 'moderation', 'teamsAndScores', 'gameMechanics', 'shareAndScreens', 'afterTheRun',
 ];
 
 /**
@@ -110,12 +115,15 @@ export const PANEL_GROUP: Record<PanelId, GroupId> = {
   // task for THIS run when a stop dies mid event.
   taskAvailability: 'gameMechanics',
 
+  // run-console-simplify: Now = what is waiting for you. The feed and the media gallery are browsing,
+  // not waiting, so they moved to Game.
+  inbox: 'moderation',
   photoReview: 'moderation',
-  feed: 'moderation',
+  feed: 'gameMechanics',
   // Every submitted photo/video, any review status (change:
   // run-media-gallery-and-video-feed) — a manager tool, not a work queue, grouped
   // with the other "from the field" surfaces rather than a new group.
-  mediaGallery: 'moderation',
+  mediaGallery: 'gameMechanics',
   chat: 'moderation',
   // The organizer's half of the staff↔admin channel (staff-console-field-ops).
   // Grouped with the other live conversations, NOT with staffInvite: inviting a
@@ -162,6 +170,8 @@ function isPanelVisible(id: PanelId, s: RunConsoleState): boolean {
   const live = s.status !== 'finished';
   switch (id) {
     // Primary zone.
+    // run-console-simplify: the inbox is the live console's home; it says "all calm" when empty.
+    case 'inbox': return live;
     case 'joinShare': return true;
     case 'stationQr': return true;
     case 'startTeams': return live;
@@ -361,7 +371,11 @@ export function buildRunConsoleSections(plan: RunConsolePlan): RunConsoleSection
  * out of bounds, who is held for consent, and where everyone stands. Kept as an
  * alias for the LIVE default so no existing caller changes meaning.
  */
-export const DEFAULT_SECTION: SectionId = 'teamsAndScores';
+export const DEFAULT_SECTION: SectionId = 'moderation';
+
+/** run-console-simplify: the three live screens, and the two that step back (setup, reports). */
+export const PRIMARY_SECTIONS: SectionId[] = ['moderation', 'teamsAndScores', 'gameMechanics'];
+export const SECONDARY_SECTIONS: SectionId[] = ['shareAndScreens', 'afterTheRun'];
 
 /**
  * Where the console opens. This used to be a constant, so a FINISHED run opened
@@ -463,7 +477,7 @@ export type ColumnCount = 1 | 2 | 3;
  */
 export const PANEL_PRIORITY: PanelId[] = [
   // Incident response.
-  'alerts', 'startTeams', 'teams', 'liveStandings', 'broadcast', 'liveMap',
+  'alerts', 'inbox', 'startTeams', 'teams', 'liveStandings', 'broadcast', 'liveMap',
   // Work queues with a human in the loop. The staff channel ranks ABOVE the team
   // chat: a marshal writing here is a staff member reporting a problem or asking
   // for a decision, which is a higher-urgency signal than a participant question.

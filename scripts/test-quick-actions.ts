@@ -3,6 +3,7 @@
 import {
   QUICK_ACTIONS, QUICK_ACTION_IDS, DEFAULT_QUICK_ACTIONS, MAX_QUICK_ACTIONS, readQuickActions,
   moveQuickAction, readStaffQuickActions, STAFF_QUICK_ACTIONS, STAFF_QUICK_ACTION_IDS, STAFF_DEFAULT_QUICK_ACTIONS,
+  staffQuickBadges,
 } from '../packages/shared/src/quickActions';
 
 let failures = 0;
@@ -46,6 +47,20 @@ check('actions that need a team say so', QUICK_ACTIONS.adjustScore.needsTeam ===
   check('unknown ids dropped, duplicates collapsed', JSON.stringify(readStaffQuickActions(['teams', 'teams', 'nope'], all)) === JSON.stringify(['teams']));
   check('garbage storage reads as the default', JSON.stringify(readStaffQuickActions('x', all)) === JSON.stringify(STAFF_DEFAULT_QUICK_ACTIONS));
   check('every staff action names the section it jumps to', STAFF_QUICK_ACTION_IDS.every((id) => typeof STAFF_QUICK_ACTIONS[id].section === 'string'));
+}
+
+// Overnight 2026-09-29: the staff bar says how many things wait behind each chip, like the console's
+// "now" list: a marshal should see "3 SOS" without scrolling. An SOS is always urgent; a submission is
+// urgent once it has waited as long as the alarm's threshold (same rule as the alarm).
+{
+  const b = staffQuickBadges({ alerts: 2, pendingReviews: 3, overdueReviews: 1 });
+  check('SOS count, always urgent', b.alerts?.count === 2 && b.alerts?.urgent === true);
+  check('reviews: count, urgent when any has waited past the alarm', b.review?.count === 3 && b.review?.urgent === true);
+  const c = staffQuickBadges({ alerts: 0, pendingReviews: 2, overdueReviews: 0 });
+  check('nothing waiting ⇒ no badge', c.alerts === undefined);
+  check('fresh reviews are counted but not urgent', c.review?.count === 2 && c.review?.urgent === false);
+  const d = staffQuickBadges({ alerts: -1, pendingReviews: Number.NaN, overdueReviews: 5 } as never);
+  check('junk counts read as zero, never a badge', d.alerts === undefined && d.review === undefined);
 }
 
 console.log(failures === 0 ? '\nquick actions: all passed' : `\nquick actions: ${failures} FAILED`);

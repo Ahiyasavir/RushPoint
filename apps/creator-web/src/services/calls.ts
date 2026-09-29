@@ -1,5 +1,6 @@
 // Typed wrappers around every creator-facing Cloud Function callable.
 import { callable, publicCallable } from './api';
+import type { WaivableKind } from '@rushpoint/shared';
 import type {
   Game,
   StaffCapability,
@@ -152,6 +153,31 @@ export const returnTeamTo = callable<
     reactivatesTeam: boolean; assignedTaskId?: string | null; queued?: boolean; finished?: boolean;
   }
 >('returnTeamTo');
+// Pause / resume ONE team (change: staff-console-field-ops; reached from the console since
+// team-lifecycle-controls). Its clock stops and it cannot advance while held.
+export const setTeamHold = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; held: boolean; reason?: string },
+  { ok: boolean; held: boolean; heldMsAdded: number }
+>('setTeamHold');
+// Take ONE team out of the game, or bring it back (change: team-lifecycle-controls). A state,
+// never a delete: it cannot advance and is in no standing. Owner / platform admin only.
+// Send ONE team to a chosen mission (change: route-team-to-mission). `accept` names the blockers the
+// organizer confirmed (routeBlockers); the server recomputes them and refuses with
+// `ROUTE_BLOCKERS_CHANGED` + the new list when they no longer match. `when: 'after'` queues it.
+export const forceAssignTask = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; taskId: string;
+    accept: WaivableKind[]; when?: 'now' | 'after'; reason?: string },
+  { ok: boolean; taskId: string; displacedTaskId: string | null; waived: string[]; queued: boolean }
+>('forceAssignTask');
+// Let ONE team into its located mission where GPS cannot prove arrival (located-mission-arrival).
+export const markTeamArrived = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; taskId: string; reason?: string },
+  { ok: boolean; changed: boolean }
+>('markTeamArrived');
+export const setTeamRemoved = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; removed: boolean; reason?: string },
+  { ok: boolean; removed: boolean; changed: boolean }
+>('setTeamRemoved');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
 export const refreshLeaderboard = callable<
   { ownerUid: string; gameId: string; runId: string; publish?: boolean; frozen?: boolean },
@@ -289,6 +315,10 @@ export interface RunTeamRow {
    * projection degrades to "not held" rather than to a false alarm.
    */
   heldForConsent?: boolean;
+  /** Paused by an operator (setTeamHold). Optional: an older backend reads as "not paused". */
+  held?: boolean;
+  /** Taken out of the game by the organizer (team-lifecycle-controls). */
+  removed?: boolean;
 }
 
 // ── Gallery ──
@@ -368,7 +398,11 @@ export const sendTeamChatMessage   = callable<{ ownerUid: string; gameId: string
 // teamId: it is run-scoped, not per team. The server stamps this side as 'admin'
 // because the caller is the owner.
 export const sendStaffChannelMessage = callable<{ ownerUid: string; gameId: string; runId: string; text: string; senderName?: string }, { messageId: string }>('sendStaffChannelMessage');
-export const pushFlashMission      = callable<{ ownerUid: string; gameId: string; runId: string; title: string; description?: string; bonusPoints: number; ttlSeconds: number }, { id: string; expiresAt: string }>('pushFlashMission');
+// flash-missions-v2: `doneBy`/`claimMode`/`requiresApproval` make it a mission teams can take; absent = an announcement.
+export const pushFlashMission      = callable<{ ownerUid: string; gameId: string; runId: string; title: string; description?: string; bonusPoints: number; ttlSeconds: number;
+  doneBy?: 'button' | 'photo' | 'video'; claimMode?: 'first' | 'many'; requiresApproval?: boolean }, { id: string; expiresAt: string }>('pushFlashMission');
+export const deactivateFlashMission = callable<{ ownerUid: string; gameId: string; runId: string; flashId: string }, { ok: boolean }>('deactivateFlashMission');
+export const reviewFlashMission = callable<{ ownerUid: string; gameId: string; runId: string; flashId: string; teamId: string; action: 'approve' | 'reject' | 'award' }, { ok: boolean; awarded: number }>('reviewFlashMission');
 export const acknowledgeAlert      = callable<{ ownerUid: string; gameId: string; runId: string; alertId: string }, { ok: boolean }>('acknowledgeAlert');
 // Out-of-bounds recovery: release a team the safe-zone latch is holding. The server
 // keeps a short grace window so a broken phone's next bad fix can't re-latch them.

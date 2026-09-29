@@ -163,6 +163,13 @@ export function Screen({ children }: { children: ReactNode }) {
   return <div className="min-h-screen flex flex-col px-5 rp-safe-t rp-safe-b max-w-md mx-auto w-full">{children}</div>;
 }
 
+// The game screen while a team plays (change: play-screen-no-scroll): EXACTLY one screen tall and
+// never scrolling as a page. `100dvh` follows the mobile browser's collapsing toolbar; the body
+// below the header scrolls inside itself (MissionSheet) when a mission is long.
+export function GameScreen({ children }: { children: ReactNode }) {
+  return <div className="h-[100dvh] overflow-hidden flex flex-col px-5 rp-safe-t rp-safe-b max-w-md mx-auto w-full">{children}</div>;
+}
+
 // Content-shaped loading placeholder. Size via `className` (e.g. "h-4 w-24").
 // Shimmer + reduced-motion handling live in index.css (.rp-skeleton).
 export function Skeleton({ className = '' }: { className?: string }) {

@@ -1,11 +1,13 @@
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
 // ── Card ─────────────────────────────────────────────────────────────────────
-export function Card({ children, className = '', glow = false }: {
+export function Card({ children, className = '', glow = false, dataPanel }: {
   children: ReactNode; className?: string; glow?: boolean;
+  /** The Run Console panel this card is, so "go to that panel" can find it (scroll target). */
+  dataPanel?: string;
 }) {
   return (
-    <div className={`
+    <div data-panel={dataPanel} className={`
       glass-card grad-border
       bg-[--surface-0] dark:bg-transparent
       border border-[--rp-border]

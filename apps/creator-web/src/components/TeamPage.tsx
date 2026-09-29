@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useT } from './LanguageContext';
 import { Badge, Button } from './ui';
 import type { TeamDossier } from '../lib/teamDossier';
+import { teamPageActionGroups } from '../lib/runConsoleActions';
 import { toTelHref, toWhatsAppHref } from '@rushpoint/shared';
 import ClipTile from './ClipTile';
 import TeamChatThread from './TeamChatThread';
@@ -20,7 +21,7 @@ import type { ChatMessage } from '@rushpoint/shared';
 // open team lives in the URL (`?team=`), so the browser's back button closes it too.
 
 export default function TeamPage({
-  dossier, onClose, onAdjust, onSkip, onSendBack, onReview, reviewBusy, chat,
+  dossier, onClose, onAdjust, onSkip, onSendBack, onReview, reviewBusy, chat, lifecycleActions = [],
 }: {
   dossier: TeamDossier;
   onClose: () => void;
@@ -31,6 +32,8 @@ export default function TeamPage({
   reviewBusy: (taskId: string) => boolean;
   /** The team's HQ chat thread (team-hq-chat), sent through the console's own handler. */
   chat?: { messages: ChatMessage[]; onSend: (text: string) => Promise<boolean>; onSeen: (messages: ChatMessage[]) => void };
+  /** team-lifecycle-controls: start / pause / resume / remove / bring back, as the console decides. */
+  lifecycleActions?: { key: string; label: string; onClick: () => void; variant: 'primary' | 'ghost' | 'danger' | 'subtle' }[];
 }) {
   const t = useT();
   const tp = t.runConsole.teamPage;
@@ -84,11 +87,38 @@ export default function TeamPage({
             </section>
           )}
 
-          <section className="flex flex-wrap gap-2" aria-label={tp.actions}>
-            <Button onClick={onAdjust}>{t.runConsole.adjustScore}</Button>
-            {onSkip && <Button variant="ghost" onClick={onSkip}>{t.runConsole.skipTask}</Button>}
-            {onSendBack && <Button variant="ghost" onClick={onSendBack}>{t.runConsole.sendBack}</Button>}
-          </section>
+          {/* run-console-simplify D4: every action for this team, grouped by what it does
+              (teamPageActionGroups). Lifecycle actions lead Play, in the console's own order. */}
+          {(() => {
+            const all = [
+              ...lifecycleActions,
+              ...(onSkip ? [{ key: 'skipTask', label: t.runConsole.skipTask, onClick: onSkip, variant: 'ghost' as const }] : []),
+              ...(onSendBack ? [{ key: 'sendBack', label: t.runConsole.sendBack, onClick: onSendBack, variant: 'ghost' as const }] : []),
+              { key: 'adjustScore', label: t.runConsole.adjustScore, onClick: onAdjust, variant: 'primary' as const },
+            ];
+            const byKey = new Map(all.map((a) => [a.key, a]));
+            const groups = teamPageActionGroups(all.map((a) => a.key));
+            const rows: { id: 'play' | 'score' | 'danger'; label: string; keys: string[] }[] = [
+              { id: 'play', label: tp.groupPlay, keys: groups.play },
+              { id: 'score', label: tp.groupScore, keys: groups.score },
+              { id: 'danger', label: tp.groupDanger, keys: groups.danger },
+            ];
+            return (
+              <section className="space-y-3" aria-label={tp.actions} data-testid="team-page-actions">
+                {rows.filter((r) => r.keys.length > 0).map((r) => (
+                  <div key={r.id} className={r.id === 'danger' ? 'pt-3 border-t border-[--rp-border]' : ''}>
+                    <div className="text-[12px] font-semibold text-[--ink-3] mb-1.5">{r.label}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {r.keys.map((k) => {
+                        const a = byKey.get(k)!;
+                        return <Button key={k} variant={a.variant} onClick={a.onClick}>{a.label}</Button>;
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            );
+          })()}
 
           {/* quick-dial-and-actions D3: call or WhatsApp the team, from the numbers the
               game's registration asked for. Never a number typed into another field. */}

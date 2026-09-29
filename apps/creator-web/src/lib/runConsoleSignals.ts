@@ -57,7 +57,8 @@ export type RunSignalInput = {
   heldForConsentCount: number;
   unreadChatThreads: number;
   pausedTaskCount: number;
-  teamCount: number;
+  /** `null` while the team list has not loaded yet: unknown is not zero (no "nobody joined"). */
+  teamCount: number | null;
   /** Joined but not launched, so their clock has not started. */
   unstartedTeamCount: number;
   /**
@@ -203,7 +204,8 @@ export function buildRunSignals(input: RunSignalInput): RunSignal[] {
   // watching a blank screen while everyone else plays. They are the same teams in
   // the same counter, so telling both would put the calm sentence next to the urgent
   // one about the same people.
-  if (teams === 0) out.push(signal('nobodyJoined', 0));
+  const teamsKnown = typeof input.teamCount === 'number' && Number.isFinite(input.teamCount);
+  if (teamsKnown && teams === 0) out.push(signal('nobodyJoined', 0));
   else if (stranded > 0) out.push(signal('lateJoinerStranded', stranded));
   else if (unstarted > 0) out.push(signal('notStarted', unstarted));
 

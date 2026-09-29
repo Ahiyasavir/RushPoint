@@ -69,8 +69,9 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamMayAdvance, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
+import { flashClaimVerdict, resumedStartedAt, type FlashMissionDoc } from '@rushpoint/shared';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
@@ -121,7 +122,7 @@ export {
 // access code that only the live console holds.
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, skipTaskForTeam, finalizeRun,
-  setTeamHold, forceAssignTask, returnTeamTo, getRunOutline,
+  setTeamHold, setTeamRemoved, forceAssignTask, returnTeamTo, getRunOutline, markTeamArrived,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks, revealTaskAnswer,
@@ -1279,6 +1280,239 @@ export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', a
 });
 
 
+// ─── Flash missions v2: take it, do it, get scored, go back (change: flash-missions-v2) ──────
+//
+// Field report 2026-09-27: the organizer pushed "first team to the farm gets 25 points" and could
+// then do nothing with it. A flash mission can now be TAKEN ("לקחתי") by the first team or by any
+// team (per mission), done with a button, a photo or a video, approved (or approved automatically),
+// awarded to a team by hand, and ended early. It is its own run-scoped object: scoring goes through
+// the score ledger and the team's current mission is SUSPENDED (not skipped) while it is out, so
+// nothing here touches routing, stage completion or the template.
+
+const FLASH_MODES = ['first', 'many'] as const;
+const FLASH_DONE_BY = ['announce', 'button', 'photo', 'video'] as const;
+
+function flashRef(ownerUid: string, gameId: string, runId: string, flashId: string) {
+  return db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/flashMissions/${flashId}`);
+}
+
+/** In a transaction: bring the team back from `flashId` to the mission it was on, time intact. */
+function resumeFromFlash(team: RunTeam, flashId: string, nowMs: number): Partial<RunTeam> & Record<string, unknown> | null {
+  const s = team.flashSuspension;
+  if (!s || s.flashId !== flashId) return null;
+  const stages = team.stages.map((st) => ({
+    ...st,
+    tasks: st.tasks.map((r) => {
+      if (!s.taskId || r.taskId !== s.taskId || r.status !== 'assigned') return r;
+      const moved = resumedStartedAt(r.startedAt, s.at, nowMs);
+      return moved ? { ...r, startedAt: moved } : r;
+    }),
+  }));
+  return { stages, flashSuspension: admin.firestore.FieldValue.delete() as never };
+}
+
+/**
+ * The ledger reason for a flash-mission award: the mission's own title, as the organizer wrote it.
+ * It used to be the fixed English "flash mission", which the Hebrew console printed under its own
+ * "משימת בזק" label (overnight 2026-09-29): it said nothing, in the wrong language.
+ */
+function flashReason(flash: object | null | undefined): string {
+  const f = (flash ?? {}) as { title?: unknown; titleHe?: unknown };
+  const he = typeof f.titleHe === 'string' ? f.titleHe.trim() : '';
+  const en = typeof f.title === 'string' ? f.title.trim() : '';
+  return (he || en).slice(0, 200);
+}
+
+/** In a transaction: add `points` to the team as a flash-mission award (ledger kind 'flash'). */
+function flashAward(team: RunTeam & { bonusPenalty?: number; scoreLedger?: unknown[] }, points: number, flashId: string, reason: string, by: string, nowIso: string) {
+  const p = team.bonusPenalty ?? 0;
+  return {
+    bonusPenalty: nextBonusPenalty(p, points),
+    score: (team.score ?? 0) + points,
+    scoreLedger: appendScoreLedger(team.scoreLedger, [{ at: nowIso, delta: points, kind: 'flash', reason, by, flashId }]),
+  };
+}
+
+export const reviewFlashMission = loggedCallable('reviewFlashMission', async (data, context) => {
+  const { ownerUid, gameId, runId, flashId, teamId, action } = data as {
+    ownerUid: string; gameId: string; runId: string; flashId: string; teamId: string; action: 'approve' | 'reject' | 'award';
+  };
+  const operatorId = await assertStaffCan(context, ownerUid, runId, 'review');
+  await enforceRateLimit(operatorId, 'reviewFlashMission');
+  const id = validate(() => requireString(flashId, 'flashId', 128));
+  const tid = validate(() => requireString(teamId, 'teamId', 128));
+  if (!['approve', 'reject', 'award'].includes(action)) throw new functions.https.HttpsError('invalid-argument', 'action must be approve, reject or award');
+  const ref = flashRef(ownerUid, gameId, runId, id);
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${tid}`);
+  const by = (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer';
+  const nowIso = new Date().toISOString();
+  let awarded = 0;
+  await db.runTransaction(async (tx) => {
+    const [f, t] = await Promise.all([tx.get(ref), tx.get(teamRef)]);
+    if (!f.exists) throw new functions.https.HttpsError('not-found', 'Flash mission not found');
+    if (!t.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const flash = f.data() as FlashMissionDoc;
+    const team = t.data() as RunTeam & { bonusPenalty?: number; scoreLedger?: unknown[] };
+    // D6: the claim lives on the team; the flash document holds only `takenBy` (first mode).
+    const claim = team.flashClaims?.[id];
+    const points = Math.max(0, Math.round(Number(flash.bonusPoints ?? 0)));
+    if (action === 'reject') {
+      if (claim?.status !== 'submitted') throw new functions.https.HttpsError('failed-precondition', 'Nothing to reject');
+      tx.update(teamRef, { [`flashClaims.${id}.status`]: 'rejected', [`flashClaims.${id}.reviewedAt`]: nowIso, updatedAt: nowIso });
+      // First team only: a rejected sending frees the mission for the other teams.
+      if (flash.claimMode === 'first' && flash.takenBy === tid) tx.update(ref, { takenBy: admin.firestore.FieldValue.delete() });
+      return;
+    }
+    if (action === 'approve' && claim?.status !== 'submitted') throw new functions.https.HttpsError('failed-precondition', 'Nothing to approve');
+    if (claim?.status === 'approved') throw new functions.https.HttpsError('failed-precondition', 'Already awarded');
+    // An award by hand in first mode makes that team the holder, so the phones say it is taken.
+    if (flash.claimMode === 'first' && !flash.takenBy) tx.update(ref, { takenBy: tid });
+    tx.update(teamRef, {
+      [`flashClaims.${id}`]: { ...(claim ?? {}), at: claim?.at ?? nowIso, status: 'approved', reviewedAt: nowIso },
+      ...(points > 0 ? flashAward(team, points, id, flashReason(flash), by, nowIso) : {}),
+      updatedAt: nowIso,
+    });
+    if (points > 0) awarded = points;
+  });
+  await writeAuditLog({
+    ownerUid, gameId, runId, teamId: tid, operatorId,
+    actionType: action === 'reject' ? 'flash_rejected' : 'flash_awarded',
+    previousValue: '', newValue: String(awarded), reason: action, flashId: id,
+  });
+  if (awarded > 0) await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId, { force: true });
+  return { ok: true, awarded };
+});
+
+export const deactivateFlashMission = loggedCallable('deactivateFlashMission', async (data, context) => {
+  const { ownerUid, gameId, runId, flashId } = data as { ownerUid: string; gameId: string; runId: string; flashId: string };
+  const operatorId = await assertStaffCan(context, ownerUid, runId, 'broadcast');
+  await enforceRateLimit(operatorId, 'deactivateFlashMission');
+  const id = validate(() => requireString(flashId, 'flashId', 128));
+  const ref = flashRef(ownerUid, gameId, runId, id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Flash mission not found');
+  const now = new Date();
+  await ref.update({ isActive: false, endedAt: now.toISOString() });
+  // Every team still out on it goes back to its mission. D6: found by its suspension (a single-field
+  // equality, served by the automatic index) rather than by a claims map on the flash document.
+  const out = await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams`)
+    .where('flashSuspension.flashId', '==', id).get();
+  for (const d of out.docs) {
+    const teamId = d.id;
+    const teamRef = d.ref;
+    await db.runTransaction(async (tx) => {
+      const t = await tx.get(teamRef);
+      if (!t.exists) return;
+      const back = resumeFromFlash(t.data() as RunTeam, id, now.getTime());
+      if (back) tx.update(teamRef, { ...back, updatedAt: now.toISOString() });
+    }).catch((e) => functions.logger.warn('deactivateFlashMission resume failed', { runId, teamId, err: String(e) }));
+  }
+  await writeAuditLog({ ownerUid, gameId, runId, operatorId, actionType: 'flash_ended', previousValue: 'active', newValue: 'ended', reason: '', flashId: id });
+  return { ok: true };
+});
+
+export const claimFlashMission = loggedCallable('claimFlashMission', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'claimFlashMission');
+  const { flashId, ownerUid, gameId, runId, code } = data as { flashId?: string; ownerUid?: string; gameId?: string; runId?: string; code?: string };
+  const id = validate(() => requireString(flashId, 'flashId', 128));
+  const { ctx, teamId, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  const ref = flashRef(ctx.ownerUid, ctx.gameId, ctx.runId, id);
+  const nowIso = new Date().toISOString();
+  await db.runTransaction(async (tx) => {
+    const [f, t] = await Promise.all([tx.get(ref), tx.get(teamRef)]);
+    if (!f.exists) throw new functions.https.HttpsError('not-found', 'Flash mission not found');
+    const flash = f.data() as FlashMissionDoc;
+    const team = t.data() as RunTeam;
+    const verdict = flashClaimVerdict({ flash, flashId: id, teamId, team, nowMs: Date.now() });
+    if (verdict !== 'ok') throw new functions.https.HttpsError('failed-precondition', `FLASH_${verdict.toUpperCase()}`);
+    // D6: ONLY first mode writes the flash document (its holder), so a "many" flash costs every
+    // listening phone nothing per claim, and many teams claiming at once never contend on one doc.
+    // Two first-mode claims racing both write `takenBy`: the transaction retries the loser, which
+    // then reads the holder and is refused 'taken'.
+    if (flash.claimMode === 'first') tx.update(ref, { takenBy: teamId });
+    tx.update(teamRef, {
+      [`flashClaims.${id}`]: { at: nowIso, status: 'claimed' },
+      flashSuspension: { flashId: id, taskId: team.activeTaskId ?? null, at: nowIso },
+      updatedAt: nowIso,
+    });
+  });
+  return { ok: true };
+});
+
+export const releaseFlashMission = loggedCallable('releaseFlashMission', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'releaseFlashMission');
+  const { flashId, ownerUid, gameId, runId, code } = data as { flashId?: string; ownerUid?: string; gameId?: string; runId?: string; code?: string };
+  const id = validate(() => requireString(flashId, 'flashId', 128));
+  const { ctx, teamId, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  const ref = flashRef(ctx.ownerUid, ctx.gameId, ctx.runId, id);
+  const now = new Date();
+  await db.runTransaction(async (tx) => {
+    const [f, t] = await Promise.all([tx.get(ref), tx.get(teamRef)]);
+    const team = t.data() as RunTeam;
+    const claim = team?.flashClaims?.[id];
+    const flash = f.data() as FlashMissionDoc | undefined;
+    if (claim?.status === 'claimed' && flash?.takenBy === teamId) tx.update(ref, { takenBy: admin.firestore.FieldValue.delete() });
+    const back = resumeFromFlash(team, id, now.getTime());
+    if (back || claim?.status === 'claimed') {
+      tx.update(teamRef, {
+        ...(back ?? {}),
+        ...(claim?.status === 'claimed' ? { [`flashClaims.${id}.status`]: 'released' } : {}),
+        updatedAt: now.toISOString(),
+      });
+    }
+  });
+  return { ok: true };
+});
+
+export const submitFlashMission = loggedCallable('submitFlashMission', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'submitFlashMission');
+  const { flashId, ownerUid, gameId, runId, code, mediaUrl: rawMedia, posterUrl: rawPoster } = data as {
+    flashId?: string; ownerUid?: string; gameId?: string; runId?: string; code?: string; mediaUrl?: string; posterUrl?: string;
+  };
+  const id = validate(() => requireString(flashId, 'flashId', 128));
+  const { ctx, teamId, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  const ref = flashRef(ctx.ownerUid, ctx.gameId, ctx.runId, id);
+  const pre = (await ref.get()).data() as FlashMissionDoc | undefined;
+  if (!pre) throw new functions.https.HttpsError('not-found', 'Flash mission not found');
+  const needsMedia = pre.doneBy === 'photo' || pre.doneBy === 'video';
+  if (needsMedia) validate(() => requireStorageUrl(rawMedia, ctx.runId, uid, storageOriginOpts()));
+  const poster = typeof rawPoster === 'string' && rawPoster.trim() ? rawPoster.trim() : undefined;
+  if (poster) validate(() => requireStorageUrl(poster, ctx.runId, uid, storageOriginOpts()));
+  const now = new Date();
+  const nowIso = now.toISOString();
+  let approved = false;
+  await db.runTransaction(async (tx) => {
+    const [f, t] = await Promise.all([tx.get(ref), tx.get(teamRef)]);
+    const flash = f.data() as FlashMissionDoc;
+    const team = t.data() as RunTeam & { bonusPenalty?: number; scoreLedger?: unknown[] };
+    const claim = team.flashClaims?.[id];
+    if (claim?.status !== 'claimed') {
+      throw new functions.https.HttpsError('failed-precondition', 'FLASH_NOT_CLAIMED');
+    }
+    approved = flash?.requiresApproval !== true;
+    const back = resumeFromFlash(team, id, now.getTime()) ?? {};
+    const points = Math.max(0, Math.round(Number(flash?.bonusPoints ?? 0)));
+    const award = approved && points > 0 ? flashAward(team, points, id, flashReason(flash), 'auto', nowIso) : {};
+    // D6: the sending is recorded on the TEAM only; the flash document is not written.
+    tx.update(teamRef, {
+      [`flashClaims.${id}`]: {
+        at: claim.at ?? nowIso, status: approved ? 'approved' : 'submitted', submittedAt: nowIso,
+        ...(needsMedia ? { mediaUrl: String(rawMedia) } : {}), ...(poster ? { posterUrl: poster } : {}),
+        ...(approved ? { reviewedAt: nowIso } : {}),
+      },
+      ...back, ...award, updatedAt: nowIso,
+    });
+  });
+  // THROTTLED, never forced (overnight 2026-09-29): a "many" flash mission sends every team's
+  // submission within seconds, and a forced refresh reads every team each time (measured 20 reads
+  // per sending at 12 teams; ~10,000 for one flash at 100 teams). The 20 s refresh carries it.
+  if (approved) await maybeRefreshLeaderboardSnapshot(ctx.ownerUid, ctx.gameId, ctx.runId);
+  return { ok: true, approved };
+});
+
 // ─── pushFlashMission ─────────────────────────────────────────────────────────
 
 export const pushFlashMission = loggedCallable('pushFlashMission', async (data, context) => {
@@ -1286,8 +1520,9 @@ export const pushFlashMission = loggedCallable('pushFlashMission', async (data, 
   const {
     ownerUid, gameId, runId,
     title, titleHe, description, descriptionHe,
-    bonusPoints, ttlSeconds,
+    bonusPoints, ttlSeconds, claimMode, doneBy, requiresApproval,
   } = data as {
+    claimMode?: unknown; doneBy?: unknown; requiresApproval?: unknown;
     ownerUid: string;
     gameId: string;
     runId: string;
@@ -1324,6 +1559,10 @@ export const pushFlashMission = loggedCallable('pushFlashMission', async (data, 
     isActive: true,
     createdAt: nowIso,
     createdBy: context.auth!.uid,
+    // flash-missions-v2: how it is taken and done. Absent (an older console) = announce only, as before.
+    ...((FLASH_MODES as readonly unknown[]).includes(claimMode) && (FLASH_DONE_BY as readonly unknown[]).includes(doneBy)
+      ? { claimMode, doneBy, requiresApproval: requiresApproval === true }
+      : {}),
   });
 
   // Mirror to Slack/Teams if the game has a webhook configured (best-effort).
@@ -1338,6 +1577,9 @@ export const pushFlashMission = loggedCallable('pushFlashMission', async (data, 
 
   return { id: ref.id, expiresAt };
 });
+
+
+
 
 
 // ─── Live photo feed (change: live-photo-feed) ─────────────────────────────────
@@ -1563,7 +1805,7 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   );
   // Staff hold (staff-console-field-ops) — before the code comparison, so a held
   // team cannot use this path as a code oracle while parked.
-  assertTeamNotHeld(team);
+  assertTeamMayAdvance(team);
   // IDOR guard (auth-anticheat row 38): a participant may only verify for their
   // OWN team. A payload teamId that isn't the caller's team is rejected.
   if (teamId && teamId !== resolvedTeamId) {
@@ -1735,7 +1977,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   const senderDevice = (team.devices ?? []).find((d) => d.uid === uid);
   const submittedBy = { uid, name: String(senderDevice?.name ?? (uid === team.id ? team.displayName : '') ?? '').slice(0, 60) };
   // Staff hold (staff-console-field-ops) — a parked team cannot bank a submission.
-  assertTeamNotHeld(team);
+  assertTeamMayAdvance(team);
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
   // OWN team. A payload teamId that isn't the caller's team is rejected.
   if (teamId && teamId !== resolvedTeamId) {

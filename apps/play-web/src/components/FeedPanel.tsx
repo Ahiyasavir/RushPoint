@@ -190,8 +190,8 @@ export default function FeedPanel({
   //     believing the photo was gone from everyone's feed while it was still up.
   async function moderateItem(item: FeedItem, restore: boolean) {
     const confirmed = restore
-      ? await dialog.confirm(t.feed.feedRestoreConfirm)
-      : await dialog.confirm(t.feed.feedHideConfirm, { danger: true });
+      ? await dialog.confirm(t.feed.feedRestoreConfirm, { confirmLabel: t.feed.feedRestore })
+      : await dialog.confirm(t.feed.feedHideConfirm, { confirmLabel: t.feed.feedHide, danger: true });
     if (!confirmed) return;
     setPending(item.id, true);
     try {
@@ -223,7 +223,7 @@ export default function FeedPanel({
   }
 
   async function muteTeam(item: FeedItem) {
-    if (!(await dialog.confirm(t.feed.feedMuteTeamConfirm({ team: item.teamName })))) return;
+    if (!(await dialog.confirm(t.feed.feedMuteTeamConfirm({ team: item.teamName }), { confirmLabel: t.feed.feedMuteTeam }))) return;
     persistMute(addMutedTeam(mute, item.teamId));
   }
 

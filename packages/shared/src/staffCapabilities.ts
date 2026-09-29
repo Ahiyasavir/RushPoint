@@ -61,10 +61,15 @@ export const STAFF_CAPABILITY_BY_CALLABLE: Readonly<Record<string, StaffCapabili
   skipTaskForTeam: 'route',
   forceAssignTask: 'route',
   returnTeamTo: 'route',
+  // located-mission-arrival: letting a team in where GPS cannot prove it is a routing act.
+  markTeamArrived: 'route',
   setTeamHold: 'hold',
   pushAnnouncement: 'broadcast',
   deactivateAnnouncement: 'broadcast',
   pushFlashMission: 'broadcast',
+  // flash-missions-v2
+  deactivateFlashMission: 'broadcast',
+  reviewFlashMission: 'review',
   sendTeamChatMessage: 'chat',
   hideFeedItem: 'feed',
   setRunTaskStatus: 'tasks',

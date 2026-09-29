@@ -36,10 +36,15 @@ check('a REVEALED hidden-location task with real coordinates is refused',
 check('a hidden-location task cannot be bypassed via smart.stationCoords',
   navigationTarget({ locationHidden: true, smart: { stationCoords: REAL } }) === null);
 
-check('a SEALED task (arrival still pending) is refused',
-  navigationTarget({ arrivalPending: true, coordinates: REAL }) === null);
-check('arrival-pending wins even without the hidden flag',
-  navigationTarget({ arrivalPending: true, smart: { stationCoords: REAL } }) === null);
+check('a SEALED hidden task (arrival still pending) is refused',
+  navigationTarget({ locationHidden: true, arrivalPending: true, coordinates: REAL }) === null);
+// located-mission-arrival (decision 2026-09-28): every located mission is now sealed until arrival,
+// and its point is ON the map on purpose — walking there is how it opens. Navigating to it must
+// work. The hidden mission's stub always carries `locationHidden: true`, so it stays refused above.
+check('a SEALED visible located mission IS navigable (that is how it opens)',
+  navigationTarget({ arrivalPending: true, coordinates: REAL }) !== null);
+check('... via its station coordinates too',
+  navigationTarget({ arrivalPending: true, smart: { stationCoords: REAL } }) !== null);
 
 check('a locationless task is refused',
   navigationTarget({ locationless: true, coordinates: REAL }) === null);

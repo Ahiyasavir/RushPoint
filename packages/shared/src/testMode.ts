@@ -161,6 +161,25 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
   copy(out, t, 'heldReason');
   copy(out, t, 'heldBy');
   copy(out, t, 'heldMs');
+  // team-lifecycle-controls: the phone must be able to say the organizers removed the team,
+  // and why. NOT `removedBy`: that is an operator uid.
+  copy(out, t, 'removed');
+  copy(out, t, 'removedReason');
+  // flash-missions-v2: the phone shows the flash mission it took, and returns from it.
+  copy(out, t, 'flashSuspension');
+  // flash-missions-v2 D6: the team's own claims, so the phone can say "sent, waiting" or "you won".
+  // STATUS ONLY (no media url, no review stamps), and under a sealed score an approve/reject
+  // verdict is a result, so it reads as "sent" (found by playing it: without this the phone that
+  // had just sent its flash mission read "another team already took it").
+  if (t.flashClaims && typeof t.flashClaims === 'object') {
+    const claims: Record<string, { status: string }> = {};
+    for (const [flashId, c] of Object.entries(t.flashClaims as Record<string, unknown>)) {
+      const status = (c as { status?: unknown } | null)?.status;
+      if (typeof status !== 'string') continue;
+      claims[flashId] = { status: sealed && (status === 'approved' || status === 'rejected') ? 'submitted' : status };
+    }
+    out.flashClaims = claims;
+  }
   copy(out, t, 'outOfBounds');
   copy(out, t, 'outOfBoundsAt');
   copy(out, t, 'outOfBoundsOverrideUntil');

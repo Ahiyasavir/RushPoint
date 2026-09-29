@@ -432,9 +432,15 @@ export async function claimSpecificTask(
   ownerUid: string,
   gameId: string,
   runId: string,
-  override: boolean,
+  // `true` keeps the original meaning (waive release, expiry and prerequisites; never capacity).
+  // A SET waives exactly the listed blockers (change: route-team-to-mission) — including
+  // `stationFull` when the operator confirmed sending a team to a full station.
+  override: boolean | ReadonlySet<string>,
   launchedAt: string | undefined,
 ): Promise<{ ok: boolean; reason?: NoAssignmentReason }> {
+  const waive: ReadonlySet<string> = override === true
+    ? new Set(['notReleased', 'expired', 'prerequisites'])
+    : override === false ? new Set() : override;
   const runRef = db.doc(runPath(ownerUid, gameId, runId));
 
   return withLockRetry(() => db.runTransaction(async (tx) => {
@@ -449,15 +455,13 @@ export async function claimSpecificTask(
     if (completedTaskIds.includes(task.id)) return { ok: false, reason: 'none' as const };
     // Never overridable — see the header.
     if (!isTaskAssignable(task, runData?.taskStatusOverrides)) return { ok: false, reason: 'none' as const };
-    if (!override) {
-      if (!isReleased(task, launchedAt, nowMs)) return { ok: false, reason: 'allLocked' as const };
-      if (isExpired(task, launchedAt, nowMs)) return { ok: false, reason: 'expired' as const };
-      if (!isUnlocked(task, completedTaskIds)) return { ok: false, reason: 'allLocked' as const };
-    }
+    if (!waive.has('notReleased') && !isReleased(task, launchedAt, nowMs)) return { ok: false, reason: 'allLocked' as const };
+    if (!waive.has('expired') && isExpired(task, launchedAt, nowMs)) return { ok: false, reason: 'expired' as const };
+    if (!waive.has('prerequisites') && !isUnlocked(task, completedTaskIds)) return { ok: false, reason: 'allLocked' as const };
     // The cap check and the increment are in ONE transaction, exactly as in
     // assignTask — a check-then-increment split here would let two concurrent
     // force-assigns both pass a cap of 1.
-    if (!task.locationless && (taskCounts[task.id] ?? 0) >= (task.maxConcurrentTeams ?? 3)) {
+    if (!waive.has('stationFull') && !task.locationless && (taskCounts[task.id] ?? 0) >= (task.maxConcurrentTeams ?? 3)) {
       return { ok: false, reason: 'stationsFull' as const };
     }
 

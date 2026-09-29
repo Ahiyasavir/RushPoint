@@ -101,6 +101,19 @@ export const PRIVILEGED_CALLABLES = {
     'Staff override that stops ONE identified team from advancing at all and pauses its race '
     + 'clock. Both directions change that team\'s standing (held time is excluded from scoring), '
     + 'so "who parked this team, when, and why" must stay answerable after the event.',
+  reviewFlashMission:
+    'Awards (or refuses) a flash mission\'s points to ONE identified team, and can award them by '
+    + 'hand. It moves a score, so "who awarded this, to whom, for what" must stay answerable (flash-missions-v2).',
+  deactivateFlashMission:
+    'Ends a live flash mission for every team and sends each team out on it back to its mission '
+    + '(flash-missions-v2).',
+  markTeamArrived:
+    'Opens a located mission for ONE team without its GPS proving arrival. It lets a team past a '
+    + 'physical gate, so "who let them in, where, and why" must stay answerable (located-mission-arrival).',
+  setTeamRemoved:
+    'Takes ONE identified team out of a live run (it can no longer advance and leaves every '
+    + 'standing) or brings it back. It changes who is on the leaderboard, so "who removed this '
+    + 'team, when, and why" must stay answerable after the event (team-lifecycle-controls).',
   updateStaffCode:
     'Changes what every person on one staff code may do during a live run (score, route, review...), '
     + 'or closes the code to new sign-ins. "Who gave the marshals the power to add points, and when" '
@@ -166,7 +179,7 @@ export const PRIVILEGED_CALLABLES = {
 
 // ── Markers ──────────────────────────────────────────────────────────────────
 
-const AUTH_MARKERS = /\b(requireAuth|assertAdmin|assertStaffOrOwner|assertStaffCan|assertOwner|assertRunStaff|assertController)\s*\(/;
+const AUTH_MARKERS = /\b(requireAuth|assertAdmin|assertStaffOrOwner|assertStaffCan|assertOwner|assertOwnerOrPlatformAdmin|assertRunStaff|assertController)\s*\(/;
 // The older inline idiom, still used verbatim in ~20 call sites; equivalent to
 // requireAuth and must count as conformant, not as a gap to be churned.
 const INLINE_AUTH = /if\s*\(\s*!\s*context\.auth\s*\)[\s\S]{0,200}?['"]unauthenticated['"]/;

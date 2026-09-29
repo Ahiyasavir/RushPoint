@@ -49,7 +49,9 @@ export interface NavTarget { lat: number; lng: number }
  */
 export function navigationTarget(task: NavigableTask | null | undefined): NavTarget | null {
   if (!task) return null;
-  if (task.arrivalPending) return null;
+  // A sealed HIDDEN mission is refused by `locationHidden` (its stub always carries it). A sealed
+  // VISIBLE located mission is navigable: its point is on the map, and walking there is how it
+  // opens (change: located-mission-arrival).
   if (task.locationHidden) return null;
   if (task.locationless) return null;
 

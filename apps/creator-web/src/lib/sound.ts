@@ -66,3 +66,45 @@ export function playAlert(): void {
     /* audio glitch — never break the surrounding flow */
   }
 }
+
+// ── The review-wait alarm (change: review-wait-alarm) ─────────────────────────
+// Louder, longer and lower than the SOS two-tone, so the organizer can tell "a team is waiting
+// for you" from "a team is in trouble" without looking. Same rules: drop, never queue, never throw.
+const URGENT_FREQS = [523, 659, 784, 659, 523, 659, 784];
+const URGENT_DURATION_MS = 900;
+const URGENT_GAIN = 0.35;
+
+export function playUrgent(): void {
+  try {
+    unlockAudio();
+    if (!ctx || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    const step = URGENT_DURATION_MS / 1000 / URGENT_FREQS.length;
+    URGENT_FREQS.forEach((freq, i) => {
+      const osc = ctx!.createOscillator();
+      const gainNode = ctx!.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      const start = now + i * step;
+      const end = start + step * 0.9;
+      gainNode.gain.setValueAtTime(0.0001, start);
+      gainNode.gain.exponentialRampToValueAtTime(URGENT_GAIN, start + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, end);
+      osc.connect(gainNode).connect(ctx!.destination);
+      osc.start(start);
+      osc.stop(end);
+    });
+  } catch {
+    /* audio glitch — never break the surrounding flow */
+  }
+}
+
+/**
+ * Can the console make a sound right now? `locked` = the browser has not allowed this page to
+ * play audio yet (no click since it loaded): every alert would be dropped SILENTLY, so the console
+ * shows a control to enable sound instead of letting the organizer believe it is on.
+ */
+export function audioState(): 'running' | 'locked' | 'unavailable' {
+  if (!audioCtor()) return 'unavailable';
+  return ctx && ctx.state === 'running' ? 'running' : 'locked';
+}

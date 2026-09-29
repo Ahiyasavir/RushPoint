@@ -97,12 +97,12 @@ describe('buildRunConsolePlan — catalogue totality', () => {
   it('catalogues exactly the documented set of panels', () => {
     expect([...ALL_PANEL_IDS].sort()).toEqual([
       'alerts', 'analytics', 'broadcast', 'chat', 'feed', 'feedback', 'finalStandings',
-      'flashMission', 'heatmap', 'hotZone', 'joinShare', 'liveMap', 'liveStandings',
+      'flashMission', 'heatmap', 'hotZone', 'inbox', 'joinShare', 'liveMap', 'liveStandings',
       'mediaGallery', 'photoReview', 'runSummary', 'shareScreens', 'staffChannel', 'staffInvite',
       'startTeams', 'stationQr', 'survey', 'taskAvailability', 'teams', 'trackables',
       'zones',
     ]);
-    expect(ALL_PANEL_IDS.length).toBe(26);
+    expect(ALL_PANEL_IDS.length).toBe(27); // + inbox (run-console-simplify)
   });
 
   it('renders every catalogued panel somewhere across the three run statuses', () => {
@@ -185,10 +185,12 @@ describe('buildRunConsolePlan — status gating', () => {
     expect(planHasPanel(plan, 'runSummary')).toBe(true);
   });
 
-  it('drops the whole game mechanics group on a finished run', () => {
-    const ids = buildRunConsolePlan(fullState('finished')).groups.map((g) => g.id);
-    expect(ids).not.toContain('gameMechanics');
-    expect(ids).toContain('afterTheRun');
+  it('keeps nothing live in the game group on a finished run (only the media browsed afterwards)', () => {
+    const plan = buildRunConsolePlan(fullState('finished'));
+    const game = plan.groups.find((g) => g.id === 'gameMechanics');
+    // run-console-simplify: the feed and the media gallery moved to Game; nothing you OPERATE stays.
+    for (const id of game?.panels ?? []) expect(['feed', 'mediaGallery'], id).toContain(id);
+    expect(plan.groups.map((g) => g.id)).toContain('afterTheRun');
   });
 });
 
@@ -341,9 +343,10 @@ describe('resolveSection', () => {
   const live = buildRunConsoleSections(buildRunConsolePlan(fullState('live')));
 
   it('defaults to the section an organizer needs during an incident', () => {
-    expect(DEFAULT_SECTION).toBe('teamsAndScores');
-    expect(resolveSection(live, null)).toBe('teamsAndScores');
-    expect(resolveSection(live, undefined)).toBe('teamsAndScores');
+    // run-console-simplify: "עכשיו" (what is waiting for you) is the live console's home.
+    expect(DEFAULT_SECTION).toBe('moderation');
+    expect(resolveSection(live, null)).toBe('moderation');
+    expect(resolveSection(live, undefined)).toBe('moderation');
   });
 
   it('honours a valid stored selection', () => {
@@ -352,7 +355,7 @@ describe('resolveSection', () => {
 
   it('falls back to the default rather than showing nothing for a stale or junk id', () => {
     for (const bad of ['', 'primary', 'somethingRemoved', '{']) {
-      expect(resolveSection(live, bad), bad).toBe('teamsAndScores');
+      expect(resolveSection(live, bad), bad).toBe('moderation');
     }
   });
 
@@ -911,6 +914,13 @@ describe('buildRunSignals — the catalogue', () => {
     expect(ids).not.toContain('photoPending');
   });
 
+  it('says nothing about who joined while the team list has not loaded yet (overnight 2026-09-29)', () => {
+    // Played: opening the console of a run with five teams, the strip said "nobody has joined yet"
+    // for the seconds before the first team poll landed. An unknown count is not a zero.
+    const ids = buildRunSignals({ ...quietSignals('live'), teamCount: null, unstartedTeamCount: 0 }).map((s) => s.id);
+    expect(ids).not.toContain('nobodyJoined');
+  });
+
   it('does not nag about unstarted teams when nobody has joined at all', () => {
     const ids = buildRunSignals({ ...quietSignals('live'), teamCount: 0, unstartedTeamCount: 0 })
       .map((s) => s.id);
@@ -1043,10 +1053,10 @@ describe('defaultSection / resolveSectionWithReason', () => {
   const live = buildRunConsoleSections(buildRunConsolePlan(fullState('live')));
   const finished = buildRunConsoleSections(buildRunConsolePlan(fullState('finished')));
 
-  it('opens a finished run on its reports and a live run on its teams', () => {
+  it('opens a finished run on its reports and a live run on "Now"', () => {
     expect(defaultSection('finished')).toBe('afterTheRun');
-    expect(defaultSection('live')).toBe('teamsAndScores');
-    expect(defaultSection('draft')).toBe('teamsAndScores');
+    expect(defaultSection('live')).toBe('moderation');
+    expect(defaultSection('draft')).toBe('moderation');
     expect(DEFAULT_SECTION).toBe(defaultSection('live'));
     expect(resolveSection(finished, null, 'finished')).toBe('afterTheRun');
   });
@@ -1063,7 +1073,7 @@ describe('defaultSection / resolveSectionWithReason', () => {
     for (const bad of [null, undefined, '', '{', 'somethingRemoved', 'primary']) {
       const r = resolveSectionWithReason(live, bad, 'live');
       expect(r.reason, String(bad)).toBe('default');
-      expect(r.id, String(bad)).toBe('teamsAndScores');
+      expect(r.id, String(bad)).toBe('moderation');
     }
   });
 
@@ -1188,7 +1198,7 @@ describe('teamRowActions — a row that fits a phone', () => {
         const all = [...inline, ...overflow];
         expect(new Set(all).size, JSON.stringify(team)).toBe(all.length);
         expect([...all].sort()).toEqual(
-          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'sendBack', 'skipStage', 'skipTask'].sort(),
+          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'holdTeam', 'removeTeam', 'routeTeam', 'sendBack', 'skipStage', 'skipTask'].sort(),
         );
       }
     }
@@ -1241,7 +1251,7 @@ describe('teamRowActions — a row that fits a phone', () => {
     const stuckRow = teamRowActions({}, stuck);
     expect(stuckRow.inline).toEqual(['skipTask']);
     expect(stuckRow.overflow).not.toContain('skipTask');
-    expect(stuckRow.overflow).toEqual(['skipStage', 'sendBack', 'adjustTeamScore']);
+    expect(stuckRow.overflow).toEqual(['skipStage', 'sendBack', 'routeTeam', 'holdTeam', 'adjustTeamScore', 'removeTeam']);
   });
 
   it('promotes nothing for a calm or merely watched team', () => {
@@ -1257,6 +1267,51 @@ describe('teamRowActions — a row that fits a phone', () => {
     const both = teamRowActions({ outOfBounds: true }, stuck);
     expect(both.inline).toEqual(['clearTeamOutOfBounds']);
     expect(both.overflow).toContain('skipTask');
+  });
+
+  // team-lifecycle-controls (field report 2026-09-27): start ONE team, pause, remove.
+  it('puts "start this team" on the row of a team that has not started', () => {
+    const row = teamRowActions({ launched: false }, ok);
+    expect(row.inline).toEqual(['startTeam']);
+    // Pausing or routing a team that is not playing means nothing.
+    expect(row.overflow).not.toContain('holdTeam');
+    expect(row.overflow).not.toContain('routeTeam');
+    expect(row.overflow).toContain('removeTeam');
+    // Unknown launch state is NOT "not started": the row stays as it was.
+    expect(teamRowActions({}, ok).inline).toEqual([]);
+  });
+
+  it('offers resume, on the row, for a paused team', () => {
+    const row = teamRowActions({ launched: true, held: true }, stuck);
+    expect(row.inline).toEqual(['resumeTeam']);
+    expect([...row.inline, ...row.overflow]).not.toContain('holdTeam');
+    // A safety release still outranks it.
+    expect(teamRowActions({ launched: true, held: true, outOfBounds: true }, ok).inline).toEqual(['clearTeamOutOfBounds']);
+  });
+
+  it('offers only "bring back" for a removed team', () => {
+    expect(teamRowActions({ launched: true, removed: true }, stuck)).toEqual({ inline: [], overflow: ['restoreTeam'] });
+  });
+
+  // route-team-to-mission: "send to a mission" on every playing team's row.
+  it('offers "send to a mission" to a playing team, confirmed', () => {
+    expect(teamRowActions({ launched: true }, ok).overflow).toContain('routeTeam');
+    expect(classifyRunAction('routeTeam')).toBe('cautionary');
+    expect(runActionNeedsConfirm('routeTeam')).toBe(true);
+    expect(runActionConsequence('routeTeam').audience).toBe('oneTeam');
+  });
+
+  it('classifies the lifecycle actions', () => {
+    expect(classifyRunAction('startTeam')).toBe('routine');
+    expect(runActionNeedsConfirm('startTeam')).toBe(false);
+    expect(classifyRunAction('resumeTeam')).toBe('routine');
+    expect(classifyRunAction('restoreTeam')).toBe('routine');
+    expect(classifyRunAction('holdTeam')).toBe('cautionary');
+    expect(classifyRunAction('removeTeam')).toBe('cautionary');
+    expect(runActionNeedsConfirm('removeTeam')).toBe(true);
+    for (const id of ['startTeam', 'holdTeam', 'resumeTeam', 'removeTeam', 'restoreTeam'] as const) {
+      expect(runActionConsequence(id).audience, id).toBe('oneTeam');
+    }
   });
 });
 
@@ -1414,14 +1469,14 @@ describe('run-console-tabs-up-front: where the console opens', () => {
     expect(defaultSection('live', 0)).toBe('shareAndScreens');
     expect(defaultSection('draft', 0)).toBe('shareAndScreens');
   });
-  it('opens on teams once anyone has joined', () => {
-    expect(defaultSection('live', 3)).toBe('teamsAndScores');
+  it('opens on "Now" once anyone has joined', () => {
+    expect(defaultSection('live', 3)).toBe('moderation');
   });
   it('a finished run still opens on the reports', () => {
     expect(defaultSection('finished', 0)).toBe('afterTheRun');
   });
-  it('an unknown team count keeps the old live default', () => {
-    expect(defaultSection('live')).toBe('teamsAndScores');
+  it('an unknown team count keeps the live default', () => {
+    expect(defaultSection('live')).toBe('moderation');
   });
   it('resolution uses the team-aware default', () => {
     const sections = buildRunConsoleSections(buildRunConsolePlan(emptyState('live')));

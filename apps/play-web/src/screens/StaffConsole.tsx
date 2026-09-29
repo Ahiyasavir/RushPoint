@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db, signInStaff, uid } from '../services/firebase';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { useStaffAccess } from '../hooks/useStaffAccess';
@@ -14,12 +14,14 @@ import {
   adjustTeamScore,
   sendTeamChatMessage,
   setTeamHold,
-  forceAssignTask,
+  routeTeam,
+  markTeamArrived,
   clearTeamOutOfBounds,
   skipTaskForTeam,
   // send-team-back
   returnTeamTo, getRunOutline, refreshStaffSession, type SendBackTarget,
   sendStaffChannelMessage,
+  reviewFlashMission, deactivateFlashMission,
 } from '../services/calls';
 import {
   FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, chatSeenMarker, countUnreadChatMessages,
@@ -35,10 +37,18 @@ import {
   sendBackTargets,
   // quick-dial-and-actions 2.5: the same call targets the organizer's team page offers.
   teamCallTargets, toTelHref, toWhatsAppHref, type PublicContact,
+  // review-wait-alarm: the same pure verdict the organizer's console reads.
+  reviewWaitAlarm, reviewRowTone, REVIEW_ALARM_MS,
+  // Overnight 2026-09-29: counts on the quick-bar chips.
+  staffQuickBadges,
+  type WaivableKind,
 } from '@rushpoint/shared';
 import { filterTeamsByName } from '../lib/staffTeamFilter';
+import { staffFlashLists } from '../lib/staffFlash';
 import { TAP_TARGET } from '../lib/interaction';
 import StaffQuickBar from '../components/StaffQuickBar';
+import StaffRoutePanel from '../components/StaffRoutePanel';
+import { staffLetInTarget } from '../lib/staffRouteList';
 import type { StaffCtx } from '../lib/playRoute';
 import {
   loadStaffSession,
@@ -99,6 +109,8 @@ interface TeamRow {
   stages?: unknown;
   /** Registration answers, for the call buttons (quick-dial-and-actions 2.5). */
   registrationData?: unknown;
+  /** This team's flash-mission claims (flash-missions-v2 design D6: they live on the team). */
+  flashClaims?: Record<string, { status?: unknown; at?: unknown; submittedAt?: unknown; mediaUrl?: unknown } | null | undefined> | null;
 }
 
 /** Stage and mission names for the run (getRunOutline), since staff cannot read the game. */
@@ -107,6 +119,8 @@ type RunOutline = {
   stages: { id: string; title: string; tasks: { id: string; title: string; spot?: { lat: number; lng: number; hidden?: boolean } }[] }[];
   /** quick-dial-and-actions 2.5: the game's phone-type registration fields (ids + labels). */
   phoneFields?: { id: string; label: string }[];
+  /** located-mission-arrival: this run opens located missions only on arrival. */
+  arrivalGate?: boolean;
 };
 
 export default function StaffConsole({ ctx, onExit }: { ctx: StaffCtx | null; onExit: () => void }) {
@@ -324,6 +338,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           activeTaskId?: string | null;
           stages?: { status?: string; tasks?: { taskId?: string; status?: string }[] }[];
           registrationData?: unknown;
+          flashClaims?: TeamRow['flashClaims'];
           taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' | 'video'; submittedBy?: { uid?: unknown; name?: unknown } | null }>;
         };
         // Which missions force-assign may offer: the still-unassigned ones in the
@@ -348,6 +363,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           assignableTaskIds,
           stages: td.stages,
           registrationData: td.registrationData,
+          flashClaims: td.flashClaims ?? null,
         });
         const subs = td.taskSubmissions ?? {};
         for (const [taskId, sub] of Object.entries(subs)) {
@@ -422,6 +438,29 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     }, (e) => setReadErr(classifyStaffError(e)));
   }, [ownerUid, gameId, runId]);
 
+  // ── The review-wait alarm (change: review-wait-alarm) ─────────────────────────
+  // Same rule as the organizer's console: a submission waiting 20 s raises a pinned banner and
+  // repeats the urgent cue every 20 s until it is judged or muted. The 1 s clock runs only while
+  // something is waiting; the verdict itself is pure (reviewWaitAlarm).
+  const hasPendingReview = pending.length > 0;
+  const [reviewNow, setReviewNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasPendingReview) return;
+    const id = window.setInterval(() => setReviewNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hasPendingReview]);
+  const [alarmMutedUntil, setAlarmMutedUntil] = useState<number | null>(null);
+  const reviewAlarm = reviewWaitAlarm(can('review') ? pending : [], reviewNow, { mutedUntilMs: alarmMutedUntil });
+  const lastUrgentAt = useRef(0);
+  useEffect(() => {
+    if (reviewAlarm.level === 'none') { lastUrgentAt.current = 0; return; }
+    if (!reviewAlarm.playSound) return;
+    if (reviewNow - lastUrgentAt.current >= REVIEW_ALARM_MS) {
+      lastUrgentAt.current = reviewNow;
+      feedback('alert');
+    }
+  }, [reviewAlarm.level, reviewAlarm.playSound, reviewNow]);
+
   async function review(s: PendingSubmission, approved: boolean) {
     try {
       await reviewStationSubmission({ ...ctx, teamId: s.teamId, taskId: s.taskId, approved });
@@ -467,7 +506,8 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     | { kind: 'hold'; held: boolean; reason?: string }
     | { kind: 'clearOob' }
     | { kind: 'skipTask' }
-    | { kind: 'forceAssign'; taskId: string; override: boolean }
+    | { kind: 'route'; taskId: string; title: string; accept: WaivableKind[]; when: 'now' | 'after' }
+    | { kind: 'letIn'; taskId: string }
     | { kind: 'sendBack'; target: SendBackTarget; title: string };
 
   async function runTeamOp(team: TeamRow, op: TeamOp) {
@@ -490,7 +530,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           lines = null;
         }
         const message = lines ? staffSkipPreviewText(lines, t) : t.staff.skipTaskConfirm;
-        if (!(await dialog.confirm(message))) return;
+        if (!(await dialog.confirm(message, { confirmLabel: t.staff.skipTask }))) return;
         await skipTaskForTeam({ ...ctx, teamId: team.id });
       } else if (op.kind === 'sendBack') {
         // send-team-back: the server's own preview, then the plain confirm, then the real call.
@@ -506,10 +546,15 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         if (!(await dialog.confirm(message, { confirmLabel: t.staff.sendBack }))) return;
         await returnTeamTo({ ...ctx, teamId: team.id, target: op.target, reason: 'staff send back' });
         setAdjustAck((a) => ({ ...a, [team.id]: t.staff.sendBackDone }));
+      } else if (op.kind === 'letIn') {
+        // located-mission-arrival: the team is at the door and GPS will not say so.
+        await markTeamArrived({ ...ctx, teamId: team.id, taskId: op.taskId, reason: 'staff let in' });
+        setAdjustAck((a) => ({ ...a, [team.id]: t.staff.letInDone }));
       } else {
-        await forceAssignTask({
-          ...ctx, teamId: team.id, taskId: op.taskId, override: op.override,
-        });
+        // route-team-to-mission: exactly the blockers the marshal confirmed; the server recomputes
+        // them and refuses if the list changed in between.
+        const res = await routeTeam({ ...ctx, teamId: team.id, taskId: op.taskId, accept: op.accept, when: op.when, reason: 'staff route' });
+        setAdjustAck((a) => ({ ...a, [team.id]: res.queued ? t.staff.route.queued({ title: op.title }) : t.staff.route.sent({ title: op.title }) }));
       }
       // No optimistic local mutation anywhere above: the open snapshot is the single
       // source of truth for these flags, so the row re-renders from the server's
@@ -543,7 +588,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         </div>
         <button
           className="inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-zinc-500 text-sm"
-          onClick={() => { void dialog.confirm(t.staff.signOutConfirm, { danger: true }).then((ok) => { if (ok) onSignOut(); }); }}
+          onClick={() => { void dialog.confirm(t.staff.signOutConfirm, { confirmLabel: t.staff.signOut, danger: true }).then((ok) => { if (ok) onSignOut(); }); }}
         >{t.staff.signOut}</button>
       </header>
 
@@ -559,7 +604,12 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       )}
 
       {/* ── SOS alerts ── */}
-      <StaffQuickBar runId={runId} can={(c) => can(c as never)} />
+      <StaffQuickBar runId={runId} can={(c) => can(c as never)}
+        badges={staffQuickBadges({
+          alerts: can('safety') ? alerts.length : 0,
+          pendingReviews: can('review') ? pending.length : 0,
+          overdueReviews: reviewAlarm.overCount,
+        })} />
 
       {contacts.length > 0 && (
         <section className="mb-6" data-testid="staff-contacts" aria-label={t.staff.contactsTitle}>
@@ -629,6 +679,20 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
           📷 {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
         </h2>
+        {reviewAlarm.level === 'alarm' && reviewAlarm.oldest && (
+          <div role="alert" data-testid="staff-review-alarm"
+            className="sticky top-2 z-20 mb-2 rounded-xl bg-ink-alert text-white p-3 shadow-lg motion-safe:animate-pulse">
+            <p className="text-sm font-bold">
+              {t.staff.reviewAlarm({ n: reviewAlarm.overCount, seconds: Math.floor(reviewAlarm.oldest.waitedMs / 1000) })}
+            </p>
+            <button type="button"
+              className="mt-2 min-h-[44px] px-3 rounded-lg bg-white/20 text-sm font-semibold disabled:opacity-60"
+              disabled={!reviewAlarm.playSound}
+              onClick={() => setAlarmMutedUntil(Date.now() + 5 * 60_000)}>
+              {reviewAlarm.playSound ? t.staff.reviewAlarmMute : t.staff.reviewAlarmMuted}
+            </button>
+          </div>
+        )}
         {pending.length === 0
           ? <p className="text-zinc-500 text-sm">{t.staff.noSubmissions}</p>
           : pending.map((s) => {
@@ -643,8 +707,11 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
             const isVideo = s.mediaKind === 'video';
             const looksLikeImage = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)(\b|\?|%|$)/i.test(s.photoUrl);
             const isImage = s.mediaKind === 'photo' || (s.mediaKind === undefined && looksLikeImage);
+            // The row carries its own age as colour (fresh / amber 20 s / red 60 s), kitchen-display style.
+            const tone = reviewRowTone(reviewNow - Date.parse(s.submittedAt || ''));
+            const toneClass = tone === 'red' ? 'border-2 border-danger' : tone === 'amber' ? 'border-2 border-amber-500' : '';
             return (
-              <Card key={key} className="p-3 mb-2">
+              <Card key={key} className={`p-3 mb-2 ${toneClass}`}>
                 <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
                 {s.senderName && <div dir="auto" className="text-xs text-zinc-500">{t.staff.mediaSentBy({ name: s.senderName })}</div>}
                 <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} <span dir="auto">{titleOf(s.taskId)}</span></div>
@@ -711,14 +778,22 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
               onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
               onSkipTask={() => void opsAction.run(tm, { kind: 'skipTask' })}
-              onForceAssign={(taskId, override) =>
-                void opsAction.run(tm, { kind: 'forceAssign', taskId, override })}
+              ctx={ctx}
+              letInTaskId={can('route') ? staffLetInTarget(outline, tm) : null}
+              onLetIn={(taskId) => void opsAction.run(tm, { kind: 'letIn', taskId })}
+              onRoute={(taskId, title, accept, when) =>
+                void opsAction.run(tm, { kind: 'route', taskId, title, accept, when })}
               onSendBack={(target, title) => void opsAction.run(tm, { kind: 'sendBack', target, title })}
               titleOf={titleOf}
               outlineStages={outline?.stages ?? []}
             />
           ))}
       </section>
+
+      {/* ── Flash missions: approve what teams sent, end one early (overnight 2026-09-29) ── */}
+      {(can('review') || can('broadcast')) && (
+        <StaffFlashSection ctx={ctx} teams={teams} canReview={can('review')} canEnd={can('broadcast')} />
+      )}
 
       {/* ── Live map of every team's last known position ── */}
       {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} spots={missionSpots(outline)} />}
@@ -750,7 +825,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 // force-assign, skip) only after a deliberate tap on "more". A marshal awards
 // points dozens of times a run and holds a team maybe twice.
 function TeamOpsCard({
-  team, ack, busy, can, onAdjust, onHold, onClearOob, onSkipTask, onForceAssign, onSendBack, titleOf, outlineStages, callTargets = [],
+  team, ack, busy, can, onAdjust, onHold, onClearOob, onSkipTask, onRoute, onSendBack, titleOf, outlineStages, callTargets = [], ctx, letInTaskId = null, onLetIn,
 }: {
   team: TeamRow;
   ack?: string;
@@ -762,7 +837,11 @@ function TeamOpsCard({
   onHold: (held: boolean, reason?: string) => void;
   onClearOob: () => void;
   onSkipTask: () => void;
-  onForceAssign: (taskId: string, override: boolean) => void;
+  onRoute: (taskId: string, title: string, accept: WaivableKind[], when: 'now' | 'after') => void;
+  ctx: StaffCtx;
+  /** located-mission-arrival: the mission this team may be let into without GPS, or null. */
+  letInTaskId?: string | null;
+  onLetIn?: (taskId: string) => void;
   // send-team-back
   onSendBack: (target: SendBackTarget, title: string) => void;
   titleOf: (taskId: string) => string;
@@ -907,7 +986,17 @@ function TeamOpsCard({
             {t.staff.clearOutOfBounds}
           </button>
         )}
-        {can.route && (team.assignableTaskIds?.length ?? 0) > 0 && (
+        {letInTaskId && onLetIn && (
+          <button
+            className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-accent text-black disabled:opacity-40"
+            disabled={busy}
+            onClick={() => onLetIn(letInTaskId)}
+            data-testid="staff-let-in"
+          >
+            {t.staff.letIn({ title: titleOf(letInTaskId) })}
+          </button>
+        )}
+        {can.route && (
           <button
             className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
             disabled={busy}
@@ -1038,13 +1127,10 @@ function TeamOpsCard({
         </div>
       )}
 
-      {/* ── Force assign ────────────────────────────────────────────────────
-          Only the team's own current-stage missions are offered: the server
-          refuses anything else, so a longer menu would just be a list of
-          guaranteed failures. The override is a SEPARATE, differently-styled
-          button per mission rather than a global toggle — a toggle left on from
-          the previous team is exactly how an authored rule gets broken by
-          accident. */}
+      {/* ── Send to a mission (route-team-to-mission) ─────────────────────────
+          Any mission in the game; the server's dry run names exactly what is in the
+          way and only that list is waived. Replaced the old all-or-nothing "override
+          lock" button, which could hand out a mission completion then refused. */}
       {/* send-team-back: the same targets the organizer's console offers (sendBackTargets), inline
           like every other panel here (a phone keyboard reflows the page under a modal). */}
       {openPanel === 'sendBack' && (
@@ -1086,41 +1172,8 @@ function TeamOpsCard({
       )}
 
       {openPanel === 'assign' && (
-        <div className="mt-2.5 pt-2.5 border-t border-glass-border">
-          <div className="text-[13px] text-zinc-500 mb-1.5">{t.staff.forceAssignPick}</div>
-          {(team.assignableTaskIds ?? []).length === 0 ? (
-            <p className="text-zinc-500 text-xs">{t.staff.forceAssignNoTasks}</p>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {(team.assignableTaskIds ?? []).map((taskId) => (
-                <div key={taskId} className="flex items-center gap-1.5">
-                  <button
-                    className="flex-1 min-h-[44px] px-3 rounded-lg text-xs font-medium bg-app-raised border border-glass-border text-zinc-200 text-start truncate disabled:opacity-40"
-                    disabled={busy}
-                    onClick={() => { onForceAssign(taskId, false); setOpenPanel(null); }}
-                  >
-                    {titleOf(taskId)}
-                  </button>
-                  <button
-                    className="shrink-0 min-h-[44px] px-2.5 rounded-lg text-[13px] font-semibold bg-transparent border border-danger/50 text-danger disabled:opacity-40"
-                    disabled={busy}
-                    title={t.staff.forceAssignOverrideWarn}
-                    onClick={() => {
-                      void dialog.confirm(t.staff.forceAssignOverrideWarn, { danger: true })
-                        .then((okToOverride) => {
-                          if (!okToOverride) return;
-                          onForceAssign(taskId, true);
-                          setOpenPanel(null);
-                        });
-                    }}
-                  >
-                    {t.staff.forceAssignOverride}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <StaffRoutePanel ctx={ctx} team={team} outlineStages={outlineStages} busy={busy}
+          onRoute={onRoute} onDone={() => setOpenPanel(null)} />
       )}
     </Card>
   );
@@ -1496,6 +1549,101 @@ function StaffFeedSection({ ctx }: { ctx: { ownerUid: string; gameId: string; ru
           </Suspense>
         )}
       </Collapsible>
+    </section>
+  );
+}
+
+// ─── Flash missions in the field (change: flash-missions-v2, overnight 2026-09-29) ─────────────
+//
+// The marshal who watched a team do the flash mission can approve it on the spot, and end a flash
+// mission early, with the same callables and the same capabilities as the console (`review`,
+// `broadcast`). Lists come from the pure `staffFlashLists`. Renders nothing when there is nothing to
+// act on, so an ordinary run's staff screen does not grow.
+function StaffFlashSection({ ctx, teams, canReview, canEnd }: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  teams: TeamRow[];
+  canReview: boolean;
+  canEnd: boolean;
+}) {
+  const { t, lang } = useT();
+  const f = t.flash;
+  const [docs, setDocs] = useState<unknown[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    const q = query(collection(db, `users/${ctx.ownerUid}/games/${ctx.gameId}/runs/${ctx.runId}/flashMissions`), orderBy('createdAt', 'desc'), limit(8));
+    return onSnapshot(q, (snap) => setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setDocs([]));
+  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const lists = staffFlashLists(docs, teams, now, lang);
+  const waiting = canReview ? lists.waiting : [];
+  const running = canEnd ? lists.running : [];
+  if (waiting.length === 0 && running.length === 0) return null;
+
+  async function act(key: string, run: () => Promise<unknown>, done: string) {
+    if (busy) return;
+    setBusy(key); setMsg('');
+    try { await run(); setMsg(done); } catch { setMsg(f.staffFailed); } finally { setBusy(null); }
+  }
+  const fmt = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+  return (
+    <section className="mb-6 scroll-mt-4" id="staff-flash" data-testid="staff-flash">
+      <h2 className="text-sm font-semibold text-zinc-300 mb-2">⚡ {f.staffTitle}</h2>
+      {waiting.length > 0 && (
+        <>
+          <p className="text-[13px] text-zinc-400 mb-1">{f.staffWaiting}</p>
+          <ul className="space-y-2 mb-3">
+            {waiting.map((w) => {
+              const key = `${w.flashId}:${w.teamId}`;
+              const late = w.ageMs >= REVIEW_ALARM_MS;
+              return (
+                <li key={key} className={`rounded-xl border p-3 ${late ? 'border-ink-alert' : 'border-glass-border'} bg-app-card`}>
+                  <p dir="auto" className="text-sm"><span className="font-semibold">{w.teamName}</span> · {w.title}</p>
+                  <p className={`text-[13px] font-mono ${late ? 'text-ink-alert font-bold' : 'text-zinc-400'}`}>{f.staffWaited({ s: fmt(w.ageMs) })}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {w.mediaUrl && (
+                      <a href={w.mediaUrl} target="_blank" rel="noreferrer" className={`${TAP_TARGET} inline-flex items-center px-3 underline text-ink-fire text-sm`}>{f.staffOpenMedia}</a>
+                    )}
+                    <Button className="w-auto px-4" loading={busy === `${key}:a`} disabled={!!busy}
+                      onClick={() => void act(`${key}:a`, () => reviewFlashMission({ ...ctx, flashId: w.flashId, teamId: w.teamId, action: 'approve' }), f.staffApproved)}>
+                      {f.staffApprove}
+                    </Button>
+                    <Button variant="ghost" className="w-auto px-4" loading={busy === `${key}:r`} disabled={!!busy}
+                      onClick={() => void act(`${key}:r`, () => reviewFlashMission({ ...ctx, flashId: w.flashId, teamId: w.teamId, action: 'reject' }), f.staffRejected)}>
+                      {f.staffReject}
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {running.length > 0 && (
+        <>
+          <p className="text-[13px] text-zinc-400 mb-1">{f.staffRunning}</p>
+          <ul className="space-y-2">
+            {running.map((r) => (
+              <li key={r.flashId} className="flex flex-wrap items-center gap-2 rounded-xl border border-glass-border bg-app-card p-3">
+                <span dir="auto" className="flex-1 min-w-[8rem] text-sm font-semibold">{r.title}</span>
+                <span className="text-[13px] text-zinc-400">{f.staffMinutesLeft({ n: r.minutesLeft })}</span>
+                <Button variant="ghost" className="w-auto px-4" loading={busy === `${r.flashId}:end`} disabled={!!busy}
+                  onClick={() => void act(`${r.flashId}:end`, () => deactivateFlashMission({ ...ctx, flashId: r.flashId }), f.staffEnded)}>
+                  {f.staffEnd}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {msg && <p role="status" aria-live="polite" className="text-[13px] text-zinc-300 mt-2">{msg}</p>}
     </section>
   );
 }

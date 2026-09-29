@@ -601,7 +601,9 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (existing.visibility === 'public') {
     resyncPublicGameSummary(gameId, { ...existing, ...updates } as Game, updates.updatedAt);
   }
-  restampTemplateCounts(ref, existing, updates.stages);
+  // Awaited (field report 2026-09-27 gate run): fire-and-forget let updateGame return before the
+  // counts landed, so a menu read right after an edit could quote the old numbers.
+  await restampTemplateCounts(ref, existing, updates.stages);
 
   return { ok: true };
 });
@@ -614,13 +616,14 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
  * template and does not restamp them would leave the picker quoting yesterday's
  * numbers. Ordinary games are not in that list and cost nothing here.
  */
-function restampTemplateCounts(
+async function restampTemplateCounts(
   ref: FirebaseFirestore.DocumentReference,
   existing: Game,
   nextStages: unknown,
-): void {
+): Promise<void> {
   if (!existing.isTemplate || !Array.isArray(nextStages)) return;
-  void ref.update(countStagesAndTasks({ stages: nextStages as Game['stages'] }))
+  // Best-effort still: a failed restamp must not fail the save it follows.
+  await ref.update(countStagesAndTasks({ stages: nextStages as Game['stages'] }))
     .catch((e) => logBestEffort('template.counts.restamp', { gameId: existing.id }, e));
 }
 

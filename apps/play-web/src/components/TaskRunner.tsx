@@ -26,6 +26,7 @@ import MissionExtras from './MissionExtras';
 import { uploadTaskMedia, uploadTaskPoster, createVideoStream, finishVideoStream, uid } from '../services/firebase';
 import type { StreamUpload } from '../lib/streamUpload';
 import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
+import { applyOrientationIntent } from '../lib/orientation';
 import type { BgKind } from '../lib/backgroundMedia';
 import { countdownLeftMs, countdownUrgent, formatCountdown } from '../lib/timeLimitCountdown';
 import { backgroundMedia } from '../services/backgroundMedia';
@@ -56,6 +57,7 @@ import { Button, Card, Input, Progress } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { quizAttemptGuard, TAP_TARGET } from '../lib/interaction';
 import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
+import { currentAssignedRec } from '../lib/currentMission';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import { Working } from './Working';
@@ -220,8 +222,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     exitTimer.current = window.setTimeout(runOnChanged, plan.delayMs);
   }
 
-  // The task currently assigned to this team within the active stage.
-  const assignedRec = stage.tasks.find((t) => t.status === 'assigned');
+  // The task currently assigned to this team: in the active stage, or a VISIT an operator sent it to
+  // in another stage (currentAssignedRec; overnight 2026-09-29, the phone showed no mission for it).
+  const assignedRec = currentAssignedRec(stage, state.team.stages);
   const unassigned  = stage.tasks.filter((t) => t.status === 'unassigned');
 
   // M2 / wave-f (next-task-regression, Bug A): are ALL remaining (unassigned)
@@ -925,16 +928,19 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     if (blockedOffline(t.task.arrivalNeedsOnline)) return;
     if (!begin()) return;
     clearMsg();
-    const submitArrival = async (coords?: { lat: number; lng: number }) => {
+    const submitArrival = async (coords?: { lat: number; lng: number; accuracyMeters?: number }) => {
       try {
-        const res = await reportArrival({ ...ctx, taskId: task!.id, ...(coords ?? {}) });
+        const res = await reportArrival({ ...ctx, taskId: task!.id, lat: coords?.lat, lng: coords?.lng, accuracyMeters: coords?.accuracyMeters });
         if (res.arrived) { showProgress(t.task.arrivalUnlocked); onChanged(); }
+        // Probably in the right place with a phone that cannot see it well yet: "stand still",
+        // never "walk on" (the same advice the check-in path gives for the same verdict).
+        else if (res.retriable) setMsg({ text: t.task.fixTooCoarse, tone: 'progress' });
         else showError(t.task.notThereYet);
       } catch (e) { setMsg(submitError(e, t.task.notThereYet)); }
       finally { end(); }
     };
     withLocation(
-      (lat, lng) => { void submitArrival({ lat, lng }); },
+      (lat, lng, accuracyMeters) => { void submitArrival({ lat, lng, accuracyMeters }); },
       () => {
         // Test run: unseal from anywhere (desk rehearsal). No synthetic coords — the
         // server bypass keys on run.isTestDrive, never on faked/leaked hidden coords.
@@ -1239,16 +1245,24 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // Returns whether the check-in SUCCEEDED so the watcher can un-latch and retry
   // on a failed arrival (change: nightly geofence-latch fix) — otherwise a single
   // transient/rejected completeTask would freeze auto check-in for good.
-  function geofenceArrive(la: number, ln: number): Promise<boolean> {
+  function geofenceArrive(la: number, ln: number, accuracyMeters?: number): Promise<boolean> {
     if (isViewer || blockedOffline()) return Promise.resolve(false);
     // A check-in is already in flight (the watcher fired again before the first
     // resolved) — report "arrived" so GeofenceAuto stays latched and lets the
     // in-flight call decide; it un-latches itself on a genuine failure.
     if (!begin()) return Promise.resolve(true);
     clearMsg();
-    return completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
+    // The fix's accuracy goes with it, or the server reads a ±300 m fix as precise (overnight
+    // 2026-09-29, scripts/test-arrival-sends-accuracy.ts). A coarse fix comes back `unavailable`:
+    // "stand still", and the watcher un-latches and tries again on the next fix.
+    return completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln, accuracyMeters })
       .then(() => { feedback('task'); advanceWithCardExit(); return true; })
-      .catch((e) => { setMsg(submitError(e, t.task.checkinFailed)); return false; })
+      .catch((e) => {
+        const code = String((e as { code?: unknown } | null)?.code ?? '').replace(/^functions\//, '');
+        if (code === 'unavailable') setMsg({ text: t.task.fixTooCoarse, tone: 'progress' });
+        else setMsg(submitError(e, t.task.checkinFailed));
+        return false;
+      })
       .finally(() => end());
   }
 
@@ -1331,18 +1345,34 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       <Card className={exiting ? 'p-5 rp-card-exit' : 'p-5'} data-testid="task-card" data-task-sealed="true" data-task-id={task.id}>
         {rehearseBar}
         <div className="text-xs text-ink-fire uppercase tracking-widest mb-1">{headerLabel}</div>
-        <h2 className="text-2xl font-bold mb-2">🧭 {t.task.sealedTitle}</h2>
-        <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-warm mb-1">
-            {t.task.hiddenBadge}
-          </div>
-          {(task.locationClueHe || task.locationClue) && (
-            <p dir="auto" className="text-sm text-zinc-200" data-testid="sealed-clue">
-              {task.locationClueHe || task.locationClue}
-            </p>
-          )}
-          <p className="text-[13px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
-        </div>
+        {/* located-mission-arrival: a VISIBLE located mission is sealed until arrival too. It ships
+            its name and its point (they are on the map anyway), so the card says where to go; the
+            mission itself opens when the team gets there. A hidden mission keeps its clue card. */}
+        {!task.locationHidden ? (
+          <>
+            <h2 className="text-2xl font-bold mb-2">🚩 <span dir="auto">{task.title}</span></h2>
+            <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1" data-testid="sealed-located">
+              <p className="text-sm font-semibold text-zinc-200 mb-1">{t.task.walkToPoint}</p>
+              <DistanceBadge task={task} />
+              <p className="text-[13px] text-zinc-500 mt-1">{t.task.walkToPointHelp}</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 className="text-2xl font-bold mb-2">🧭 {t.task.sealedTitle}</h2>
+            <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-warm mb-1">
+                {t.task.hiddenBadge}
+              </div>
+              {(task.locationClueHe || task.locationClue) && (
+                <p dir="auto" className="text-sm text-zinc-200" data-testid="sealed-clue">
+                  {task.locationClueHe || task.locationClue}
+                </p>
+              )}
+              <p className="text-[13px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
+            </div>
+          </>
+        )}
 
         {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
 
@@ -1389,7 +1419,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       ) : (
         <div className="mt-5">
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
-            {t.task.checkArrival}
+            {task.locationHidden ? t.task.checkArrival : t.task.imHere}
           </Button>
         </div>
       )}
@@ -2138,7 +2168,7 @@ function NumericEntry({ busy, prefill, onSubmit }: {
 // radius, we surface a "request help" affordance (raises a host alert) so the
 // player is never dead-ended. We never fake location — the server validates.
 function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
-  task: SafeTask; onArrive: (lat: number, lng: number) => Promise<boolean> | void;
+  task: SafeTask; onArrive: (lat: number, lng: number, accuracyMeters?: number) => Promise<boolean> | void;
   onRequestHelp?: () => void; helpSent?: boolean;
 }) {
   const { t } = useT();
@@ -2191,7 +2221,8 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
             fired.current = true;
             // Un-latch on a failed arrival so the watcher retries as the player
             // stays in range, instead of freezing after one transient failure.
-            void Promise.resolve(onArrive(p.coords.latitude, p.coords.longitude))
+            void Promise.resolve(onArrive(p.coords.latitude, p.coords.longitude,
+              Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : undefined))
               .then((ok) => { if (ok === false) fired.current = false; });
           }
         },
@@ -3110,6 +3141,8 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
   function stopTracks() {
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
+    // capture-rotation: the camera is off, so the game may ask for portrait again.
+    applyOrientationIntent('portrait');
   }
   function clearTimers() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
@@ -3248,6 +3281,8 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
 
   async function openCamera() {
     setErr('');
+    // capture-rotation (field report 2026-09-27): while filming, the phone may be turned.
+    applyOrientationIntent('free');
     const mime = pickVideoMimeType();
     if (!mime || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setUnsupported(true);

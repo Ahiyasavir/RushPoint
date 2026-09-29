@@ -246,5 +246,29 @@ check('non-string input yields undefined, never a throw', boundStoredAnswer(42 a
 check('undefined input yields undefined', boundStoredAnswer(undefined as never) === undefined);
 check('empty / whitespace-only yields undefined', boundStoredAnswer('   ') === undefined);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. flashClaims (flash-missions-v2 D6, overnight 2026-09-29). Found by PLAYING it: after the claims
+//    moved onto the team, this allowlist dropped them, so a phone that had just sent its flash
+//    mission read "another team already took it". The phone needs its claim's STATUS, nothing else;
+//    under a sealed score an approve/reject verdict is a result, so it reads as "sent".
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const withClaims = { ...fullTeam, flashClaims: {
+    f1: { status: 'submitted', at: 'a', submittedAt: 'b', mediaUrl: 'https://x/secret.jpg' },
+    f2: { status: 'approved', at: 'a', reviewedAt: 'c' },
+    f3: { status: 'rejected', at: 'a' },
+    f4: { status: 'claimed', at: 'a' },
+  } } as never;
+  const o = sanitizeTeamForParticipant(withClaims, false) as unknown as { flashClaims?: Record<string, Record<string, unknown>> };
+  const s = sanitizeTeamForParticipant(withClaims, true) as unknown as { flashClaims?: Record<string, Record<string, unknown>> };
+  check('flashClaims: the phone gets each claim status', o.flashClaims?.f1?.status === 'submitted'
+    && o.flashClaims?.f2?.status === 'approved' && o.flashClaims?.f3?.status === 'rejected' && o.flashClaims?.f4?.status === 'claimed');
+  check('flashClaims: status only, no media url or review stamps', Object.keys(o.flashClaims?.f1 ?? {}).join() === 'status'
+    && Object.keys(o.flashClaims?.f2 ?? {}).join() === 'status');
+  check('flashClaims: a sealed score hides the verdict (approved/rejected read as sent)',
+    s.flashClaims?.f2?.status === 'submitted' && s.flashClaims?.f3?.status === 'submitted' && s.flashClaims?.f4?.status === 'claimed');
+  check('flashClaims: absent stays absent', (sanitizeTeamForParticipant(fullTeam, false) as unknown as { flashClaims?: unknown }).flashClaims === undefined);
+}
+
 console.log(`\n${failures === 0 ? 'ALL TEST-MODE TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

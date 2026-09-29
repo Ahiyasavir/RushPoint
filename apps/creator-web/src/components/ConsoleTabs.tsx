@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { summaryChips, type GroupSummary, type SectionId } from '../lib/runConsoleLayout';
+import { summaryChips, SECONDARY_SECTIONS, type GroupSummary, type SectionId } from '../lib/runConsoleLayout';
 
 // The Run Console's primary navigation (change: run-console-tabs-up-front).
 //
@@ -19,9 +19,10 @@ export interface ConsoleTab {
 }
 
 export const SECTION_ICON: Record<SectionId, string> = {
+  // run-console-simplify: Now / Teams / Game, then setup and reports.
   teamsAndScores: '👥',
-  moderation: '📥',
-  gameMechanics: '🎛️',
+  moderation: '⚡',
+  gameMechanics: '🎮',
   shareAndScreens: '🔗',
   afterTheRun: '📊',
 };
@@ -65,11 +66,28 @@ export default function ConsoleTabs({
 
   return (
     <>
-      {/* Desktop: a sticky bar across the content width. */}
+      {/* Desktop: a sticky bar across the content width. It sticks BELOW the site header
+          (App.tsx: `sticky top-0 z-30`, h-14 + a 1px border), not at 0: at 0 both stuck to
+          the same line and the header painted over the tabs, so an organizer who had
+          scrolled saw half a tab bar (field report 2026-09-27). */}
       <nav aria-label={navLabel} data-testid="console-tabs"
-        className="hidden lg:flex sticky top-0 z-20 -mx-1 px-1 py-2 gap-2 bg-[--surface-0] border-b border-[--rp-border]">
+        className="hidden lg:flex sticky top-[calc(3.5rem+1px)] z-20 -mx-1 px-1 py-2 gap-2 bg-[--surface-0] border-b border-[--rp-border]">
         {tabs.map((tab, i) => {
           const on = tab.id === active;
+          // run-console-simplify: setup and reports step back — compact, no summary row, at the end.
+          const secondary = SECONDARY_SECTIONS.includes(tab.id);
+          if (secondary) {
+            return (
+              <button key={tab.id} type="button" onClick={() => onOpen(tab.id)}
+                aria-current={on ? 'true' : undefined}
+                title={shortcutTitle(longName(tab.id), i + 1)}
+                className={`relative shrink-0 min-h-[44px] rounded-xl border px-3 py-2 text-[13px] font-medium transition-colors ${
+                  i === tabs.findIndex((x) => SECONDARY_SECTIONS.includes(x.id)) ? 'ms-auto' : ''} ${
+                  on ? 'border-rp-fire bg-rp-fire/10 text-[--ink-1]' : 'border-transparent text-[--ink-3] hover:bg-[--surface-2]'}`}>
+                <span aria-hidden="true">{SECTION_ICON[tab.id]}</span> {longName(tab.id)}
+              </button>
+            );
+          }
           return (
             <button key={tab.id} type="button" onClick={() => onOpen(tab.id)}
               aria-current={on ? 'true' : undefined}
@@ -103,7 +121,7 @@ export default function ConsoleTabs({
               <button key={tab.id} type="button" onClick={() => onOpen(tab.id)}
                 aria-current={on ? 'true' : undefined}
                 aria-label={dot ? `${longName(tab.id)}, ${newLabel}` : longName(tab.id)}
-                className={`relative flex-1 min-w-0 min-h-[56px] flex flex-col items-center justify-center gap-0.5 px-0.5 ${
+                className={`relative ${SECONDARY_SECTIONS.includes(tab.id) ? 'flex-[0.7] opacity-80' : 'flex-1'} min-w-0 min-h-[56px] flex flex-col items-center justify-center gap-0.5 px-0.5 ${
                   on ? 'text-ink-fire' : 'text-[--ink-2]'}`}>
                 {on && <span aria-hidden="true" className="absolute top-0 inset-x-3 h-0.5 rounded-full bg-rp-fire" />}
                 <span aria-hidden="true" className="relative text-lg leading-none">

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, isValidCoord, isHotZoneActive, circlePolygonGeoJSON, type MapMode, type HotZone, type CaptureZone } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, isHotZoneActive, circlePolygonGeoJSON, bearingDeg, haversineKm, type MapMode, type HotZone, type CaptureZone, type MissionPin } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from '../i18nContext';
 import type { MapSearchArea } from '../lib/searchAreas';
@@ -31,6 +31,28 @@ const ZONES_SOURCE = 'capture-zones';
 // search area deliberately does NOT use the game's accent colour.
 const SEARCH_SOURCE = 'search-areas';
 const SEARCH_COLOR = '#8B5CF6';
+// located-mission-arrival: the line from the team to its mission.
+const ROUTE_SOURCE = 'to-mission';
+
+// One stylesheet for the destination pulse, injected once: marker elements are created in the DOM
+// by MapLibre, outside React, so a Tailwind class would need a static string anyway.
+function ensurePulseStyle() {
+  if (typeof document === 'undefined' || document.getElementById('rp-dest-pulse')) return;
+  const st = document.createElement('style');
+  st.id = 'rp-dest-pulse';
+  st.textContent = '@keyframes rpPulse{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.2);opacity:0}}'
+    + '@media (prefers-reduced-motion: reduce){.rp-pulse-ring{animation:none!important;opacity:0!important}}';
+  document.head.appendChild(st);
+}
+
+// Other missions of the game (decision 2026-09-28: locked ones too), small and quiet under the flag.
+const PIN_STYLE: Record<MissionPin['state'], { bg: string; glyph: string }> = {
+  done: { bg: '#16A34A', glyph: '✓' },
+  current: { bg: '#F97316', glyph: '' },
+  open: { bg: '#64748B', glyph: '' },
+  locked: { bg: '#94A3B8', glyph: '🔒' },
+};
+
 
 // Capturable-territory circle color by holder (change: fix-territory-map-visibility):
 // mine = green, a rival's = red, unclaimed = slate. Static hex (painted by the map,
@@ -51,8 +73,13 @@ function zoneOwnership(z: CaptureZone, myTeamId?: string): 'mine' | 'rival' | 'o
 
 export default function NavMap({
   targets, me, hotZone = null, zones = [], searchAreas = [], myTeamId, accent = '#F97316', className = '', keepMapWithMe = false,
+  pins = [], bottomInset = 0,
 }: {
   targets: NavTarget[];
+  /** Every located mission of the game (located-mission-arrival), drawn under the targets. */
+  pins?: MissionPin[];
+  /** px of the map covered from the bottom (the mission sheet): the camera keeps its subject above it. */
+  bottomInset?: number;
   me?: { lat: number; lng: number } | null;
   hotZone?: HotZone | null;
   zones?: CaptureZone[];
@@ -75,6 +102,8 @@ export default function NavMap({
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const pinMarkers = useRef<maplibregl.Marker[]>([]);
+  const arrowMarker = useRef<maplibregl.Marker | null>(null);
   const meMarker = useRef<maplibregl.Marker | null>(null);
   const fitted = useRef(false);
   // PARTICIPANTS STAY ON TOPO (change: maps-open-on-satellite). The creator's
@@ -243,7 +272,7 @@ export default function NavMap({
     // to the same position the marker is drawn from.
     // styledata fires on initial load AND after each setStyle (mode toggle),
     // which wipes GeoJSON sources/layers — re-apply the overlay each time.
-    map.current.on('styledata', () => { if (map.current) { applyHotZone(map.current); applyZones(map.current); applySearchAreas(map.current); } });
+    map.current.on('styledata', () => { if (map.current) { applyHotZone(map.current); applyZones(map.current); applySearchAreas(map.current); applyRouteLine(map.current); } });
     return () => { map.current?.remove(); map.current = null; fitted.current = false; };
     // Re-run when the map container appears/disappears: while `valid` is empty the
     // component renders a placeholder with NO ref div, so a NavMap that mounts
@@ -253,6 +282,14 @@ export default function NavMap({
     // is byte-identical to `[]` (the value never changes, so it fires once).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valid.length === 0 && !hasOverlay && !hasMe]);
+
+  // play-screen-no-scroll: the mission sheet covers the bottom of the map. Map padding moves the
+  // camera's centre (flyTo/easeTo) above it; fitBounds gets the same inset below.
+  const insetRef = useRef(bottomInset);
+  insetRef.current = bottomInset;
+  useEffect(() => {
+    map.current?.setPadding({ top: 0, left: 0, right: 0, bottom: Math.max(0, bottomInset) });
+  }, [bottomInset]);
 
   // Switch tile style on mode change (HTML markers persist across setStyle).
   useEffect(() => {
@@ -283,22 +320,118 @@ export default function NavMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify((searchAreas ?? []).map((s) => [s.id, s.lat, s.lng, s.radiusMeters]))]);
 
-  // Sync target markers.
+  // Sync target markers. located-mission-arrival: the ACTIVE mission is a labelled flag with a pulse
+  // (a bare brand-coloured dot did not say "go here"); others stay plain dots.
   useEffect(() => {
     if (!map.current) return;
+    ensurePulseStyle();
     markers.current.forEach((m) => m.remove());
     markers.current = valid.map((t) => {
       const el = document.createElement('div');
-      el.style.cssText = `width:${t.active ? 22 : 16}px;height:${t.active ? 22 : 16}px;border-radius:50%;
-        background:${t.active ? accent : '#64748b'};border:3px solid #0b0f17;
-        box-shadow:0 0 0 2px ${t.active ? accent : '#475569'};cursor:pointer;`;
+      if (t.active) {
+        el.setAttribute('role', 'img');
+        el.setAttribute('aria-label', t.title);
+        el.style.cssText = 'position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;';
+        const ring = document.createElement('div');
+        ring.className = 'rp-pulse-ring';
+        ring.style.cssText = `position:absolute;bottom:-6px;width:28px;height:28px;border-radius:50%;background:${accent};animation:rpPulse 1.6s ease-out infinite;`;
+        const flag = document.createElement('div');
+        flag.textContent = '🚩';
+        flag.style.cssText = 'font-size:30px;line-height:1;filter:drop-shadow(0 2px 2px rgba(0,0,0,.4));position:relative;';
+        const label = document.createElement('div');
+        label.textContent = t.title;
+        label.dir = 'auto';
+        label.style.cssText = `max-width:140px;margin-top:2px;padding:2px 6px;border-radius:8px;background:#fff;color:#1c1917;font:600 12px system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 3px rgba(0,0,0,.3);border:2px solid ${accent};`;
+        el.append(ring, flag, label);
+        return new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([t.lng, t.lat]).addTo(map.current!);
+      }
+      el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#64748b;border:3px solid #0b0f17;box-shadow:0 0 0 2px #475569;cursor:pointer;';
       return new maplibregl.Marker({ element: el })
         .setLngLat([t.lng, t.lat])
         .setPopup(new maplibregl.Popup({ offset: 14, closeButton: false }).setText(t.title))
         .addTo(map.current!);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(valid.map((t) => [t.id, t.lat, t.lng, t.active])), accent]);
+  }, [JSON.stringify(valid.map((t) => [t.id, t.lat, t.lng, t.active, t.title])), accent]);
+
+  // Every other mission of the game (located-mission-arrival, decision 2026-09-28: locked too).
+  // Anything already drawn as a target is skipped, so a mission is never drawn twice.
+  useEffect(() => {
+    if (!map.current) return;
+    pinMarkers.current.forEach((m) => m.remove());
+    const drawn = new Set(valid.map((v) => v.id));
+    pinMarkers.current = (pins ?? []).filter((p) => !drawn.has(p.id) && isValidCoord(p.lat, p.lng)).map((p) => {
+      const style = PIN_STYLE[p.state];
+      const el = document.createElement('div');
+      el.textContent = style.glyph;
+      el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${style.bg};border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;opacity:${p.state === 'locked' ? 0.75 : 0.95};cursor:pointer;`;
+      const stateText = { done: t.play.pinDone, current: t.play.pinCurrent, open: t.play.pinOpen, locked: t.play.pinLocked }[p.state];
+      return new maplibregl.Marker({ element: el })
+        .setLngLat([p.lng, p.lat])
+        .setPopup(new maplibregl.Popup({ offset: 12, closeButton: false }).setText(`${p.title} · ${stateText}`))
+        .addTo(map.current!);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify((pins ?? []).map((p) => [p.id, p.state, p.lat, p.lng])), JSON.stringify(valid.map((v) => v.id))]);
+
+  // The line from the team to its mission, with an arrow on it pointing the way.
+  const activeTarget = valid.find((v) => v.active) ?? null;
+  const meValid = !!me && isValidCoord(me.lat, me.lng);
+  const routeRef = useRef<{ from: { lat: number; lng: number }; to: { lat: number; lng: number } } | null>(null);
+  routeRef.current = activeTarget && meValid ? { from: { lat: me!.lat, lng: me!.lng }, to: { lat: activeTarget.lat, lng: activeTarget.lng } } : null;
+  function applyRouteLine(m: maplibregl.Map) {
+    if (!m.isStyleLoaded()) return;
+    const r = routeRef.current;
+    const data = {
+      type: 'FeatureCollection' as const,
+      features: r ? [{ type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: [[r.from.lng, r.from.lat], [r.to.lng, r.to.lat]] } }] : [],
+    };
+    const src = m.getSource(ROUTE_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    if (src) { src.setData(data); return; }
+    m.addSource(ROUTE_SOURCE, { type: 'geojson', data });
+    m.addLayer({ id: `${ROUTE_SOURCE}-line`, type: 'line', source: ROUTE_SOURCE,
+      paint: { 'line-color': accent, 'line-width': 4, 'line-dasharray': [2, 1.5], 'line-opacity': 0.9 } });
+  }
+  useEffect(() => {
+    if (!map.current) return;
+    applyRouteLine(map.current);
+    const r = routeRef.current;
+    if (!r) { arrowMarker.current?.remove(); return; }
+    if (!arrowMarker.current) {
+      const el = document.createElement('div');
+      el.textContent = '➤';
+      el.setAttribute('aria-hidden', 'true');
+      el.style.cssText = `font-size:22px;color:${accent};text-shadow:0 0 3px #fff,0 0 3px #fff;line-height:1;`;
+      arrowMarker.current = new maplibregl.Marker({ element: el, rotationAlignment: 'map' });
+    }
+    // Midway along the line, pointing at the mission. The glyph points EAST, so bearing - 90.
+    const mid = { lat: (r.from.lat + r.to.lat) / 2, lng: (r.from.lng + r.to.lng) / 2 };
+    arrowMarker.current.setLngLat([mid.lng, mid.lat]).setRotation(bearingDeg(r.from, r.to) - 90).addTo(map.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTarget?.id, activeTarget?.lat, activeTarget?.lng, me?.lat, me?.lng, accent]);
+
+  // The moment a NEW located mission arrives: fly to it, then frame it together with the team.
+  // Only on a CHANGE of mission, never on a GPS ping, so the player's own panning is not fought.
+  const shownMission = useRef<string | null>(null);
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !activeTarget) return;
+    if (shownMission.current === activeTarget.id) return;
+    const first = shownMission.current === null;
+    shownMission.current = activeTarget.id;
+    if (first) return; // the initial fit already frames the first mission with the team
+    const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    m.flyTo({ center: [activeTarget.lng, activeTarget.lat], zoom: 17, duration: reduced ? 0 : 900 });
+    const frame = () => {
+      if (!map.current || !me || !isValidCoord(me.lat, me.lng)) return;
+      const b = new maplibregl.LngLatBounds([activeTarget.lng, activeTarget.lat], [activeTarget.lng, activeTarget.lat]);
+      b.extend([me.lng, me.lat]);
+      map.current.fitBounds(b, { padding: { top: 64, left: 48, right: 48, bottom: 64 + insetRef.current }, maxZoom: 17, duration: reduced ? 0 : 900 });
+    };
+    const id = window.setTimeout(frame, reduced ? 0 : 1100);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTarget?.id]);
 
   // Sync the "me" marker.
   useEffect(() => {
@@ -328,7 +461,7 @@ export default function NavMap({
     } else {
       const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
       pts.forEach((p) => b.extend(p));
-      map.current.fitBounds(b, { padding: 56, maxZoom: 16, duration: 600 });
+      map.current.fitBounds(b, { padding: { top: 56, left: 40, right: 40, bottom: 56 + insetRef.current }, maxZoom: 16, duration: 600 });
     }
     fitted.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -362,6 +495,16 @@ export default function NavMap({
     <div className={`relative rounded-2xl overflow-hidden border border-glass-border ${className}`}>
       <div ref={ref} className="w-full h-full" />
       <MapModeToggle mode={mode} onChange={setMode} />
+      {/* located-mission-arrival: where to go, in words, with the distance. */}
+      {activeTarget && (
+        <div className="absolute top-2 inset-x-0 z-10 flex justify-center pointer-events-none" data-testid="walk-chip">
+          <span dir="auto" className="inline-flex items-center gap-1.5 rounded-full bg-app-card/95 backdrop-blur border border-glass-border px-3 py-1 text-[13px] font-semibold text-zinc-100 shadow-soft">
+            🚩 {meValid
+              ? t.play.walkChip({ meters: Math.round(haversineKm({ lat: me!.lat, lng: me!.lng }, { lat: activeTarget.lat, lng: activeTarget.lng }) * 1000) })
+              : t.play.walkChipNoFix}
+          </span>
+        </div>
+      )}
       {/* Sits in the bottom inline-start corner (bottom-14), within easy thumb
           reach on the 208px strip, clearing the bottom-2 compact attribution and
           the bottom-2 search-area legend (both pointer-events-none). Logical

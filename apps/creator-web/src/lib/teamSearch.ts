@@ -32,6 +32,9 @@ export interface TeamSearchOptions {
   needsAttention?: (id: string) => boolean;
   /** 1-based leaderboard rank, or null when unranked. */
   rankOf?: (id: string) => number | null;
+  /** The UI language to collate names in. Pass it: the runtime default is the VIEWER's
+   *  machine locale, so the same list sorted differently for different organizers. */
+  locale?: string;
 }
 
 const fold = (s: unknown) => (typeof s === 'string' ? s.toLowerCase() : '');
@@ -71,7 +74,7 @@ export function searchTeams<T extends TeamSearchRow>(rows: readonly T[] | null |
     };
     indexed.sort((a, b) => (r(a.row.id) - r(b.row.id)) || byIndex(a, b));
   } else if (opts.sort === 'name') {
-    indexed.sort((a, b) => a.row.displayName.localeCompare(b.row.displayName, undefined, { sensitivity: 'base' }) || byIndex(a, b));
+    indexed.sort((a, b) => a.row.displayName.localeCompare(b.row.displayName, opts.locale, { sensitivity: 'base' }) || byIndex(a, b));
   } else if (opts.sort === 'activity') {
     const t = (row: TeamSearchRow) => {
       const ms = typeof row.updatedAt === 'string' ? Date.parse(row.updatedAt) : NaN;

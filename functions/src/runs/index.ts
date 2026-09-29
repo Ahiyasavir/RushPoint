@@ -154,6 +154,9 @@ import {
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
 import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSeconds } from '@rushpoint/shared';
+import { teamAdvanceRefusal, rankableTeams } from '@rushpoint/shared';
+import { routeBlockers, acceptsAll, type RouteBlockers, type HardBlocker, type WaivableKind } from '@rushpoint/shared';
+import { arrivalGateApplies, missionPins, resumedStartedAt } from '@rushpoint/shared';
 // Test mode (change: test-mode-hidden-scoring) — the seal predicate, the participant
 // team projection (the SECURITY boundary for the sealed payload, not chrome) and the
 // stored-answer bound.
@@ -195,7 +198,7 @@ import { validate, parseStored } from '../validation';
 import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
 import { isSoloSelfGuidedRun, soloRunReadyToAutoFinalize } from './soloAutoFinalize';
 
-import { requireAuth, assertStaffCan } from '../auth';
+import { requireAuth, assertStaffCan, assertOwnerOrPlatformAdmin } from '../auth';
 import { devicePresence } from '../devicePresenceStore';
 import { shouldFeedTask } from '../feedVisibility';
 import { applyStageCompletion } from './helpers';
@@ -203,8 +206,9 @@ import { applyStageCompletion } from './helpers';
 // plus the durable trail every privileged override leaves.
 import { planTaskSkip } from '@rushpoint/shared';
 import {
-  writeAuditLog, AUDIT_TASK_SKIPPED,
-  AUDIT_TEAM_HELD, AUDIT_TEAM_RESUMED,
+  writeAuditLog, auditBestEffort, AUDIT_TASK_SKIPPED,
+  AUDIT_TEAM_HELD, AUDIT_TEAM_RESUMED, AUDIT_TEAM_REMOVED, AUDIT_TEAM_RESTORED,
+  AUDIT_TASK_ROUTED, AUDIT_ROUTE_QUEUED, AUDIT_ROUTE_QUEUE_DROPPED, AUDIT_TEAM_ARRIVAL_MARKED,
   AUDIT_TASK_FORCE_ASSIGNED, AUDIT_TASK_FORCE_ASSIGNED_OVERRIDE, AUDIT_TEAM_RETURNED,
 } from '../obs/audit';
 // Game trash / tombstone (change: recoverable-game-deletion): a soft-deleted game
@@ -499,6 +503,8 @@ export async function launchRunCore(
     // exists to avoid. Only carried when actually on, so an existing run stays
     // free of the field.
     ...(game.autoApproveAllMedia === true ? { autoApproveAllMedia: true } : {}),
+    // located-mission-arrival: every located mission of this run opens on arrival.
+    arrivalGate: true,
     launchedAt: now, createdAt: now, updatedAt: now,
   });
   const accessCode: AccessCode = { code, ownerUid: uid, gameId, runId: runRef.id, status: 'unused', createdAt: now };
@@ -1005,6 +1011,8 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
 
   const selected = teamsSnap.docs.filter((d) => {
     const t = d.data() as RunTeam;
+    // team-lifecycle-controls: a removed team is never started, by "start all" or by name.
+    if (t.removed === true) return false;
     return !(t.launched || (teamIds && !teamIds.includes(t.id)));
   });
   // Guardian-consent gate (guardian-consent-qr): a minor's team is held in
@@ -1320,7 +1328,14 @@ export async function completeTaskForTeam(
     // verifyStationCode, submitStationPhoto autoApprove) are closed at once.
     // Order matters: the already-completed no-op above stays BEFORE this throw so
     // a duplicate submission of an already-graded task remains a silent no-op.
-    if (stages[stageIdx].status !== 'active') {
+    // route-team-to-mission: what an operator waived for THIS assignment is honoured here too,
+    // and nothing else is. Before this, a force-assign with `override` could hand a team a locked
+    // mission that this very function then refused at submission ("This task is locked").
+    const routedWaived = new Set<string>(Array.isArray(taskRec.routedByOperator?.waived) ? taskRec.routedByOperator!.waived : []);
+    // A mission VISITED in another stage completes while that stage is not active; the stage
+    // itself is not evaluated now (below), only when it becomes active (applyStageCompletion).
+    const visiting = stages[stageIdx].status !== 'active' && routedWaived.has('otherStage');
+    if (stages[stageIdx].status !== 'active' && !visiting) {
       throw new functions.https.HttpsError(
         'failed-precondition',
         'This stage is not active yet — finish your current stage first',
@@ -1342,7 +1357,7 @@ export async function completeTaskForTeam(
     // prerequisites cannot be completed, whatever path funnels here (completeTask,
     // submitTaskAnswer, submitSequenceStep, verifyStationCode, photo review).
     // Completed ids come from the freshly-read team state INSIDE this transaction.
-    if (gameTask) {
+    if (gameTask && !routedWaived.has('prerequisites')) {
       // skip-keeps-the-stage: an operator-skipped prerequisite satisfies the gate too.
       const satisfiedTaskIds = gateSatisfiedTaskIds(stages);
       if (!isUnlocked(gameTask, satisfiedTaskIds)) {
@@ -1575,8 +1590,12 @@ export async function completeTaskForTeam(
     // finishes, leftover tasks are auto-skipped, the next stage unlocks (unless
     // scheduled-release-gated), and any leftover that was still ASSIGNED holds a
     // station slot — collect those for release after the transaction.
-    const { heldAssignedTaskIds } = applyStageCompletion(stages, stageIdx, game, launchedAt, now);
-    skippedHeldTaskIds.push(...heldAssignedTaskIds);
+    // A visited stage (route-team-to-mission) is not the team's stage: evaluating it now would
+    // complete it and open the NEXT stage under a team that is still playing its own.
+    if (!visiting) {
+      const { heldAssignedTaskIds } = applyStageCompletion(stages, stageIdx, game, launchedAt, now);
+      skippedHeldTaskIds.push(...heldAssignedTaskIds);
+    }
 
     const allDone = stages.every((s) => s.status === 'completed');
     const newScore = (team.score ?? 0) + earnedScore;
@@ -2091,7 +2110,7 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
 //      subtracted by buildRankings (see teamHeldExclusionMs), so a hold can never
 //      cost a team its standing — otherwise no marshal would dare use it.
 //   2. Progress is blocked, but READS are not. Every write path refuses via
-//      assertTeamNotHeld; getMyTeamState deliberately does not, so the participant
+//      assertTeamMayAdvance; getMyTeamState deliberately does not, so the participant
 //      app can explain the pause instead of showing seven opaque failures.
 //   3. It is reversible and audited, and it cannot outlive the run (finalizeRun
 //      settles any still-open hold).
@@ -2107,16 +2126,20 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
  * its own state; that is the only way the app can say "staff paused you" instead
  * of failing silently, and a read grants nothing a hold is meant to prevent.
  */
-export function assertTeamNotHeld(team: Pick<RunTeam, 'held' | 'heldReason'>): void {
-  if (team?.held !== true) return;
+export function assertTeamMayAdvance(team: Pick<RunTeam, 'held' | 'heldReason' | 'removed' | 'removedReason'>): void {
+  // One gate for "may this team advance" (change: team-lifecycle-controls): a staff HOLD and an
+  // organizer REMOVAL are refused at the same 12 doors, so a new progress path cannot remember
+  // one and forget the other. Removed outranks held (teamAdvanceRefusal).
+  const refusal = teamAdvanceRefusal(team);
+  if (!refusal) return;
   // `failed-precondition` (not permission-denied): the caller is legitimate, the
-  // STATE is temporarily wrong. describeCallFailure maps this to a non-retryable
-  // 'rejected' on the client, which is exactly right — retrying changes nothing
-  // until staff resume the team.
+  // STATE is wrong. describeCallFailure maps this to a non-retryable 'rejected' on
+  // the client, which is exactly right — retrying changes nothing until an
+  // operator resumes or restores the team.
   throw new functions.https.HttpsError(
     'failed-precondition',
-    'TEAM_HELD', // stable code — clients localize it, never render this string
-    { reason: team.heldReason ?? '' },
+    refusal.code, // stable code (TEAM_HELD | TEAM_REMOVED) — clients localize it, never render it
+    { reason: refusal.reason },
   );
 }
 
@@ -2196,11 +2219,28 @@ export const setTeamHold = loggedCallable('setTeamHold', async (data, context) =
       const startedMs = Date.parse(team.heldAt ?? '');
       const elapsed = Number.isFinite(startedMs) ? Date.now() - startedMs : 0;
       addedMs = Math.max(0, elapsed);
+      // The mission the team was on is paused with it (overnight 2026-09-29): its time limit counts
+      // from `startedAt`, so without this a team held past its limit came back to a mission the
+      // sweep closed as "time is up", for the organizer's pause. Same arithmetic as a flash
+      // mission's return (`resumedStartedAt`), measured from the SERVER's own hold stamp.
+      const nowMsResume = Date.now();
+      let movedStart = false;
+      const stages = team.stages.map((st) => ({
+        ...st,
+        tasks: st.tasks.map((r) => {
+          if (r.status !== 'assigned') return r;
+          const moved = resumedStartedAt(r.startedAt, team.heldAt, nowMsResume);
+          if (!moved || moved === r.startedAt) return r;
+          movedStart = true;
+          return { ...r, startedAt: moved };
+        }),
+      }));
       tx.update(teamRef, {
         held: false,
         heldAt: FieldValue.delete(),
         heldReason: FieldValue.delete(),
         heldMs: (Number.isFinite(team.heldMs) ? (team.heldMs as number) : 0) + addedMs,
+        ...(movedStart ? { stages } : {}),
         updatedAt: now,
       });
     }
@@ -2228,6 +2268,129 @@ export const setTeamHold = loggedCallable('setTeamHold', async (data, context) =
   return { ok: true, held, heldMsAdded: addedMs };
 });
 
+// ─── Remove a team from the game (change: team-lifecycle-controls) ───────────
+//
+// Field report 2026-09-27: the organizer needed a test team out of a live race — not playing, not
+// in the table — and the only way was deleting its document. Removal is a STATE:
+//   * refused at every progress door by the same gate as a hold (assertTeamMayAdvance);
+//   * left out of every standing by buildRankings (rankableTeams), live and final alike;
+//   * never started by startTeams; SOS still works (a removed team is still people outside);
+//   * its mission is given back and its station slot released, so it holds no capacity;
+//   * reversible, idempotent, audited, and owner/admin ONLY — not staff, whatever their grant.
+export const setTeamRemoved = loggedCallable('setTeamRemoved', async (data, context) => {
+  const {
+    ownerUid: ownerUidIn, gameId, runId, teamId, removed, reason,
+  } = data as {
+    ownerUid?: string; gameId: string; runId: string; teamId: string;
+    removed?: unknown; reason?: string;
+  };
+  const ownerUid = ownerUidIn ?? context.auth?.uid ?? '';
+  const operatorId = assertOwnerOrPlatformAdmin(context, ownerUid);
+  await enforceRateLimit(operatorId, 'setTeamRemoved');
+
+  if (typeof removed !== 'boolean') {
+    throw new functions.https.HttpsError('invalid-argument', 'removed must be a boolean');
+  }
+  const ids = validate(() => ({
+    gameId: requireString(gameId, 'gameId', MAX_ID_LEN),
+    runId: requireString(runId, 'runId', MAX_ID_LEN),
+    teamId: requireString(teamId, 'teamId', MAX_ID_LEN),
+  }));
+  const cleanReason = typeof reason === 'string' ? reason.slice(0, 200) : '';
+
+  const runSnap = await db.doc(runPath(ownerUid, ids.gameId, ids.runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = runSnap.data() as Run;
+  if (run.ownerUid !== ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
+
+  const teamRef = db.doc(teamPath(ownerUid, ids.gameId, ids.runId, ids.teamId));
+  const now = new Date().toISOString();
+  let changed = false;
+  let releasedTaskId: string | null = null;
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = snap.data() as RunTeam;
+    // Idempotent in both directions, unlike a hold: removing is not an accumulator, and an
+    // organizer double-tapping "remove" must simply end with the team removed.
+    if ((team.removed === true) === removed) return;
+    changed = true;
+    // A team out on a flash mission gives it back too (overnight 2026-09-29): otherwise its
+    // 'claimed' claim keeps a first-team mission "taken" for every other team until it expires, and
+    // no organizer action frees it. Read here, before any write, as a transaction requires.
+    const flashId = removed ? team.flashSuspension?.flashId : undefined;
+    const flashRef = flashId ? db.doc(`${runPath(ownerUid, ids.gameId, ids.runId)}/flashMissions/${flashId}`) : null;
+    const flashSnap = flashRef ? await tx.get(flashRef) : null;
+    const releaseClaim = !!flashId && team.flashClaims?.[flashId]?.status === 'claimed';
+    if (flashRef && flashSnap?.exists && releaseClaim
+      && (flashSnap.data() as { takenBy?: string }).takenBy === ids.teamId) {
+      tx.update(flashRef, { takenBy: FieldValue.delete() });
+    }
+    if (removed) {
+      // Give back the mission it holds: `unassigned`, not skipped, so a restore finds the stage
+      // exactly as playable as it was. The slot is released after the commit.
+      const stages = team.stages.map((s) => ({
+        ...s,
+        tasks: s.tasks.map((r) => {
+          if (r.status !== 'assigned') return r;
+          releasedTaskId = r.taskId;
+          const { startedAt: _drop, ...rest } = r;
+          return { ...rest, status: 'unassigned' as const };
+        }),
+      }));
+      tx.update(teamRef, {
+        removed: true,
+        removedAt: now,
+        removedBy: operatorId,
+        removedReason: cleanReason,
+        stages,
+        activeTaskId: FieldValue.delete(),
+        ...(flashId ? { flashSuspension: FieldValue.delete() } : {}),
+        ...(releaseClaim && flashId ? { [`flashClaims.${flashId}.status`]: 'released' } : {}),
+        updatedAt: now,
+      });
+    } else {
+      tx.update(teamRef, {
+        removed: false,
+        removedAt: FieldValue.delete(),
+        removedBy: FieldValue.delete(),
+        removedReason: FieldValue.delete(),
+        updatedAt: now,
+      });
+    }
+  });
+
+  if (!changed) return { ok: true, removed, changed: false };
+
+  if (releasedTaskId) {
+    await releaseTask(releasedTaskId, ownerUid, ids.gameId, ids.runId);
+  }
+
+  await writeAuditLog({
+    ownerUid,
+    gameId: ids.gameId,
+    runId: ids.runId,
+    teamId: ids.teamId,
+    operatorId,
+    actionType: removed ? AUDIT_TEAM_REMOVED : AUDIT_TEAM_RESTORED,
+    previousValue: removed ? 'in_game' : 'removed',
+    newValue: removed ? 'removed' : 'in_game',
+    reason: cleanReason,
+    ...(releasedTaskId ? { taskId: releasedTaskId } : {}),
+  });
+
+  // The standings change the moment a team leaves or rejoins them.
+  await maybeRefreshLeaderboardSnapshot(ownerUid, ids.gameId, ids.runId, { force: true });
+
+  return { ok: true, removed, changed: true };
+});
+
 
 // ─── forceAssignTask (change: staff-console-field-ops) ────────────────────────
 //
@@ -2250,12 +2413,199 @@ export const setTeamHold = loggedCallable('setTeamHold', async (data, context) =
 // expiry) — the ones a marshal legitimately needs to open early for one team. It is
 // off by default and audited under its own action type, so an organizer reading the
 // trail can see exactly when an authored rule was deliberately set aside.
+// ─── Route a team to a chosen mission, waiving EXACTLY what blocks it ─────────
+// (change: route-team-to-mission)
+//
+// Field report 2026-09-27: send a team to ANY mission, choose "now" or "after this mission", and
+// waive only the conditions that actually stand in the way. `routeBlockers` (shared, pure) is the
+// list the organizer saw; it is recomputed here and must be covered by what they accepted, or the
+// call is refused with the new list (something changed since they looked). Only the computed kinds
+// are waived, and only for this team and this assignment: nothing is written to the template and
+// no other team or mission changes. A mission in another stage is VISITED: completed and scored
+// there without completing or opening that stage (completeTaskForTeam, applyStageCompletion).
+
+type RouteWhen = 'now' | 'after';
+
+function refuseHardBlocker(kind: HardBlocker['kind']): never {
+  switch (kind) {
+    case 'unknownTask':
+      throw new functions.https.HttpsError('invalid-argument', 'That mission is not in this game');
+    case 'runFinished':
+      throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+    case 'missionClosed':
+      throw new functions.https.HttpsError('failed-precondition', 'That mission is paused or closed for this run');
+    case 'alreadyDone':
+      throw new functions.https.HttpsError('failed-precondition', 'That mission is already completed or skipped');
+    case 'alreadyCurrent':
+      throw new functions.https.HttpsError('failed-precondition', 'This team is already on that mission');
+    default:
+      // teamHeld / teamRemoved: assertTeamMayAdvance refused before we got here; a race lands here.
+      throw new functions.https.HttpsError('failed-precondition', 'This team cannot be routed right now');
+  }
+}
+
+function refuseChangedBlockers(blockers: RouteBlockers): never {
+  throw new functions.https.HttpsError(
+    'failed-precondition',
+    'ROUTE_BLOCKERS_CHANGED', // stable code: the console shows the new list and asks again
+    { blockers: blockers.waivable },
+  );
+}
+
+/** Claim `taskId` for the team with `waived`, displacing whatever it holds (any stage). */
+async function applyRoute(a: {
+  ownerUid: string; gameId: string; runId: string; teamId: string; teamRef: FirebaseFirestore.DocumentReference;
+  game: Game; run: Run; team: RunTeam; taskId: string; waived: WaivableKind[]; operatorId: string; now: string;
+}): Promise<{ displacedTaskId: string | null }> {
+  const gameTask = findGameTask(a.game, a.taskId);
+  if (!gameTask) refuseHardBlocker('unknownTask');
+  const claim = await claimSpecificTask(
+    gameTask!, gateSatisfiedTaskIds(a.team.stages), a.ownerUid, a.gameId, a.runId, new Set(a.waived), a.run.launchedAt,
+  );
+  if (!claim.ok) {
+    // The slot or a gate moved between the check and the claim: say so with the fresh list.
+    const fresh = routeBlockers({ game: a.game, team: a.team, run: a.run, taskId: a.taskId, nowMs: Date.now() });
+    refuseChangedBlockers(fresh);
+  }
+  let displacedTaskId: string | null = null;
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(a.teamRef);
+      if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+      const fresh = snap.data() as RunTeam;
+      assertTeamMayAdvance(fresh);
+      const stages = fresh.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+      const all = stages.flatMap((s) => s.tasks);
+      const rec = all.find((t) => t.taskId === a.taskId);
+      if (!rec || rec.status !== 'unassigned') {
+        throw new functions.https.HttpsError('failed-precondition', 'That mission is no longer available to this team');
+      }
+      // Displace what is in flight ANYWHERE (a visit included): back to `unassigned`, never skipped.
+      const inFlight = all.find((t) => t.status === 'assigned');
+      if (inFlight) {
+        inFlight.status = 'unassigned';
+        delete inFlight.startedAt;
+        delete inFlight.routedByOperator;
+        displacedTaskId = inFlight.taskId;
+      }
+      rec.status = 'assigned';
+      rec.startedAt = a.now;
+      rec.routedByOperator = { at: a.now, by: a.operatorId, waived: a.waived };
+      tx.update(a.teamRef, {
+        stages,
+        activeTaskId: a.taskId,
+        // A route that happened supersedes a queued one for the same mission.
+        ...(fresh.queuedRoute?.taskId === a.taskId ? { queuedRoute: FieldValue.delete() } : {}),
+        updatedAt: a.now,
+      });
+    });
+  } catch (e) {
+    await releaseTask(a.taskId, a.ownerUid, a.gameId, a.runId).catch(() => undefined);
+    throw e;
+  }
+  if (displacedTaskId) await releaseTask(displacedTaskId, a.ownerUid, a.gameId, a.runId);
+
+  try {
+    const noticeRef = db.collection(`users/${a.ownerUid}/games/${a.gameId}/runs/${a.runId}/announcements`).doc();
+    await noticeRef.set({
+      id: noticeRef.id,
+      kind: 'forceAssign',
+      teamId: a.teamId,
+      taskId: a.taskId,
+      message: `Staff sent you to: ${gameTask!.title ?? ''}`,
+      messageHe: `הצוות שלח אתכם אל: ${gameTask!.title ?? ''}`,
+      active: true,
+      createdAt: a.now,
+      createdBy: a.operatorId,
+    });
+  } catch (e) {
+    functions.logger.warn('route notice write failed', { runId: a.runId, teamId: a.teamId, err: String(e) });
+  }
+  return { displacedTaskId };
+}
+
+async function routeTeamWithWaivers(a: {
+  ownerUid: string; gameId: string; runId: string; teamId: string; teamRef: FirebaseFirestore.DocumentReference;
+  game: Game; run: Run; team: RunTeam; taskId: string; accept: string[]; when: RouteWhen;
+  operatorId: string; reason: string;
+}): Promise<{ ok: true; taskId: string; displacedTaskId: string | null; waived: WaivableKind[]; queued: boolean }> {
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const blockers = routeBlockers({ game: a.game, team: a.team, run: a.run, taskId: a.taskId, nowMs });
+  if (blockers.hard.length > 0) refuseHardBlocker(blockers.hard[0].kind);
+  if (!acceptsAll(blockers, a.accept)) refuseChangedBlockers(blockers);
+  const waived = blockers.waivable.map((b) => b.kind);
+
+  if (a.when === 'after') {
+    await a.teamRef.update({
+      queuedRoute: { taskId: a.taskId, waived, at: now, by: a.operatorId },
+      updatedAt: now,
+    });
+    await writeAuditLog({
+      ownerUid: a.ownerUid, gameId: a.gameId, runId: a.runId, teamId: a.teamId, operatorId: a.operatorId,
+      actionType: AUDIT_ROUTE_QUEUED, previousValue: a.team.queuedRoute?.taskId ?? '', newValue: a.taskId,
+      reason: a.reason, taskId: a.taskId, waived,
+    });
+    return { ok: true, taskId: a.taskId, displacedTaskId: null, waived, queued: true };
+  }
+
+  const { displacedTaskId } = await applyRoute({ ...a, waived, now });
+  await writeAuditLog({
+    ownerUid: a.ownerUid, gameId: a.gameId, runId: a.runId, teamId: a.teamId, operatorId: a.operatorId,
+    actionType: AUDIT_TASK_ROUTED, previousValue: displacedTaskId ?? '', newValue: a.taskId,
+    reason: a.reason, taskId: a.taskId, waived,
+  });
+  return { ok: true, taskId: a.taskId, displacedTaskId, waived, queued: false };
+}
+
+/**
+ * "After this mission": hand the queued mission to a team that has just become free, with the
+ * waiver the operator confirmed — but only if that waiver still covers everything in the way.
+ * Otherwise the queue is dropped (audited) and normal routing runs. Never throws.
+ */
+async function consumeQueuedRoute(
+  ownerUid: string, gameId: string, runId: string, teamId: string, game: Game, team: RunTeam,
+): Promise<string | null> {
+  const q = team.queuedRoute;
+  if (!q || typeof q.taskId !== 'string') return null;
+  const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+  const now = new Date().toISOString();
+  try {
+    const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+    const run = runSnap.data() as Run;
+    const blockers = routeBlockers({ game, team, run, taskId: q.taskId, nowMs: Date.now() });
+    const stillCovered = blockers.hard.length === 0 && acceptsAll(blockers, q.waived ?? []);
+    if (!stillCovered) {
+      await teamRef.update({ queuedRoute: FieldValue.delete(), updatedAt: now });
+      await auditBestEffort({
+        ownerUid, gameId, runId, teamId, operatorId: q.by ?? '',
+        actionType: AUDIT_ROUTE_QUEUE_DROPPED, previousValue: q.taskId, newValue: '',
+        reason: blockers.hard[0]?.kind ?? `blocked:${blockers.waivable.map((b) => b.kind).join(',')}`,
+        taskId: q.taskId,
+      });
+      return null;
+    }
+    const waived = blockers.waivable.map((b) => b.kind);
+    await applyRoute({ ownerUid, gameId, runId, teamId, teamRef, game, run, team, taskId: q.taskId, waived, operatorId: q.by ?? '', now });
+    await teamRef.update({ queuedRoute: FieldValue.delete() }).catch(() => undefined);
+    await auditBestEffort({
+      ownerUid, gameId, runId, teamId, operatorId: q.by ?? '',
+      actionType: AUDIT_TASK_ROUTED, previousValue: '', newValue: q.taskId, reason: 'queued', taskId: q.taskId, waived,
+    });
+    return q.taskId;
+  } catch (e) {
+    functions.logger.warn('consumeQueuedRoute failed; routing normally', { runId, teamId, err: String(e) });
+    await teamRef.update({ queuedRoute: FieldValue.delete() }).catch(() => undefined);
+    return null;
+  }
+}
+
 export const forceAssignTask = loggedCallable('forceAssignTask', async (data, context) => {
   const {
-    ownerUid: ownerUidIn, gameId, runId, teamId, taskId, override, reason,
+    ownerUid: ownerUidIn, gameId, runId, teamId, taskId, override, reason, accept, when,
   } = data as {
     ownerUid?: string; gameId: string; runId: string; teamId: string;
-    taskId: string; override?: unknown; reason?: string;
+    taskId: string; override?: unknown; reason?: string; accept?: unknown; when?: unknown;
   };
   const ownerUid = ownerUidIn ?? context.auth?.uid ?? '';
   const operatorId = await assertStaffCan(context, ownerUid, runId, 'route');
@@ -2290,8 +2640,38 @@ export const forceAssignTask = loggedCallable('forceAssignTask', async (data, co
   if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
   const team = teamSnap.data() as RunTeam;
 
+  // route-team-to-mission, staff app: "what stands in the way?" without doing anything. The staff
+  // app cannot read the game document, so it cannot compute the blockers itself; the server answers
+  // with the same `routeBlockers` it will recompute on the real call. Hard blockers (held, removed,
+  // already current…) are REPORTED here rather than thrown, so the picker can say why. No write.
+  if (data && (data as { dryRun?: unknown }).dryRun === true) {
+    const blockers = routeBlockers({ game, team, run, taskId: ids.taskId, nowMs: Date.now() });
+    const titleOf = new Map<string, string>();
+    for (const s of game.stages ?? []) for (const tk of s.tasks ?? []) titleOf.set(tk.id, typeof tk.title === 'string' ? tk.title : '');
+    const missing = blockers.waivable.find((b) => b.kind === 'prerequisites');
+    return {
+      dryRun: true as const,
+      blockers,
+      missingTitles: missing && missing.kind === 'prerequisites' ? missing.missing.map((id) => titleOf.get(id) || id) : [],
+      teamBusy: typeof team.activeTaskId === 'string' && team.activeTaskId !== '',
+    };
+  }
+
   // A held team is parked on purpose — routing it somewhere would defeat the hold.
-  assertTeamNotHeld(team);
+  assertTeamMayAdvance(team);
+
+  // route-team-to-mission: a request that NAMES what it accepts takes the per-blocker path (any
+  // stage, now or after this mission). Without `accept` everything below is exactly as it was,
+  // so the staff app's `override` requests keep their behaviour and their error codes.
+  if (Array.isArray(accept)) {
+    return routeTeamWithWaivers({
+      ownerUid, gameId: ids.gameId, runId: ids.runId, teamId: ids.teamId, teamRef, game, run, team,
+      taskId: ids.taskId,
+      accept: accept.filter((x): x is string => typeof x === 'string'),
+      when: when === 'after' ? 'after' : 'now',
+      operatorId, reason: cleanReason,
+    });
+  }
 
   const stageIdx = team.stages.findIndex((s) => s.status === 'active');
   if (stageIdx < 0) {
@@ -2507,7 +2887,7 @@ export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context)
   const firstSnap = await teamRef.get();
   if (!firstSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
   const firstTeam = firstSnap.data() as RunTeam;
-  assertTeamNotHeld(firstTeam);
+  assertTeamMayAdvance(firstTeam);
   const firstPlan = planFor(firstTeam);
   if (!firstPlan.ok) refusal(firstPlan.reason);
 
@@ -2549,7 +2929,7 @@ export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context)
       const snap = await tx.get(teamRef);
       if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
       const fresh = snap.data() as RunTeam;
-      assertTeamNotHeld(fresh);
+      assertTeamMayAdvance(fresh);
       // Re-planned on the fresh read: the team may have moved since the first read.
       const plan = planFor(fresh);
       if (!plan.ok) refusal(plan.reason);
@@ -2667,10 +3047,17 @@ export const getRunOutline = loggedCallable('getRunOutline', async (data, contex
     gameId: requireString(gameId, 'gameId', MAX_ID_LEN),
     runId: requireString(runId, 'runId', MAX_ID_LEN),
   }));
-  const gameSnap = await db.doc(gamePath(ownerUid, ids.gameId)).get();
+  const [gameSnap, runSnap] = await Promise.all([
+    db.doc(gamePath(ownerUid, ids.gameId)).get(),
+    db.doc(runPath(ownerUid, ids.gameId, ids.runId)).get(),
+  ]);
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
   return {
+    // located-mission-arrival: staff cannot read the run document (firestore.rules), and whether a
+    // team must ARRIVE to open a mission decides if the staff app offers "let them in". One read,
+    // once per staff session.
+    arrivalGate: (runSnap.data() as Run | undefined)?.arrivalGate === true,
     stages: (game.stages ?? []).map((s) => ({
       id: s.id,
       title: typeof s.title === 'string' ? s.title : '',
@@ -2705,7 +3092,10 @@ export const getRunOutline = loggedCallable('getRunOutline', async (data, contex
 // never drift. `now` is the reference time for not-yet-finished teams.
 export function buildRankings(game: Game, teams: RunTeam[], now: string): LeaderboardEntry[] {
   type ScoredTeam = LeaderboardEntry & { durationMin: number };
-  const scored: ScoredTeam[] = teams.map((team) => {
+  // team-lifecycle-controls: a team the organizers REMOVED is in no standing, live or final.
+  // Filtered here, the one function both finalizeRun and refreshLeaderboard call, so the two
+  // boards cannot disagree about who is in them.
+  const scored: ScoredTeam[] = rankableTeams(teams).map((team) => {
     let rawScore = 0;
 
     // Pause-clock tasks (change: pause-clock-tasks): ONE excluded amount per team,
@@ -4017,7 +4407,8 @@ export const startInstantPlay = loggedCallable('startInstantPlay', async (data, 
   const run: Run = {
     id: runId, gameId, ownerUid, status: 'live', accessCode: code,
     billingType: 'free', maxParticipants: 1, participantCount: 1,
-    selfGuided: true, launchedAt: now, createdAt: now, updatedAt: now,
+    // located-mission-arrival: instant play opens located missions on arrival too.
+    selfGuided: true, arrivalGate: true, launchedAt: now, createdAt: now, updatedAt: now,
   };
   const accessCode: AccessCode = { code, ownerUid, gameId, runId, status: 'unused', createdAt: now };
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, uid));
@@ -4466,6 +4857,10 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       // over to, not who the guardian is. False for every team of every run that
       // does not require consent, and for every row if the game read above failed.
       heldForConsent: !t.launched && !isConsentSatisfied(t, consentConfig),
+      // team-lifecycle-controls: the console's row actions branch on these (resume a paused
+      // team, bring back a removed one) and the list files removed teams behind a filter.
+      held: t.held === true,
+      removed: t.removed === true,
     };
   });
 
@@ -4987,7 +5382,10 @@ export async function assignNextInActiveStage(
     const idx = team.stages.findIndex((s) => s.status === 'active');
     const assignedRec = idx >= 0 ? team.stages[idx].tasks.find((t) => t.status === 'assigned') : undefined;
     const gt = assignedRec ? findGameTask(game, assignedRec.taskId) : undefined;
-    if (assignedRec && gt && (gt.expiresAfterMinutes || gt.expiresAt || gt.timeLimitMinutes)) {
+    // flash-missions-v2: a mission the team left for a flash mission is SUSPENDED; its countdown
+    // resumes (shifted) when the team returns, so the sweep must not expire it meanwhile.
+    // A held team's mission is paused too (its start moves forward on resume), so never sweep it.
+    if (assignedRec && gt && !team.flashSuspension && team.held !== true && (gt.expiresAfterMinutes || gt.expiresAt || gt.timeLimitMinutes)) {
       const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
       const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
       const swept = sweepExpiredInFlight(team, game, launchedAt, Date.now());
@@ -5057,8 +5455,17 @@ export async function assignNextInActiveStage(
   if (!gameStage) return {};
 
   // Already have a task in flight in this stage? Don't double-assign.
-  const inFlight = stageRec.tasks.find((t) => t.status === 'assigned');
+  // route-team-to-mission: a mission an operator sent the team to in ANOTHER stage is in flight
+  // too; looking only in the active stage would hand the team a second mission on top of it.
+  const inFlight = team.stages.flatMap((s) => s.tasks).find((t) => t.status === 'assigned');
   if (inFlight) return { taskId: inFlight.taskId };
+
+  // "After this mission": the operator's queued route goes first (never throws; drops itself
+  // when what blocks it has changed beyond what was confirmed).
+  if (team.queuedRoute?.taskId) {
+    const routed = await consumeQueuedRoute(ownerUid, gameId, runId, teamId, game, team);
+    if (routed) return { taskId: routed };
+  }
 
   const unassigned = stageRec.tasks.filter((t) => t.status === 'unassigned');
   if (unassigned.length === 0) return {};
@@ -5167,7 +5574,7 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   assertCoordIfPresent(lat, lng);
 
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
-  assertTeamNotHeld(team); // staff-console-field-ops — no check-in while held
+  assertTeamMayAdvance(team); // staff-console-field-ops — no check-in while held
   const now = new Date().toISOString();
   const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
   // Set by the proximity gate below when the grace window let a coarse fix through
@@ -5223,7 +5630,12 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     // locationless server-side too (nightly hardening).
     const c = gtask.coordinates;
     const hasRealCoords = !!c && isValidCoord(c.lat, c.lng) && (c.lat !== 0 || c.lng !== 0);
-    if ((mode === 'radius' || mode === 'exact') && hasRealCoords) {
+    // "Let them in" (markTeamArrived, located-mission-arrival): an operator vouched for this team's
+    // arrival where GPS could not prove it. For a check-in, arriving IS the mission, so demanding the
+    // fix here again stranded exactly the indoor team the let-in exists for (overnight 2026-09-29).
+    // Only an OPERATOR's latch counts; a GPS-latched arrival still proves itself at check-in.
+    const letInByOperator = team.stages.some((s) => s.tasks.some((r) => r.taskId === taskId && r.arrivalByOperator != null));
+    if ((mode === 'radius' || mode === 'exact') && hasRealCoords && !letInByOperator) {
       // Test-run bypass (wave-J): in a TEST run the creator may check in from their
       // desk, so a would-reject verdict is overridden — but ONLY on the reject path,
       // via a lazy run-doc read, so a real run's happy path is byte-identical (zero
@@ -5354,7 +5766,7 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   // Staff hold (staff-console-field-ops) — before every other read/write, so a held
   // team causes zero side effects: no station slot reserved, no stage sweep persisted.
-  assertTeamNotHeld(team);
+  assertTeamMayAdvance(team);
   // Soft-pause (safe-zone-boundary): no new task while the team is out of bounds.
   // Test-run bypass (wave-J): a desk rehearsal must never dead-end on the safe-zone
   // latch. The run-doc read happens ONLY when already flagged out of bounds (an
@@ -5394,7 +5806,7 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
-  assertTeamNotHeld(team); // staff-console-field-ops — no charged action while held
+  assertTeamMayAdvance(team); // staff-console-field-ops — no charged action while held
   // Same stage-scope guard as every answer/interaction callable (submitTaskAnswer,
   // submitSequenceStep, verifyStationCode, reportArrival): a hint may only be
   // revealed for a task in the team's ACTIVE (or already-completed) stage. Without
@@ -5462,6 +5874,63 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
   return { hint: hintText, penalty: result.charged, alreadyUsed: result.alreadyUsed, free: result.free };
 });
 
+// ─── markTeamArrived: "let them in" (change: located-mission-arrival) ─────────
+//
+// Every located mission now opens only on arrival, and GPS fails indoors and between tall
+// buildings (Actionbound's own guidance says as much). A team standing at the right door must not
+// be stranded by a bad fix, so an operator can latch the arrival for them. Recorded on the task
+// record as `arrivalByOperator` (organizer-facing, never allow-listed to the player) and audited.
+export const markTeamArrived = loggedCallable('markTeamArrived', async (data, context) => {
+  const { ownerUid: ownerUidIn, gameId, runId, teamId, taskId, reason } = data as {
+    ownerUid?: string; gameId: string; runId: string; teamId: string; taskId: string; reason?: string;
+  };
+  const ownerUid = ownerUidIn ?? context.auth?.uid ?? '';
+  const operatorId = await assertStaffCan(context, ownerUid, runId, 'route');
+  await enforceRateLimit(operatorId, 'markTeamArrived');
+  const ids = validate(() => ({
+    gameId: requireString(gameId, 'gameId', MAX_ID_LEN),
+    runId: requireString(runId, 'runId', MAX_ID_LEN),
+    teamId: requireString(teamId, 'teamId', MAX_ID_LEN),
+    taskId: requireString(taskId, 'taskId', MAX_ID_LEN),
+  }));
+  const cleanReason = typeof reason === 'string' ? reason.slice(0, 200) : '';
+  const runSnap = await db.doc(runPath(ownerUid, ids.gameId, ids.runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = runSnap.data() as Run;
+  if (run.ownerUid !== ownerUid) throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  if (run.status === 'finished') throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+
+  const teamRef = db.doc(teamPath(ownerUid, ids.gameId, ids.runId, ids.teamId));
+  const now = new Date().toISOString();
+  let changed = false;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = snap.data() as RunTeam;
+    let found = false;
+    const stages = team.stages.map((s) => ({
+      ...s,
+      tasks: s.tasks.map((r) => {
+        if (r.taskId !== ids.taskId) return r;
+        found = true;
+        if (r.arrivedAt != null) return r; // idempotent: arrival is sticky
+        changed = true;
+        return { ...r, arrivedAt: now, arrivalByOperator: { at: now, by: operatorId } };
+      }),
+    }));
+    if (!found) throw new functions.https.HttpsError('not-found', 'That mission is not in this team\'s game');
+    if (changed) tx.update(teamRef, { stages, updatedAt: now });
+  });
+  if (changed) {
+    await writeAuditLog({
+      ownerUid, gameId: ids.gameId, runId: ids.runId, teamId: ids.teamId, operatorId,
+      actionType: AUDIT_TEAM_ARRIVAL_MARKED, previousValue: '', newValue: ids.taskId,
+      reason: cleanReason, taskId: ids.taskId,
+    });
+  }
+  return { ok: true, changed };
+});
+
 // ─── reportArrival (unseal a hidden-location task once the team is there) ─────
 // change: play-task-gating (wave D).
 //
@@ -5496,7 +5965,7 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
   const { ctx, teamId, team, teamRef } = await resolveCallerTeam(
     uid, { ownerUid, gameId, runId, code }, { requireController: true },
   );
-  assertTeamNotHeld(team); // staff-console-field-ops — a held team cannot unseal
+  assertTeamMayAdvance(team); // staff-console-field-ops — a held team cannot unseal
 
   // The game template cannot change mid-run, and this is a hot participant path
   // (change: hot-path-read-cost).
@@ -5512,8 +5981,12 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
   // Recorded on the latch below, organizer-facing only.
   let unsealUnverified = false;
 
-  // Nothing to unseal on a visible task — a no-op success keeps the client simple.
-  if (!task.hideLocation) return { arrived: true };
+  // located-mission-arrival: a located mission of a gated run is checked exactly like a hidden one
+  // (same fix, radius, accuracy and grace rules). Anything else has nothing to unseal — a no-op
+  // success keeps the client simple.
+  const runForGate = (await cachedGetDoc<Run>(db, docCachePolicy, runPath(ctx.ownerUid, ctx.gameId, ctx.runId))).data;
+  const arrivalGated = !task.hideLocation && arrivalGateApplies(task, runForGate);
+  if (!task.hideLocation && !arrivalGated) return { arrived: true };
 
   const c = task.coordinates;
   const hasRealCoords = !!c && isValidCoord(c.lat, c.lng) && (c.lat !== 0 || c.lng !== 0);
@@ -5565,11 +6038,16 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
       // tightly-authored hidden mission would clear the accuracy gate and then fail
       // the distance gate one line later, which is the same dead end wearing a
       // different message.
-      const verdict = evaluateTrigger(mode, distM, fix.effectiveRadiusM, { hidden: true });
+      const verdict = evaluateTrigger(mode, distM, fix.effectiveRadiusM, { hidden: task.hideLocation === true });
       if (!verdict.ok && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
         // Reason strings for hidden tasks are digit-free by contract; never fall
-        // back to a message that carries the distance.
-        return { arrived: false, reason: verdict.reason ?? 'Not here yet — keep following the clue' };
+        // back to a message that carries the distance. A VISIBLE located mission's point is on
+        // the map already, so the distance is no secret there (located-mission-arrival).
+        return {
+          arrived: false,
+          reason: verdict.reason ?? (task.hideLocation ? 'Not here yet — keep following the clue' : 'Not here yet — walk to the point on the map'),
+          ...(arrivalGated ? { distanceMeters: Math.round(distM) } : {}),
+        };
       }
     }
   }
@@ -5769,7 +6247,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   }
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
-  assertTeamNotHeld(team); // staff-console-field-ops — no scoring action while held
+  assertTeamMayAdvance(team); // staff-console-field-ops — no scoring action while held
 
   // The game template cannot change mid-run, and this is a hot participant path
   // (change: hot-path-read-cost).
@@ -6160,7 +6638,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   }
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
-  assertTeamNotHeld(team); // staff-console-field-ops — no step progress while held
+  assertTeamMayAdvance(team); // staff-console-field-ops — no step progress while held
 
   // The game template cannot change mid-run, and this is a hot participant path
   // (change: hot-path-read-cost).
@@ -6398,12 +6876,20 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   // temporal dead zone and crashed every getMyTeamState with "Cannot access
   // 'sealed' before initialization". tsc cannot see that across a closure.
   const sealed = sealsScoreFromParticipant(game);
+  // route-team-to-mission: a mission an operator sent the team to in ANOTHER stage (a visit) is
+  // the team's current mission too, so its content ships alongside the active stage's.
+  const activeRecs = activeStageIdx >= 0 ? team.stages[activeStageIdx].tasks : [];
+  const visitRec = team.stages
+    .filter((_s, i) => i !== activeStageIdx)
+    .flatMap((s) => s.tasks)
+    .find((r) => r.status === 'assigned');
   const recByTaskId = new Map(
-    (activeStageIdx >= 0 ? team.stages[activeStageIdx].tasks : []).map((r) => [r.taskId, r]),
+    [...activeRecs, ...(visitRec ? [visitRec] : [])].map((r) => [r.taskId, r]),
   );
+  const visitTask = visitRec ? findGameTask(game, visitRec.taskId) : undefined;
   const activeStageTasks =
     activeStageIdx >= 0 && orderedStages[activeStageIdx]
-      ? orderedStages[activeStageIdx].tasks.filter((t) => {
+      ? [...orderedStages[activeStageIdx].tasks, ...(visitTask ? [visitTask] : [])].filter((t) => {
           const st = recByTaskId.get(t.id)?.status;
           return st === 'assigned' || st === 'completed';
         }).map((t) => {
@@ -6412,7 +6898,11 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
           // spot you've been to).
           const rec = recByTaskId.get(t.id);
           const revealed = rec?.arrivedAt != null || rec?.status === 'completed';
-          const safe = sanitizeTaskForParticipant(t, { shuffleSeed: `${team.id}:${t.id}`, revealed }) as Record<string, unknown>;
+          const safe = sanitizeTaskForParticipant(t, {
+            shuffleSeed: `${team.id}:${t.id}`, revealed,
+            // located-mission-arrival: a located mission in a gated run is sealed until arrival too.
+            arrivalGated: arrivalGateApplies(t, run),
+          }) as Record<string, unknown>;
           // Hint auto escalation (change: hint-auto-escalation): decorate the
           // team's ACTIVE task with a display-only `hintFreeNow` flag. The charge
           // decision is re-made inside requestTaskHint's transaction, so a stale
@@ -6627,6 +7117,10 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       // media mission. Not a secret; the server still makes the decision.
       autoApproveAllMedia: run.autoApproveAllMedia === true,
     },
+    // located-mission-arrival: every mission with a location, locked ones too, for the player's
+    // map (decision 2026-09-28). Hidden missions are excluded here; their search circle ships
+    // separately. From the cached game doc: no extra read on this hot path.
+    missionPins: missionPins(game as never, team as never),
     // Scheduled-release countdown to the next timed stage drop (ms epoch or null).
     nextStageReleaseAt,
     game: {
@@ -6848,7 +7342,7 @@ export const checkOutTask = loggedCallable('checkOutTask', async (data, context)
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
   const { ctx, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
-  assertTeamNotHeld(team); // staff-console-field-ops — no abandoning a task while held
+  assertTeamMayAdvance(team); // staff-console-field-ops — no abandoning a task while held
 
   // Only release a slot this team actually holds, and clear our own record —
   // otherwise a replayed / cross-team call drains run.taskCounts for a slot it

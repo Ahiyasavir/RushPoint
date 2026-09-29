@@ -34,15 +34,20 @@ interface TeamLoc {
 }
 
 export default function LiveTeamMap({
-  ownerUid, gameId, runId, teams, className = '',
+  ownerUid, gameId, runId, teams, className = '', onTeamClick,
 }: {
   ownerUid: string;
   gameId: string;
   runId: string;
   teams: { id: string; displayName: string }[];
   className?: string;
+  /** team-lifecycle-controls: a click on a team opens its page (field report 2026-09-27). */
+  onTeamClick?: (teamId: string) => void;
 }) {
   const rc = useT().runConsole;
+  // Markers are created once and moved in place, so they must read the CURRENT handler.
+  const onTeamClickRef = useRef(onTeamClick);
+  onTeamClickRef.current = onTeamClick;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   // One persistent marker per team, keyed by teamId — updated in place on each
@@ -115,14 +120,24 @@ export default function LiveTeamMap({
           `width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
           `background:${color};border:2px solid #fff;cursor:pointer;box-shadow:0 0 0 2px ${color}55;`;
         el.title = nameOf(l.teamId);
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([l.lng, l.lat])
-          .setPopup(
+        const marker = new maplibregl.Marker({ element: el }).setLngLat([l.lng, l.lat]);
+        if (onTeamClickRef.current) {
+          // Clicking a team opens its page, instead of a popup that only repeated its name.
+          const teamId = l.teamId;
+          el.setAttribute('role', 'button');
+          el.setAttribute('tabindex', '0');
+          el.setAttribute('aria-label', rc.openTeamAria({ team: nameOf(teamId) }));
+          const open = (e: Event) => { e.stopPropagation(); onTeamClickRef.current?.(teamId); };
+          el.addEventListener('click', open);
+          el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') open(e); });
+        } else {
+          marker.setPopup(
             new maplibregl.Popup({ offset: 16, closeButton: false }).setHTML(
               `<div style="font-weight:600">${escapeHtml(nameOf(l.teamId))}</div>`,
             ),
-          )
-          .addTo(map.current!);
+          );
+        }
+        marker.addTo(map.current!);
         markersById.current.set(l.teamId, marker);
       }
     }

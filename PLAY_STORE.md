@@ -115,6 +115,12 @@ that URL in a browser.
 
 ## 4. Build the Android App Bundle (automated)
 
+> **Orientation (change: capture-rotation, 2026-09-28).** `twa-manifest.json` now says
+> `"orientation": "any"` (it was `portrait`, which Bubblewrap bakes into `AndroidManifest.xml`, so
+> players could not turn the phone to film in landscape). The installed app keeps getting the old
+> lock until the next `.aab` is built and published; the game asks for portrait from JavaScript
+> while playing and lets go while the camera is open.
+
 ```bash
 npm run play:twa:build    # → npx @bubblewrap/cli build  → app-release-bundle.aab
 ```

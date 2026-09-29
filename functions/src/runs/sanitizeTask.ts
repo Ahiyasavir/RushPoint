@@ -14,7 +14,7 @@
 //   - task.smart.secretCode + task.smart.adminNotes (and any field NOT in the
 //     explicit allow-list below)
 import type { Task } from '@rushpoint/shared';
-import { seededShuffle, hiddenSearchArea } from '@rushpoint/shared';
+import { seededShuffle, hiddenSearchArea, locatedSealedStub } from '@rushpoint/shared';
 
 export function sanitizeTaskForParticipant(
   task: Task,
@@ -23,6 +23,10 @@ export function sanitizeTaskForParticipant(
   // SHUFFLED — never in the authored (answer-key) order. No seed ⇒ fail closed.
   opts?: {
     shuffleSeed?: string;
+    // change: located-mission-arrival. The caller's `arrivalGateApplies(task, run)`: this located
+    // mission, in this run, opens only on arrival. Sealed with `locatedSealedStub` (by
+    // construction) until `revealed`. Defaults to false, so every existing caller is unchanged.
+    arrivalGated?: boolean;
     // change: play-task-gating (wave D). Hidden-location ("treasure hunt") tasks
     // are SEALED until the server has confirmed the team physically arrived
     // (reportArrival latches RunTaskRecord.arrivedAt). `revealed` is that
@@ -74,6 +78,14 @@ export function sanitizeTaskForParticipant(
       ...(task.difficulty != null ? { difficulty: task.difficulty } : {}),
       ...(task.estimatedMinutes != null ? { estimatedMinutes: task.estimatedMinutes } : {}),
     } as Record<string, unknown>;
+  }
+
+  // ── Located, not arrived yet (change: located-mission-arrival) ──────────────
+  // Every located mission of a gated run opens only when the team arrives. Until then the player
+  // gets the way THERE (name, exact point, radius, points, the picture) and nothing of the mission
+  // itself, built by construction like the hidden stub above. `reportArrival` latches `arrivedAt`.
+  if (opts?.arrivalGated === true && !opts?.revealed) {
+    return locatedSealedStub(task as unknown as Record<string, unknown>);
   }
 
   // Strip every server-secret answer key: the hint text (paid reveal only),
@@ -135,6 +147,10 @@ export function sanitizeTaskForParticipant(
     ...(choicePoints ? { choicePoints } : {}),
     ...(shuffledOrderItems ? { orderItems: shuffledOrderItems } : {}),
     ...(hidden ? { locationHidden: true as const } : {}),
+    // An "anywhere" mission (trigger mode locationless) reads as anywhere on the phone even when a
+    // stale document says `locationless: false` and keeps an old pin: the phone reads this flag,
+    // the Builder and the server read the trigger mode (overnight 2026-09-29, found by playing).
+    ...(rest.triggerMode === 'locationless' ? { locationless: true } : {}),
     hasHint: !!hint && hint.trim().length > 0,
     hintPenalty: task.hintPenalty ?? 25,
     // The step ANSWER stays server-secret, but whether a step HAS one is not a

@@ -22,7 +22,10 @@ import { selectSearchAreas } from '../lib/searchAreas';
 // decision is unit-testable — it had silently latched ON for every game; see
 // lib/locationRelevance.ts (change: locationless-fail-safe-vs-task-gating).
 import { computeLocationRelevant } from '../lib/locationRelevance';
-import { Button, Progress, Screen } from '../components/ui';
+import { Button, Progress, Screen, GameScreen } from '../components/ui';
+import MissionSheet from '../components/MissionSheet';
+import FlashRunner from '../components/FlashRunner';
+import { useOrientationIntent } from '../lib/orientation';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
@@ -32,6 +35,8 @@ import InRunAlerts from '../components/InRunAlerts';
 // Shared top overlay stack (change: play-top-overlay-stack) — see components/TopOverlays.tsx.
 import { TopOverlay } from '../components/TopOverlays';
 import type { NavTarget } from '../components/NavMap';
+import { currentAssignedRec } from '../lib/currentMission';
+import { finalScreenReason } from '../lib/finalReason';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
 // join screen doesn't need it; it loads when the participant starts racing.
@@ -119,6 +124,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // Something on the mission card asked for a drawer tab (change: submission-status-truth:
   // "message the organizer" on the waiting card). A nonce so the same tab can be asked twice.
   const [drawerRequest, setDrawerRequest] = useState<{ tab: DrawerTabId; nonce: number } | null>(null);
+  // play-screen-no-scroll: how much of the map the mission sheet covers, so the camera keeps the
+  // mission and the team above it.
+  const [sheetHeight, setSheetHeight] = useState(0);
   const { unreadCount: chatUnread } = useTeamChat(session, session.teamId ?? uid() ?? '', viewingTab === 'chat');
   // Shared team devices: only the CONTROLLING phone pings the live map, so the
   // team's pin follows whoever is actually playing instead of flickering.
@@ -137,6 +145,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // Latch for the location verdict above. A ref, not state: it must never itself
   // trigger a render, and it is read during render right after it is written.
   const everLocationRelevant = useRef(false);
+  // capture-rotation: while playing, ask for portrait where the platform allows it (the manifests
+  // no longer lock it, so filming can rotate). A no-op on iPhone and in a browser tab.
+  useOrientationIntent(state?.team?.launched ? 'portrait' : 'free');
 
   const refresh = useCallback(async () => {
     try {
@@ -315,7 +326,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         const sealedId = pendingArrivalRef.current;
         if (activeRef.current && controllerRef.current && sealedId && now - lastArrivalProbe.current >= 15_000) {
           lastArrivalProbe.current = now;
-          reportArrival({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, taskId: sealedId, lat, lng })
+          reportArrival({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, taskId: sealedId, lat, lng, accuracyMeters })
             .then((r) => { if (r.arrived) { pendingArrivalRef.current = null; void refresh(); } })
             .catch(() => undefined);
         }
@@ -327,7 +338,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }, [session, refresh, locationRelevant]);
 
   // Keep the screen awake while actively racing (map open, navigating).
-  useWakeLock(!!state && state.team.launched && state.team.status !== 'finished');
+  useWakeLock(!!state && state.team.launched && finalScreenReason(state.team, state.run) === null);
 
   // Power-ups: fire a toast when the log grows. The FIRST observation only records
   // the baseline length (so a mid-run reload doesn't replay every past award).
@@ -456,7 +467,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // A finished run has nothing left to lose, so skip the "are you sure" prompt
     // (this is the demo-finish exit path via FinalScreen). Mid-run still confirms.
     if (state?.team.status === 'finished') { clearSession(); onLeave(); return; }
-    if (await dialog.confirm(t.play.leaveConfirm)) { clearSession(); onLeave(); }
+    if (await dialog.confirm(t.play.leaveConfirm, { confirmLabel: t.play.leave, danger: true })) { clearSession(); onLeave(); }
   }
 
   async function sos() {
@@ -575,7 +586,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   const { team, game } = state;
   // Ping the live map only while the team is launched and still racing.
-  activeRef.current = team.launched && team.status !== 'finished';
+  // Not after the organizers ended the run either: pings to a finished run are quota spent on nothing.
+  activeRef.current = team.launched && finalScreenReason(team, state.run) === null;
   // Role is DERIVED live from the team doc (never persisted): a transfer flips
   // every phone's UI on the next snapshot. Legacy docs: founding uid controls.
   const myUid = uid();
@@ -599,8 +611,43 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // TITLES jump around; a position in the player's own run never does.
   const progress = missionProgress(team.stages);
 
-  if (team.status === 'finished') {
-    return <FinalScreen state={state} session={session} onLeave={leave} />;
+  // team-lifecycle-controls: a team the organizers removed sees why, the organizers' numbers and
+  // SOS, and nothing else. Checked before "finished": a removed team is not a finisher. Every
+  // progress door refuses it server-side (TEAM_REMOVED); this screen is the explanation.
+  if (team.removed === true) {
+    return (
+      <Screen>
+        <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
+        <Header game={game} score={team.score} accent={accent} onLeave={leave}
+          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3" data-testid="team-removed">
+          <div className="text-5xl" aria-hidden>🚫</div>
+          <h2 className="text-xl font-bold">{t.play.removedTitle}</h2>
+          {team.removedReason?.trim() && (
+            <p dir="auto" className="text-base text-zinc-300 max-w-sm">{team.removedReason}</p>
+          )}
+          <p className="text-sm text-zinc-400 max-w-sm">{t.play.removedBody}</p>
+        </div>
+        {(state.contacts ?? []).map((c) => {
+          const href = toTelHref(c.phone);
+          return href ? (
+            <a key={c.id} href={href}
+              className="flex items-center justify-center gap-2 min-h-[48px] rounded-xl border border-glass-border bg-app-card text-sm font-semibold text-zinc-200 mb-2">
+              📞 <span dir="auto">{t.play.callContact({ label: c.label })}</span>
+            </a>
+          ) : null;
+        })}
+        <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
+      </Screen>
+    );
+  }
+
+  // The final screen also opens when the organizers END the run while this team is still playing:
+  // "סיום ריצה" never touches team documents, so without reading run.status the phone kept showing a
+  // mission (overnight 2026-09-29, found by playing). finalScreenReason is pure and fails open.
+  const finalReason = finalScreenReason(team, state.run);
+  if (finalReason) {
+    return <FinalScreen state={state} session={session} onLeave={leave} runEnded={finalReason === 'runEnded'} />;
   }
 
   if (!team.launched) {
@@ -619,7 +666,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
         <Header game={game} score={team.score} accent={accent} onLeave={leave}
           timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
-        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={game.testMode !== true} />
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={game.testMode !== true} activeTaskId={team.activeTaskId ?? null} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">{hold.held ? '🙋' : '⏳'}</div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
@@ -680,8 +727,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   // Build map targets from the active stage's not-yet-completed tasks, joining
   // each run-record to its sanitized coordinates. The assigned task is "active".
+  // A VISIT (a mission an operator sent the team to in another stage) is the current target too.
+  const visitRec = activeStage ? currentAssignedRec(null, team.stages) : undefined;
+  const visitExtra = visitRec && activeStage && !activeStage.tasks.some((r) => r.taskId === visitRec.taskId) ? [visitRec] : [];
   const targets: NavTarget[] = activeStage
-    ? activeStage.tasks
+    ? [...activeStage.tasks, ...visitExtra]
         .filter((t) => t.status !== 'completed' && t.status !== 'skipped')
         .map((rec) => {
           const content = state.activeStageTasks.find((c) => c.id === rec.taskId);
@@ -689,7 +739,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           // play-task-gating: a hidden spot has no pin only while it is still
           // SEALED. Once the server confirms arrival it releases the coordinates,
           // so a player who wanders off can navigate back to it.
-          if (content?.arrivalPending) return null;
+          // located-mission-arrival: a sealed VISIBLE located mission keeps its pin (walking to
+          // it is how it opens); only a sealed HIDDEN one has none.
+          if (content?.arrivalPending && content?.locationHidden) return null;
           const coords = content?.smart?.stationCoords ?? content?.coordinates;
           return coords && (coords.lat !== 0 || coords.lng !== 0)
             ? { id: rec.taskId, lat: coords.lat, lng: coords.lng, title: content?.title ?? 'Mission', active: rec.status === 'assigned' }
@@ -705,7 +757,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // completed records only) plus their own GPS. We do NOT plot the hidden active
   // target — its coordinates stay sealed until reportArrival. For a NORMAL active
   // task these stay empty, so its map is byte-identical to before (its own pin).
-  const activeMissionSealed = state.activeStageTasks.some((c) => c.arrivalPending);
+  const activeMissionSealed = state.activeStageTasks.some((c) => c.arrivalPending && c.locationHidden);
   const completedPins: NavTarget[] = activeMissionSealed
     ? (state.completedTaskPins ?? []).map((p) => ({
         id: p.id, lat: p.coordinates.lat, lng: p.coordinates.lng, title: p.title, active: false,
@@ -735,7 +787,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   });
 
   return (
-    <Screen>
+    <GameScreen>
       <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
@@ -776,13 +828,29 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         howToPlay={<HowToPlayButton instructions={game.instructions} lang={lang} />}
         onShare={game.testMode === true ? undefined : () => void shareAction.run()} sharing={sharing}
       />
+      {/* play-screen-no-scroll (field report 2026-09-27: "no scrolling at all"): the game body is
+          the rest of ONE screen. With a map, the map fills it and the mission lives in a sheet over
+          it (lib/sheetSnap.ts); without one, the mission fills it. The PAGE never scrolls; the
+          sheet or the mission area scrolls inside itself when a mission is longer than the phone. */}
+      <div className="relative flex-1 min-h-0 mt-2" data-testid="game-body">
+      {locationRelevant && (
+        <div className="absolute inset-0 rounded-2xl overflow-hidden">
+          <Suspense fallback={<div className="h-full rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
+            <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} pins={state.missionPins ?? []} bottomInset={sheetHeight} className="h-full" />
+          </Suspense>
+        </div>
+      )}
+      {(() => {
+        const content = (<>
       {/* Announcements + flash missions are the organizer TALKING to this team
           mid-race. They used to render below the mission with the other secondary
           panels — i.e. below the fold on a phone. The leaderboard half moved into
           the drawer (showBoard={false}), which is what let the urgent half come up
           here without dragging a scoreboard with it. */}
       <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id}
-        lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={false} />
+        lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={false}
+        teamFlashId={team.flashSuspension?.flashId ?? null} myFlashClaims={team.flashClaims ?? null} onFlashClaimed={() => void refresh()}
+        activeTaskId={team.activeTaskId ?? null} />
       <InRunAlerts
         hotZone={state.run.hotZone}
         outOfBounds={team.outOfBounds}
@@ -790,14 +858,6 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         heldReason={team.heldReason}
       />
 
-      {/* PRIMARY: the map + current task sit at the TOP, prominent
-          (change: fix-play-screen-hierarchy) — the family playtest buried the task
-          under status panels and the screen scrolled to find it. */}
-      {locationRelevant && (
-        <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} className="h-52 mb-4" />
-        </Suspense>
-      )}
 
       <div className="mb-4">
         {activeStage ? (
@@ -812,6 +872,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
                 <Button className="shrink-0 !w-auto px-4" onClick={() => void takeOver()}>{t.devices.sendFromMyPhone}</Button>
               </div>
             )}
+            {/* flash-missions-v2: while the team is out on a flash mission, that is the mission on
+                screen; the one it left is suspended on the server and comes back afterwards. */}
+            {team.flashSuspension?.flashId ? (
+              <FlashRunner ctx={session} flashId={team.flashSuspension.flashId} lang={lang}
+                onChanged={() => void refresh()} readOnly={!isController} />
+            ) : (
             <TaskRunner
               session={session} state={state} stage={activeStage} onChanged={refresh}
               role={isController ? 'sender' : 'viewer'} senderName={controllerName}
@@ -820,6 +886,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
                 ? () => setDrawerRequest({ tab: 'chat', nonce: Date.now() })
                 : undefined}
             />
+            )}
             <LockedTasksList stage={activeStage} state={state} />
           </>
         ) : state.nextStageReleaseAt && state.nextStageReleaseAt > Date.now() ? (
@@ -881,7 +948,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           }}
         />
       </div>
-    </Screen>
+        </>);
+        return locationRelevant
+          // Keyed on the flash mission too: taking one swaps the sheet's content for the flash card
+          // while the current mission stays the same, and the sheet must re-fit to show "סיימנו".
+          ? <MissionSheet openKey={`${team.activeTaskId ?? ''}|${team.flashSuspension?.flashId ?? ''}`} onHeight={setSheetHeight}
+              mapFirst={state.activeStageTasks.some((c) => c.id === team.activeTaskId && c.arrivalPending === true)}>{content}</MissionSheet>
+          : <div className="h-full overflow-y-auto overscroll-contain pb-4" data-testid="mission-area">{content}</div>;
+      })()}
+      </div>
+    </GameScreen>
   );
 }
 
@@ -1147,6 +1223,12 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest }: {
     setOpen(true);
     rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [openRequest]);
+  // Opening it by its own button brings it into view too (overnight 2026-09-29): on a 375x667 phone
+  // the chat opened with its input at y=632-676, cut by the bottom of the screen, inside a mission
+  // area that scrolls on its own and gave no sign that there was more below.
+  useEffect(() => {
+    if (open) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [open]);
 
   const label: Record<DrawerTabId, string> = {
     board: t.more.board, feed: t.more.feed, chat: t.more.chat,
@@ -1434,6 +1516,36 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
   );
 }
 
+function LeaveMenu({ onLeave }: { onLeave: () => void }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+  return (
+    <div className="relative -me-2">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-label={t.play.menu} aria-expanded={open} aria-haspopup="menu"
+        data-testid="play-menu"
+        className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-xl leading-none text-zinc-400">⋯</button>
+      {open && (
+        <>
+          <button type="button" aria-label={t.play.menuClose} className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
+          <div role="menu" className="absolute end-0 top-full z-50 mt-1 min-w-[14rem] rounded-xl border border-glass-border bg-app-card shadow-task-card p-1">
+            <button type="button" role="menuitem" data-testid="leave-game"
+              onClick={() => { setOpen(false); onLeave(); }}
+              className="w-full min-h-[44px] rounded-lg px-3 text-start text-sm font-semibold text-ink-alert hover:bg-app-raised">
+              {t.play.leaveOnThisPhone}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Header({
   game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy,
   isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing, phones, callContact,
@@ -1531,8 +1643,10 @@ function Header({
               SOS
             </button>
           )}
-          <button onClick={onLeave} aria-label={t.play.leaveAria} title={t.play.leave}
-            className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] -me-2 rounded-lg text-base text-zinc-500">✕</button>
+          {/* play-screen-no-scroll (field report 2026-09-27): a bare ✕ read as "close this", and
+              players could not tell whether it left the mission, the game or the app. Leaving is
+              now a labelled item in a menu, with the same confirm as before. */}
+          <LeaveMenu onLeave={onLeave} />
         </div>
       </div>
       {progress && <div className="mt-2">{progress}</div>}

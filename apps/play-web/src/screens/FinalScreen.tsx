@@ -32,7 +32,11 @@ const MEDAL_BG = [
   'bg-gradient-to-r from-orange-400/20 to-orange-300/10 border-orange-400/30',
 ];
 
-export default function FinalScreen({ state, session, onLeave }: { state: MyTeamState; session: Session; onLeave: () => void }) {
+export default function FinalScreen({ state, session, onLeave, runEnded = false }: {
+  state: MyTeamState; session: Session; onLeave: () => void;
+  /** The organizers ended the run before this team finished every stage (finalScreenReason). */
+  runEnded?: boolean;
+}) {
   const { t, lang } = useT();
   const { team, run, game } = state;
   const accent = game.branding?.primaryColor ?? '#FF5722';
@@ -246,8 +250,8 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
           >
             🏆
           </div>
-          <h1 className="font-brand text-4xl font-extrabold" style={{ color: accent }}>{t.final.title}</h1>
-          <p dir="auto" className="text-zinc-400 mt-1">{t.final.subtitle({ name: team.displayName })}</p>
+          <h1 className="font-brand text-4xl font-extrabold" style={{ color: accent }}>{runEnded ? t.final.titleRunEnded : t.final.title}</h1>
+          <p dir="auto" className="text-zinc-400 mt-1">{runEnded ? t.final.subtitleRunEnded({ name: team.displayName }) : t.final.subtitle({ name: team.displayName })}</p>
         </div>
 
         {/* Score card — a time_only run isn't ranked by points (the "score" is just

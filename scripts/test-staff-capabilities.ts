@@ -52,6 +52,9 @@ const expected: Record<string, StaffCapability> = {
   skipTaskForTeam: 'route',
   forceAssignTask: 'route',
   returnTeamTo: 'route',
+  markTeamArrived: 'route', // located-mission-arrival: "let them in" without GPS
+  deactivateFlashMission: 'broadcast', // flash-missions-v2: ending one is the same power as pushing it
+  reviewFlashMission: 'review', // flash-missions-v2: judging a flash submission is judging a submission
   setTeamHold: 'hold',
   pushAnnouncement: 'broadcast',
   deactivateAnnouncement: 'broadcast',

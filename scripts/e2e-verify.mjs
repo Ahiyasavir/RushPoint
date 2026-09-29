@@ -388,6 +388,9 @@ const ALLOWED_RUN_TEAM_ROW_KEYS = new Set([
   'updatedAt', 'answerLockoutUntil', 'lastLocationAt',
   // held-team-visibility: a BOOLEAN, never the guardian's name or contact.
   'heldForConsent',
+  // team-lifecycle-controls: two BOOLEANS the row actions branch on (resume a paused team, bring
+  // back a removed one). Never who paused/removed it, never the reason text.
+  'held', 'removed',
   // late-joiner-autostart: WHEN the team joined. Consciously classified rather than
   // waved through: it is a timestamp the organizer already sees as "joined at" in
   // their own console, it is not a position, not an answer key and not a guardian
@@ -1645,6 +1648,8 @@ async function main() {
   await signInAnonymously(player3.auth);
   await player3.call('joinRun', { code: c3, displayName: 'Riddler' });
   await creator.call('startTeams', { gameId: g3, runId: r3 });
+  // located-mission-arrival: a located mission opens on arrival, so the team arrives first.
+  await player3.call('reportArrival', { taskId: 'h-1', lat: 31.78, lng: 35.21, accuracyMeters: 10, code: c3 });
 
   // The hint TEXT must not be leaked in the task payload.
   const s3 = await player3.call('getMyTeamState', { code: c3 });
@@ -3610,6 +3615,8 @@ async function main() {
   await creator.call('startTeams', { gameId: gP, runId: rP });
   const CP = { ownerUid: creatorCred.user.uid, gameId: gP, runId: rP };
 
+  // located-mission-arrival: a located mission opens on arrival, so the team arrives first.
+  await playerP.call('reportArrival', { taskId: 'pq1', lat: 31.78, lng: 35.21, accuracyMeters: 10, code: cP });
   // sanitized payload: requirePresence visible, answers stripped.
   const sP = await playerP.call('getMyTeamState', { code: cP });
   const pTask = sP?.activeStageTasks?.find((t) => t.id === 'pq1');
@@ -7830,6 +7837,22 @@ async function main() {
       ['participant', pl, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['stranger', str, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['other-run staff', staffB, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      // team-lifecycle-controls: removing a team takes it out of every standing. Owner/admin
+      // ONLY; the denial for staff of THIS run is proven in the 'team lifecycle' scenario.
+      ['participant', pl, 'setTeamRemoved', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, removed: true }],
+      ['stranger', str, 'setTeamRemoved', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, removed: true }],
+      ['other-run staff', staffB, 'setTeamRemoved', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, removed: true }],
+      // located-mission-arrival: letting a team in opens a physical gate for it (route capability).
+      ['participant', pl, 'markTeamArrived', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      ['stranger', str, 'markTeamArrived', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      ['other-run staff', staffB, 'markTeamArrived', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      // flash-missions-v2: awarding a flash mission moves a score; ending one affects every team.
+      ['participant', pl, 'reviewFlashMission', { ownerUid: OWNER, gameId: ag, runId: ar, flashId: 'x', teamId: plUid, action: 'award' }],
+      ['stranger', str, 'reviewFlashMission', { ownerUid: OWNER, gameId: ag, runId: ar, flashId: 'x', teamId: plUid, action: 'award' }],
+      ['other-run staff', staffB, 'reviewFlashMission', { ownerUid: OWNER, gameId: ag, runId: ar, flashId: 'x', teamId: plUid, action: 'award' }],
+      ['participant', pl, 'deactivateFlashMission', { ownerUid: OWNER, gameId: ag, runId: ar, flashId: 'x' }],
+      ['stranger', str, 'deactivateFlashMission', { ownerUid: OWNER, gameId: ag, runId: ar, flashId: 'x' }],
+      ['other-run staff', staffB, 'deactivateFlashMission', { ownerUid: OWNER, gameId: ag, runId: ar, flashId: 'x' }],
       // send-team-back: reopening a mission or stage moves ONE team's score and route.
       ['participant', pl, 'returnTeamTo', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, target: { kind: 'task', taskId: 'az-t' } }],
       // quick-dial-and-actions: the run's phone numbers are the owner's to set.
@@ -12051,6 +12074,10 @@ async function main() {
     const fpUid = fp.auth.currentUser.uid;
 
     // ── setTeamHold: pause the race clock, then resume it ─────────────────────
+    // The team holds a mission first, so the hold can be seen to pause that mission's clock too.
+    await fp.call('getMyTeamState', { code: fc });
+    const assignedRec = (t) => (t.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.status === 'assigned');
+    const startBeforeHold = assignedRec((await creator.getDocAt(fTeamPathFor(fpUid))).data ?? {})?.startedAt;
     const hold = await creator.call('setTeamHold', { ...F, teamId: fpUid, held: true, reason: 'medical check' });
     check('hold: the response reports held true with zero elapsed ms',
       hold?.ok === true && hold?.held === true && hold?.heldMsAdded === 0, JSON.stringify(hold));
@@ -12068,8 +12095,15 @@ async function main() {
       creator.call('forceAssignTask', { ...F, teamId: fpUid, taskId: 'fo-a' }),
       { codeIn: ['functions/failed-precondition'] });
 
-    await new Promise((r) => setTimeout(r, 50)); // ensure heldMs has something nonzero to accumulate
+    await new Promise((r) => setTimeout(r, 1200)); // a measurable hold for heldMs and the mission clock
     const resume = await creator.call('setTeamHold', { ...F, teamId: fpUid, held: false });
+    // Overnight 2026-09-29: a hold paused the race clock but not the mission's own countdown
+    // (`timeLimitMinutes` counts from `startedAt`), so a team held longer than its limit came back to
+    // a mission swept as "time is up". Resuming now moves `startedAt` forward by the hold.
+    const startAfterResume = assignedRec((await creator.getDocAt(fTeamPathFor(fpUid))).data ?? {})?.startedAt;
+    check("resume: the held mission's clock is moved forward by the hold",
+      !!startBeforeHold && Date.parse(startAfterResume) - Date.parse(startBeforeHold) >= 1000,
+      JSON.stringify({ startBeforeHold, startAfterResume }));
     check('resume: the response reports held false with a positive elapsed ms',
       resume?.ok === true && resume?.held === false && resume?.heldMsAdded > 0, JSON.stringify(resume));
     const resumedTeam = (await creator.getDocAt(fTeamPathFor(fpUid))).data ?? {};
@@ -12115,6 +12149,456 @@ async function main() {
     check('audit: the force-assign is recorded with the displaced task as the previous value',
       !!forceEntry && forceEntry.newValue === other && forceEntry.previousValue === before,
       JSON.stringify(forceEntry));
+  });
+
+  // team-lifecycle-controls (field report 2026-09-27): start ONE team, remove a team from the race
+  // without deleting it, bring it back. The organizer needed all three by hand in a live run.
+  await scenario('team lifecycle (start one · remove · restore)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: lg } = await creator.call('createGame', { title: 'Lifecycle Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: lg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'lc-s', order: 0, title: 'Stops', isFinal: true, tasks: [
+        { id: 'lc-a', title: 'Stop A', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9 },
+        { id: 'lc-b', title: 'Stop B', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: lr, accessCode: lcode } = await creator.call('launchRun', { gameId: lg });
+    const L = { ownerUid: OWNER, gameId: lg, runId: lr };
+    const teamDoc = async (uid) => (await creator.getDocAt(`users/${OWNER}/games/${lg}/runs/${lr}/teams/${uid}`)).data ?? {};
+    const runDoc = async () => (await creator.getDocAt(`users/${OWNER}/games/${lg}/runs/${lr}`)).data ?? {};
+
+    const p1 = makeParty('lifecycleOne');
+    await signInAnonymously(p1.auth);
+    await p1.call('joinRun', { code: lcode, displayName: 'Keeper' });
+    const p2 = makeParty('lifecycleTwo');
+    await signInAnonymously(p2.auth);
+    await p2.call('joinRun', { code: lcode, displayName: 'Test team' });
+    const u1 = p1.auth.currentUser.uid;
+    const u2 = p2.auth.currentUser.uid;
+
+    // ── start ONE team ──────────────────────────────────────────────────────────
+    const one = await creator.call('startTeams', { gameId: lg, runId: lr, teamIds: [u1] });
+    check('start one: exactly the listed team launched', one?.launched === 1, JSON.stringify(one));
+    check('start one: the other team is still waiting',
+      (await teamDoc(u1)).launched === true && (await teamDoc(u2)).launched !== true);
+    await creator.call('startTeams', { gameId: lg, runId: lr });
+    const t2 = await teamDoc(u2);
+    check('start all: the second team launched too', t2.launched === true);
+    const heldTask = t2.activeTaskId;
+    const countBefore = (await runDoc()).taskCounts?.[heldTask] ?? 0;
+
+    // ── remove ──────────────────────────────────────────────────────────────────
+    const rm = await creator.call('setTeamRemoved', { ...L, teamId: u2, removed: true, reason: 'test team' });
+    check('remove: ok', rm?.ok === true && rm?.removed === true, JSON.stringify(rm));
+    const removed = await teamDoc(u2);
+    check('remove: the team doc carries the removal, and its data is kept',
+      removed.removed === true && removed.removedReason === 'test team' && !!removed.removedAt
+      && removed.displayName === 'Test team' && Array.isArray(removed.stages),
+      JSON.stringify({ removed: removed.removed, reason: removed.removedReason }));
+    check('remove: the team no longer holds a mission', !removed.activeTaskId, String(removed.activeTaskId));
+    const countAfter = (await runDoc()).taskCounts?.[heldTask] ?? 0;
+    check('remove: its station slot was released',
+      heldTask ? countAfter === countBefore - 1 : true, `${heldTask}: ${countBefore} -> ${countAfter}`);
+    await expectError('remove: a removed team cannot be routed',
+      p2.call('requestNextTask', { code: lcode, lat: 0, lng: 0 }), { codeIn: ['functions/failed-precondition'] });
+    await expectError('remove: a removed team cannot complete a mission',
+      p2.call('completeTask', { taskId: 'lc-a', code: lcode }), { codeIn: ['functions/failed-precondition'] });
+    const sos = await p2.call('triggerSOS', { ...L, message: 'still people outside' });
+    check('remove: SOS still works for a removed team', !!sos, JSON.stringify(sos));
+    const mine = await p2.call('getMyTeamState', { code: lcode });
+    check('remove: the phone is told why (removed + reason, never who)',
+      mine?.team?.removed === true && mine?.team?.removedReason === 'test team' && mine?.team?.removedBy === undefined,
+      JSON.stringify({ removed: mine?.team?.removed, reason: mine?.team?.removedReason, by: mine?.team?.removedBy }));
+    const lbOut = await creator.call('refreshLeaderboard', { ...L, publish: false });
+    const outIds = (lbOut?.rankings ?? []).map((r) => r.teamId);
+    check('remove: the live standings leave the removed team out', outIds.includes(u1) && !outIds.includes(u2), JSON.stringify(outIds));
+    const again = await creator.call('setTeamRemoved', { ...L, teamId: u2, removed: true });
+    check('remove: removing a removed team is a harmless no-op', again?.ok === true, JSON.stringify(again));
+
+    // Staff of THIS run cannot remove: removal is owner/admin only.
+    const { pin: lPin } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: lg, runId: lr, name: 'Lifecycle Marshal', permissions: ['review_photos'],
+    });
+    const lStaff = makeParty('lifecycleStaff');
+    await signInAnonymously(lStaff.auth);
+    const lTok = await lStaff.call('staffSignIn', { ownerUid: OWNER, gameId: lg, runId: lr, pin: lPin });
+    await signInWithCustomToken(lStaff.auth, lTok.customToken);
+    await expectError('remove: staff of this very run are denied',
+      lStaff.call('setTeamRemoved', { ...L, teamId: u1, removed: true }), { codeIn: ['functions/permission-denied'] });
+
+    // ── restore ─────────────────────────────────────────────────────────────────
+    const back = await creator.call('setTeamRemoved', { ...L, teamId: u2, removed: false });
+    check('restore: ok', back?.ok === true && back?.removed === false, JSON.stringify(back));
+    const restored = await teamDoc(u2);
+    check('restore: the removal fields are cleared', restored.removed !== true && restored.removedReason === undefined);
+    const next = await p2.call('requestNextTask', { code: lcode, lat: 0, lng: 0 });
+    check('restore: the team can play again', !!next, JSON.stringify(next));
+    const lbBack = await creator.call('refreshLeaderboard', { ...L, publish: false });
+    check('restore: it is ranked again', (lbBack?.rankings ?? []).some((r) => r.teamId === u2));
+
+    const logs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    const kinds = (logs?.logs ?? []).filter((l) => l.runId === lr && l.teamId === u2).map((l) => l.actionType);
+    check('audit: removal and restore are both recorded', kinds.includes('team_removed') && kinds.includes('team_restored'), JSON.stringify(kinds));
+  });
+
+  // route-team-to-mission (field report 2026-09-27): send a team to ANY mission, waiving EXACTLY
+  // what blocks that jump; now or after the current mission; a mission in another stage is visited.
+  await scenario('route team (per-blocker waivers · visit · after)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const st = (id, title, extra = {}) => ({
+      id, title, type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 },
+      difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, ...extra,
+    });
+    const { gameId: rg } = await creator.call('createGame', { title: 'Route Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: rg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        // 4 of 5: pausing V below must leave the stage winnable (the pause guard refuses otherwise).
+        { id: 'rt-s1', order: 0, title: 'One', requiredTaskCount: 4, tasks: [
+          st('rx', 'X'), st('ry', 'Y'),
+          st('rz', 'Z', { unlockAfterTaskIds: ['rx', 'ry'] }),
+          st('rw', 'W', { unlockAfterTaskIds: ['ry'] }),
+          st('rv', 'V'),
+        ] },
+        { id: 'rt-s2', order: 1, title: 'Two', isFinal: true, requiredTaskCount: 1, tasks: [
+          st('later', 'Later', { pointValue: 40 }), st('later2', 'Later 2'),
+        ] },
+      ],
+    });
+    const { runId: rr, accessCode: rcode } = await creator.call('launchRun', { gameId: rg });
+    const R = { ownerUid: OWNER, gameId: rg, runId: rr };
+    const rp = makeParty('routePlayer');
+    await signInAnonymously(rp.auth);
+    await rp.call('joinRun', { code: rcode, displayName: 'Router' });
+    const ru = rp.auth.currentUser.uid;
+    await creator.call('startTeams', { gameId: rg, runId: rr });
+    const teamDoc = async () => (await creator.getDocAt(`users/${OWNER}/games/${rg}/runs/${rr}/teams/${ru}`)).data ?? {};
+    const route = (taskId, accept, when = 'now') => creator.call('forceAssignTask', { ...R, teamId: ru, taskId, accept, when });
+    const done = async (taskId) => rp.call('completeTask', { taskId, code: rcode });
+
+    // Put the team on X with an empty waiver (nothing blocks X), complete it. Routing then gives Y or V.
+    // Routing may already have handed X out at the start; asking again is refused as "already
+    // current" (a HARD blocker), so route away first to prove the empty acceptance on X.
+    if ((await teamDoc()).activeTaskId === 'rx') {
+      await expectError('route: sending a team to the mission it is on is refused', route('rx', []), { codeIn: ['functions/failed-precondition'] });
+      await route('rv', []);
+    }
+    const onX = await route('rx', []);
+    check('route: nothing blocks X, so an empty acceptance routes it', onX?.ok === true && (onX?.waived ?? []).length === 0, JSON.stringify(onX));
+    await done('rx');
+    const cur = (await teamDoc()).activeTaskId;
+    if (cur !== 'ry') await route('ry', []); // make Y the in-flight mission, deterministically
+    check('route: the team is on Y', (await teamDoc()).activeTaskId === 'ry');
+
+    // The X/Y example: Z waits for X and Y, X is done ⇒ ONLY "Y is missing" blocks Z.
+    // The staff app cannot read the game, so it asks the server first (dryRun): the list, nothing written.
+    const preview = await creator.call('forceAssignTask', { ...R, teamId: ru, taskId: 'rz', dryRun: true });
+    check('route: a dry run names exactly what is in the way (only Y) and hard blockers are empty',
+      preview?.dryRun === true
+      && JSON.stringify(preview?.blockers?.waivable ?? null) === JSON.stringify([{ kind: 'prerequisites', missing: ['ry'] }])
+      && Array.isArray(preview?.blockers?.hard) && preview.blockers.hard.length === 0
+      && Array.isArray(preview?.missingTitles) && preview.missingTitles[0] === 'Y',
+      JSON.stringify(preview));
+    check('route: a dry run moves nothing', (await teamDoc()).activeTaskId === 'ry');
+    const previewCur = await creator.call('forceAssignTask', { ...R, teamId: ru, taskId: 'ry', dryRun: true });
+    check('route: a dry run on the current mission reports the hard blocker instead of throwing',
+      JSON.stringify(previewCur?.blockers?.hard ?? null) === JSON.stringify([{ kind: 'alreadyCurrent' }]), JSON.stringify(previewCur));
+    let changed = null;
+    try { await route('rz', []); } catch (e) { changed = e; }
+    check('route: accepting nothing while Y is missing is refused with the list',
+      changed?.code === 'functions/failed-precondition' && /ROUTE_BLOCKERS_CHANGED/.test(changed?.message ?? '')
+      && JSON.stringify(changed?.details?.blockers ?? []) === JSON.stringify([{ kind: 'prerequisites', missing: ['ry'] }]),
+      JSON.stringify({ code: changed?.code, message: changed?.message, details: changed?.details }));
+    const onZ = await route('rz', ['prerequisites']);
+    check('route: waiving exactly "prerequisites" sends the team to Z, displacing Y (not skipped)',
+      onZ?.ok === true && onZ?.displacedTaskId === 'ry' && JSON.stringify(onZ?.waived) === '["prerequisites"]', JSON.stringify(onZ));
+    const tZ = await teamDoc();
+    const recY = tZ.stages[0].tasks.find((t) => t.taskId === 'ry');
+    check('route: Y went back to unassigned, not skipped', recY?.status === 'unassigned', JSON.stringify(recY));
+    const mid = await rp.call('getMyTeamState', { code: rcode });
+    check('route: W (which also waits for Y) is still locked for the team', (mid?.lockedTaskIds ?? []).includes('rw'), JSON.stringify(mid?.lockedTaskIds));
+    await done('rz');
+    const recZ = (await teamDoc()).stages[0].tasks.find((t) => t.taskId === 'rz');
+    check('route: Z can be COMPLETED with its prerequisite waived (the old override could not)', recZ?.status === 'completed', JSON.stringify(recZ));
+
+    // A closed/paused mission cannot be forced.
+    await creator.call('setRunTaskStatus', { ...R, taskId: 'rv', status: 'paused' });
+    await expectError('route: a paused mission is refused', route('rv', ['prerequisites']), { codeIn: ['functions/failed-precondition'] });
+    await creator.call('setRunTaskStatus', { ...R, taskId: 'rv', status: 'active' });
+
+    // Visit a mission in stage 2 while stage 1 is the team's stage.
+    const scoreBefore = (await teamDoc()).score ?? 0;
+    const onLater = await route('later', ['otherStage']);
+    check('route: a mission in another stage is routed with the "otherStage" waiver', onLater?.ok === true, JSON.stringify(onLater));
+    const vis = await rp.call('getMyTeamState', { code: rcode });
+    check('route: the phone receives the visited mission', (vis?.activeStageTasks ?? []).some((t) => t.id === 'later'), JSON.stringify((vis?.activeStageTasks ?? []).map((t) => t.id)));
+    await done('later');
+    const afterVisit = await teamDoc();
+    check('route: the visit scored', (afterVisit.score ?? 0) > scoreBefore, `${scoreBefore} -> ${afterVisit.score}`);
+    check('route: the team is still in stage 1, and stage 2 is not opened by the visit',
+      afterVisit.stages[0].status === 'active' && afterVisit.stages[1].status === 'locked',
+      JSON.stringify(afterVisit.stages.map((s) => s.status)));
+
+    // "After this mission": queue W while the team is on something else in stage 1.
+    await rp.call('requestNextTask', { code: rcode, lat: 0, lng: 0 });
+    const holding = (await teamDoc()).activeTaskId;
+    check('route: the team is back on a stage-1 mission after the visit', ['ry', 'rv'].includes(holding), String(holding));
+    const other = holding === 'ry' ? 'rv' : 'ry';
+    const queued = await route(other, [], 'after');
+    check('route: "after" queues without moving the team',
+      queued?.queued === true && (await teamDoc()).activeTaskId === holding && (await teamDoc()).queuedRoute?.taskId === other,
+      JSON.stringify(queued));
+    await done(holding);
+    await rp.call('requestNextTask', { code: rcode, lat: 0, lng: 0 });
+    const afterQueue = await teamDoc();
+    check('route: finishing the current mission hands over the queued one', afterQueue.activeTaskId === other && !afterQueue.queuedRoute,
+      JSON.stringify({ active: afterQueue.activeTaskId, queued: afterQueue.queuedRoute }));
+
+    // Finish stage 1: stage 2 opens with its requirement ALREADY met by the visit, so it completes
+    // on activation and the team finishes (the activation check this change added).
+    for (let i = 0; i < 4; i++) {
+      const t = (await teamDoc());
+      if (t.status === 'finished') break;
+      const a = t.activeTaskId ?? (await rp.call('requestNextTask', { code: rcode, lat: 0, lng: 0 }))?.taskId;
+      if (!a) break;
+      await done(a);
+    }
+    const end = await teamDoc();
+    check('route: stage 2 completed on activation, the team finished', end.status === 'finished' && end.stages[1].status === 'completed',
+      JSON.stringify({ status: end.status, stages: end.stages.map((s) => s.status) }));
+
+    const logs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    const mine = (logs?.logs ?? []).filter((l) => l.runId === rr && l.teamId === ru);
+    check('audit: routes and the queue are recorded with what was waived',
+      mine.some((l) => l.actionType === 'task_routed' && l.taskId === 'rz' && JSON.stringify(l.waived) === '["prerequisites"]')
+      && mine.some((l) => l.actionType === 'route_queued' && l.taskId === other),
+      JSON.stringify(mine.map((l) => [l.actionType, l.taskId, l.waived])));
+  });
+
+  // located-mission-arrival (field report 2026-09-27 + decisions 2026-09-28): every located mission
+  // opens only on arrival; an operator can let a team in; the map carries every mission's pin.
+  await scenario('arrival gate (located missions open on arrival · let them in · pins)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const HERE = { lat: 31.7767, lng: 35.2345 };
+    const FAR = { lat: 31.7867, lng: 35.2345 }; // ~1.1 km north
+    const quiz = (id, title, coords) => ({
+      id, title, type: 'quiz', description: 'Read the plaque', choices: ['1850', '1900'], answers: ['1900'],
+      coordinates: coords, triggerMode: 'radius', geofenceRadiusMeters: 50,
+      difficulty: 1, estimatedMinutes: 2, pointValue: 10, maxConcurrentTeams: 9,
+    });
+    const { gameId: ag } = await creator.call('createGame', { title: 'Arrival Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: ag, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'ag-s1', order: 0, title: 'One', tasks: [quiz('ag-a', 'Plaque A', HERE), quiz('ag-b', 'Plaque B', { lat: 31.7768, lng: 35.2346 }),
+          // A CHECK-IN mission: arriving IS the mission (overnight 2026-09-29, see "let in" below).
+          { id: 'ag-c', title: 'Library door', type: 'field', coordinates: { lat: 31.7769, lng: 35.2347 }, triggerMode: 'radius',
+            geofenceRadiusMeters: 50, difficulty: 1, estimatedMinutes: 2, pointValue: 10, maxConcurrentTeams: 9 }] },
+        { id: 'ag-s2', order: 1, title: 'Two', isFinal: true, tasks: [
+          quiz('ag-later', 'Later plaque', { lat: 31.78, lng: 35.23 }),
+          { ...quiz('ag-hidden', 'Hidden plaque', { lat: 31.781, lng: 35.231 }), hideLocation: true, locationClue: 'by the gate' },
+        ] },
+      ],
+    });
+    const { runId: ar, accessCode: acode } = await creator.call('launchRun', { gameId: ag });
+    const A = { ownerUid: OWNER, gameId: ag, runId: ar };
+    const runDoc = (await creator.getDocAt(`users/${OWNER}/games/${ag}/runs/${ar}`)).data ?? {};
+    check('arrival: a run launched now carries the arrival gate', runDoc.arrivalGate === true, JSON.stringify(runDoc.arrivalGate));
+    // The staff app cannot read the run document, so the outline tells it (it decides whether to
+    // offer "let them in" from this).
+    const outline = await creator.call('getRunOutline', A);
+    check('arrival: getRunOutline reports the arrival gate to the staff app', outline?.arrivalGate === true, JSON.stringify(outline?.arrivalGate));
+
+    const ap = makeParty('arrivalPlayer');
+    await signInAnonymously(ap.auth);
+    await ap.call('joinRun', { code: acode, displayName: 'Walker' });
+    const au = ap.auth.currentUser.uid;
+    await creator.call('startTeams', { gameId: ag, runId: ar });
+    await creator.call('forceAssignTask', { ...A, teamId: au, taskId: 'ag-a', accept: [] }).catch(() => undefined);
+    const st = await ap.call('getMyTeamState', { code: acode });
+    const sealed = (st?.activeStageTasks ?? []).find((t) => t.id === 'ag-a');
+    check('arrival: before arrival the mission shows its name and place only',
+      sealed?.arrivalPending === true && sealed?.title === 'Plaque A' && sealed?.coordinates?.lat === HERE.lat
+      && sealed?.choices === undefined && sealed?.description === undefined && sealed?.type === undefined && sealed?.answers === undefined,
+      JSON.stringify(sealed));
+    assertTaskPayloadAllowlisted('arrival: the sealed located stub is allowlisted', sealed);
+
+    const pins = st?.missionPins ?? [];
+    check('pins: every located mission is on the map, locked ones too',
+      ['ag-a', 'ag-b', 'ag-later'].every((id) => pins.some((p) => p.id === id)), JSON.stringify(pins.map((p) => [p.id, p.state])));
+    check('pins: the current mission is "current", a later stage is "locked"',
+      pins.find((p) => p.id === 'ag-a')?.state === 'current' && pins.find((p) => p.id === 'ag-later')?.state === 'locked');
+    check('pins: a hidden mission is NEVER pinned', !pins.some((p) => p.id === 'ag-hidden'));
+
+    const far = await ap.call('reportArrival', { taskId: 'ag-a', ...FAR, accuracyMeters: 10, code: acode });
+    check('arrival: far away does not open it, and says how far', far?.arrived === false && far?.distanceMeters > 500, JSON.stringify(far));
+    // A coarse fix at the right spot proves nothing yet: "hold still", retriable, still sealed
+    // (overnight 2026-09-29: the phone now always sends the fix's accuracy, so this is what it gets).
+    const coarse = await ap.call('reportArrival', { taskId: 'ag-a', ...HERE, accuracyMeters: 400, code: acode });
+    check('arrival: a ±400 m fix at the point does not open it yet, and is retriable',
+      coarse?.arrived === false && coarse?.retriable === true, JSON.stringify(coarse));
+    const near = await ap.call('reportArrival', { taskId: 'ag-a', ...HERE, accuracyMeters: 10, code: acode });
+    check('arrival: at the point it opens', near?.arrived === true, JSON.stringify(near));
+    const open = ((await ap.call('getMyTeamState', { code: acode }))?.activeStageTasks ?? []).find((t) => t.id === 'ag-a');
+    check('arrival: after arrival the full mission ships', open?.arrivalPending === undefined && Array.isArray(open?.choices) && open?.description === 'Read the plaque',
+      JSON.stringify(open));
+
+    // Let them in: an operator latches arrival where GPS cannot prove it.
+    await creator.call('forceAssignTask', { ...A, teamId: au, taskId: 'ag-b', accept: [] });
+    const let1 = await creator.call('markTeamArrived', { ...A, teamId: au, taskId: 'ag-b', reason: 'indoors' });
+    check('let in: ok', let1?.ok === true && let1?.changed === true, JSON.stringify(let1));
+    const openB = ((await ap.call('getMyTeamState', { code: acode }))?.activeStageTasks ?? []).find((t) => t.id === 'ag-b');
+    check('let in: the mission opens on the phone', openB?.arrivalPending === undefined && Array.isArray(openB?.choices), JSON.stringify(openB));
+    const again = await creator.call('markTeamArrived', { ...A, teamId: au, taskId: 'ag-b' });
+    check('let in: idempotent', again?.ok === true && again?.changed === false, JSON.stringify(again));
+    // A check-in mission an operator let the team into can be checked in without a GPS proof: the
+    // operator vouched for the arrival, and arriving IS this mission. Before, the check-in demanded
+    // the very fix the let-in exists to replace, so an indoor team stayed stuck.
+    await creator.call('forceAssignTask', { ...A, teamId: au, taskId: 'ag-c', accept: [] });
+    await creator.call('markTeamArrived', { ...A, teamId: au, taskId: 'ag-c', reason: 'indoors' });
+    let letInCheckIn = null;
+    try { letInCheckIn = await ap.call('completeTask', { ...A, taskId: 'ag-c', ...FAR, accuracyMeters: 10, code: acode }); }
+    catch (e) { letInCheckIn = { error: String(e?.message ?? e) }; }
+    check('let in: a check-in mission the team was let into completes without a GPS proof',
+      letInCheckIn?.ok === true, JSON.stringify(letInCheckIn));
+
+    // A run live before this change keeps today's behaviour (no flag ⇒ nothing sealed).
+    await adminSdk.firestore().doc(`users/${OWNER}/games/${ag}/runs/${ar}`).update({ arrivalGate: false });
+    await creator.call('forceAssignTask', { ...A, teamId: au, taskId: 'ag-later', accept: ['otherStage'] });
+    const legacy = ((await ap.call('getMyTeamState', { code: acode }))?.activeStageTasks ?? []).find((t) => t.id === 'ag-later');
+    check('arrival: a run without the gate ships the located mission whole, as before',
+      legacy && legacy.arrivalPending === undefined && Array.isArray(legacy.choices), JSON.stringify(legacy));
+
+    const logs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    check('audit: letting a team in is recorded',
+      (logs?.logs ?? []).some((l) => l.runId === ar && l.teamId === au && l.actionType === 'team_arrival_marked' && l.taskId === 'ag-b'));
+  });
+
+  // flash-missions-v2 (field report 2026-09-27): take it ("לקחתי"), do it, get scored, go back to the
+  // mission you were on with its time intact; first team only or any team; end it early; award by hand.
+  await scenario('flash missions (claim · submit · review · end · award)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const st = (id, title) => ({ id, title, type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 },
+      difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, timeLimitMinutes: 20 });
+    const { gameId: fg } = await creator.call('createGame', { title: 'Flash Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: fg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'fl-s', order: 0, title: 'One', isFinal: true, tasks: [st('fl-a', 'A'), st('fl-b', 'B'), st('fl-c', 'C')] }],
+    });
+    const { runId: fr, accessCode: fcode } = await creator.call('launchRun', { gameId: fg });
+    const F = { ownerUid: OWNER, gameId: fg, runId: fr };
+    const mk = async (name) => {
+      const p = makeParty(name);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: fcode, displayName: name });
+      return p;
+    };
+    const pa = await mk('flashA');
+    const pb = await mk('flashB');
+    await creator.call('startTeams', { gameId: fg, runId: fr });
+    const ua = pa.auth.currentUser.uid;
+    const ub = pb.auth.currentUser.uid;
+    const teamDoc = async (u) => (await creator.getDocAt(`users/${OWNER}/games/${fg}/runs/${fr}/teams/${u}`)).data ?? {};
+    const flashDoc = async (id) => (await creator.getDocAt(`users/${OWNER}/games/${fg}/runs/${fr}/flashMissions/${id}`)).data ?? {};
+    const media = (u, n) => `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.firebasestorage.app/o/runs%2F${fr}%2Fteams%2F${u}%2Fflash-${n}.jpg?alt=media`;
+
+    // ── first team only, photo, needs approval ────────────────────────────────
+    const push1 = await creator.call('pushFlashMission', { ...F, title: 'First to the farm', bonusPoints: 25, ttlSeconds: 600,
+      claimMode: 'first', doneBy: 'photo', requiresApproval: true });
+    const f1 = push1?.id;
+    check('flash: a v2 flash mission stores how it is taken and done',
+      (await flashDoc(f1)).claimMode === 'first' && (await flashDoc(f1)).doneBy === 'photo', JSON.stringify(await flashDoc(f1)));
+    const beforeA = await teamDoc(ua);
+    const aTask = beforeA.activeTaskId;
+    const aStart = beforeA.stages[0].tasks.find((t) => t.taskId === aTask)?.startedAt;
+    await pa.call('claimFlashMission', { flashId: f1, code: fcode });
+    check('flash: A took it and its mission is suspended, not skipped',
+      (await teamDoc(ua)).flashSuspension?.flashId === f1 && (await teamDoc(ua)).flashSuspension?.taskId === aTask
+      && (await teamDoc(ua)).stages[0].tasks.find((t) => t.taskId === aTask)?.status === 'assigned');
+    await expectError('flash: first team only — B is refused', pb.call('claimFlashMission', { flashId: f1, code: fcode }),
+      { codeIn: ['functions/failed-precondition'], match: /FLASH_TAKEN/ });
+    const mine = await pa.call('getMyTeamState', { code: fcode });
+    check('flash: the phone is told it is out on a flash mission', mine?.team?.flashSuspension?.flashId === f1, JSON.stringify(mine?.team?.flashSuspension));
+    await new Promise((r) => setTimeout(r, 1200));
+    const sub = await pa.call('submitFlashMission', { flashId: f1, code: fcode, mediaUrl: media(ua, 1) });
+    check('flash: a submission that needs approval waits', sub?.approved === false && (await teamDoc(ua)).flashClaims?.[f1]?.status === 'submitted', JSON.stringify(sub));
+    // Design D6: the claim is on the TEAM; the flash document names only who holds a first-team one.
+    check('flash: first team only, the flash document names the holder', (await flashDoc(f1)).takenBy === ua && (await flashDoc(f1)).claims === undefined,
+      JSON.stringify(await flashDoc(f1)));
+    const backA = await teamDoc(ua);
+    const newStart = backA.stages[0].tasks.find((t) => t.taskId === aTask)?.startedAt;
+    check('flash: A is back on its mission, its clock moved forward by the time away',
+      !backA.flashSuspension && backA.activeTaskId === aTask && Date.parse(newStart) - Date.parse(aStart) >= 1000,
+      JSON.stringify({ aStart, newStart }));
+    const scoreBefore = backA.score ?? 0;
+    const rev = await creator.call('reviewFlashMission', { ...F, flashId: f1, teamId: ua, action: 'approve' });
+    const afterApprove = await teamDoc(ua);
+    check('flash: approving awards the points, recorded as a flash award',
+      rev?.awarded === 25 && (afterApprove.score ?? 0) === scoreBefore + 25
+      && (afterApprove.scoreLedger ?? []).some((l) => l.kind === 'flash' && l.flashId === f1 && l.delta === 25 && l.reason === 'First to the farm'),
+      JSON.stringify({ rev, score: afterApprove.score }));
+    await expectError('flash: the same claim cannot be awarded twice', creator.call('reviewFlashMission', { ...F, flashId: f1, teamId: ua, action: 'approve' }),
+      { codeIn: ['functions/failed-precondition'] });
+
+    // ── any team, done button, no approval ──────────────────────────────────────
+    const f2 = (await creator.call('pushFlashMission', { ...F, title: 'Everyone: shout', bonusPoints: 5, ttlSeconds: 600,
+      claimMode: 'many', doneBy: 'button', requiresApproval: false }))?.id;
+    await pa.call('claimFlashMission', { flashId: f2, code: fcode });
+    await pb.call('claimFlashMission', { flashId: f2, code: fcode });
+    const bScore = (await teamDoc(ub)).score ?? 0;
+    const bSub = await pb.call('submitFlashMission', { flashId: f2, code: fcode });
+    check('flash: "many" lets both teams take it; no approval ⇒ points at once',
+      bSub?.approved === true && ((await teamDoc(ub)).score ?? 0) === bScore + 5, JSON.stringify(bSub));
+    // Every phone listens to the flash documents, so a "many" claim or sending must not write one
+    // (design D6: that fan-out was ≈40,000 reads for one flash mission at 100 teams).
+    const f2doc = await flashDoc(f2);
+    check('flash: a "many" flash document is not written by claims or sendings',
+      f2doc.claims === undefined && f2doc.takenBy === undefined, JSON.stringify(f2doc));
+    // A gives it up: back to its mission, no points.
+    const aScore = (await teamDoc(ua)).score ?? 0;
+    await pa.call('releaseFlashMission', { flashId: f2, code: fcode });
+    check('flash: giving it up brings the team back, with no points',
+      !(await teamDoc(ua)).flashSuspension && ((await teamDoc(ua)).score ?? 0) === aScore && (await teamDoc(ua)).flashClaims?.[f2]?.status === 'released');
+
+    // ── end early sends everyone out on it back ─────────────────────────────────
+    const f3 = (await creator.call('pushFlashMission', { ...F, title: 'Quick one', bonusPoints: 5, ttlSeconds: 600,
+      claimMode: 'first', doneBy: 'video', requiresApproval: true }))?.id;
+    await pb.call('claimFlashMission', { flashId: f3, code: fcode });
+    await creator.call('deactivateFlashMission', { ...F, flashId: f3 });
+    check('flash: ending it early sends the team back', !(await teamDoc(ub)).flashSuspension && (await flashDoc(f3)).isActive === false);
+    await expectError('flash: an ended flash mission cannot be taken', pa.call('claimFlashMission', { flashId: f3, code: fcode }),
+      { codeIn: ['functions/failed-precondition'] });
+
+    // ── announce-only (and every pre-v2 flash mission) is awarded by hand ──────
+    const f4 = (await creator.call('pushFlashMission', { ...F, title: 'First to the gate: 10', bonusPoints: 10, ttlSeconds: 600 }))?.id;
+    await expectError('flash: an announcement cannot be "taken"', pb.call('claimFlashMission', { flashId: f4, code: fcode }),
+      { codeIn: ['functions/failed-precondition'], match: /FLASH_ANNOUNCEONLY/ });
+    const bBefore = (await teamDoc(ub)).score ?? 0;
+    const award = await creator.call('reviewFlashMission', { ...F, flashId: f4, teamId: ub, action: 'award' });
+    check('flash: the organizer awards an announcement to the winner', award?.awarded === 10 && ((await teamDoc(ub)).score ?? 0) === bBefore + 10);
+
+    // ── removing a team gives back the flash mission it holds (overnight 2026-09-29) ─────────
+    // Found by reading: a removed team's 'claimed' first-team claim kept the mission "taken" for
+    // every other team until it expired, and the organizer had no action that could free it.
+    const f5 = (await creator.call('pushFlashMission', { ...F, title: 'Race you', bonusPoints: 5, ttlSeconds: 600,
+      claimMode: 'first', doneBy: 'button', requiresApproval: false }))?.id;
+    await pa.call('claimFlashMission', { flashId: f5, code: fcode });
+    await creator.call('setTeamRemoved', { ...F, teamId: ua, removed: true, reason: 'e2e' });
+    check('flash: removing a team releases its claim and ends its suspension',
+      (await teamDoc(ua)).flashClaims?.[f5]?.status === 'released' && !(await teamDoc(ua)).flashSuspension && !(await flashDoc(f5)).takenBy,
+      JSON.stringify({ claim: (await teamDoc(ua)).flashClaims?.[f5], susp: (await teamDoc(ua)).flashSuspension, takenBy: (await flashDoc(f5)).takenBy }));
+    let bTook = true;
+    try { await pb.call('claimFlashMission', { flashId: f5, code: fcode }); } catch { bTook = false; }
+    check('flash: another team can take a first-team mission the removed team held', bTook);
+    await creator.call('setTeamRemoved', { ...F, teamId: ua, removed: false });
+
+    const logs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    check('audit: awards and ending are recorded',
+      (logs?.logs ?? []).some((l) => l.runId === fr && l.actionType === 'flash_awarded')
+      && (logs?.logs ?? []).some((l) => l.runId === fr && l.actionType === 'flash_ended'));
   });
 
   await scenario('run-summary email scope (real runs only; demo/sim/synthetic excluded)', async () => {

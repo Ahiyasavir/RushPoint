@@ -144,6 +144,16 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // Staff team-management actions (staff-console-field-ops). Bounded because each
   // writes an audit row, but high enough for a marshal working a queue of teams.
   setTeamHold: { max: 30, windowMs: MIN },
+  // team-lifecycle-controls: owner-only and audited; a removal is a rare, deliberate act.
+  setTeamRemoved: { max: 30, windowMs: MIN },
+  // located-mission-arrival: a marshal letting teams in at a door with no GPS.
+  markTeamArrived: { max: 60, windowMs: MIN },
+  // flash-missions-v2
+  deactivateFlashMission: { max: 30, windowMs: MIN },
+  reviewFlashMission: { max: 60, windowMs: MIN },
+  claimFlashMission: { max: 20, windowMs: MIN },
+  releaseFlashMission: { max: 20, windowMs: MIN },
+  submitFlashMission: { max: 20, windowMs: MIN },
   forceAssignTask: { max: 30, windowMs: MIN },
   // send-team-back: the same field-ops shape and budget as forceAssignTask.
   returnTeamTo: { max: 30, windowMs: MIN },

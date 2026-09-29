@@ -47,6 +47,8 @@ export const PANEL_COPY: Record<PanelId, PanelCopy> = {
   taskAvailability: { icon: '⏸️', hasHelp: true, hasEmpty: true },
 
   // ── From the field ──
+  // run-console-simplify: "עכשיו", everything waiting for the organizer in one list.
+  inbox: { icon: '⚡', hasHelp: true, hasEmpty: true },
   photoReview: { icon: '📷', hasHelp: true, hasEmpty: true },
   feed: { icon: '📸', hasHelp: true, hasEmpty: true },
   mediaGallery: { icon: '🖼️', hasHelp: true, hasEmpty: true },

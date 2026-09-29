@@ -41,3 +41,36 @@ export function formatScoreNotice(
   if (!trimmed) return signed;
   return `${signed} · ${trimmed}`;
 }
+
+/**
+ * Is a "the staff sent you to X" notice (`kind: 'forceAssign'`) still about the team's current
+ * mission? (overnight 2026-09-29) Every operator route leaves one, and old ones stayed after the team
+ * moved on: played at 375x667, three stacked above the mission (two naming a mission no longer
+ * current) and pushed its own button out of the sheet. Shown only while X is current; any other
+ * notice, a notice with no task id, or an unknown current mission keeps today's behaviour (shown).
+ */
+export function routeNoticeStillCurrent(
+  a: { kind?: string; taskId?: string | null },
+  activeTaskId: string | null | undefined,
+): boolean {
+  if (a?.kind !== 'forceAssign' || typeof a.taskId !== 'string' || !a.taskId) return true;
+  if (typeof activeTaskId !== 'string' || !activeTaskId) return true;
+  return a.taskId === activeTaskId;
+}
+
+/**
+ * The id of the newest "the staff sent you to X" notice, or null (overnight 2026-09-29): two routes
+ * to the same mission left two identical notices stacked above it. Only the newest is shown.
+ */
+export function newestRouteNoticeId(
+  list: readonly ({ id?: unknown; kind?: string; createdAt?: string } | null | undefined)[] | null | undefined,
+): string | null {
+  let best: { id: string; at: number } | null = null;
+  for (const a of Array.isArray(list) ? list : []) {
+    if (!a || a.kind !== 'forceAssign' || typeof a.id !== 'string') continue;
+    const at = typeof a.createdAt === 'string' ? Date.parse(a.createdAt) : NaN;
+    const t = Number.isFinite(at) ? at : -Infinity;
+    if (!best || t >= best.at) best = { id: a.id, at: t };
+  }
+  return best?.id ?? null;
+}

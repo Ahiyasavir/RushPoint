@@ -151,5 +151,21 @@ for (const [name, { file, needsInset, why }] of Object.entries(SHELLS)) {
     file);
 }
 
+// ── play-screen-no-scroll (field report 2026-09-27: "no scrolling at all") ──────
+// The launched game screen is EXACTLY one screen tall and never scrolls as a page; the mission
+// scrolls inside its own sheet. And leaving is a labelled menu item, never a bare ✕ ("does it
+// leave the mission, the game or the app?").
+{
+  const ui = readFileSync(join(PLAY, 'src', 'components', 'ui.tsx'), 'utf8');
+  const gameScreen = /export function GameScreen[\s\S]*?\n}/.exec(ui)?.[0] ?? '';
+  ok(/h-\[100dvh\]/.test(gameScreen) && /\boverflow-hidden\b/.test(gameScreen) && /\brp-safe-t\b/.test(gameScreen),
+    'GameScreen is one screen tall, never scrolls as a page, and folds in the top inset');
+  const play = readFileSync(join(PLAY, 'src', 'screens', 'PlayScreen.tsx'), 'utf8');
+  ok(/<GameScreen>[\s\S]*<StoryInterstitial/.test(play), 'the launched game screen uses GameScreen');
+  ok(/<MissionSheet\b/.test(play), 'with a map, the mission lives in the sheet');
+  ok(!/onClick=\{onLeave\}[^>]*>✕</.test(play), 'no bare ✕ leaves the game');
+  ok(/leaveOnThisPhone/.test(play), 'leaving is labelled "leave the game on this phone"');
+}
+
 console.log(`\n${failed === 0 ? 'ALL TOP OVERLAY STACK TESTS PASSED' : 'TOP OVERLAY STACK TESTS FAILED'} (${passed} passed, ${failed} failed)`);
 process.exit(failed === 0 ? 0 : 1);

@@ -114,6 +114,13 @@ export function applyStageCompletion(
     if (isReleased(nextGameStage, launchedAt, new Date(now).getTime())) {
       stages[stageIdx + 1].status = 'active';
       stages[stageIdx + 1].startedAt = now;
+      // Evaluate the stage the moment it becomes active (change: route-team-to-mission). A team
+      // can arrive at a stage whose requirement is already met — it visited that stage's missions
+      // earlier on an operator's route, or a rewind kept them (send-team-back D2) — and a stage is
+      // otherwise only evaluated when one of ITS missions completes, which may never happen again.
+      // A freshly opened stage with nothing done is untouched by this (stageDone is false).
+      const cascade = applyStageCompletion(stages, stageIdx + 1, game, launchedAt, now);
+      heldAssignedTaskIds.push(...cascade.heldAssignedTaskIds);
     }
   }
   return { completed: true, heldAssignedTaskIds };

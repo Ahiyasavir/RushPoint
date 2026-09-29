@@ -102,3 +102,59 @@ function isSetLike(value: unknown): value is ReadonlySet<string> {
 }
 
 export { SILENT as SILENT_CUE_VERDICT };
+
+// ── The waiting alarm (change: review-wait-alarm) ─────────────────────────────
+//
+// Field report 2026-09-27: "alert strongly if I don't approve a photo for more than 20 seconds".
+// `newPendingKeys` cues once when a submission ARRIVES; nothing escalated afterwards, however long
+// a team stood waiting. Modelled on kitchen display systems: every ticket shows its age and changes
+// colour at fixed thresholds until someone clears it. Clock injected, total, and quiet on bad data
+// (an unparseable or future timestamp never raises an alarm, the same rule as the wait label).
+
+/** A submission waiting this long raises the alarm. */
+export const REVIEW_ALARM_MS = 20_000;
+/** A row turns red from here. */
+export const REVIEW_RED_MS = 60_000;
+
+export interface WaitingRow { teamId: string; taskId: string; submittedAt: string }
+export interface ReviewWaitVerdict {
+  level: 'none' | 'alarm';
+  oldest: { key: string; waitedMs: number } | null;
+  overCount: number;
+  playSound: boolean;
+}
+
+function waitedMs(row: WaitingRow, nowMs: number): number | null {
+  if (!row || typeof row.submittedAt !== 'string' || row.submittedAt === '') return null;
+  const at = Date.parse(row.submittedAt);
+  if (!Number.isFinite(at) || at > nowMs) return null;
+  return nowMs - at;
+}
+
+export function reviewWaitAlarm(
+  pending: readonly WaitingRow[] | null | undefined,
+  nowMs: number,
+  opts: { mutedUntilMs?: number | null } = {},
+): ReviewWaitVerdict {
+  const quiet: ReviewWaitVerdict = { level: 'none', oldest: null, overCount: 0, playSound: false };
+  if (!Array.isArray(pending)) return quiet;
+  let oldest: ReviewWaitVerdict['oldest'] = null;
+  let overCount = 0;
+  for (const row of pending) {
+    const w = waitedMs(row, nowMs);
+    if (w === null || w < REVIEW_ALARM_MS) continue;
+    overCount++;
+    if (!oldest || w > oldest.waitedMs) oldest = { key: `${row.teamId}:${row.taskId}`, waitedMs: w };
+  }
+  if (overCount === 0) return quiet;
+  const muted = typeof opts.mutedUntilMs === 'number' && Number.isFinite(opts.mutedUntilMs) && opts.mutedUntilMs > nowMs;
+  return { level: 'alarm', oldest, overCount, playSound: !muted };
+}
+
+/** The colour of one waiting row: fresh, amber from 20 s, red from 60 s. Unknown ⇒ fresh. */
+export function reviewRowTone(waited: number): 'fresh' | 'amber' | 'red' {
+  if (!Number.isFinite(waited)) return 'fresh';
+  if (waited >= REVIEW_RED_MS) return 'red';
+  if (waited >= REVIEW_ALARM_MS) return 'amber';
+  return 'fresh';
+}

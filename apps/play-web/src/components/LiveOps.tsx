@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { announcementVisibleTo, formatScoreNotice, type RunLeaderboard } from '@rushpoint/shared';
+import { announcementVisibleTo, routeNoticeStillCurrent, newestRouteNoticeId, formatScoreNotice, flashMissionState, flashMyClaimLine, type RunLeaderboard, type FlashClaimStatus } from '@rushpoint/shared';
+import { claimFlashMission } from '../services/calls';
+import { feedback } from '../lib/sound';
 import { db } from '../services/firebase';
 import { translations } from '../i18n';
 import { haptic } from '../lib/haptics';
@@ -45,15 +47,22 @@ const FLASH_WINDOW = 20;
 interface AnnouncementDoc {
   id: string; message: string; messageHe?: string; active: boolean; createdAt?: string;
   // Targeted announcements (change: targeted-announcements).
-  teamId?: string; kind?: 'announcement' | 'score'; delta?: number; reason?: string;
+  teamId?: string; kind?: 'announcement' | 'score' | 'forceAssign'; delta?: number; reason?: string;
+  /** A route notice's mission ("the staff sent you to X"). */
+  taskId?: string;
 }
-interface FlashDoc { id: string; title: string; titleHe?: string; description?: string; descriptionHe?: string; bonusPoints?: number; expiresAt: string; isActive: boolean }
+interface FlashDoc { id: string; title: string; titleHe?: string; description?: string; descriptionHe?: string; bonusPoints?: number; expiresAt: string; isActive: boolean;
+  // flash-missions-v2: a mission teams can take. Absent on an announcement (and every pre-v2 one).
+  claimMode?: 'first' | 'many'; doneBy?: 'announce' | 'button' | 'photo' | 'video'; takenBy?: string | null }
 
 // Non-blocking live-ops banners + a collapsible leaderboard peek. Rendered above
 // the map/task card so it never covers the active mission UI.
 export default function LiveOps({
-  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false, showBoard = true,
+  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false, showBoard = true, teamFlashId = null, myFlashClaims = null, onFlashClaimed,
+  activeTaskId = null,
 }: {
+  /** The team's current mission: a "the staff sent you to X" notice shows only while X is current. */
+  activeTaskId?: string | null;
   ctx: Ctx;
   leaderboard: RunLeaderboard | null;
   myTeamId: string;
@@ -69,6 +78,12 @@ export default function LiveOps({
    * unchanged.
    */
   showBoard?: boolean;
+  /** flash-missions-v2: the flash mission this team is out on, if any (team.flashSuspension). */
+  teamFlashId?: string | null;
+  /** flash-missions-v2: after a successful "לקחתי", so the screen refreshes into the flash card. */
+  onFlashClaimed?: () => void;
+  /** flash-missions-v2 D6: this team's own claims (team.flashClaims), keyed by flash mission. */
+  myFlashClaims?: Record<string, { status: FlashClaimStatus } | null | undefined> | null;
   // time_only runs never award points, so the peek must show each team's time,
   // not a column of zeros (mirrors the finish/TV/public boards).
   timeOnly?: boolean;
@@ -120,12 +135,48 @@ export default function LiveOps({
   }, []);
 
   const liveFlashes = flashes.filter((f) => new Date(f.expiresAt).getTime() > now && !dismissed.has(f.id));
+
+  // flash-missions-v2: a NEW flash mission arrives as an event: a full-screen moment with a sound
+  // and (on Android) a buzz, once per flash mission per phone, then the banner below.
+  const [moment, setMoment] = useState<FlashDoc | null>(null);
+  const seenFlashes = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const key = `rp.flashSeen.${runId}`;
+    if (!seenFlashes.current) {
+      try { seenFlashes.current = new Set(JSON.parse(localStorage.getItem(key) ?? '[]') as string[]); }
+      catch { seenFlashes.current = new Set(); }
+    }
+    const fresh = liveFlashes.find((f) => !seenFlashes.current!.has(f.id));
+    if (!fresh) return;
+    seenFlashes.current.add(fresh.id);
+    try { localStorage.setItem(key, JSON.stringify([...seenFlashes.current].slice(-50))); } catch { /* memory only */ }
+    setMoment(fresh);
+    feedback('alert');
+    try { navigator.vibrate?.([80, 60, 80, 60, 160]); } catch { /* iOS has none */ }
+    const id = window.setTimeout(() => setMoment(null), 3200);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveFlashes.map((f) => f.id).join(','), runId]);
+  const [claiming, setClaiming] = useState<string | null>(null);
+  const [claimMsg, setClaimMsg] = useState<string | null>(null);
+  async function claim(f: FlashDoc) {
+    if (claiming) return;
+    setClaiming(f.id);
+    setClaimMsg(null);
+    try { await claimFlashMission({ ownerUid, gameId, runId, flashId: f.id }); setMoment(null); onFlashClaimed?.(); }
+    catch (e) { setClaimMsg(/FLASH_TAKEN/.test(String((e as Error)?.message)) ? translations[lang].flash.takenByOther : translations[lang].flash.claimFailed); }
+    finally { setClaiming(null); }
+  }
   // Targeted announcements: only show a doc that is global or addressed to my team
   // (client-side courtesy filter — the field is not secret). Score notices also
   // auto-hide once older than SCORE_NOTICE_TTL_MS.
+  // Only the newest route notice for this team (two routes to one mission left two identical ones).
+  const newestRoute = newestRouteNoticeId(announcements.filter((a) => announcementVisibleTo(a, myTeamId)));
   const liveAnnouncements = announcements.filter((a) => {
     if (dismissed.has(a.id)) return false;
     if (!announcementVisibleTo(a, myTeamId)) return false;
+    if (!routeNoticeStillCurrent(a, activeTaskId)) return false;
+    if (a.kind === 'forceAssign' && a.id !== newestRoute) return false;
     if (a.kind === 'score' && a.createdAt && now - new Date(a.createdAt).getTime() > SCORE_NOTICE_TTL_MS) return false;
     return true;
   });
@@ -217,9 +268,45 @@ export default function LiveOps({
               </div>
               <span className="text-xs font-mono text-purple-300 shrink-0">{mm}:{ss}</span>
             </div>
+            {/* flash-missions-v2: the action. First-team missions say who took them. */}
+            {f.claimMode && f.doneBy && f.doneBy !== 'announce' && (() => {
+              const fl = translations[lang].flash;
+              const mine = myFlashClaims?.[f.id];
+              const state = flashMissionState(f, now);
+              if (teamFlashId === f.id) return <p className="mt-2 text-[13px] font-semibold text-purple-200">{fl.youAreOnIt}</p>;
+              // What happened to OUR claim: taken, sent and waiting, won, or not approved.
+              const line = flashMyClaimLine(mine);
+              if (line) {
+                const text = line === 'waiting' ? fl.myWaiting : line === 'won' ? fl.myWon({ points: f.bonusPoints ?? 0 }) : line === 'rejected' ? fl.myRejected : fl.alreadyYours;
+                return <p role="status" className={`mt-2 text-[13px] ${line === 'won' ? 'font-bold text-purple-100' : 'text-purple-200'}`}>{text}</p>;
+              }
+              if (state === 'taken') return <p className="mt-2 text-[13px] text-zinc-400">{fl.takenByOther}</p>;
+              return (
+                <button type="button" data-testid="flash-claim" disabled={!!claiming || !!teamFlashId}
+                  onClick={() => void claim(f)}
+                  className="mt-2 w-full min-h-[44px] rounded-xl bg-purple-500 text-white font-bold text-sm disabled:opacity-50">
+                  {claiming === f.id ? fl.claiming : fl.claim}
+                </button>
+              );
+            })()}
           </div>
         );
       })}
+      {claimMsg && <p role="status" className="text-[13px] text-zinc-400">{claimMsg}</p>}
+      {moment && (
+        <div role="alertdialog" aria-labelledby="rp-flash-moment" data-testid="flash-moment"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-purple-900/80 backdrop-blur-sm p-6 motion-safe:animate-fade-up">
+          {/* The whole backdrop dismisses: a real button, so it is reachable and named. */}
+          <button type="button" className="absolute inset-0 w-full h-full cursor-default"
+            aria-label={translations[lang].flash.momentDismiss} onClick={() => setMoment(null)} />
+          <div className="relative text-center text-white pointer-events-none">
+            <div className="text-7xl mb-3 motion-safe:animate-bounce" aria-hidden>⚡</div>
+            <p className="text-sm font-bold uppercase tracking-widest mb-2">{translations[lang].flash.momentLabel}</p>
+            <h2 id="rp-flash-moment" dir="auto" className="text-3xl font-extrabold mb-2">{lang === 'he' && moment.titleHe ? moment.titleHe : moment.title}</h2>
+            {moment.bonusPoints ? <p className="text-2xl font-bold text-amber-300">+{moment.bonusPoints}</p> : null}
+          </div>
+        </div>
+      )}
 
       {showBoard && hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} timeOnly={timeOnly} />}
     </div>

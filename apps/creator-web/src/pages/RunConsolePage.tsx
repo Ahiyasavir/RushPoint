@@ -4,13 +4,14 @@ import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } fr
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, approvedAutomatically, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   updateGame,
-  skipStage, skipTaskForTeam, returnTeamTo, adjustTeamScore, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
+  skipStage, skipTaskForTeam, returnTeamTo, adjustTeamScore, setTeamHold, setTeamRemoved, forceAssignTask, markTeamArrived,
+  deactivateFlashMission, reviewFlashMission, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
   sendTeamChatMessage, sendStaffChannelMessage, reviewStationSubmission, setRunTaskStatus,
@@ -20,7 +21,7 @@ import {
 // play-web StaffConsole so the two review surfaces can never disagree.
 import {
   buildSubmissionQueues, submissionKey, isRenderableMedia,
-  newPendingKeys, pendingLateJoiners,
+  newPendingKeys, pendingLateJoiners, reviewWaitAlarm, reviewRowTone, REVIEW_ALARM_MS,
   OTHER_REASON, reasonsForDelta, resolveReason, isScoreReasonId, toTelHref, type ScoreReasonId,
   type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
 } from '@rushpoint/shared';
@@ -37,9 +38,13 @@ import { buildRunMediaGallery } from '../lib/runMediaGallery';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
-import { OverflowMenu } from '../components/OverflowMenu';
 // send-team-back: the "where to?" picker and what it may offer.
 import SendBackPicker, { type SendBackChoice } from '../components/SendBackPicker';
+import RoutePicker from '../components/RoutePicker';
+import { buildInbox, consoleClockMs, inboxRowAction } from '../lib/runConsoleInbox';
+import { buildRoutePicker } from '../lib/routePicker';
+import type { WaivableKind, FlashDoneBy, FlashClaimMode, FlashMissionDoc } from '@rushpoint/shared';
+import { flashMissionState, flashClaimsByFlash, type FlashClaim } from '@rushpoint/shared';
 import ConsoleTabs from '../components/ConsoleTabs';
 import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import { buildTeamDossier } from '../lib/teamDossier';
@@ -97,8 +102,8 @@ import {
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import { describeCallFailure } from '../lib/callFeedback';
-import { playAlert, unlockAudio } from '../lib/sound';
-import { useT } from '../components/LanguageContext';
+import { playAlert, unlockAudio, playUrgent, audioState } from '../lib/sound';
+import { useT, useLanguage } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
 import HeatmapMap from '../components/HeatmapMap';
 import LocationStep from '../components/LocationStep';
@@ -152,6 +157,7 @@ export default function RunConsolePage() {
   const nav = useNavigate();
   const { user } = useAuth();
   const t = useT();
+  const { lang } = useLanguage();
   const reportFailure = useCallFailureToast();
   const ownerUid = user!.uid;
   const [run, setRun] = useState<Run | null>(null);
@@ -438,6 +444,11 @@ export default function RunConsolePage() {
     });
   }, [gameId, runId, ownerUid, runLive]);
   const photoQueues = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
+  // The same recent flash missions the flash panel lists (one shared listener target in the SDK),
+  // so the inbox can show a flash mission a team sent that waits for approval.
+  const recentFlashes = useRecentFlashMissions(ownerUid, gameId, runLive ? runId : undefined);
+  // Design D6: each team's flash claims live on its own document, which this page already streams.
+  const flashClaims = useMemo(() => flashClaimsByFlash([...teamFullDocs.values()] as never), [teamFullDocs]);
 
   // A submission arriving is the ONE event an organizer is blocked on and cannot
   // see (change: live-ops-feedback-loop). The SOS listener above has cued since it
@@ -457,6 +468,74 @@ export default function RunConsolePage() {
     seenPendingKeys.current = new Set(keys);
     if (verdict.shouldCue) playAlert();
   }, [photoQueues]);
+
+  // ── The review-wait alarm (change: review-wait-alarm) ──────────────────────────
+  // Field report 2026-09-27: "alert strongly if I don't approve a photo for more than 20 seconds".
+  // A 1 s clock runs only while something is waiting; the verdict is pure (reviewWaitAlarm). The
+  // urgent cue repeats every 20 s while anything is over the line and the sound is not muted.
+  // The same clock drives the "now" list's ages and its 20 s urgency (overnight 2026-09-29: it used to
+  // tick only while a MISSION photo waited, so a waiting flash mission never turned urgent and every
+  // age froze). Cadence is pure: consoleClockMs.
+  const hasPendingReview = photoQueues.pending.length > 0;
+  const pendingFlashCount = Object.values(flashClaims).reduce(
+    (n, byTeam) => n + Object.values(byTeam).filter((c) => c?.status === 'submitted').length, 0);
+  const clockMs = consoleClockMs({
+    pendingReviews: photoQueues.pending.length,
+    pendingFlash: pendingFlashCount,
+    inboxItems: alerts.length + teams.length,
+  });
+  const [reviewNow, setReviewNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (clockMs == null) return;
+    setReviewNow(Date.now());
+    const id = window.setInterval(() => setReviewNow(Date.now()), clockMs);
+    return () => window.clearInterval(id);
+  }, [clockMs]);
+  const [alarmMutedUntil, setAlarmMutedUntil] = useState<number | null>(null);
+  const reviewAlarm = reviewWaitAlarm(hasPendingReview ? photoQueues.pending : [], reviewNow, { mutedUntilMs: alarmMutedUntil });
+  const lastUrgentAt = useRef(0);
+  useEffect(() => {
+    if (reviewAlarm.level === 'none') { lastUrgentAt.current = 0; return; }
+    if (!reviewAlarm.playSound) return;
+    if (reviewNow - lastUrgentAt.current >= REVIEW_ALARM_MS) {
+      lastUrgentAt.current = reviewNow;
+      playUrgent();
+    }
+  }, [reviewAlarm.level, reviewAlarm.playSound, reviewNow]);
+  // The tab title carries it too: the console is often a background tab while the organizer talks.
+  useEffect(() => {
+    if (reviewAlarm.level !== 'alarm') return;
+    const prev = document.title;
+    document.title = t.runConsole.reviewAlarmTabTitle({ n: reviewAlarm.overCount });
+    return () => { document.title = prev; };
+  }, [reviewAlarm.level, reviewAlarm.overCount, t]);
+  // A browser notification when the console is hidden, once per alarm, only if already allowed.
+  const notifiedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const key = reviewAlarm.oldest?.key ?? null;
+    if (!key) { notifiedFor.current = null; return; }
+    if (notifiedFor.current === key || !document.hidden) return;
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        notifiedFor.current = key;
+        new Notification(t.runConsole.reviewAlarmNotification({ n: reviewAlarm.overCount }));
+      }
+    } catch { /* notifications unsupported — the banner and the title still carry it */ }
+  }, [reviewAlarm.oldest?.key, reviewAlarm.overCount, t]);
+  // Sound readiness: until the page may play audio, every cue is dropped silently. Say so.
+  const [soundState, setSoundState] = useState(() => audioState());
+  useEffect(() => {
+    const check = () => setSoundState(audioState());
+    const id = window.setInterval(check, 2000);
+    window.addEventListener('pointerdown', check);
+    return () => { window.clearInterval(id); window.removeEventListener('pointerdown', check); };
+  }, []);
+  function enableSound() {
+    unlockAudio();
+    playAlert();
+    try { if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission(); } catch { /* unsupported */ }
+    window.setTimeout(() => setSoundState(audioState()), 300);
+  }
   // Everything the review queue's pending/reviewed split does NOT show on its
   // own: an autoApproved item, an already-rejected one — same source snapshot,
   // no extra listener.
@@ -583,6 +662,9 @@ export default function RunConsolePage() {
   const [gameAnchors, setGameAnchors] = useState<readonly LatLng[]>([]);
   // send-team-back: stage and mission titles for the "send back" picker, from the SAME read.
   const [gameStagesLite, setGameStagesLite] = useState<{ id: string; title: string; tasks: { id: string; title: string }[] }[]>([]);
+  // route-team-to-mission: the FULL stages (gates, capacity, release/expiry) the route picker needs.
+  const [gameStagesFull, setGameStagesFull] = useState<{ id: string; title?: string; tasks?: ({ id: string; title?: string } & Record<string, unknown>)[] }[]>([]);
+  const [routeFor, setRouteFor] = useState<RunTeamRow | null>(null);
   // staff-capabilities: what a new staff code starts with (the game's default; absent = everything).
   const [staffDefaultCaps, setStaffDefaultCaps] = useState<StaffCapability[]>(() => defaultCodeCapabilities(undefined));
   // quick-dial-and-actions D3: the game's phone-type registration fields, from the SAME read.
@@ -616,6 +698,7 @@ export default function RunConsolePage() {
         setGameStagesLite((game.stages ?? []).map((s) => ({
           id: s.id, title: s.title ?? '', tasks: (s.tasks ?? []).map((tk) => ({ id: tk.id, title: tk.title ?? '' })),
         })));
+        setGameStagesFull((game.stages ?? []) as never);
       })
       .catch(() => undefined);
     return () => { alive = false; };
@@ -632,6 +715,8 @@ export default function RunConsolePage() {
   // Team search (team-dossier-and-search D4). Hooks live HERE, above the page's
   // early return. The box shows itself past 6 teams; `/` opens it at any size.
   const [teamQuery, setTeamQuery] = useState('');
+  // team-lifecycle-controls: teams taken out of the game sit behind this switch, not in the list.
+  const [showRemovedTeams, setShowRemovedTeams] = useState(false);
   const [teamFilter, setTeamFilter] = useState<TeamFilter>('all');
   const [teamSort, setTeamSort] = useState<TeamSort>('rank');
   const [teamSearchOpen, setTeamSearchOpen] = useState(false);
@@ -675,6 +760,11 @@ export default function RunConsolePage() {
   // alone would do nothing in exactly that case — which is the most common one
   // during a live run, when the chip and the panel belong to the same section.
   const sectionPaneRef = useRef<HTMLElement | null>(null);
+  // The PANEL a reveal is for, when the caller named one (goToPanel). Overnight 2026-09-29: the
+  // inbox's "פתיחה" on a flash mission waiting for approval opened the Game section and stopped at
+  // its top, with the flash panel ~1,800px further down: a dead-looking press. The reveal now lands
+  // on the panel itself (PanelShell stamps `data-panel`), and on the section when none was named.
+  const revealPanelRef = useRef<PanelId | null>(null);
   const [revealNonce, setRevealNonce] = useState(0);
   const openSection = useCallback((id: SectionId) => {
     // Record what the organizer saw in the section they are leaving and the one
@@ -691,6 +781,10 @@ export default function RunConsolePage() {
   }, [runId]);
   useEffect(() => {
     if (revealNonce === 0) return; // mount, or a restore — never scroll for those
+    const panel = revealPanelRef.current;
+    revealPanelRef.current = null;
+    const target = panel ? document.querySelector<HTMLElement>(`[data-panel="${panel}"]`) : null;
+    if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     // `nearest` moves the minimum: on a desktop where the pane is already in
     // view this is a no-op, so the fix costs the wide layout nothing.
     sectionPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -712,10 +806,13 @@ export default function RunConsolePage() {
   // (e.g.) SOS must SCROLL to it and flash it — never be a dead click.
   const goToPanel = useCallback((panel: PanelId) => {
     const where = panelPlacement(panel);
-    if (where !== 'pinned') { openSection(where); return; }
+    if (where !== 'pinned') { revealPanelRef.current = panel; openSection(where); return; }
     const el = pinnedPanelRefs.current[panel];
     if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Scroll the CARD (it carries the scroll margin), not the lane wrapper: measured at 375px, the
+    // wrapper landed the SOS panel's title under the sticky header (overnight 2026-09-29).
+    const card = el.querySelector<HTMLElement>(`[data-panel="${panel}"]`) ?? el;
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     try { el.focus({ preventScroll: true }); } catch { /* focus is best effort */ }
     setFlashedPanel(panel);
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -1026,7 +1123,8 @@ export default function RunConsolePage() {
     heldForConsentCount: teams.filter((tm) => tm.heldForConsent).length,
     unreadChatThreads,
     pausedTaskCount,
-    teamCount: teams.length,
+    // Unknown until the first team poll lands: an empty list before then is not "nobody joined".
+    teamCount: lastTeamsSyncAt == null ? null : teams.length,
     unstartedTeamCount: teams.filter((tm) => !tm.launched && !tm.finished).length,
     // The safety net for the defect that cost one team its whole run (change:
     // late-joiner-autostart). Deliberately NOT gated on the auto start setting:
@@ -1263,6 +1361,78 @@ export default function RunConsolePage() {
         : rc.skipTaskDone({ team: team.displayName }));
     } catch { await dialog.alert(rc.skipTaskFailed); }
   }
+  // ── team-lifecycle-controls: start ONE team, pause/resume it, take it out and back ─────────
+  // Field report 2026-09-27: every one of these was done by hand on the server during a live run.
+  async function startOneTeam(team: RunTeamRow) {
+    try {
+      const res = await startTeams({ gameId: gameId!, runId: runId!, teamIds: [team.id] });
+      await loadTeams();
+      if (res.launched > 0) toast.success(rc.startTeamDone({ team: team.displayName }));
+      else if ((res.heldForConsent ?? 0) > 0) await dialog.alert(rc.startTeamHeldConsent({ team: team.displayName }));
+      else if ((res.heldForMembers ?? 0) > 0) await dialog.alert(rc.startTeamHeldMembers({ team: team.displayName }));
+      else toast.success(rc.startTeamNothing({ team: team.displayName }));
+    } catch (e) { reportFailure(e, 'startTeams'); }
+  }
+  async function holdOneTeam(team: RunTeamRow) {
+    const reason = await dialog.prompt(rc.holdTeamPrompt({ team: team.displayName }), '', rc.holdTeamCta);
+    if (reason === null) return;
+    try {
+      await setTeamHold({ ...ctx, teamId: team.id, held: true, reason: reason.trim() });
+      await loadTeams();
+      toast.success(rc.holdTeamDone({ team: team.displayName }));
+    } catch { await dialog.alert(rc.teamActionFailed); }
+  }
+  async function resumeOneTeam(team: RunTeamRow) {
+    try {
+      await setTeamHold({ ...ctx, teamId: team.id, held: false });
+      await loadTeams();
+      toast.success(rc.resumeTeamDone({ team: team.displayName }));
+    } catch { await dialog.alert(rc.teamActionFailed); }
+  }
+  async function removeOneTeam(team: RunTeamRow) {
+    // The prompt IS the confirm: it names the consequence, and its button names the action.
+    const reason = await dialog.prompt(rc.removeTeamPrompt({ team: team.displayName }), '', rc.confirmCta.removeTeam);
+    if (reason === null) return;
+    try {
+      await setTeamRemoved({ ...ctx, teamId: team.id, removed: true, reason: reason.trim() });
+      await loadTeams();
+      toast.success(rc.removeTeamDone({ team: team.displayName }));
+    } catch { await dialog.alert(rc.teamActionFailed); }
+  }
+  async function routeOneTeam(team: RunTeamRow, taskId: string, accept: WaivableKind[], when: 'now' | 'after') {
+    setRouteFor(null);
+    const title = taskTitles.get(taskId) ?? taskId;
+    try {
+      const res = await forceAssignTask({ ...ctx, teamId: team.id, taskId, accept, when });
+      await loadTeams();
+      toast.success(res.queued ? rc.routeQueued({ team: team.displayName, title }) : rc.routeDone({ team: team.displayName, title }));
+    } catch (e) {
+      // The list moved between the look and the click: say so and let them choose again.
+      if (/ROUTE_BLOCKERS_CHANGED/.test(String((e as Error)?.message ?? ''))) {
+        await dialog.alert(rc.routeChanged);
+        setRouteFor(team);
+      } else {
+        await dialog.alert(rc.routeFailed);
+      }
+    }
+  }
+  // located-mission-arrival: "let them in" when the team is at the door and GPS cannot prove it.
+  async function letTeamIn(team: RunTeamRow, taskId: string) {
+    try {
+      await markTeamArrived({ ...ctx, teamId: team.id, taskId, reason: 'organizer' });
+      // Refresh now, like restore: until the next poll the "let them in" button stayed and invited a
+      // second tap (harmless, the latch is idempotent, but it reads as "did that work?").
+      await loadTeams();
+      toast.success(rc.letInDone({ team: team.displayName }));
+    } catch { await dialog.alert(rc.teamActionFailed); }
+  }
+  async function restoreOneTeam(team: RunTeamRow) {
+    try {
+      await setTeamRemoved({ ...ctx, teamId: team.id, removed: false });
+      await loadTeams();
+      toast.success(rc.restoreTeamDone({ team: team.displayName }));
+    } catch { await dialog.alert(rc.teamActionFailed); }
+  }
   // send-team-back: the picker hands back a target; the server's dry run says what it will do; the
   // organizer confirms; the real call runs. A failed preview falls back to the generic consequence.
   async function sendTeamBack(team: RunTeamRow, choice: SendBackChoice) {
@@ -1393,7 +1563,7 @@ export default function RunConsolePage() {
       case 'liveMap':
         return (
           <PanelShell panel="liveMap">
-            <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
+            <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" onTeamClick={openTeamPage} />
           </PanelShell>
         );
 
@@ -1453,30 +1623,46 @@ export default function RunConsolePage() {
                 </div>
               </div>
             )}
-            {teams.length === 0 ? (
+            {lastTeamsSyncAt == null && !teamsStale && teams.length === 0 ? (
+              // Not loaded yet is not "no teams" (overnight 2026-09-29, same fix as the signal strip).
+              <Spinner label={t.runConsole.loadingTeams} />
+            ) : teams.length === 0 ? (
               <PanelEmpty panel="teams" />
             ) : (() => {
               const rankIndex = new Map((activeRun.leaderboard?.rankings ?? []).map((r, i) => [r.teamId, i + 1]));
-              const shownTeams = searchTeams(teams, {
+              const removedCount = teams.filter((tm) => tm.removed === true).length;
+              const listedTeams = showRemovedTeams ? teams : teams.filter((tm) => tm.removed !== true);
+              const removedToggle = removedCount > 0 && (
+                <button type="button" className="text-[13px] underline text-[--ink-3] hover:text-ink-fire min-h-[44px] px-1"
+                  aria-pressed={showRemovedTeams}
+                  onClick={() => setShowRemovedTeams((v) => !v)}>
+                  {showRemovedTeams ? rc.removedTeamsHide : rc.removedTeamsShow({ n: removedCount })}
+                </button>
+              );
+              const shownTeams = searchTeams(listedTeams, {
                 query: teamQuery,
                 filter: teamFilter,
                 sort: teamSort,
                 needsAttention: (id) => { const lv = attentionById.get(id)?.level; return !!lv && lv !== 'ok'; },
                 rankOf: (id) => rankIndex.get(id) ?? null,
+                locale: lang,
               });
               if (shownTeams.length === 0) {
                 return (
-                  <p role="status" className="text-sm text-[--ink-3] px-1">
-                    {rc.teamSearchNoMatch}{' '}
-                    <button type="button" className="underline text-ink-fire min-h-[44px]"
-                      onClick={() => { setTeamQuery(''); setTeamFilter('all'); }}>{rc.teamSearchClear}</button>
-                  </p>
+                  <>
+                    <p role="status" className="text-sm text-[--ink-3] px-1">
+                      {rc.teamSearchNoMatch}{' '}
+                      <button type="button" className="underline text-ink-fire min-h-[44px]"
+                        onClick={() => { setTeamQuery(''); setTeamFilter('all'); }}>{rc.teamSearchClear}</button>
+                    </p>
+                    {removedToggle}
+                  </>
                 );
               }
               return (
               <div className="space-y-2">
-                {shownTeams.length !== teams.length && (
-                  <p className="text-[13px] text-[--ink-3] px-1">{rc.teamSearchCount({ shown: shownTeams.length, total: teams.length })}</p>
+                {shownTeams.length !== listedTeams.length && (
+                  <p className="text-[13px] text-[--ink-3] px-1">{rc.teamSearchCount({ shown: shownTeams.length, total: listedTeams.length })}</p>
                 )}
                 {shownTeams.map((team) => (
                   <div key={team.id} className="flex flex-wrap items-center gap-3 p-2 rounded-lg bg-[--surface-2]">
@@ -1488,6 +1674,8 @@ export default function RunConsolePage() {
                         <span dir="auto">{team.displayName}</span>
                       </button>
                       <div className="text-[13px] text-[--ink-3]">
+                        {team.removed === true && <span className="font-semibold text-ink-alert">{rc.teamRemovedBadge}{' · '}</span>}
+                        {team.held === true && team.removed !== true && <span className="font-semibold text-ink-amber">{rc.teamPausedBadge}{' · '}</span>}
                         {team.finished
                           ? rc.teamStatusFinished
                           : !team.launched
@@ -1543,7 +1731,7 @@ export default function RunConsolePage() {
                     {(() => {
                       const at = attentionById.get(team.id) ?? { level: 'ok' as const, reasons: [] };
                       const rowActions = teamRowActions(team, at);
-                      const render = (id: RunActionId, inMenu: boolean) => {
+                      const render = (id: RunActionId) => {
                         const props = {
                           clearTeamOutOfBounds: {
                             label: rc.letBackIn,
@@ -1575,13 +1763,49 @@ export default function RunConsolePage() {
                             run: () => void adjustScore(team),
                             disabled: false,
                           },
-                        }[id as 'clearTeamOutOfBounds' | 'skipTask' | 'skipStage' | 'sendBack' | 'adjustTeamScore'];
+                          startTeam: {
+                            label: rc.startTeam,
+                            aria: rc.startTeamAria({ team: team.displayName }),
+                            run: () => void startOneTeam(team),
+                            disabled: false,
+                          },
+                          holdTeam: {
+                            label: rc.holdTeam,
+                            aria: rc.holdTeamAria({ team: team.displayName }),
+                            run: () => void holdOneTeam(team),
+                            disabled: false,
+                          },
+                          resumeTeam: {
+                            label: rc.resumeTeam,
+                            aria: rc.resumeTeamAria({ team: team.displayName }),
+                            run: () => void resumeOneTeam(team),
+                            disabled: false,
+                          },
+                          removeTeam: {
+                            label: rc.removeTeam,
+                            aria: rc.removeTeamAria({ team: team.displayName }),
+                            run: () => void removeOneTeam(team),
+                            disabled: false,
+                          },
+                          restoreTeam: {
+                            label: rc.restoreTeam,
+                            aria: rc.restoreTeamAria({ team: team.displayName }),
+                            run: () => void restoreOneTeam(team),
+                            disabled: false,
+                          },
+                          routeTeam: {
+                            label: rc.routeTeam,
+                            aria: rc.routeTeamAria({ team: team.displayName }),
+                            run: () => setRouteFor(team),
+                            disabled: false,
+                          },
+                        }[id as 'clearTeamOutOfBounds' | 'skipTask' | 'skipStage' | 'sendBack' | 'adjustTeamScore'
+                          | 'startTeam' | 'holdTeam' | 'resumeTeam' | 'removeTeam' | 'restoreTeam' | 'routeTeam'];
                         return (
                           <Button
                             key={id}
                             variant={runActionVariant(id)}
-                            role={inMenu ? 'menuitem' : undefined}
-                            className={`min-h-0 px-2.5 py-1 text-[13px] rounded-lg ${inMenu ? 'w-full justify-start text-start' : ''}`}
+                            className="min-h-0 px-2.5 py-1 text-[13px] rounded-lg"
                             aria-label={props.aria}
                             disabled={props.disabled}
                             onClick={props.run}
@@ -1597,18 +1821,23 @@ export default function RunConsolePage() {
                               held team, otherwise the per-task skip for a team the
                               attention verdict flags as stuck. Everything else is
                               behind the menu. */}
-                          {rowActions.inline.map((id) => render(id, false))}
-                          <OverflowMenu
-                            label={rc.moreActions}
-                            ariaLabel={rc.moreActionsAria({ team: team.displayName })}
+                          {rowActions.inline.map((id) => render(id))}
+                          {/* run-console-simplify D4: no ⋯ on the row. Every other action lives on
+                              the team page, grouped; this opens it (so does the team's name). */}
+                          <Button
+                            variant="subtle"
+                            className="min-h-0 px-2.5 py-1 text-[13px] rounded-lg"
+                            aria-label={rc.moreActionsAria({ team: team.displayName })}
+                            onClick={() => openTeamPage(team.id)}
                           >
-                            {rowActions.overflow.map((id) => render(id, true))}
-                          </OverflowMenu>
+                            {rc.moreActions}
+                          </Button>
                         </div>
                       );
                     })()}
                   </div>
                 ))}
+                {removedToggle}
               </div>
               );
             })()}
@@ -1694,7 +1923,72 @@ export default function RunConsolePage() {
         );
 
       case 'hotZone': return <HotZonePanel ctx={ctx} hotZone={activeRun.hotZone ?? null} gameAnchors={gameAnchors} />;
-      case 'flashMission': return <FlashMissionCard ctx={ctx} />;
+      case 'inbox': {
+        // run-console-simplify: "עכשיו", everything waiting for the organizer in ONE list, urgent first,
+        // then the oldest (lib/runConsoleInbox.ts). Every row has one action; most open the team page,
+        // where every action for that team now lives.
+        const nameOf = (id: string) => teams.find((tm) => tm.id === id)?.displayName ?? id;
+        const items = buildInbox({
+          nowMs: reviewNow,
+          alerts: alerts.map((a) => ({ id: a.id, teamId: a.teamId, teamName: nameOf(a.teamId), createdAt: a.createdAt,
+            kind: /bounds/i.test(a.type) ? 'outOfBounds' as const : 'sos' as const })),
+          pending: photoQueues.pending,
+          flashPending: recentFlashes.flatMap((f) => Object.entries(flashClaims[f.id] ?? {})
+            .filter(([, c]) => c?.status === 'submitted')
+            .map(([teamId, c]) => ({ flashId: f.id, teamId, teamName: nameOf(teamId), title: f.title, submittedAt: c.submittedAt ?? c.at }))),
+          unreadChats: chatThreads
+            .filter((th) => countUnreadChatMessages(th.messages, chatMarkerFor(th.teamId), ownerUid) > 0)
+            .map((th) => ({ teamId: th.teamId, teamName: nameOf(th.teamId), lastAt: th.messages[th.messages.length - 1]?.at })),
+          stuck: teams.filter((tm) => attentionById.get(tm.id)?.level === 'stuck' && tm.removed !== true)
+            .map((tm) => ({ teamId: tm.id, teamName: tm.displayName, since: tm.updatedAt ?? undefined })),
+          waiting: teams.filter((tm) => tm.launched === false && tm.removed !== true)
+            .map((tm) => ({ teamId: tm.id, teamName: tm.displayName, joinedAt: tm.joinedAt ?? undefined })),
+        });
+        const ib = rc.inbox;
+        const fmtAge = (ms: number) => {
+          const s = Math.floor(ms / 1000);
+          return s < 3600 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : ib.hours({ n: Math.floor(s / 3600) });
+        };
+        return (
+          <PanelShell panel="inbox">
+            {items.length === 0 ? (
+              <p className="text-sm text-[--ink-3]" role="status" data-testid="inbox-empty">{rc.panel.inbox.empty}</p>
+            ) : (
+              <ul className="space-y-2" data-testid="inbox-list">
+                {items.map((it) => {
+                  const row = teams.find((tm) => tm.id === it.teamId);
+                  // Where the row goes is pure (inboxRowAction): an SOS to the alerts panel, not to a
+                  // team page that cannot acknowledge it.
+                  const to = inboxRowAction(it.kind);
+                  const action = 'startTeam' in to
+                    ? (row ? { label: rc.startTeam, run: () => void startOneTeam(row) } : null)
+                    : 'panel' in to
+                      ? { label: ib.open, run: () => goToPanel(to.panel) }
+                    : it.teamId ? { label: ib.open, run: () => openTeamPage(it.teamId!) } : null;
+                  return (
+                    <li key={it.key} className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${
+                      it.severity === 'urgent' ? 'border-rp-alert bg-rp-alert/5' : 'border-[--rp-border] bg-[--surface-2]'}`}>
+                      <span className="text-lg" aria-hidden>{ib.icon[it.kind]}</span>
+                      <span dir="auto" className="flex-1 min-w-[10rem] text-sm text-[--ink-1]">
+                        <span className="font-semibold">{it.teamName ?? ''}</span>{it.teamName ? ' · ' : ''}{ib.kind[it.kind]}
+                        {it.taskId ? <span className="text-[--ink-3]"> · {taskTitles.get(it.taskId) ?? it.taskId}</span> : null}
+                        {it.flashTitle ? <span className="text-[--ink-3]"> · ⚡ {it.flashTitle}</span> : null}
+                      </span>
+                      <span className={`text-[13px] font-mono ${it.severity === 'urgent' ? 'text-ink-alert font-bold' : 'text-[--ink-3]'}`}>{fmtAge(it.ageMs)}</span>
+                      {action && (
+                        <Button className="min-h-0 px-3 py-1.5 text-xs rounded-lg" variant={it.severity === 'urgent' ? 'primary' : 'ghost'} onClick={action.run}>
+                          {action.label}
+                        </Button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </PanelShell>
+        );
+      }
+      case 'flashMission': return <FlashMissionCard ctx={ctx} teams={teams} claimsByFlash={flashClaims} />;
       case 'trackables': return <TrackablesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} />;
       case 'zones': return <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} gameAnchors={gameAnchors} />;
       case 'taskAvailability':
@@ -1889,6 +2183,39 @@ export default function RunConsolePage() {
         />
       )}
 
+      {/* ── Sound and the review-wait alarm (change: review-wait-alarm) ─────────────
+          Above the tabs, so it is on screen in EVERY section. */}
+      {soundState === 'locked' && runLive && (
+        <button type="button" onClick={enableSound} data-testid="enable-sound"
+          className="w-full mb-2 min-h-[44px] rounded-xl border border-rp-amber/50 bg-rp-amber/10 px-4 text-sm font-semibold text-ink-amber text-start">
+          {t.runConsole.enableSound}
+        </button>
+      )}
+      {reviewAlarm.level === 'alarm' && reviewAlarm.oldest && (() => {
+        const [alarmTeamId, alarmTaskId] = reviewAlarm.oldest.key.split(':');
+        const alarmTeam = teams.find((tm) => tm.id === alarmTeamId)?.displayName ?? alarmTeamId;
+        const secs = Math.floor(reviewAlarm.oldest.waitedMs / 1000);
+        return (
+          <div role="alert" data-testid="review-alarm"
+            className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border-2 border-rp-alert bg-rp-alert/10 px-4 py-2 animate-pulse">
+            <span className="text-lg" aria-hidden>⏳</span>
+            <span dir="auto" className="flex-1 min-w-[12rem] text-sm font-bold text-ink-alert">
+              {t.runConsole.reviewAlarm({ team: alarmTeam, task: taskTitles.get(alarmTaskId) ?? alarmTaskId, time: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, n: reviewAlarm.overCount })}
+            </span>
+            <Button className="min-h-0 px-3 py-1.5 text-xs rounded-lg" onClick={() => openSection('moderation')}>
+              {t.runConsole.reviewAlarmOpen}
+            </Button>
+            {reviewAlarm.playSound ? (
+              <Button variant="ghost" className="min-h-0 px-3 py-1.5 text-xs rounded-lg" onClick={() => setAlarmMutedUntil(Date.now() + 5 * 60_000)}>
+                {t.runConsole.reviewAlarmMute}
+              </Button>
+            ) : (
+              <span className="text-xs text-[--ink-3]">{t.runConsole.reviewAlarmMuted}</span>
+            )}
+          </div>
+        );
+      })()}
+
       {/* ── SECTIONS NAVIGATION (change: run-console-tabs-up-front) ───────────────
           Directly under the header and ABOVE the pinned zone. It used to render
           after five pinned panels - 1,665 px down on a phone - and organizers
@@ -1977,6 +2304,33 @@ export default function RunConsolePage() {
             onAdjust={() => void adjustScore(row)}
             onSkip={!finished && row.launched && !row.finished ? () => void skipTeamTask(row) : undefined}
             onSendBack={!finished ? () => setSendBackFor(row) : undefined}
+            lifecycleActions={finished ? [] : (() => {
+              // The same decision as the row (teamRowActions), so the page and the row cannot
+              // offer different lifecycle actions for the same team.
+              const { inline, overflow } = teamRowActions(row, attentionById.get(row.id) ?? null);
+              const handlers: Partial<Record<RunActionId, { label: string; run: () => void }>> = {
+                startTeam: { label: rc.startTeam, run: () => void startOneTeam(row) },
+                holdTeam: { label: rc.holdTeam, run: () => void holdOneTeam(row) },
+                resumeTeam: { label: rc.resumeTeam, run: () => void resumeOneTeam(row) },
+                removeTeam: { label: rc.removeTeam, run: () => void removeOneTeam(row) },
+                routeTeam: { label: rc.routeTeam, run: () => setRouteFor(row) },
+                restoreTeam: { label: rc.restoreTeam, run: () => void restoreOneTeam(row) },
+                // D4: the row's ⋯ is gone, so everything it offered must be here.
+                skipStage: { label: rc.skipStage, run: () => void skipTeamStage(row) },
+                clearTeamOutOfBounds: { label: rc.letBackIn, run: () => void letBackInAction.run(row) },
+              };
+              const acts: { key: string; label: string; onClick: () => void; variant: 'primary' | 'ghost' | 'danger' | 'subtle' }[] = [...inline, ...overflow].flatMap((id) => {
+                const h = handlers[id];
+                return h ? [{ key: id, label: h.label, onClick: h.run, variant: runActionVariant(id) }] : [];
+              });
+              // located-mission-arrival: the team holds a mission it has not opened by arriving.
+              const heldRec = ((teamStages.get(row.id) as { tasks?: { taskId: string; status?: string; arrivedAt?: string }[] }[] | undefined) ?? [])
+                .flatMap((s) => s.tasks ?? []).find((r) => r.status === 'assigned' && !r.arrivedAt);
+              if (heldRec && (run as { arrivalGate?: boolean } | null)?.arrivalGate === true) {
+                acts.unshift({ key: 'letIn', label: rc.letIn, onClick: () => void letTeamIn(row, heldRec.taskId), variant: 'primary' as const });
+              }
+              return acts;
+            })()}
             onReview={(taskId, approved) => void reviewFromTeamPage(row.id, taskId, approved)}
             reviewBusy={(taskId) => teamPageReviewBusy.has(`${row.id}:${taskId}`)}
             chat={{
@@ -1996,6 +2350,20 @@ export default function RunConsolePage() {
         );
       })()}
 
+      {routeFor && (
+        <RoutePicker
+          teamName={routeFor.displayName}
+          stages={buildRoutePicker({
+            stages: gameStagesFull,
+            team: teamStages.has(routeFor.id) ? { stages: teamStages.get(routeFor.id) as never, held: routeFor.held, removed: routeFor.removed } : null,
+            run: run ? { status: run.status, launchedAt: (run as { launchedAt?: string }).launchedAt, taskStatusOverrides: (run as { taskStatusOverrides?: never }).taskStatusOverrides, taskCounts: (run as { taskCounts?: Record<string, number> }).taskCounts } : null,
+            nowMs: Date.now(),
+          })}
+          teamBusy={((teamStages.get(routeFor.id) as { tasks?: { status?: string }[] }[] | undefined) ?? []).some((s) => (s.tasks ?? []).some((tk) => tk.status === 'assigned'))}
+          onRoute={(taskId, accept, when) => void routeOneTeam(routeFor, taskId, accept, when)}
+          onClose={() => setRouteFor(null)}
+        />
+      )}
       {sendBackFor && (
         <SendBackPicker
           teamName={sendBackFor.displayName}
@@ -2083,7 +2451,9 @@ function PanelShell({ panel, badge, actions, tone, children }: {
 }) {
   const { meta, copy } = usePanelCopy(panel);
   return (
-    <Card className={`p-4 ${tone === 'alert' ? 'border-rp-alert/40' : ''}`}>
+    // scroll-mt: a reveal lands the panel BELOW the sticky header (+ the section bar on wide screens,
+    // 144px measured at 1280), not under it with its title hidden.
+    <Card dataPanel={panel} className={`p-4 scroll-mt-24 lg:scroll-mt-40 ${tone === 'alert' ? 'border-rp-alert/40' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className={`text-sm font-medium flex flex-wrap items-center gap-1.5 ${tone === 'alert' ? 'text-ink-alert' : 'text-[--ink-1]'}`}>
@@ -2315,34 +2685,150 @@ function AnnouncementCard({ ctx, teams }: { ctx: { ownerUid: string; gameId: str
 // so it sits in the "game systems" group. Its lifetime used to be a bare
 // `ttlSeconds: 600` at the call site, knowable only by reading the source: the
 // payload and the copy now read the same exported constant.
-function FlashMissionCard({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+type RecentFlash = FlashMissionDoc & { id: string; title?: string };
+
+/** The run's 8 most recent flash missions, live. Nothing is read until all three ids are known. */
+function useRecentFlashMissions(ownerUid: string | undefined, gameId: string | undefined, runId: string | undefined): RecentFlash[] {
+  const [live, setLive] = useState<RecentFlash[]>([]);
+  useEffect(() => {
+    if (!ownerUid || !gameId || !runId) { setLive([]); return undefined; }
+    const q = query(collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/flashMissions`), orderBy('createdAt', 'desc'), limit(8));
+    return onSnapshot(q, (snap) => setLive(snap.docs.map((d) => ({ id: d.id, ...(d.data() as FlashMissionDoc & { title?: string }) }))), () => setLive([]));
+  }, [ownerUid, gameId, runId]);
+  return live;
+}
+
+function FlashMissionCard({ ctx, teams, claimsByFlash }: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  teams: RunTeamRow[];
+  /** Design D6: who took which flash mission, read off the team documents. */
+  claimsByFlash: Record<string, Record<string, FlashClaim>>;
+}) {
   const t = useT();
+  const fm = t.runConsole.flashV2;
   const [flash, setFlash] = useState('');
   const [pts, setPts] = useState(50);
+  const [doneBy, setDoneBy] = useState<FlashDoneBy>('photo');
+  const [claimMode, setClaimMode] = useState<FlashClaimMode>('first');
+  const [needsApproval, setNeedsApproval] = useState(true);
   const [busyFlash, setBusyFlash] = useState(false);
+  // flash-missions-v2: the organizer sees every recent flash mission, who took it and where it stands.
+  const live = useRecentFlashMissions(ctx.ownerUid, ctx.gameId, ctx.runId);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(id);
+  }, []);
 
   async function sendFlash() {
     setBusyFlash(true);
     try {
-      await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: FLASH_MISSION_TTL_SECONDS });
+      await pushFlashMission({
+        ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: FLASH_MISSION_TTL_SECONDS,
+        ...(doneBy === 'announce' ? {} : { doneBy, claimMode, requiresApproval: needsApproval }),
+      });
       setFlash('');
       toast.success(t.runConsole.flashSent);
     }
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyFlash(false); }
   }
+  const nameOf = (id: string) => teams.find((tm) => tm.id === id)?.displayName ?? id;
+  async function act(run: () => Promise<unknown>, done: string) {
+    try { await run(); toast.success(done); } catch { await dialog.alert(fm.actionFailed); }
+  }
 
+  const DONE_BY: FlashDoneBy[] = ['announce', 'button', 'photo', 'video'];
   return (
     <PanelShell panel="flashMission" actions={<RichTooltip concept="flashMission" />}>
       <div className="space-y-2">
         <p className="text-[13px] text-[--ink-3]">{t.runConsole.flashMissionTtlNote({ minutes: FLASH_MISSION_TTL_MINUTES })}</p>
         <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder={t.runConsole.flashMissionPlaceholder} dir="auto" />
+        <label className="block text-[13px] text-[--ink-2]">
+          {fm.doneByLabel}
+          <select className="mt-1 w-full min-h-[44px] rounded-lg border border-[--rp-border] bg-[--surface-1] px-2 text-sm"
+            value={doneBy} onChange={(e) => setDoneBy(e.target.value as FlashDoneBy)}>
+            {DONE_BY.map((d) => <option key={d} value={d}>{fm.doneBy[d]}</option>)}
+          </select>
+        </label>
+        {doneBy !== 'announce' && (
+          <div className="flex flex-wrap gap-3 text-[13px] text-[--ink-2]">
+            <label className="inline-flex items-center gap-1.5 min-h-[44px]">
+              <input type="radio" name="flash-claim-mode" checked={claimMode === 'first'} onChange={() => setClaimMode('first')} /> {fm.claimFirst}
+            </label>
+            <label className="inline-flex items-center gap-1.5 min-h-[44px]">
+              <input type="radio" name="flash-claim-mode" checked={claimMode === 'many'} onChange={() => setClaimMode('many')} /> {fm.claimMany}
+            </label>
+            <label className="inline-flex items-center gap-1.5 min-h-[44px]">
+              <input type="checkbox" checked={needsApproval} onChange={(e) => setNeedsApproval(e.target.checked)} /> {fm.needsApproval}
+            </label>
+          </div>
+        )}
         <div className="flex gap-2">
-          <Input type="number" min="0" value={pts} onChange={(e) => setPts(Math.max(0, parseInt(e.target.value) || 0))} />
+          <Input type="number" min="0" value={pts} onChange={(e) => setPts(Math.max(0, parseInt(e.target.value) || 0))} aria-label={fm.points} />
           <Button variant={runActionVariant('pushFlashMission')} disabled={!flash || busyFlash} onClick={sendFlash}>
             {t.runConsole.push}
           </Button>
         </div>
+
+        {live.length > 0 && (
+          <ul className="mt-3 space-y-2" data-testid="flash-live">
+            {live.map((f) => {
+              const state = flashMissionState(f, now);
+              const left = f.expiresAt ? Math.max(0, Math.round((Date.parse(f.expiresAt) - now) / 60000)) : 0;
+              const claims = Object.entries(claimsByFlash[f.id] ?? {});
+              const active = state === 'open' || state === 'taken';
+              return (
+                <li key={f.id} className="rounded-xl border border-[--rp-border] p-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span dir="auto" className="flex-1 min-w-[10rem] text-sm font-semibold text-[--ink-1]">⚡ {f.title}</span>
+                    <span className="text-[13px] text-[--ink-3]">{fm.state[state]}{active ? ` · ${fm.minutesLeft({ n: left })}` : ''}</span>
+                    {active && (
+                      <Button variant="ghost" className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
+                        onClick={() => void act(() => deactivateFlashMission({ ...ctx, flashId: f.id }), fm.ended)}>
+                        {fm.endNow}
+                      </Button>
+                    )}
+                  </div>
+                  {claims.length === 0 ? (
+                    <p className="text-[13px] text-[--ink-3]">{f.claimMode ? fm.noTakers : fm.announceOnly}</p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {claims.map(([teamId, c]) => (
+                        <li key={teamId} className="flex flex-wrap items-center gap-2 text-[13px]">
+                          <span dir="auto" className="font-medium text-[--ink-1]">{nameOf(teamId)}</span>
+                          <span className="text-[--ink-3]">{fm.claimStatus[c.status]}</span>
+                          {c.mediaUrl && <a href={c.mediaUrl} target="_blank" rel="noreferrer" className="underline text-ink-fire">{fm.openMedia}</a>}
+                          {c.status === 'submitted' && (
+                            <>
+                              <Button className="min-h-0 px-3 py-1 text-xs rounded-lg"
+                                onClick={() => void act(() => reviewFlashMission({ ...ctx, flashId: f.id, teamId, action: 'approve' }), fm.approved)}>{fm.approve}</Button>
+                              <Button variant="subtle" className="min-h-0 px-3 py-1 text-xs rounded-lg"
+                                onClick={() => void act(() => reviewFlashMission({ ...ctx, flashId: f.id, teamId, action: 'reject' }), fm.rejected)}>{fm.reject}</Button>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {/* Award by hand: for an announcement ("first to the gate…"), or to any team. */}
+                  {(f.bonusPoints ?? 0) > 0 && (
+                    <label className="flex flex-wrap items-center gap-2 text-[13px] text-[--ink-2]">
+                      {fm.awardTo({ points: f.bonusPoints ?? 0 })}
+                      <select className="min-h-[44px] rounded-lg border border-[--rp-border] bg-[--surface-1] px-2 text-sm" value=""
+                        onChange={(e) => { const teamId = e.target.value; if (teamId) void act(() => reviewFlashMission({ ...ctx, flashId: f.id, teamId, action: 'award' }), fm.awarded({ team: nameOf(teamId) })); }}>
+                        <option value="">{fm.chooseTeam}</option>
+                        {teams.filter((tm) => tm.removed !== true && claimsByFlash[f.id]?.[tm.id]?.status !== 'approved').map((tm) => (
+                          <option key={tm.id} value={tm.id}>{tm.displayName}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </PanelShell>
   );
@@ -2984,7 +3470,10 @@ function PhotoReviewConsole({
                     role="listitem"
                     tabIndex={focused || (focusKey === null && item === items[0]) ? 0 : -1}
                     onFocus={() => setFocusKey(key)}
-                    className={`rounded-lg bg-[--surface-2] p-2 outline-none ${focused ? 'ring-2 ring-rp-amber' : ''}`}
+                    className={`rounded-lg bg-[--surface-2] p-2 outline-none ${focused ? 'ring-2 ring-rp-amber' : ''} ${
+                      /* review-wait-alarm: the card itself ages, amber from 20 s, red from 60 s. */
+                      ({ fresh: '', amber: 'border-2 border-rp-amber', red: 'border-2 border-rp-alert' } as const)[
+                        reviewRowTone(Date.now() - Date.parse(row.submittedAt || ''))]}`}
                   >
                     <Media row={row} />
                     <div dir="auto" className="text-xs text-[--ink-2] truncate mt-2">{row.displayName}</div>
@@ -3250,10 +3739,12 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
                     {rc.mediaGalleryTaskLine({ name: taskLabel(row.taskId) })}
                   </div>
                   <div className="flex items-center justify-between mt-1">
-                    <span className={`text-[13px] ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
+                    <span className={`text-[13px] ${STATUS_TONE[row.status]}`}>
+                      {approvedAutomatically(row) ? rc.mediaGalleryStatusApprovedAuto : STATUS_LABEL[row.status]}
+                    </span>
                     {isRenderableMedia(row.photoUrl) && (
                       <a
-                        href={row.photoUrl}
+                        href={mediaDownloadUrl(row.photoUrl)}
                         download={`${row.teamId}-${row.taskId}`}
                         rel="noreferrer"
                         className="text-[13px] font-semibold text-ink-fire hover:underline"

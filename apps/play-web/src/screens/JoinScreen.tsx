@@ -724,6 +724,9 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       >
         {busy ? t.join.joining : t.join.joinCta}
       </Button>
+      {/* flash-missions-v2 (field report 2026-09-27): surprises arrive with a sound. iOS silences web
+          audio on the ringer switch, so the hint names both the volume and silent mode. */}
+      <p className="mt-3 text-center text-[13px] text-zinc-500" data-testid="volume-hint">🔊 {t.join.volumeHint}</p>
       {!isSolo && (
         <button
           type="button"

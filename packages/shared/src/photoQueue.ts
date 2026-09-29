@@ -150,6 +150,17 @@ export function isPending(row: SubmissionRow): boolean {
   return row.status === 'pending';
 }
 
+/**
+ * Approved by the mission's own autoApprove rule rather than by a person. The server's
+ * auto path (`submitStationPhoto`) writes `approved` with NO `reviewedAt`; every human
+ * decision (`reviewStationSubmission`) stamps one. The console says which it was, because
+ * a clip approved "without me" beside a sibling that waited for him (it was outside the
+ * mission's length range) reads as a bug (field report 2026-09-27). Total.
+ */
+export function approvedAutomatically(row: Pick<SubmissionRow, 'status' | 'reviewedAt'> | null | undefined): boolean {
+  return !!row && row.status === 'approved' && !row.reviewedAt;
+}
+
 // ── Flattening ───────────────────────────────────────────────────────────────
 
 function toRow(team: SubmissionTeamDoc, taskId: string, sub: RawSubmission): SubmissionRow {

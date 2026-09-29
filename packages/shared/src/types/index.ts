@@ -980,6 +980,10 @@ export interface Run {
   // submitStationPhoto alongside the per task `smart.autoApprove`, which still wins
   // on its own.
   autoApproveAllMedia?: boolean;
+  // Every located mission of this run opens only on arrival (change: located-mission-arrival).
+  // Stamped at launch, so a run already live when this shipped is never re-sealed under a team
+  // mid-mission. Read through `arrivalGateApplies`.
+  arrivalGate?: boolean;
   // Retention tombstones, written by the maintenance sweeps (server only). Both
   // make their sweep idempotent — a stamped run is never re-scanned.
   //   piiPrunedAt       raw participant PII destroyed (90 days)
@@ -1209,6 +1213,14 @@ export interface RunTaskRecord {
   // SIZE a client chooses. Destroyed after ANSWER_LOG_RETENTION_DAYS (30) by the
   // maintenance sweep — scores, verdicts and timings above survive that strip.
   answerLog?: import('./../answerLog').AnswerLogEntry[];
+  // An operator sent the team to this mission (change: route-team-to-mission), waiving EXACTLY
+  // these blockers for this team and this assignment. Completion honours the same list (a waived
+  // prerequisite is not re-checked at submission; a visited mission in another stage may be
+  // completed while that stage is not active). Organizer-facing; never allow-listed to players.
+  routedByOperator?: { at: string; by: string; waived: import('./../routeBlockers').WaivableKind[] };
+  // An operator latched this arrival where GPS could not prove it (change: located-mission-arrival).
+  // Organizer-facing only; never allow-listed to the participant.
+  arrivalByOperator?: { at: string; by: string };
 }
 
 export interface RunStageRecord {
@@ -1277,7 +1289,7 @@ export interface RunTeam {
   // same place every other per-team operational latch (outOfBounds above) already lives,
   // and therefore immune to template edits, duplication and export.
   //
-  // While `held` is true every progress-advancing callable refuses (assertTeamNotHeld);
+  // While `held` is true every progress-advancing callable refuses (assertTeamMayAdvance);
   // reads are deliberately NOT gated, so the participant app can explain the pause
   // instead of showing an opaque failure.
   held?: boolean;
@@ -1290,6 +1302,24 @@ export interface RunTeam {
   // team-level analogue of RunTaskRecord.excludedMs. Absent on every pre-change doc
   // and read as 0.
   heldMs?: number;
+  // Removed from the game by the organizers (change: team-lifecycle-controls). A STATE, never a
+  // delete: refused at every progress door (teamAdvanceRefusal), left out of every standing
+  // (rankableTeams), SOS still allowed, fully reversible by setTeamRemoved({ removed: false }).
+  // `removedBy` (a uid) is organizer-facing only and never allow-listed to the participant.
+  removed?: boolean;
+  removedAt?: string;
+  removedBy?: string;
+  removedReason?: string;
+  // "Send there after this mission" (change: route-team-to-mission): consumed by
+  // assignNextInActiveStage before normal routing, with the waiver the operator confirmed. A queue
+  // of one: a newer route replaces it.
+  queuedRoute?: { taskId: string; waived: import('./../routeBlockers').WaivableKind[]; at: string; by: string };
+  // flash-missions-v2: the team took a flash mission; `taskId` is the mission it was on (still
+  // assigned, its clock shifted forward on return by resumedStartedAt). Allow-listed to the phone.
+  flashSuspension?: { flashId: string; taskId: string | null; at: string };
+  // flash-missions-v2 D6: this team's claim on each flash mission (claimed / submitted / approved /
+  // rejected / released), kept HERE rather than on the flash document every phone listens to.
+  flashClaims?: Record<string, import('./../flashMission').FlashClaim>;
   /** Cooldown marker so an active override can't mint a breach alert every ping. */
   lastBreachAlertAt?: string;
   // Discovery POIs (change: surprise-trivia-waypoints): poiId → lifecycle state.

@@ -35,7 +35,7 @@
   "isMetaQuest": false,
   "fullScopeUrl": "https://player.rush-point.com/",
   "minSdkVersion": 21,
-  "orientation": "portrait",
+  "orientation": "any",
   "fingerprints": [],
   "additionalTrustedOrigins": [],
   "retainedBundles": [],

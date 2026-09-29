@@ -613,3 +613,20 @@ describe('sanitizeTaskForParticipant — hidden location: sealed until arrival',
     expect(json.includes('go inside')).toBe(false);
   });
 });
+
+// Overnight 2026-09-29, found by PLAYING a gated run: a mission the Builder shows as "anywhere"
+// (`triggerMode: 'locationless'`) but whose document still says `locationless: false` and keeps an
+// old pin reached the phone as a LOCATED mission: "3.1 km from here", a navigate button and a map
+// pin, for a mission that needs no presence and that the arrival gate (rightly) never seals. The
+// phone reads `locationless`, the Builder and the server read the trigger mode; the payload now
+// carries the trigger mode's answer.
+describe('sanitizeTaskForParticipant — an "anywhere" mission reads as anywhere on the phone', () => {
+  test('triggerMode locationless ⇒ locationless: true, whatever the stale flag says', () => {
+    const out = sanitizeTaskForParticipant(baseTask({ type: 'photo', triggerMode: 'locationless', locationless: false })) as Record<string, unknown>;
+    expect(out.locationless).toBe(true);
+  });
+  test('a located mission is untouched', () => {
+    const out = sanitizeTaskForParticipant(baseTask()) as Record<string, unknown>;
+    expect(out.locationless).toBeUndefined();
+  });
+});

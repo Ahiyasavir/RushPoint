@@ -62,6 +62,62 @@ for (const v of [null, undefined, 0, {}, [], Symbol('x')]) {
 }
 eq('nothing throws', threw, false);
 
+// ── Every call site, not just the helper (field report 2026-09-27) ──────────────
+// The helper above was correct and tested, and the organizer STILL got a video opened in
+// a tab: the media gallery's per-item "הורדה" link pointed `<a download>` at the raw
+// api.rush-point.com url, so only "download all" had been fixed. A helper nobody is
+// made to call fixes nothing. So: every `<a … download=…>` in both apps must take its
+// href from mediaDownloadUrl, or be declared here as a LOCAL url (blob:/data:), where
+// the attribute does work. A declared entry that no longer exists fails too.
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+const LOCAL_HREF_OK: { file: string; href: string; why: string }[] = [
+  { file: 'apps/play-web/src/components/TaskRunner.tsx', href: 'preview',
+    why: 'the player\'s own photo, an object url of the captured file' },
+  { file: 'apps/play-web/src/components/TaskRunner.tsx', href: 'previewUrl',
+    why: 'the player\'s own clip, an object url of the recorded blob' },
+];
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) walk(p, out);
+    else if (p.endsWith('.tsx')) out.push(p);
+  }
+  return out;
+}
+
+console.log('\n— every <a download> in the apps goes through mediaDownloadUrl —');
+const files = [...walk('apps/creator-web/src'), ...walk('apps/play-web/src')];
+let anchors = 0;
+const usedAllow = new Set<number>();
+for (const abs of files) {
+  const file = abs.replace(/\\/g, '/');
+  const src = readFileSync(abs, 'utf8');
+  // A JSX `download=` attribute (not the word in a comment or a `?download=1` string).
+  const re = /\sdownload=\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    const open = src.lastIndexOf('<a', m.index);
+    if (open < 0) continue;
+    anchors++;
+    const element = src.slice(open, m.index + 400);
+    const line = src.slice(0, m.index).split('\n').length;
+    const href = /href=\{([^}]*)\}/.exec(element)?.[1]?.trim() ?? '(none)';
+    if (href.startsWith('mediaDownloadUrl(')) { eq(`${file}:${line} uses the helper`, true, true); continue; }
+    const allowIdx = LOCAL_HREF_OK.findIndex((a) => a.file === file && a.href === href);
+    if (allowIdx >= 0) { usedAllow.add(allowIdx); eq(`${file}:${line} is a declared local url (${href})`, true, true); continue; }
+    eq(`${file}:${line} href={${href}} must be mediaDownloadUrl(...) — a cross-origin <a download> just opens the file`, href, 'mediaDownloadUrl(...)');
+  }
+}
+LOCAL_HREF_OK.forEach((a, i) => {
+  if (!usedAllow.has(i)) eq(`stale allowlist entry ${a.file} href={${a.href}}`, 'present', 'gone');
+});
+// Print the denominator: "no bad anchors" must never be compatible with "found none".
+console.log(`  (${anchors} <a download> element(s) examined in ${files.length} files)`);
+eq('the sweep actually found anchors to examine', anchors > 0, true);
+
 console.log('');
 if (failures > 0) {
   console.error(`✗ media-download-url: ${failures} assertion(s) failed\n`);

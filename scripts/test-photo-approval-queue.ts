@@ -16,6 +16,7 @@ import {
   normalizeStatus,
   submissionKey,
   DEFAULT_REVIEWED_LIMIT,
+  approvedAutomatically,
   type RawSubmission,
   type SubmissionStatus,
   type SubmissionTeamDoc,
@@ -264,6 +265,24 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
   ok(legacy.senderName === '', 'a submission without submittedBy has an empty sender name');
   const [junk] = flattenSubmissions([team('t1', { a: sub({ submittedBy: { uid: 5, name: { x: 1 } } as never }) })]);
   ok(junk.senderName === '', 'a malformed submittedBy never reaches the screen');
+}
+
+// ── Approved automatically vs by a person (field report 2026-09-27) ─────────
+// The organizer saw one team's clip "approved without me approving" and another's on the
+// SAME mission waiting for him, and read it as a bug. Both were right: autoApprove fires
+// only when the clip length is inside the mission's range, otherwise it queues for a
+// human. The console must SAY which one happened. Auto-approval writes status approved
+// and NO reviewedAt; every human decision stamps reviewedAt.
+{
+  const [auto] = flattenSubmissions([team('t1', { a: sub({ status: 'approved' }) })]);
+  ok(approvedAutomatically(auto), 'approved with no reviewedAt ⇒ approved automatically');
+  const [byHand] = flattenSubmissions([team('t1', { a: sub({ status: 'approved', reviewedAt: '2026-09-27T08:43:00.000Z' }) })]);
+  ok(!approvedAutomatically(byHand), 'approved with a reviewedAt ⇒ approved by a person');
+  const [rejected] = flattenSubmissions([team('t1', { a: sub({ status: 'rejected' }) })]);
+  ok(!approvedAutomatically(rejected), 'a rejection is never "approved automatically"');
+  const [pending] = flattenSubmissions([team('t1', { a: sub() })]);
+  ok(!approvedAutomatically(pending), 'a pending submission is never "approved automatically"');
+  ok(!approvedAutomatically(null as never) && !approvedAutomatically({} as never), 'junk in ⇒ false, never a throw');
 }
 
 console.log(`\nphoto approval queue: ${passed} passed, ${failed} failed`);

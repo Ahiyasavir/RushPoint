@@ -61,8 +61,14 @@ describe('searchTeams: sort', () => {
     const rank = new Map([['t4', 1], ['t2', 2]]);
     expect(ids(searchTeams(rows, { sort: 'rank', rankOf: (id) => rank.get(id) ?? null }))).toEqual(['t4', 't2', 't1', 't3']);
   });
-  it('by name, locale aware', () => {
-    expect(ids(searchTeams(rows, { sort: 'name' }))[0]).toBe('t4'); // "Bears" first among Latin names
+  // The collation locale is PASSED, never the runtime default: with `undefined` the order
+  // was the machine's, so this test passed in an en-US worktree and failed on a he-IL laptop,
+  // and in the product two organizers saw the same list in different orders.
+  it('by name, in the given UI language (English: Latin first)', () => {
+    expect(ids(searchTeams(rows, { sort: 'name', locale: 'en' }))[0]).toBe('t4'); // "Bears"
+  });
+  it('by name, in the given UI language (Hebrew: Hebrew first)', () => {
+    expect(ids(searchTeams(rows, { sort: 'name', locale: 'he' }))[0]).toBe('t1'); // "האריות"
   });
   it('by last activity, most recent first, unknown last', () => {
     const withUnknown = [...rows, { id: 't5', displayName: 'X', updatedAt: null } as TeamSearchRow];

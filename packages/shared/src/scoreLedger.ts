@@ -10,7 +10,8 @@
 // Bounded (latest SCORE_LEDGER_MAX) and total. Rewritten as a whole array, never a dotted update
 // into an array element (CLAUDE.md: that coerces the array to a map).
 
-export type ScoreLedgerKind = 'adjust' | 'hint' | 'skipAward' | 'reversal';
+// 'flash' (change: flash-missions-v2): a flash-mission award, positive, or its reversal, negative.
+export type ScoreLedgerKind = 'adjust' | 'hint' | 'skipAward' | 'reversal' | 'flash';
 
 export interface ScoreLedgerEntry {
   at: string;
@@ -20,10 +21,12 @@ export interface ScoreLedgerEntry {
   /** Operator display name, never a uid. */
   by?: string;
   taskId?: string;
+  /** The flash mission an award came from (kind 'flash'). */
+  flashId?: string;
 }
 
 export const SCORE_LEDGER_MAX = 100;
-const KINDS = new Set<ScoreLedgerKind>(['adjust', 'hint', 'skipAward', 'reversal']);
+const KINDS = new Set<ScoreLedgerKind>(['adjust', 'hint', 'skipAward', 'reversal', 'flash']);
 
 function clean(e: unknown): ScoreLedgerEntry | null {
   if (!e || typeof e !== 'object') return null;
@@ -38,6 +41,7 @@ function clean(e: unknown): ScoreLedgerEntry | null {
   if (typeof x.reason === 'string' && x.reason.trim()) out.reason = x.reason.trim().slice(0, 200);
   if (typeof x.by === 'string' && x.by.trim()) out.by = x.by.trim().slice(0, 60);
   if (typeof x.taskId === 'string' && x.taskId) out.taskId = x.taskId;
+  if (typeof x.flashId === 'string' && x.flashId) out.flashId = x.flashId.slice(0, 128);
   return out;
 }
 
