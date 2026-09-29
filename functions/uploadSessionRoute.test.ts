@@ -55,6 +55,19 @@ function patch(app: express.Express, id: string, offset: number, body: Buffer, f
 beforeEach(async () => { uploadDir = await fs.promises.mkdtemp(fsPath.join(os.tmpdir(), 'rp-sess-')); });
 afterEach(async () => { await fs.promises.rm(uploadDir, { recursive: true, force: true }); });
 
+// Wait on an OBSERVABLE server state instead of a fixed sleep: a sleep is a guess about how fast
+// the machine is, and under the parallel `npm run verify` load it guessed wrong (the flake these
+// replaced). The deadline is generous because it only bounds a genuine failure.
+async function until<T>(probe: () => Promise<T>, done: (v: T) => boolean, what: string, ms = 15_000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await probe();
+    if (done(v)) return v;
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 const bytes = (n: number, seed = 1) => Buffer.from(Array.from({ length: n }, (_, i) => (i * 7 + seed) % 256));
 
 describe('create: the SAME guards as PUT /upload', () => {
@@ -135,25 +148,34 @@ describe('append, resume, finish', () => {
     try {
       const src = bytes(200_000, 3);
       const { body: { id } } = await create(server as never);
-      // Send 80 KB, then drop the connection before the body is complete.
-      await new Promise<void>((resolve) => {
-        const req = http.request({ port, method: 'PATCH', path: `/upload/sessions/${id}`,
-          headers: { authorization: 'Bearer good', 'upload-offset': '0', 'content-length': String(src.length) } });
-        req.on('error', () => resolve());
-        req.write(src.subarray(0, 80_000), () => setTimeout(() => { req.destroy(); setTimeout(resolve, 150); }, 100));
-      });
-      const h = await request(server).head(`/upload/sessions/${id}`).set(auth());
-      const offset = Number(h.headers['upload-offset']);
+      // Send 80 KB, wait until the server has STORED some of it, then drop the connection before
+      // the body is complete (destroying earlier can reset the socket with nothing delivered).
+      const req = http.request({ port, method: 'PATCH', path: `/upload/sessions/${id}`,
+        headers: { authorization: 'Bearer good', 'upload-offset': '0', 'content-length': String(src.length) } });
+      req.on('error', () => {});
+      req.write(src.subarray(0, 80_000));
+      await until(() => request(server).head(`/upload/sessions/${id}`).set(auth()),
+        (h) => Number(h.headers['upload-offset']) > 0, 'the first bytes to reach the disk');
+      req.destroy();
+      // The server notices the abort on its own schedule. Until it has, the session is still
+      // locked and a resume answers 409 ABORTED; so re-read the offset and retry until the lock
+      // is released, then the resume must complete.
+      let offset = 0;
+      const done = await until(async () => {
+        const h = await request(server).head(`/upload/sessions/${id}`).set(auth());
+        offset = Number(h.headers['upload-offset']);
+        if (offset === 0) return { status: 0 };
+        return request(server).patch(`/upload/sessions/${id}`).set(auth())
+          .set('Upload-Offset', String(offset)).set('Upload-Length', String(src.length)).send(src.subarray(offset));
+      }, (r) => r.status !== 0 && r.status !== 409, 'the aborted append to release its lock');
       expect(offset).toBeGreaterThan(0);
       expect(offset).toBeLessThanOrEqual(80_000);
-      const done = await request(server).patch(`/upload/sessions/${id}`).set(auth())
-        .set('Upload-Offset', String(offset)).set('Upload-Length', String(src.length)).send(src.subarray(offset));
       expect(done.status).toBe(200);
       expect(Buffer.compare(fs.readFileSync(fsPath.join(uploadDir, videoPath)), src)).toBe(0);
     } finally {
       server.close();
     }
-  });
+  }, 30_000);
 
   it('the cap is CUMULATIVE across patches', async () => {
     const app = buildApp({ maxBytesFor: () => 1000 });
@@ -175,7 +197,9 @@ describe('append, resume, finish', () => {
       held.on('error', () => {});
       const heldDone = new Promise<number>((r) => held.on('response', (res) => { res.resume(); r(res.statusCode ?? 0); }));
       held.write(bytes(1000));
-      await new Promise((r) => setTimeout(r, 100));
+      // Bytes on disk prove the first append holds the lock (it is still waiting for its body).
+      await until(() => request(server).head(`/upload/sessions/${id}`).set(auth()),
+        (h) => h.headers['upload-offset'] === '1000', 'the first append to take the lock');
       const second = await request(server).patch(`/upload/sessions/${id}`).set(auth()).set('Upload-Offset', '0').send(bytes(10));
       expect(second.status).toBe(409);
       held.end(bytes(1000));
@@ -183,7 +207,7 @@ describe('append, resume, finish', () => {
     } finally {
       server.close();
     }
-  });
+  }, 30_000);
 
   it('a PATCH holds an upload slot, so the stage-1 concurrency brake applies', async () => {
     const slots = createUploadSlots({ maxConcurrent: 0, maxPerUid: 2 });

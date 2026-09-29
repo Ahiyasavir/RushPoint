@@ -20,7 +20,9 @@ export async function auditRun({ creator, ownerUid, gameId, runId, states, audit
   // Score conservation per team.
   const broken = states.filter((st) => {
     const tasks = (st?.team?.stages ?? []).flatMap((s) => s.tasks ?? []);
-    return tasks.reduce((a, t) => a + (t.earnedScore ?? 0), 0) !== st?.team?.score;
+    // Awards outside a mission (a flash mission, a staff adjustment) move `score` and are booked
+    // against `bonusPenalty` (score += d, bonusPenalty -= d), so that is the conserved quantity.
+    return tasks.reduce((a, t) => a + (t.earnedScore ?? 0), 0) - (st?.team?.bonusPenalty ?? 0) !== st?.team?.score;
   });
   audit('score conservation holds for every team', broken.length === 0,
     broken.map((st) => st?.team?.displayName).join(',') || `${teamCount} teams checked`);

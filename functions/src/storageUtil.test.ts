@@ -22,7 +22,10 @@ beforeAll(async () => {
   // UPLOAD_DIR is read when the module loads, as on the VPS.
   process.env.UPLOAD_DIR = root;
   ({ deleteRunUploads } = await import('./storageUtil'));
-});
+  // This hook is a COLD import of firebase-functions + firebase-admin, not a wait on anything that
+  // can race. Under the parallel verify load it measured past vitest's 10 s hook default, which
+  // failed the file with "hook timed out" while every assertion was fine. The bound is for a hang.
+}, 60_000);
 
 afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
