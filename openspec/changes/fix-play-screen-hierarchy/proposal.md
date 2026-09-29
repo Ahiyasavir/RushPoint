@@ -1,3 +1,7 @@
+> **Superseded (2026-09-28) by `play-screen-no-scroll`.** The secondary panels already moved into
+> `MoreDrawer`, and the requirement became "no page scroll at all" (map + bottom sheet). Do not
+> implement this change; it is kept for history.
+
 # Proposal: fix-play-screen-hierarchy
 
 ## Why

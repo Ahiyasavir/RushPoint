@@ -44,6 +44,9 @@ Index last verified **2026-09-08**.
 |---|---|
 | [consistency-audit-2026-07-09.md](consistency-audit-2026-07-09.md) | 4-lane cross-surface sweep of score/status/time/counts. |
 | [playtest-2026-07-11-takeaways.md](playtest-2026-07-11-takeaways.md) | Family playtest findings; the P0 items became OpenSpec changes. |
+| [field-report-2026-09-27.md](field-report-2026-09-27.md) | The live "המירוץ לציון" run of 2026-09-27: what had to be done by hand on the server, each complaint traced to a cause, research on comparable products (Goosechase, Loquiz, Actionbound, kitchen displays, dispatch), and the planned changes, incl. the console simplification. |
+| [HANDOFF-2026-09-28.md](HANDOFF-2026-09-28.md) | Handoff for the session that continues the field report 2026-09-27 work: hard rules, gate state, what was built, what is left in order, traps. |
+| [OVERNIGHT-2026-09-29.md](OVERNIGHT-2026-09-29.md) | The overnight pass on the same uncommitted work: flaky tests made deterministic, bugs found by reading and by playing on a 375px phone (each with its test), the flash-mission quota redesign (claims on the team), load-sim coverage for flash races and routing, and measured gate results. |
 | [field-report-2026-09-25.md](field-report-2026-09-25.md) | Ahiya's field report (runs 2026-09-10 to 09-22), each item traced to a root cause (several reproduced in the app or confirmed in production), and the 12 OpenSpec changes it produced. |
 | [night-sim/](night-sim) | Two overnight simulation write-ups: full lifecycle and browser fidelity. |
 | [wave-a/](wave-a) … [wave-l/](wave-l) | The 2026 build waves, one folder per wave, one file per work item. Superseded by `openspec/changes/` once the OpenSpec flow started; kept for the reasoning. |

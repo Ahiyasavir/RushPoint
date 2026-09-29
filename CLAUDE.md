@@ -1214,6 +1214,61 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   code, was the variable. So: the offset lane is for a gate that must not DISTURB a live playtest;
   it is not a way to get a trustworthy `simulate` result while the machine is busy. Stop the other
   stack before believing a load-sim violation, and always run the 1:1:1 count before chasing one.
+- **A guard that reads an OPTIONAL input is only as strong as the callers that send it.** The server
+  has refused to be proved by a coarse GPS fix since arrival-needs-a-usable-fix (`evaluateArrivalFix`),
+  and it deliberately reads an ABSENT `accuracyMeters` as "precise", so an app that had not updated
+  kept working. But play-web's own `reportArrival` calls (the background probe while walking and the
+  "we are here" button) and the geofence auto check-in never sent it, so the guard never ran for any
+  of them; once located-mission-arrival sealed EVERY located mission, a ±300 m fix could open any
+  mission a street early. Nothing was loud: the server tests passed their accuracy explicitly, and the
+  `completeTask` wrapper's type did not even allow the field (only a spread smuggled it through on
+  the check-in button). `scripts/test-arrival-sends-accuracy.ts` now fails if a position-carrying call
+  from the phone omits it. **Adding an optional safety input ⇒ make its first-party callers send it
+  in the same change, and gate that.**
+- **A pause must stop EVERY clock that counts against the paused thing.** A staff hold excluded its
+  interval from the race clock (`heldMs`) but not from the current mission's own countdown
+  (`timeLimitMinutes`, counted from `RunTaskRecord.startedAt`), and the time-limit sweep did not skip a
+  held team, so a team held past its limit came back to a mission closed as "time is up" with 0
+  points. Resuming now moves `startedAt` forward by the hold (`resumedStartedAt`, the same arithmetic a
+  flash-mission return uses) and the sweep skips held teams. Any new "pause" (hold, flash suspension,
+  a future one) must list the clocks it stops.
+- **An override that unseals must also satisfy what it unsealed.** `markTeamArrived` ("let them in")
+  latched arrival so an indoor team could open a located mission, but a CHECK-IN mission's completion
+  re-demanded the GPS proof the let-in exists to replace. `completeTask` now accepts an
+  operator-latched arrival (`arrivalByOperator`) as proximity; a GPS-latched one still proves itself.
+- **Never keep per-team state in a map on a document every phone listens to.** Firestore bills a
+  listener one read per changed document, so a `claims` map on each flash-mission document (which every
+  phone streams) turned every claim, sending and review into a read on EVERY phone: ≈40,000 reads for
+  one "many" flash at 100 teams, against a 50,000/day Spark ceiling, and every claim in the run
+  contended on one document. Claims now live on the team (`RunTeam.flashClaims`, design D6 of
+  flash-missions-v2); the broadcast document keeps only what every phone needs (`takenBy` in first
+  mode). The console and staff app read claims off team documents they already stream
+  (`flashClaimsByFlash`). Before adding a field to a broadcast document, multiply its write rate by the
+  number of listeners.
+- **A sleep in a test is a guess about how fast the machine is.** `uploadSessionRoute.test.ts` waited
+  100/150 ms for the server to notice an abort, and failed only under the parallel `npm run verify`
+  load, so the gauntlet was red in one pass for weeks while every phase passed alone. It now polls an
+  observable state (the HEAD offset, the lock being released) with a generous deadline. Prefer
+  waiting on a fact over raising a timeout.
+- **Moving data onto the team document means moving it through the participant PROJECTION too.**
+  `getMyTeamState` does not send the team document: it sends `sanitizeTeamForParticipant`
+  (`packages/shared/src/testMode.ts`), an ALLOWLIST. When flash claims moved from the flash document
+  to `RunTeam.flashClaims` (for quota), the server, console, staff app, e2e and load sim all passed,
+  because every one of them reads the stored document; only the phone reads the projection, so the
+  phone that had just sent its flash mission read "another team already took it". Found only by
+  playing it. A new `RunTeam` field the phone needs ⇒ add it to that projection in the same change
+  (and decide what a sealed test-mode score may show of it).
+- **A clock that ticks for one reason starves every other reader of it.** The Run Console's
+  `reviewNow` ticked only while a MISSION photo waited, and the "now" list reused it, so a flash
+  mission waiting for approval never crossed its 20 s urgency line and every age in the list froze,
+  while each piece looked right on a freshly loaded page. The cadence is now one pure decision
+  (`consoleClockMs`). When a new reader borrows a timer, check what starts and stops it.
+- **A floating panel's size must come from the box it lives in, never from the window.** The play
+  screen's mission sheet computed its snap heights from `window.innerHeight` minus an ASSUMED 56px
+  header; the real container starts at y=118 on a 375x667 phone, so "full" rose over the game header
+  and covered the SOS button. Invisible on the desktop preview and at "half", which is where every
+  check had looked. `boxSnapHeights` measures the container (ResizeObserver). Anything drawn above
+  the header's safety controls (SOS, the menu) is a safety defect, not a layout nit.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```
