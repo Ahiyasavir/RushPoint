@@ -1,8 +1,8 @@
 {
   "_comment": "Single settings file for every reel. Anything marked TODO is a number or fact Ahiya has not given yet; qa.py --final refuses to pass while one is still used by a reel.",
   "paths": {
-    "work_root_windows": "C:\\Users\\ahiya\\Desktop\\RushPoint-reels-work",
-    "out_root_windows": "C:\\Users\\ahiya\\Desktop\\RushPoint-reels-out",
+    "work_root_windows": "%USERPROFILE%\\Desktop\\RushPoint-reels-work",
+    "out_root_windows": "%USERPROFILE%\\Desktop\\RushPoint-reels-out",
     "work_root_fallback": "_work",
     "out_root_fallback": "_out",
     "browser_windows": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",

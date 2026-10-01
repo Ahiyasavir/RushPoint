@@ -9,7 +9,7 @@
 ```powershell
 cd C:\Users\ahiya\Desktop\RushPoint\docs\marketing\tools\reels-edit
 pip install pillow numpy python-bidi fonttools
-python setup_workspace.py          # יוצר RushPoint-reels-work + RushPoint-reels-out על ה Desktop
+python setup_workspace.py          # יוצר RushPoint-reels-work + RushPoint-reels-out על ה Desktop של המשתמש הנוכחי (%USERPROFILE%)
 python test_captions.py            # בודק שהעברית בכתוביות יוצאת בסדר הנכון
 python variants.py reel2-stairs    # A/B/C + קאבר + QA, איכות תצוגה
 python variants.py reel2-stairs --final   # מאסטר; מעביר ל out רק מה שעבר QA מלא

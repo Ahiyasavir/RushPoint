@@ -39,7 +39,7 @@ def _pick_root(env: str, win_key: str, fallback_key: str) -> Path:
     if os.environ.get(env):
         return Path(os.environ[env])
     if os.name == "nt":
-        return Path(CFG["paths"][win_key])
+        return Path(os.path.expandvars(CFG["paths"][win_key]))   # %USERPROFILE% → C:\Users\<you>
     return ROOT / CFG["paths"][fallback_key]
 
 
