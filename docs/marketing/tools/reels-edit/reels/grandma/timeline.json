@@ -1,0 +1,260 @@
+{
+  "id": "grandma",
+  "title": "סבתא · המרוץ לציון",
+  "source": "no spec yet: general interview/story template, update after the call",
+  "rules": [
+    "hook shows the RESULT first",
+    "no seated shot",
+    "minimal speech, captions carry it",
+    "share trigger is DM, never 'comment'",
+    "loop: last line flows into the first ('…כי')",
+    "one 'תפיסה גאונית' beat",
+    "phone only",
+    "no school, no family in frame (grandma video approved), no market, no Idan, no events that did not happen",
+    "no invented numbers: every unknown is TODO",
+    "grandma in frame is approved for this video only"
+  ],
+  "shots": [
+    {
+      "id": "G01",
+      "start": 0.0,
+      "end": 2.5,
+      "clip": "clips/G01.mp4",
+      "in": 0,
+      "effect": "none",
+      "static": false,
+      "note": "RESULT FIRST: the finish / the moment it worked"
+    },
+    {
+      "id": "G02",
+      "start": 2.5,
+      "end": 5.0,
+      "clip": "clips/G02.mp4",
+      "in": 0,
+      "effect": "punch_in",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G03",
+      "start": 5.0,
+      "end": 7.6,
+      "clip": "clips/G03.mp4",
+      "in": 0,
+      "effect": "none",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G04",
+      "start": 7.6,
+      "end": 10.0,
+      "clip": "clips/G04.mp4",
+      "in": 0,
+      "effect": "punch_in",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G05",
+      "start": 10.0,
+      "end": 12.8,
+      "clip": "clips/G05.mp4",
+      "in": 0,
+      "effect": "none",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G06",
+      "start": 12.8,
+      "end": 15.3,
+      "clip": "clips/G06.mp4",
+      "in": 0,
+      "effect": "punch_in",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G07",
+      "start": 15.3,
+      "end": 17.9,
+      "clip": "clips/G07.mp4",
+      "in": 0,
+      "effect": "none",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G08",
+      "start": 17.9,
+      "end": 20.3,
+      "clip": "clips/G08.mp4",
+      "in": 0,
+      "effect": "punch_in",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G09",
+      "start": 20.3,
+      "end": 23.0,
+      "clip": "clips/G09.mp4",
+      "in": 0,
+      "effect": "none",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G10",
+      "start": 23.0,
+      "end": 25.5,
+      "clip": "clips/G10.mp4",
+      "in": 0,
+      "effect": "punch_in",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    },
+    {
+      "id": "G11",
+      "start": 25.5,
+      "end": 28.0,
+      "clip": "clips/G11.mp4",
+      "in": 0,
+      "effect": "none",
+      "static": false,
+      "note": "never a seated static shot: walking, hands, phone, map, start line"
+    }
+  ],
+  "lower_third": {
+    "start": 2.6,
+    "end": 5.4,
+    "name": "TODO מי היא",
+    "why": "TODO למה זה מעניין"
+  },
+  "captions": [
+    {
+      "start": 0.1,
+      "end": 2.5,
+      "text": "TODO התוצאה קודם",
+      "style": "big",
+      "y": 1350
+    },
+    {
+      "start": 5.5,
+      "end": 9.0,
+      "text": "TODO ציטוט שלה",
+      "style": "sub"
+    },
+    {
+      "start": 12.0,
+      "end": 15.0,
+      "text": "TODO תפיסה גאונית",
+      "style": "sub"
+    },
+    {
+      "start": 25.5,
+      "end": 28.0,
+      "text": "TODO שורת לופ שנגמרת ב כי",
+      "style": "sub"
+    }
+  ],
+  "overlays": [],
+  "sfx": [
+    {
+      "at": 2.5,
+      "file": "sfx/whoosh.wav",
+      "gain": -10
+    }
+  ],
+  "voice": {
+    "file": "voice/grandma_vo.wav",
+    "at": 0.0
+  },
+  "keep_clip_audio": 1.0,
+  "blur_note": "add 'blur':[{x,y,w,h,start,end}] (times inside the shot) on any shot with a stranger's face, a plate or a name",
+  "default_opening": "A",
+  "openings": {
+    "A": {
+      "cut": 2.5,
+      "why": "the result",
+      "shots": [
+        {
+          "id": "GopenA",
+          "start": 0,
+          "end": 2.5,
+          "clip": "clips/G01.mp4",
+          "in": 0,
+          "effect": "flash_in"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.5,
+          "text": "TODO הוק A",
+          "style": "big",
+          "y": 1350
+        }
+      ]
+    },
+    "B": {
+      "cut": 2.5,
+      "why": "her line, no context",
+      "shots": [
+        {
+          "id": "GopenB",
+          "start": 0,
+          "end": 2.5,
+          "clip": "clips/G_hookB.mp4",
+          "in": 0,
+          "effect": "punch_in"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.5,
+          "text": "TODO הוק B",
+          "style": "big",
+          "y": 1350
+        }
+      ]
+    },
+    "C": {
+      "cut": 2.5,
+      "why": "the number / the map",
+      "shots": [
+        {
+          "id": "GopenC",
+          "start": 0,
+          "end": 2.5,
+          "clip": "clips/G_hookC.mp4",
+          "in": 0,
+          "effect": "shake"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.5,
+          "text": "TODO הוק C",
+          "style": "big",
+          "y": 1350
+        }
+      ]
+    }
+  },
+  "cover": {
+    "headline": {
+      "A": "TODO",
+      "B": "TODO",
+      "C": "TODO"
+    },
+    "frame_at": 1.0
+  },
+  "todo": [
+    "everything: filmed 14:45–16:15 today, rebuild after the conversation",
+    "her name/description for the lower third (with her consent)"
+  ]
+}

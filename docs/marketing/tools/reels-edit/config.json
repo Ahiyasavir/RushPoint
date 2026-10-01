@@ -1,0 +1,66 @@
+{
+  "_comment": "Single settings file for every reel. Anything marked TODO is a number or fact Ahiya has not given yet; qa.py --final refuses to pass while one is still used by a reel.",
+  "paths": {
+    "work_root_windows": "%USERPROFILE%\\Desktop\\RushPoint-reels-work",
+    "out_root_windows": "%USERPROFILE%\\Desktop\\RushPoint-reels-out",
+    "work_root_fallback": "_work",
+    "out_root_fallback": "_out",
+    "browser_windows": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "browser_fallbacks": [
+      "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+      "/usr/bin/chromium",
+      "/usr/bin/google-chrome"
+    ],
+    "logo": "../../../../apps/play-web/public/icon.svg",
+    "_logo_comment": "Relative to this folder. Point it at C:\\\\Users\\\\ahiya\\\\Desktop\\\\RushPoint-logo\\\\<file> to use the master logo."
+  },
+  "video": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "min_seconds": 25,
+    "max_seconds": 30,
+    "max_shot_seconds": 3.0,
+    "crf_master": 16,
+    "crf_delivery": 21,
+    "audio_lufs": -14,
+    "audio_tp": -1.0
+  },
+  "safe_zone": {
+    "top": 200,
+    "bottom": 250
+  },
+  "colors": {
+    "fire": "#FF5722",
+    "amber": "#FFB300",
+    "plasma": "#06B6D4",
+    "green": "#10B981",
+    "dark": "#1C1917",
+    "bone": "#F5EFE6"
+  },
+  "fonts": {
+    "_comment": "DECISION PENDING (see README). The brief asks for Space Grotesk / Inter / JetBrains Mono only, but Space Grotesk and Inter contain NO Hebrew glyphs, so Hebrew would fall back to Arial. The app's real design system (packages/brand/tokens.mjs) is Rubik (display) + Assistant (body) + JetBrains Mono (codes). Defaults below follow the app. To switch, change these names; every renderer reads them from here.",
+    "display": "Rubik",
+    "display_weight": 800,
+    "body": "Assistant",
+    "body_weight": 700,
+    "mono": "JetBrains Mono",
+    "mono_weight": 700,
+    "latin_display": "Space Grotesk",
+    "latin_display_weight": 700
+  },
+  "captions": {
+    "active_color": "#FFB300",
+    "idle_color": "#FFFFFF",
+    "outline_color": "#1C1917",
+    "sub_size": 66,
+    "big_size": 118,
+    "sub_center_y": 1180,
+    "big_center_y": 760,
+    "max_words_per_group": 4
+  },
+  "money": {
+    "usd_ils_rate": "TODO",
+    "_rate_comment": "ILS per 1 USD. Update on edit day (Bank of Israel representative rate). The receipt's dollar line renders TODO until this is a number."
+  }
+}
