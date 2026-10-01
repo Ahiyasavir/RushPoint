@@ -11,7 +11,7 @@
       "/usr/bin/chromium",
       "/usr/bin/google-chrome"
     ],
-    "logo": "../../../apps/play-web/public/icon.svg",
+    "logo": "../../../../apps/play-web/public/icon.svg",
     "_logo_comment": "Relative to this folder. Point it at C:\\\\Users\\\\ahiya\\\\Desktop\\\\RushPoint-logo\\\\<file> to use the master logo."
   },
   "video": {

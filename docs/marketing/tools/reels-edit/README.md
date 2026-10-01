@@ -7,7 +7,7 @@
 ## הרצה אצלך (Windows, PowerShell)
 
 ```powershell
-cd C:\Users\ahiya\Desktop\RushPoint\docs\marketing\reels-edit
+cd C:\Users\ahiya\Desktop\RushPoint\docs\marketing\tools\reels-edit
 pip install pillow numpy python-bidi fonttools
 python setup_workspace.py          # יוצר RushPoint-reels-work + RushPoint-reels-out על ה Desktop
 python test_captions.py            # בודק שהעברית בכתוביות יוצאת בסדר הנכון
@@ -48,7 +48,7 @@ RushPoint-reels-out\<reel>\   ← רק מה שעבר `--final`
    כל נחיתה = צליל נחיתה + "דינג" + שורה חדשה בקבלה (מודגשת בענבר). שורה 11 נכנסת רק
    כש `approved: true`. עד אז הקפיצה קורית והקבלה לא גדלה.
 3. כתוביות עם תזמון מדויק: במקום `text` אפשר `words: [["מילה", 1.2, 1.5], …]` (למשל
-   מ faster-whisper עם `ivrit-ai/whisper-large-v3-turbo-ct2`, ראה `../playbooks/video-editing-setup.md`).
+   מ faster-whisper עם `ivrit-ai/whisper-large-v3-turbo-ct2`, ראה `../../playbooks/video-editing-setup.md`).
 4. טשטוש: `"blur": [{"x":..,"y":..,"w":..,"h":..,"start":0,"end":1.2}]` על השוט (זמנים בתוך השוט).
 5. כל מה שעדיין TODO מופיע בכתום עם מסגרת מקווקוות, ו `qa.py --final` נכשל עליו.
 

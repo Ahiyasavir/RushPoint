@@ -21,7 +21,7 @@ from .html_render import page, render
 C = CFG["colors"]
 F = CFG["fonts"]
 SAFE_T, SAFE_B = CFG["safe_zone"]["top"], CFG["safe_zone"]["bottom"]
-LOGO = (ROOT / CFG["paths"].get("logo", "../../../apps/play-web/public/icon.svg")).resolve()
+LOGO = (ROOT / CFG["paths"].get("logo", "../../../../apps/play-web/public/icon.svg")).resolve()
 
 BASE_CSS = f"""
 :root{{--fire:{C['fire']};--amber:{C['amber']};--plasma:{C['plasma']};--green:{C['green']};
