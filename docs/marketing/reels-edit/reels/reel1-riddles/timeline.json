@@ -1,0 +1,226 @@
+{
+  "id": "reel1-riddles",
+  "title": "ריל 1 · חידות (שלד)",
+  "source": "skeleton only, NOT for today. Percentages come from getRunAnalytics after a real run",
+  "rules": [
+    "hook shows the RESULT first",
+    "no seated shot",
+    "minimal speech, captions carry it",
+    "share trigger is DM, never 'comment'",
+    "loop: last line flows into the first ('…כי')",
+    "one 'תפיסה גאונית' beat",
+    "phone only",
+    "no school, no family in frame (grandma video approved), no market, no Idan, no events that did not happen",
+    "no invented numbers: every unknown is TODO"
+  ],
+  "shots": [
+    {
+      "id": "1open",
+      "start": 0,
+      "end": 2.5,
+      "clip": "clips/1A_take1.mp4",
+      "in": 0,
+      "effect": "flash_in"
+    },
+    {
+      "id": "R1q",
+      "start": 2.5,
+      "end": 5.1,
+      "clip": "clips/1A_take1.mp4",
+      "in": 0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "R1a",
+      "start": 5.1,
+      "end": 7.5,
+      "clip": "clips/1A_take2.mp4",
+      "in": 0,
+      "effect": "none"
+    },
+    {
+      "id": "R2q",
+      "start": 7.5,
+      "end": 10.1,
+      "clip": "clips/1B_take1.mp4",
+      "in": 0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "R2a",
+      "start": 10.1,
+      "end": 12.5,
+      "clip": "clips/1B_take2.mp4",
+      "in": 0,
+      "effect": "none"
+    },
+    {
+      "id": "R3q",
+      "start": 12.5,
+      "end": 15.1,
+      "clip": "clips/1C_take1.mp4",
+      "in": 0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "R3a",
+      "start": 15.1,
+      "end": 17.5,
+      "clip": "clips/1C_take2.mp4",
+      "in": 0,
+      "effect": "none"
+    },
+    {
+      "id": "R4q",
+      "start": 17.5,
+      "end": 20.1,
+      "clip": "clips/1A_take1.mp4",
+      "in": 0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "R4a",
+      "start": 20.1,
+      "end": 22.5,
+      "clip": "clips/1A_take2.mp4",
+      "in": 0,
+      "effect": "none"
+    },
+    {
+      "id": "R5q",
+      "start": 22.5,
+      "end": 25.1,
+      "clip": "clips/1B_take1.mp4",
+      "in": 0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "R5a",
+      "start": 25.1,
+      "end": 27.5,
+      "clip": "clips/1B_take2.mp4",
+      "in": 0,
+      "effect": "none"
+    }
+  ],
+  "riddles": [
+    {
+      "q": "TODO נוסח החידה (365)",
+      "a": "TODO",
+      "pct_wrong": "TODO",
+      "q_start": 2.5,
+      "a_start": 5.1,
+      "end": 7.5
+    },
+    {
+      "q": "מה כבד יותר, קילו ברזל או קילו נוצות?",
+      "a": "אותו משקל",
+      "pct_wrong": "TODO",
+      "q_start": 7.5,
+      "a_start": 10.1,
+      "end": 12.5
+    },
+    {
+      "q": "TODO נוסח החידה (דני)",
+      "a": "TODO",
+      "pct_wrong": "TODO",
+      "q_start": 12.5,
+      "a_start": 15.1,
+      "end": 17.5
+    },
+    {
+      "q": "1, 1, 2, 3, 5, 8 ומה הבא?",
+      "a": "13",
+      "pct_wrong": "TODO",
+      "q_start": 17.5,
+      "a_start": 20.1,
+      "end": 22.5
+    },
+    {
+      "q": "8÷2(2+2) = ?",
+      "a": "16",
+      "pct_wrong": "TODO",
+      "q_start": 22.5,
+      "a_start": 25.1,
+      "end": 27.5
+    }
+  ],
+  "captions": [
+    {
+      "start": 0.1,
+      "end": 2.5,
+      "text": "TODO הוק",
+      "style": "big",
+      "y": 1400
+    }
+  ],
+  "overlays": [],
+  "sfx": [
+    {
+      "at": 5.1,
+      "file": "sfx/ding.wav"
+    },
+    {
+      "at": 10.1,
+      "file": "sfx/ding.wav"
+    },
+    {
+      "at": 15.1,
+      "file": "sfx/ding.wav"
+    },
+    {
+      "at": 20.1,
+      "file": "sfx/ding.wav"
+    },
+    {
+      "at": 25.1,
+      "file": "sfx/ding.wav"
+    },
+    {
+      "at": 2.5,
+      "file": "sfx/tick.wav",
+      "gain": -8
+    },
+    {
+      "at": 7.5,
+      "file": "sfx/tick.wav",
+      "gain": -8
+    },
+    {
+      "at": 12.5,
+      "file": "sfx/tick.wav",
+      "gain": -8
+    },
+    {
+      "at": 17.5,
+      "file": "sfx/tick.wav",
+      "gain": -8
+    },
+    {
+      "at": 22.5,
+      "file": "sfx/tick.wav",
+      "gain": -8
+    }
+  ],
+  "voice": {
+    "file": "voice/reel1_vo.wav",
+    "at": 0.0
+  },
+  "keep_clip_audio": 0.0,
+  "default_opening": "A",
+  "openings": {},
+  "cover": {
+    "headline": {
+      "A": "TODO",
+      "B": "TODO",
+      "C": "TODO"
+    },
+    "frame_at": 5.0
+  },
+  "todo": [
+    "riddle 1 (365) and 3 (Dani) wording",
+    "pct_wrong ×5 from getRunAnalytics",
+    "1A/1B/1C clips",
+    "openings A/B/C"
+  ]
+}

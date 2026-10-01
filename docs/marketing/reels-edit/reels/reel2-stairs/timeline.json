@@ -1,0 +1,451 @@
+{
+  "id": "reel2-stairs",
+  "title": "ריל 2 · המדרגות",
+  "source": "RushPoint-reels-EDIT-SPEC.md § ריל 2 (TODO: reconcile every time and line with the spec)",
+  "rules": [
+    "hook shows the RESULT first",
+    "no seated shot",
+    "minimal speech, captions carry it",
+    "share trigger is DM, never 'comment'",
+    "loop: last line flows into the first ('…כי')",
+    "one 'תפיסה גאונית' beat",
+    "phone only",
+    "no school, no family in frame (grandma video approved), no market, no Idan, no events that did not happen",
+    "no invented numbers: every unknown is TODO"
+  ],
+  "shots": [
+    {
+      "id": "2A-open",
+      "start": 0,
+      "end": 2.0,
+      "clip": "clips/2A_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "flash_in",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump01",
+      "start": 2.0,
+      "end": 3.75,
+      "clip": "clips/2A_take1.mp4",
+      "in": 2.0,
+      "speed": 1.0,
+      "effect": "none",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump02",
+      "start": 3.75,
+      "end": 5.5,
+      "clip": "clips/2A_take1.mp4",
+      "in": 3.75,
+      "speed": 1.0,
+      "effect": "punch_in",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump03",
+      "start": 5.5,
+      "end": 7.25,
+      "clip": "clips/2A_take1.mp4",
+      "in": 5.5,
+      "speed": 1.0,
+      "effect": "none",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump04",
+      "start": 7.25,
+      "end": 9.0,
+      "clip": "clips/2A_take1.mp4",
+      "in": 7.25,
+      "speed": 1.0,
+      "effect": "punch_in",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump05",
+      "start": 9.0,
+      "end": 10.75,
+      "clip": "clips/2A_take1.mp4",
+      "in": 9.0,
+      "speed": 1.0,
+      "effect": "none",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump06",
+      "start": 10.75,
+      "end": 12.5,
+      "clip": "clips/2A_take1.mp4",
+      "in": 10.75,
+      "speed": 1.0,
+      "effect": "punch_in",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump07",
+      "start": 12.5,
+      "end": 14.25,
+      "clip": "clips/2A_take1.mp4",
+      "in": 12.5,
+      "speed": 1.0,
+      "effect": "none",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump08",
+      "start": 14.25,
+      "end": 16.0,
+      "clip": "clips/2A_take1.mp4",
+      "in": 14.25,
+      "speed": 1.0,
+      "effect": "punch_in",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump09",
+      "start": 16.0,
+      "end": 17.75,
+      "clip": "clips/2A_take1.mp4",
+      "in": 16.0,
+      "speed": 1.0,
+      "effect": "none",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump10",
+      "start": 17.75,
+      "end": 19.5,
+      "clip": "clips/2A_take1.mp4",
+      "in": 17.75,
+      "speed": 1.0,
+      "effect": "punch_in",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump11",
+      "start": 19.5,
+      "end": 21.25,
+      "clip": "clips/2A_take1.mp4",
+      "in": 19.5,
+      "speed": 1.0,
+      "effect": "none",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-jump12",
+      "start": 21.25,
+      "end": 23.0,
+      "clip": "clips/2A_take1.mp4",
+      "in": 21.25,
+      "speed": 1.0,
+      "effect": "punch_in",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-total",
+      "start": 23.0,
+      "end": 25.0,
+      "clip": "clips/2A_take1.mp4",
+      "in": 23.0,
+      "speed": 1.0,
+      "effect": "slow_push",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    },
+    {
+      "id": "2A-final",
+      "start": 25.0,
+      "end": 27.0,
+      "clip": "clips/2A_take1.mp4",
+      "in": 25.0,
+      "speed": 1.0,
+      "effect": "slow_push",
+      "note": "continuous take; set 'in' so each landing lands on its receipt line"
+    }
+  ],
+  "receipt": {
+    "landings": [
+      2.0,
+      3.75,
+      5.5,
+      7.25,
+      9.0,
+      10.75,
+      12.5,
+      14.25,
+      16.0,
+      17.75,
+      19.5,
+      21.25
+    ],
+    "lines": [
+      {
+        "jump": 1,
+        "label": "TODO שורה 1",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 2,
+        "label": "TODO שורה 2",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 3,
+        "label": "TODO שורה 3",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 4,
+        "label": "TODO שורה 4",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 5,
+        "label": "TODO שורה 5",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 6,
+        "label": "TODO שורה 6",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 7,
+        "label": "TODO שורה 7",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 8,
+        "label": "TODO שורה 8",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 9,
+        "label": "TODO שורה 9",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 10,
+        "label": "TODO שורה 10",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      },
+      {
+        "jump": 11,
+        "label": "TODO שורה 11",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": false,
+        "_note": "Line 11 enters ONLY after Ahiya confirms it is true. Until then: no receipt line, no ding."
+      },
+      {
+        "jump": 12,
+        "label": "TODO שורה 12",
+        "ils": "TODO",
+        "hours": "TODO",
+        "approved": true
+      }
+    ],
+    "currency": "₪",
+    "hours_label": "שעות",
+    "final_line": "ההוצאה הבאה: ___",
+    "total_at": 23.0,
+    "final_at": 25.0,
+    "box": {
+      "x": 110,
+      "y": 230,
+      "w": 860,
+      "h": 860
+    }
+  },
+  "captions": [
+    {
+      "start": 2.2,
+      "end": 5.0,
+      "text": "TODO כתובית גוף 1 (מהמפרט)",
+      "style": "sub",
+      "y": 1480
+    },
+    {
+      "start": 9.0,
+      "end": 12.0,
+      "text": "TODO תפיסה גאונית",
+      "style": "sub",
+      "y": 1480
+    },
+    {
+      "start": 22.5,
+      "end": 25.0,
+      "text": "TODO כתובית סיכום",
+      "style": "sub",
+      "y": 1480
+    },
+    {
+      "start": 25.0,
+      "end": 27.0,
+      "text": "TODO שורת לופ שנגמרת ב כי",
+      "style": "sub",
+      "y": 1480
+    }
+  ],
+  "overlays": [],
+  "sfx": [
+    {
+      "at": 25.0,
+      "file": "sfx/whoosh.wav",
+      "gain": -6
+    }
+  ],
+  "voice": {
+    "file": "voice/reel2_vo.wav",
+    "at": 0.0,
+    "gain": 0
+  },
+  "keep_clip_audio": 0.35,
+  "loop": {
+    "note": "last frame = Ahiya back at the top of the stairs = first frame of the opening"
+  },
+  "default_opening": "A",
+  "openings": {
+    "A": {
+      "cut": 2.0,
+      "why": "result first: the full receipt, then rewind to jump 1",
+      "shots": [
+        {
+          "id": "2A-openA",
+          "start": 0,
+          "end": 2.0,
+          "clip": "clips/2A_take1.mp4",
+          "in": "TODO last landing",
+          "effect": "flash_in"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.0,
+          "text": "TODO הוק A",
+          "style": "big",
+          "y": 1400
+        }
+      ],
+      "overlays": [
+        {
+          "png": "@receipt_full",
+          "start": 0,
+          "end": 2.0,
+          "kind": "text"
+        }
+      ],
+      "sfx": [
+        {
+          "at": 0.0,
+          "file": "sfx/ding.wav"
+        }
+      ]
+    },
+    "B": {
+      "cut": 2.0,
+      "why": "mid action: airborne on jump 1, number on screen",
+      "shots": [
+        {
+          "id": "2A-openB",
+          "start": 0,
+          "end": 2.0,
+          "clip": "clips/2A_take2.mp4",
+          "in": 0,
+          "effect": "shake"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.0,
+          "text": "TODO הוק B",
+          "style": "big",
+          "y": 1400
+        }
+      ],
+      "sfx": [
+        {
+          "at": 1.8,
+          "file": "sfx/land.wav"
+        }
+      ]
+    },
+    "C": {
+      "cut": 2.0,
+      "why": "the blank: 'ההוצאה הבאה: ___' first, then the stairs",
+      "shots": [
+        {
+          "id": "2A-openC",
+          "start": 0,
+          "end": 2.0,
+          "clip": "clips/2A_take3.mp4",
+          "in": 0,
+          "effect": "punch_in"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.0,
+          "text": "TODO הוק C",
+          "style": "big",
+          "y": 1400
+        }
+      ],
+      "overlays": [
+        {
+          "png": "@receipt_blank",
+          "start": 0,
+          "end": 2.0,
+          "kind": "text"
+        }
+      ],
+      "sfx": [
+        {
+          "at": 0.0,
+          "file": "sfx/pop.wav"
+        }
+      ]
+    }
+  },
+  "cover": {
+    "headline": {
+      "A": "TODO כותרת קאבר A",
+      "B": "TODO כותרת קאבר B",
+      "C": "TODO כותרת קאבר C"
+    },
+    "frame_at": 21.5
+  },
+  "todo": [
+    "landing times from the real 2A take",
+    "12 receipt lines: label, ₪, hours (from the spec)",
+    "approve line 11",
+    "usd_ils_rate in config.json on edit day",
+    "hook captions A/B/C",
+    "cover headlines"
+  ]
+}

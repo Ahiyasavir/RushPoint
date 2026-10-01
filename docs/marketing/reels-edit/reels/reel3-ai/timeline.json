@@ -1,0 +1,406 @@
+{
+  "id": "reel3-ai",
+  "title": "ריל 3 · AI",
+  "source": "RushPoint-reels-EDIT-SPEC.md § ריל 3 + RushPoint-3-reels-v3.pdf (3A–3I)",
+  "rules": [
+    "hook shows the RESULT first",
+    "no seated shot",
+    "minimal speech, captions carry it",
+    "share trigger is DM, never 'comment'",
+    "loop: last line flows into the first ('…כי')",
+    "one 'תפיסה גאונית' beat",
+    "phone only",
+    "no school, no family in frame (grandma video approved), no market, no Idan, no events that did not happen",
+    "no invented numbers: every unknown is TODO"
+  ],
+  "shots": [
+    {
+      "id": "3open",
+      "start": 0,
+      "end": 2.5,
+      "clip": "clips/3A_take1.mp4",
+      "in": 0,
+      "effect": "flash_in"
+    },
+    {
+      "id": "3A",
+      "start": 2.5,
+      "end": 4.9,
+      "clip": "clips/3A_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "3B",
+      "start": 4.9,
+      "end": 7.1,
+      "clip": "clips/3B_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "shake"
+    },
+    {
+      "id": "3C",
+      "start": 7.1,
+      "end": 9.1,
+      "clip": "clips/3C_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "3D",
+      "start": 9.1,
+      "end": 10.9,
+      "clip": "clips/3D_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "3E",
+      "start": 10.9,
+      "end": 12.6,
+      "clip": "clips/3E_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "shake"
+    },
+    {
+      "id": "3F",
+      "start": 12.6,
+      "end": 14.2,
+      "clip": "clips/3F_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "3G",
+      "start": 14.2,
+      "end": 15.7,
+      "clip": "clips/3G_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "3H",
+      "start": 15.7,
+      "end": 17.1,
+      "clip": "clips/3H_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "shake"
+    },
+    {
+      "id": "3I",
+      "start": 17.1,
+      "end": 18.4,
+      "clip": "clips/3I_take1.mp4",
+      "in": 0,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "collage",
+      "start": 18.4,
+      "end": 21.0,
+      "graphic": "@collage",
+      "effect": "slow_push"
+    },
+    {
+      "id": "P10",
+      "start": 21.0,
+      "end": 23.6,
+      "clip": "clips/3I_take2.mp4",
+      "in": 0,
+      "effect": "punch_in"
+    },
+    {
+      "id": "punch",
+      "start": 23.6,
+      "end": 26.4,
+      "graphic": "@punchline",
+      "effect": "none"
+    }
+  ],
+  "proofs": [
+    {
+      "id": "P1",
+      "start": 2.5,
+      "end": 4.9,
+      "shot": "3A",
+      "image": "proofs/P1.png",
+      "label": "TODO יכולת 1"
+    },
+    {
+      "id": "P2",
+      "start": 4.9,
+      "end": 7.1,
+      "shot": "3B",
+      "image": "proofs/P2.png",
+      "label": "TODO יכולת 2"
+    },
+    {
+      "id": "P3",
+      "start": 7.1,
+      "end": 9.1,
+      "shot": "3C",
+      "image": "proofs/P3.png",
+      "label": "TODO יכולת 3"
+    },
+    {
+      "id": "P4",
+      "start": 9.1,
+      "end": 10.9,
+      "shot": "3D",
+      "image": "proofs/P4.png",
+      "label": "TODO יכולת 4"
+    },
+    {
+      "id": "P5",
+      "start": 10.9,
+      "end": 12.6,
+      "shot": "3E",
+      "image": "proofs/P5.png",
+      "label": "TODO יכולת 5"
+    },
+    {
+      "id": "P6",
+      "start": 12.6,
+      "end": 14.2,
+      "shot": "3F",
+      "image": "proofs/P6.png",
+      "label": "TODO יכולת 6"
+    },
+    {
+      "id": "P7",
+      "start": 14.2,
+      "end": 15.7,
+      "shot": "3G",
+      "image": "proofs/P7.png",
+      "label": "TODO יכולת 7"
+    },
+    {
+      "id": "P8",
+      "start": 15.7,
+      "end": 17.1,
+      "shot": "3H",
+      "image": "proofs/P8.png",
+      "label": "TODO יכולת 8"
+    },
+    {
+      "id": "P9",
+      "start": 17.1,
+      "end": 18.4,
+      "shot": "3I",
+      "image": "proofs/P9.png",
+      "label": "TODO יכולת 9"
+    },
+    {
+      "id": "P10",
+      "start": 21.0,
+      "end": 23.6,
+      "shot": "P10",
+      "image": "proofs/P10.png",
+      "label": "TODO יכולת 10"
+    }
+  ],
+  "collage": {
+    "from": [
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6",
+      "P7",
+      "P8",
+      "P9"
+    ]
+  },
+  "punchline": {
+    "text": "הוא כתב וערך את זה",
+    "sub": "TODO שורת משנה או ריק"
+  },
+  "captions": [
+    {
+      "start": 2.6,
+      "end": 6.0,
+      "text": "TODO כתובית תפיסה גאונית",
+      "style": "sub",
+      "y": 1520
+    },
+    {
+      "start": 18.4,
+      "end": 21.0,
+      "text": "TODO כתובית קולאז׳",
+      "style": "sub",
+      "y": 1520
+    },
+    {
+      "start": 23.7,
+      "end": 26.4,
+      "text": "TODO שורת לופ שנגמרת ב כי",
+      "style": "sub",
+      "y": 1520
+    }
+  ],
+  "overlays": [],
+  "sfx": [
+    {
+      "at": 2.5,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 4.9,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 7.1,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 9.1,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 10.9,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 12.6,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 14.2,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 15.7,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 17.1,
+      "file": "sfx/whoosh.wav",
+      "gain": -8
+    },
+    {
+      "at": 18.4,
+      "file": "sfx/riser.wav",
+      "gain": -6
+    },
+    {
+      "at": 23.6,
+      "file": "sfx/hit.wav"
+    }
+  ],
+  "voice": {
+    "file": "voice/reel3_vo.wav",
+    "at": 0.0
+  },
+  "keep_clip_audio": 0.0,
+  "loop": {
+    "note": "the punchline card cuts straight back into the first proof"
+  },
+  "default_opening": "A",
+  "openings": {
+    "A": {
+      "cut": 2.5,
+      "why": "result first: the punchline frame, then 'how'",
+      "shots": [
+        {
+          "id": "3openA",
+          "start": 0,
+          "end": 2.5,
+          "graphic": "@punchline",
+          "effect": "punch_in"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.5,
+          "text": "TODO הוק A",
+          "style": "big",
+          "y": 1400
+        }
+      ],
+      "sfx": [
+        {
+          "at": 0,
+          "file": "sfx/hit.wav"
+        }
+      ]
+    },
+    "B": {
+      "cut": 2.5,
+      "why": "the collage as a wall of proof",
+      "shots": [
+        {
+          "id": "3openB",
+          "start": 0,
+          "end": 2.5,
+          "graphic": "@collage",
+          "effect": "slow_push"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.5,
+          "text": "TODO הוק B",
+          "style": "big",
+          "y": 1400
+        }
+      ]
+    },
+    "C": {
+      "cut": 2.5,
+      "why": "motion first: 3A at full speed with P1 already on it",
+      "shots": [
+        {
+          "id": "3openC",
+          "start": 0,
+          "end": 2.5,
+          "clip": "clips/3A_take2.mp4",
+          "in": 0,
+          "effect": "shake"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 2.5,
+          "text": "TODO הוק C",
+          "style": "big",
+          "y": 1400
+        }
+      ]
+    }
+  },
+  "cover": {
+    "headline": {
+      "A": "TODO",
+      "B": "TODO",
+      "C": "TODO"
+    },
+    "frame_at": 19.4
+  },
+  "todo": [
+    "P1–P10 screenshots + capability names",
+    "which proof goes on which 3A–3I shot (spec)",
+    "captions",
+    "cover headlines"
+  ]
+}
