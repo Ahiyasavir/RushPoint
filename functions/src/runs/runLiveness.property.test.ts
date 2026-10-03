@@ -25,7 +25,7 @@ import {
   type Game, type RunStageRecord, type RunTeam, type StationStatus, type Task,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
-import { applyTaskClosure, advanceTeamStateOnPoll, buildInitialStages, healStrandedStage, retiredNow } from './index';
+import { applyTaskClosure, advanceTeamStateOnPoll, buildInitialStages, healStrandedStage, retiredNow, applySkipStage, applyRunClosures, heldTaskIdOf } from './index';
 import { isRoutingCandidate } from '../routing/assignNextTask';
 
 const LAUNCH = '2026-03-01T09:00:00.000Z';
@@ -62,7 +62,8 @@ function genGame(r: R): Game {
       const id = `s${si}t${ti}`;
       const t: Record<string, unknown> = {
         id, title: id, type: 'field', difficulty: 5, estimatedMinutes: 5, pointValue: 10,
-        locationless: true, maxConcurrentTeams: 3,
+        // Some stations are physical and capped, so several teams contend for a slot.
+        locationless: r.chance(0.5), maxConcurrentTeams: r.int(1, 3),
       };
       if (ti > 0 && r.chance(0.4)) {
         const earlier = Array.from({ length: ti }, (_, j) => `s${si}t${j}`);
@@ -107,7 +108,11 @@ function genGame(r: R): Game {
 // ── the simulated run ───────────────────────────────────────────────────────
 interface Sim {
   game: Game;
+  /** The team the current event acts on (one of `teams`). */
   team: RunTeam;
+  teams: RunTeam[];
+  /** run.taskCounts: station slots held, per mission. Must always equal who is holding what. */
+  counts: Record<string, number>;
   overrides: Record<string, StationStatus>;
   now: number;
   log: string[];
@@ -121,23 +126,32 @@ function settleFinished(s: Sim) {
   if (s.team.stages.every((st) => st.status === 'completed')) s.team.status = 'finished';
 }
 
+function inc(s: Sim, id: string) { s.counts[id] = (s.counts[id] ?? 0) + 1; }
+function dec(s: Sim, id: string) {
+  // releaseTask clamps at zero, which would HIDE a double release in production — so here it fails.
+  if ((s.counts[id] ?? 0) <= 0) fail(s, `slot for ${id} released more times than it was claimed`);
+  s.counts[id] -= 1;
+}
+const capped = (s: Sim, t: Task) => !t.locationless && (s.counts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3);
+
 class Violation extends Error {}
-function fail(s: Sim, msg: string): never { throw new Violation(`${msg}\n  log:\n    ${s.log.slice(-40).join('\n    ')}`); }
+function fail(s: Sim, msg: string): never { throw new Violation(`${msg}\n  log:\n    ${[...s.log.slice(0, 2), '…', ...s.log.slice(2).slice(-60)].join('\n    ')}`); }
 
 /** getMyTeamState's poll + requestNextTask (assignNextInActiveStage), in order. */
 async function poll(s: Sim) {
   await advanceTeamStateOnPoll({
-    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: false,
-    persist: async () => undefined, release: async () => undefined, onPersistError: () => undefined,
+    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true,
+    persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
   });
   settleFinished(s);
   // MIRROR assignNextInActiveStage: stage unlock is covered by the poll above.
   const stages = clone(s.team.stages);
-  if (healStrandedStage(stages, s.game, LAUNCH, iso(s.now)).changed) { s.team.stages = stages; settleFinished(s); s.log.push('heal'); }
+  const healed = healStrandedStage(stages, s.game, LAUNCH, iso(s.now));
+  if (healed.changed) { s.team.stages = stages; settleFinished(s); s.log.push(`heal ${s.team.id}`); healed.heldAssignedTaskIds.forEach((id) => dec(s, id)); }
   // The stage the heal just completed may have unlocked the next one (computeStageUnlock path).
   await advanceTeamStateOnPoll({
-    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: false,
-    persist: async () => undefined, release: async () => undefined, onPersistError: () => undefined,
+    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true,
+    persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
   });
   const idx = activeIdx(s);
   if (idx < 0) return;
@@ -148,14 +162,15 @@ async function poll(s: Sim) {
   const sat = gateSatisfiedTaskIds(s.team.stages, s.game.stages);
   const cands = gs.tasks
     .filter((t) => stageRec.tasks.find((r) => r.taskId === t.id)?.status === 'unassigned')
-    .filter((t) => isRoutingCandidate(t, sat, {}, LAUNCH, s.now, s.overrides));
+    .filter((t) => isRoutingCandidate(t, sat, s.counts, LAUNCH, s.now, s.overrides));
   if (cands.length === 0) return;
   const t = cands[0];
   const rec = stageRec.tasks.find((r) => r.taskId === t.id)!;
   rec.status = 'assigned';
   rec.startedAt = iso(s.now);
   s.team.activeTaskId = t.id;
-  s.log.push(`assign ${t.id}`);
+  inc(s, t.id);
+  s.log.push(`${s.team.id} assign ${t.id}`);
 }
 
 /** MIRROR completeTaskForTeam's guard sequence + its exclusive-sibling retirement. */
@@ -181,11 +196,13 @@ function tryComplete(s: Sim): 'done' | string {
     t.status = 'skipped';
     t.skipCause = 'exclusive';
   }
-  applyStageCompletion(stages, idx, s.game, LAUNCH, iso(s.now));
+  const res = applyStageCompletion(stages, idx, s.game, LAUNCH, iso(s.now));
   s.team.stages = stages;
   s.team.activeTaskId = null;
+  dec(s, rec.taskId);
+  res.heldAssignedTaskIds.forEach((id) => dec(s, id));
   settleFinished(s);
-  s.log.push(`complete ${rec.taskId}`);
+  s.log.push(`${s.team.id} complete ${rec.taskId}`);
   return 'done';
 }
 
@@ -200,13 +217,19 @@ function setStatus(s: Sim, taskId: string, next: StationStatus, r: R) {
   s.overrides = { ...s.overrides, [taskId]: next };
   s.log.push(`${next} ${taskId}${plan.stageUnwinnable ? ' (forced)' : ''}`);
   if (next === 'closed' && from !== 'closed') {
-    const stages = clone(s.team.stages);
-    const out = applyTaskClosure(stages, s.game, taskId, LAUNCH, iso(s.now));
-    if (out.changed) {
-      s.team.stages = stages;
-      if (out.wasHolding || s.team.activeTaskId === taskId) s.team.activeTaskId = null;
+    // MIRROR closeTaskForAllTeams: every team, then the slots.
+    const keep = s.team;
+    for (const team of s.teams) {
+      s.team = team;
+      const stages = clone(team.stages);
+      const out = applyTaskClosure(stages, s.game, taskId, LAUNCH, iso(s.now));
+      if (!out.changed) continue;
+      team.stages = stages;
+      team.activeTaskId = heldTaskIdOf(stages);
       settleFinished(s);
+      for (const id of new Set(out.releaseIds)) dec(s, id);
     }
+    s.team = keep;
   }
 }
 
@@ -230,12 +253,14 @@ function skipOne(s: Sim, r: R) {
   rec.skipCause = 'operator';
   delete rec.gateOverride;
   stageRec.requiredTaskCount = plan.requiredTaskCount;
+  if (plan.heldSlot) dec(s, target);
   const res = applyStageCompletion(stages, idx, s.game, LAUNCH, iso(s.now));
+  res.heldAssignedTaskIds.forEach((id) => dec(s, id));
   // The preview is planned on the run graph; a stage DELETED from the template is settled by the
   // retirement rule the plan does not model (the write is right, the confirmation text is not).
   if (plan.stageCompletes !== res.completed) fail(s, `skip preview said stageCompletes=${plan.stageCompletes}, the write did ${res.completed} (${target})`);
   s.team.stages = stages;
-  if (s.team.activeTaskId === target) s.team.activeTaskId = null;
+  s.team.activeTaskId = heldTaskIdOf(stages);
   settleFinished(s);
   s.log.push(`skip ${target}`);
 }
@@ -249,8 +274,10 @@ function forceAssign(s: Sim, r: R) {
   const target = r.pick(open).taskId;
   const gameTask = findTask(s, target);
   if (!gameTask || !isTaskAssignable(gameTask, s.overrides)) return;
+  if (capped(s, gameTask)) { s.log.push(`force refused full ${target}`); return; }
+  inc(s, target);
   const stages = clone(s.team.stages);
-  for (const t of stages[idx].tasks) if (t.status === 'assigned') { t.status = 'unassigned'; delete t.startedAt; delete t.gateOverride; }
+  for (const t of stages[idx].tasks) if (t.status === 'assigned') { t.status = 'unassigned'; delete t.startedAt; delete t.gateOverride; dec(s, t.taskId); }
   const rec = stages[idx].tasks.find((t) => t.taskId === target)!;
   rec.status = 'assigned';
   rec.startedAt = iso(s.now);
@@ -274,14 +301,17 @@ function rewind(s: Sim, r: R) {
   const stages = plan.stages;
   if (plan.assignTaskId) {
     const gt = findTask(s, plan.assignTaskId);
-    if (gt && isTaskAssignable(gt, s.overrides)) {
+    if (gt && isTaskAssignable(gt, s.overrides) && !capped(s, gt)) {
       const rec = stages[plan.targetStageIdx].tasks.find((t) => t.taskId === plan.assignTaskId);
-      if (rec) { rec.status = 'assigned'; rec.startedAt = iso(s.now); rec.gateOverride = true; }
+      if (rec) { rec.status = 'assigned'; rec.startedAt = iso(s.now); rec.gateOverride = true; inc(s, plan.assignTaskId); }
     }
   }
+  plan.releaseTaskIds.forEach((id) => dec(s, id));
   let idx = plan.targetStageIdx;
   while (idx >= 0 && idx < stages.length && stages[idx].status === 'active') {
-    if (!applyStageCompletion(stages, idx, s.game, LAUNCH, iso(s.now)).completed) break;
+    const res = applyStageCompletion(stages, idx, s.game, LAUNCH, iso(s.now));
+    res.heldAssignedTaskIds.forEach((id) => dec(s, id));
+    if (!res.completed) break;
     idx += 1;
   }
   s.team.stages = stages;
@@ -290,6 +320,45 @@ function rewind(s: Sim, r: R) {
   s.log.push(`rewind ${JSON.stringify(target)}`);
 }
 
+/** MIRROR skipStage. */
+function skipWholeStage(s: Sim) {
+  const idx = activeIdx(s);
+  if (idx < 0) return;
+  const stages = clone(s.team.stages);
+  const out = applySkipStage(stages, idx, s.game, LAUNCH, iso(s.now), 'op');
+  s.team.stages = stages;
+  s.team.activeTaskId = null;
+  out.heldTaskIds.forEach((id) => dec(s, id));
+  settleFinished(s);
+  s.log.push(`${s.team.id} skipStage ${stages[idx].stageId}`);
+}
+
+/** MIRROR checkOutTask: the player walks away from the mission in hand. */
+function checkOut(s: Sim) {
+  const idx = activeIdx(s);
+  if (idx < 0) return;
+  const rec = s.team.stages[idx].tasks.find((t) => t.status === 'assigned');
+  if (!rec) return;
+  rec.status = 'unassigned';
+  delete rec.gateOverride;
+  s.team.activeTaskId = null;
+  dec(s, rec.taskId);
+  s.log.push(`${s.team.id} checkOut ${rec.taskId}`);
+}
+
+/** MIRROR joinRun for a late joiner on a started run. */
+function lateJoin(s: Sim) {
+  if (s.teams.length >= 4) return;
+  const id = `t${s.teams.length}`;
+  const stages = applyRunClosures(buildInitialStages(clone(s.game)), s.game, { taskStatusOverrides: s.overrides, launchedAt: LAUNCH }, iso(s.now));
+  const team = { id, stages, status: 'active', launched: true, score: 0, activeTaskId: null } as unknown as RunTeam;
+  s.teams.push(team);
+  s.team = team;
+  settleFinished(s);
+  s.log.push(`join ${id}`);
+}
+
+let uid = 0;
 /** A creator editing the template while the run is live (updateGame accepts all of these). */
 function editTemplate(s: Sim, r: R) {
   const g = clone(s.game);
@@ -298,9 +367,9 @@ function editTemplate(s: Sim, r: R) {
   if (kind === 0 && st.tasks.length > 1) {
     const victim = r.pick(st.tasks).id;
     st.tasks = st.tasks.filter((t) => t.id !== victim);
-    // The Builder's save prunes a dangling prerequisite (pruneDanglingPrerequisites) — sometimes;
-    // an older client or an import may not, so both shapes are played.
-    if (r.chance(0.5)) for (const t of st.tasks) if (t.unlockAfterTaskIds) t.unlockAfterTaskIds = t.unlockAfterTaskIds.filter((x) => x !== victim);
+    // updateGame refuses a dangling prerequisite (validateUnlockGraph), and the Builder prunes it
+    // before saving (pruneDanglingPrerequisites), so a deletion always takes its gate entries along.
+    for (const t of st.tasks) if (t.unlockAfterTaskIds) t.unlockAfterTaskIds = t.unlockAfterTaskIds.filter((x) => x !== victim);
     if (st.exclusiveGroups) st.exclusiveGroups = st.exclusiveGroups.map((x) => ({ ...x, taskIds: x.taskIds.filter((y) => y !== victim) }));
     if (typeof st.requiredTaskCount === 'number') st.requiredTaskCount = Math.min(st.requiredTaskCount, Math.max(1, maxCompletableTasks(st)));
     s.log.push(`edit: delete ${victim}`);
@@ -310,7 +379,7 @@ function editTemplate(s: Sim, r: R) {
     g.stages.forEach((x, i) => { x.order = orders[i]; });
     s.log.push('edit: reorder stages');
   } else if (kind === 2) {
-    const id = `${st.id}new${r.int(0, 999)}`;
+    const id = `${st.id}new${++uid}`;
     st.tasks.push({ id, title: id, type: 'field', difficulty: 5, estimatedMinutes: 5, pointValue: 10, locationless: true } as unknown as Task);
     s.log.push(`edit: add ${id}`);
   } else if (kind === 3 && g.stages.length > 1) {
@@ -321,7 +390,8 @@ function editTemplate(s: Sim, r: R) {
   } else {
     // Insert a stage at the front of the order.
     g.stages.forEach((x) => { x.order += 1; });
-    g.stages.unshift({ id: `ins${r.int(0, 999)}`, order: 0, title: 'ins', tasks: [{ id: `ins${r.int(0, 999)}t`, title: 'x', type: 'field', difficulty: 5, estimatedMinutes: 5, pointValue: 10, locationless: true } as unknown as Task] } as never);
+    const n = ++uid;
+    g.stages.unshift({ id: `ins${n}`, order: 0, title: 'ins', tasks: [{ id: `ins${n}t`, title: 'x', type: 'field', difficulty: 5, estimatedMinutes: 5, pointValue: 10, locationless: true } as unknown as Task] } as never);
     s.log.push('edit: insert stage');
   }
   s.game = g;
@@ -329,6 +399,22 @@ function editTemplate(s: Sim, r: R) {
 
 // ── invariants ──────────────────────────────────────────────────────────────
 function assertSafe(s: Sim) {
+  const keep = s.team;
+  const holders: Record<string, number> = {};
+  for (const team of s.teams) {
+    s.team = team;
+    assertTeamSafe(s);
+    for (const st of team.stages) for (const t of st.tasks) if (t.status === 'assigned') holders[t.taskId] = (holders[t.taskId] ?? 0) + 1;
+  }
+  s.team = keep;
+  for (const id of new Set([...Object.keys(holders), ...Object.keys(s.counts)])) {
+    if ((holders[id] ?? 0) !== (s.counts[id] ?? 0)) fail(s, `slot count for ${id} is ${s.counts[id] ?? 0} but ${holders[id] ?? 0} team(s) hold it`);
+    const t = findTask(s, id);
+    if (t && !t.locationless && (holders[id] ?? 0) > (t.maxConcurrentTeams ?? 3)) fail(s, `${id} held by ${holders[id]} teams over its cap ${t.maxConcurrentTeams}`);
+  }
+}
+
+function assertTeamSafe(s: Sim) {
   const stages = s.team.stages;
   const active = stages.map((st, i) => (st.status === 'active' ? i : -1)).filter((i) => i >= 0);
   if (active.length > 1) fail(s, `two active stages: ${active}`);
@@ -354,9 +440,10 @@ function assertSafe(s: Sim) {
     }
   });
   if ((s.team.status === 'finished') !== stages.every((st) => st.status === 'completed')) fail(s, 'finished flag disagrees with the stages');
-  if (s.team.activeTaskId) {
-    const held = stages.flatMap((st) => st.tasks).find((t) => t.taskId === s.team.activeTaskId);
-    if (!held || held.status !== 'assigned') fail(s, `activeTaskId ${s.team.activeTaskId} is not held`);
+  // activeTaskId is what the console, the holder count and the station map read: it must name
+  // exactly the record the team holds, and nothing when it holds nothing.
+  if ((s.team.activeTaskId ?? null) !== heldTaskIdOf(stages)) {
+    fail(s, `activeTaskId ${s.team.activeTaskId} but the team holds ${heldTaskIdOf(stages)}`);
   }
 }
 
@@ -382,48 +469,66 @@ async function drain(s: Sim) {
   // The organizers lift every pause they can (a closure is final).
   for (const [id, st] of Object.entries(s.overrides)) if (st === 'paused') s.overrides = { ...s.overrides, [id]: 'active' };
   s.log.push('— drain —');
-  for (let i = 0; i < 400; i++) {
-    // Twice: one requestNextTask can settle a stage and leave the next one to the following call
-    // (production's client retries; see TaskRunner's routing backoff).
-    await poll(s);
-    await poll(s);
-    assertSafe(s);
-    if (s.team.status === 'finished') return;
-    const res = tryComplete(s);
-    assertSafe(s);
-    if (res === 'done') continue;
-    if (res === 'locked' || res === 'exclusiveTaken' || res === 'notReleased') {
-      fail(s, `the team holds a mission it cannot complete: ${res}`);
+  for (let round = 0; round < 400; round++) {
+    let progressed = false;
+    for (const team of s.teams) {
+      if (team.status === 'finished') continue;
+      s.team = team;
+      const before = JSON.stringify(team.stages);
+      // Twice: one requestNextTask can settle a stage and leave the next one to the following
+      // call (production's client retries; see TaskRunner's routing backoff).
+      await poll(s);
+      await poll(s);
+      assertSafe(s);
+      if ((team.status as string) === 'finished') { progressed = true; continue; }
+      const res = tryComplete(s);
+      assertSafe(s);
+      if (res === 'locked' || res === 'exclusiveTaken' || res === 'notReleased') {
+        fail(s, `${team.id} holds a mission it cannot complete: ${res}`);
+      }
+      if (res === 'done' || JSON.stringify(team.stages) !== before) progressed = true;
     }
-    // Nothing to do right now: let time pass to the next gate (or a little).
+    if (s.teams.every((t) => t.status === 'finished')) return;
+    if (progressed) continue;
+    // Nothing moved this round: let time pass to the next gate.
     const next = nextInterestingInstant(s);
-    if (next === null && res === 'nothing held') {
-      fail(s, `STRANDED: no mission to play, nothing left to wait for (stage ${s.team.stages[activeIdx(s)]?.stageId} records ${JSON.stringify(s.team.stages[activeIdx(s)]?.tasks.map((t) => [t.taskId, t.status, t.skipCause]))})`);
+    if (next === null) {
+      const stuck = s.teams.filter((t) => t.status !== 'finished').map((t) => {
+        const st = t.stages.find((x) => x.status === 'active');
+        return `${t.id}: stage ${st?.stageId ?? '(none active)'} ${JSON.stringify(st?.tasks.map((x) => [x.taskId, x.status, x.skipCause]) ?? t.stages.map((x) => [x.stageId, x.status]))}`;
+      });
+      fail(s, `STRANDED: nothing to play and nothing left to wait for — ${stuck.join(' | ')} counts ${JSON.stringify(s.counts)}`);
     }
-    s.now = next ?? s.now + 60_000;
+    s.now = next;
   }
-  fail(s, 'did not finish within 400 drain steps');
+  fail(s, 'did not finish within 400 drain rounds');
 }
 
 async function play(seed: number) {
   const r = rng(seed);
   const game = genGame(r);
-  const team = { id: 't', stages: buildInitialStages(clone(game)), status: 'active', launched: true, score: 0 } as unknown as RunTeam;
-  const s: Sim = { game, team, overrides: {}, now: L, log: [`seed ${seed}`, `game ${JSON.stringify(game.stages.map((g) => ({ id: g.id, req: g.requiredTaskCount, rel: g.releaseAfterMinutes, ex: g.exclusiveGroups?.map((x) => x.taskIds), t: g.tasks.map((t) => [t.id, t.unlockAfterTaskIds, t.hidden ? 'H' : '', t.releaseAfterMinutes, t.expiresAfterMinutes, t.expiresAt ? 'abs' : '', t.timeLimitMinutes]) })))}`] };
-  // Same as launchRun's late-joiner path: nothing to do on a fresh run.
+  const nTeams = r.int(1, 3);
+  const teams = Array.from({ length: nTeams }, (_, i) =>
+    ({ id: `t${i}`, stages: buildInitialStages(clone(game)), status: 'active', launched: true, score: 0, activeTaskId: null } as unknown as RunTeam));
+  const s: Sim = { game, team: teams[0], teams, counts: {}, overrides: {}, now: L, log: [`seed ${seed}`, `game ${JSON.stringify(game.stages.map((g) => ({ id: g.id, req: g.requiredTaskCount, rel: g.releaseAfterMinutes, ex: g.exclusiveGroups?.map((x) => x.taskIds), t: g.tasks.map((t) => [t.id, t.unlockAfterTaskIds, t.hidden ? 'H' : '', t.releaseAfterMinutes, t.expiresAfterMinutes, t.expiresAt ? 'abs' : '', t.timeLimitMinutes, t.locationless ? '' : `cap${t.maxConcurrentTeams}`]) })))}`] };
   assertSafe(s);
-  const steps = r.int(5, 40);
-  for (let i = 0; i < steps && s.team.status !== 'finished'; i++) {
+  const steps = r.int(5, 60);
+  for (let i = 0; i < steps; i++) {
+    s.team = r.pick(s.teams);
+    if ((s.team.status as string) === 'finished' && !r.chance(0.2)) continue;
     const roll = r.next();
     const allIds = s.game.stages.flatMap((g) => playableTasks(g).map((t) => t.id));
-    if (roll < 0.30) await poll(s);
-    else if (roll < 0.50) tryComplete(s);
-    else if (roll < 0.62) { s.now += r.int(1, 25) * 60_000; s.log.push(`+time → ${(s.now - L) / 60_000}m`); }
-    else if (roll < 0.70 && allIds.length) setStatus(s, r.pick(allIds), r.pick(['paused', 'active'] as StationStatus[]), r);
-    else if (roll < 0.75 && allIds.length) setStatus(s, r.pick(allIds), 'closed', r);
-    else if (roll < 0.81) skipOne(s, r);
-    else if (roll < 0.87) forceAssign(s, r);
-    else if (roll < 0.92) rewind(s, r);
+    if (roll < 0.28) await poll(s);
+    else if (roll < 0.46) tryComplete(s);
+    else if (roll < 0.56) { s.now += r.int(1, 25) * 60_000; s.log.push(`+time → ${(s.now - L) / 60_000}m`); }
+    else if (roll < 0.63 && allIds.length) setStatus(s, r.pick(allIds), r.pick(['paused', 'active'] as StationStatus[]), r);
+    else if (roll < 0.67 && allIds.length) setStatus(s, r.pick(allIds), 'closed', r);
+    else if (roll < 0.72) skipOne(s, r);
+    else if (roll < 0.76) skipWholeStage(s);
+    else if (roll < 0.81) forceAssign(s, r);
+    else if (roll < 0.85) rewind(s, r);
+    else if (roll < 0.89) checkOut(s);
+    else if (roll < 0.92) lateJoin(s);
     else editTemplate(s, r);
     assertSafe(s);
   }

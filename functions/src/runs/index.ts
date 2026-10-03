@@ -333,6 +333,12 @@ export function retiredNow(
   }).map((r) => r.taskId);
 }
 
+/** The mission a team is holding in its active stage, from the records (never a stale pointer). */
+export function heldTaskIdOf(stages: RunStageRecord[]): string | null {
+  const active = stages.find((st) => st.status === 'active');
+  return active?.tasks.find((t) => t.status === 'assigned')?.taskId ?? null;
+}
+
 export function applyTaskClosure(
   stages: RunStageRecord[],
   game: Game,
@@ -375,7 +381,7 @@ export function applyTaskClosure(
 }
 
 /** Every closure already on the run, applied to a team's freshly built stages (a late joiner). */
-function applyRunClosures(stages: RunStageRecord[], game: Game, run: Pick<Run, 'taskStatusOverrides' | 'launchedAt'>, now: string): RunStageRecord[] {
+export function applyRunClosures(stages: RunStageRecord[], game: Game, run: Pick<Run, 'taskStatusOverrides' | 'launchedAt'>, now: string): RunStageRecord[] {
   const overrides = run.taskStatusOverrides ?? {};
   for (const [taskId, status] of Object.entries(overrides)) {
     if (status === 'closed') applyTaskClosure(stages, game, taskId, run.launchedAt, now);
@@ -409,7 +415,13 @@ export async function closeTaskForAllTeams(
         const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
         outcome = applyTaskClosure(stages, game, taskId, launchedAt, now);
         if (!outcome.changed) return;
-        const holding = outcome.wasHolding || team.activeTaskId === taskId;
+        // run-gate-integrity: the closure can END the stage, auto-skipping a DIFFERENT mission the
+        // team was on (found by the liveness simulation). That team was moved too, and must be told
+        // and re-routed exactly like a holder of the closed mission — not left pointing at a record
+        // that is no longer theirs.
+        const stillHeld = heldTaskIdOf(stages);
+        const holding = outcome.wasHolding || team.activeTaskId === taskId
+          || (!!team.activeTaskId && team.activeTaskId !== stillHeld);
         const allDone = stages.every((st) => st.status === 'completed');
         tx.update(doc.ref, {
           stages,
@@ -1698,6 +1710,59 @@ async function recordPlayerResult(
 
 // ─── skipStage ────────────────────────────────────────────────────────────────
 
+/**
+ * skipStage's write, pure (change: run-gate-integrity). Mutates `stages`.
+ *
+ * Only OPEN records (unassigned / assigned) are skipped and paid the consolation. It used to take
+ * every record that was not `completed`, so a record ALREADY skipped was skipped again and paid
+ * again: an exclusive-group loser earned a consolation for the alternative the team did not choose,
+ * a mission the organizers CLOSED (which earns nothing) was paid, and a mission already skipped on
+ * its own (skipTaskForTeam, which pays the same consolation) was paid twice — the team's score
+ * grew by both payments while the record kept one.
+ *
+ * The next stage opens by the SAME rule applyStageCompletion uses: not after a final stage, and not
+ * before its scheduled release (a skip used to hand the team a timed chapter early). A held-back
+ * stage opens on the next poll, exactly as after a normal completion.
+ */
+export function applySkipStage(
+  stages: RunStageRecord[], activeIdx: number, game: Game, launchedAt: string | undefined, now: string, by: string,
+): { awardTotal: number; skipLedger: { at: string; delta: number; kind: 'skipAward'; taskId: string; by: string }[]; heldTaskIds: string[] } {
+  let awardTotal = 0;
+  // team-dossier-and-search D2: one ledger line per consolation actually paid.
+  const skipLedger: { at: string; delta: number; kind: 'skipAward'; taskId: string; by: string }[] = [];
+  const heldTaskIds: string[] = [];
+  for (const taskRec of stages[activeIdx].tasks) {
+    if (taskRec.status !== 'unassigned' && taskRec.status !== 'assigned') continue;
+    if (taskRec.status === 'assigned') heldTaskIds.push(taskRec.taskId);
+    // Look the game task up by id, not by (activeIdx, taskIndex) (nightly hardening).
+    const gameTask = findGameTask(game, taskRec.taskId);
+    const award = gameTask ? skipAward(game.scoringPreset, gameTask) : 0;
+    taskRec.status = 'skipped';
+    taskRec.skipCause = 'operatorStage'; // skip-keeps-the-stage
+    delete taskRec.gateOverride;
+    taskRec.completedAt = now;
+    taskRec.earnedScore = award;
+    // fix-fixed-points-speed-template-drift: the immutable expected-minutes stamp.
+    if (gameTask) taskRec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
+    awardTotal += award;
+    if (award > 0) skipLedger.push({ at: now, delta: award, kind: 'skipAward', taskId: taskRec.taskId, by });
+  }
+  stages[activeIdx].status = 'completed';
+  stages[activeIdx].completedAt = now;
+  stages[activeIdx].earnedScore = (stages[activeIdx].earnedScore ?? 0) + awardTotal;
+
+  const gameStage = game.stages?.find((st) => st.id === stages[activeIdx].stageId);
+  const isLastStage = gameStage?.isFinal ?? (activeIdx === stages.length - 1);
+  if (!isLastStage && activeIdx + 1 < stages.length) {
+    const nextGameStage = game.stages?.find((st) => st.id === stages[activeIdx + 1].stageId);
+    if (isReleased(nextGameStage, launchedAt, new Date(now).getTime())) {
+      stages[activeIdx + 1].status = 'active';
+      stages[activeIdx + 1].startedAt = now;
+    }
+  }
+  return { awardTotal, skipLedger, heldTaskIds };
+}
+
 export const skipStage = loggedCallable('skipStage', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId, teamId } = data as { gameId: string; runId: string; teamId: string };
@@ -1727,40 +1792,12 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
     const activeIdx = stages.findIndex((s) => s.status === 'active');
     if (activeIdx < 0) throw new functions.https.HttpsError('failed-precondition', 'No active stage');
 
-    // Skip all pending tasks with a fair award
-    let awardTotal = 0;
-    // team-dossier-and-search D2: one ledger line per consolation actually paid.
-    const skipLedger: { at: string; delta: number; kind: 'skipAward'; taskId: string; by: string }[] = [];
+    // Skip all pending tasks with a fair award (applySkipStage, pure).
     const skipBy = (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer';
-    for (const taskRec of stages[activeIdx].tasks) {
-      if (taskRec.status !== 'completed') {
-        if (taskRec.status === 'assigned') skippedHeldTaskIds.push(taskRec.taskId);
-        // Look the game task up by id, not by (activeIdx, taskIndex): team.stages is
-        // sorted by `order` but `game.stages` is builder-array order, so indexing can
-        // hit the wrong stage/task and mis-award. Same fix completeTaskForTeam already
-        // uses (nightly hardening).
-        const gameTask = findGameTask(game, taskRec.taskId);
-        const award = gameTask ? skipAward(game.scoringPreset, gameTask) : 0;
-        taskRec.status = 'skipped';
-        taskRec.skipCause = 'operatorStage'; // skip-keeps-the-stage
-        taskRec.completedAt = now;
-        taskRec.earnedScore = award;
-        // fix-fixed-points-speed-template-drift: stamp the skipped task's expected
-        // route-minutes so a finished team's terminal record is immutable against
-        // later template edits.
-        if (gameTask) taskRec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
-        awardTotal += award;
-        if (award > 0) skipLedger.push({ at: now, delta: award, kind: 'skipAward', taskId: taskRec.taskId, by: skipBy });
-      }
-    }
-    stages[activeIdx].status = 'completed';
-    stages[activeIdx].completedAt = now;
-    stages[activeIdx].earnedScore = (stages[activeIdx].earnedScore ?? 0) + awardTotal;
+    const out = applySkipStage(stages, activeIdx, game, (runSnap.data() as Run).launchedAt, now, skipBy);
+    skippedHeldTaskIds.push(...out.heldTaskIds);
+    const { awardTotal, skipLedger } = out;
 
-    if (activeIdx + 1 < stages.length) {
-      stages[activeIdx + 1].status = 'active';
-      stages[activeIdx + 1].startedAt = now;
-    }
     const allDone = stages.every((s) => s.status === 'completed');
 
     tx.update(teamRef, {
@@ -2017,7 +2054,10 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
         }]),
       } : {}),
       ...(allDone ? { status: 'finished', finishedAt: now } : {}),
-      activeTaskId: null,
+      // run-gate-integrity: the mission the team is STILL holding, not null. Skipping a mission the
+      // team was not on (an unassigned one) used to blank this while the record stayed `assigned`,
+      // so the console showed the team idle and setRunTaskStatus' holder count missed it.
+      activeTaskId: heldTaskIdOf(stages),
       updatedAt: now,
     });
   });

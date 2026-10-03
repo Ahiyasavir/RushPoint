@@ -8,7 +8,7 @@ import {
   type Game, type RunStageRecord, type RunTaskRecord,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
-import { applyTaskClosure } from './index';
+import { applyTaskClosure, applySkipStage, heldTaskIdOf } from './index';
 
 const LAUNCH = '2026-01-01T10:00:00.000Z';
 const L = Date.parse(LAUNCH);
@@ -146,5 +146,46 @@ describe('a closed mission', () => {
     const stages = [stage('s1', 'active', [rec('a'), rec('b')])];
     applyTaskClosure(stages, g3, 'a', LAUNCH, at(1));
     expect(stages[0].requiredTaskCount).toBe(1);
+  });
+});
+
+describe('skipStage (applySkipStage)', () => {
+  const g = game([
+    { id: 's1', tasks: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }], exclusiveGroups: [{ id: 'x', taskIds: ['a', 'b'] }] },
+    { id: 's2', isFinal: true, tasks: [{ id: 'z' }] },
+  ]);
+  (g as unknown as { scoringPreset: string }).scoringPreset = 'fixed_points_speed';
+
+  test('pays the consolation ONLY for missions still open — never again for one already skipped', () => {
+    const stages = [stage('s1', 'active', [
+      rec('a', 'completed', { earnedScore: 10 }),
+      rec('b', 'skipped', { skipCause: 'exclusive' }),
+      rec('c', 'skipped', { skipCause: 'operator', closedByOrganizer: true, earnedScore: 0 }),
+      rec('d', 'skipped', { skipCause: 'operator', earnedScore: 5 }),
+      rec('e', 'assigned'),
+    ]), stage('s2', 'locked', [rec('z')])];
+    const out = applySkipStage(stages, 0, g, LAUNCH, at(1), 'op');
+    expect(out.skipLedger.map((l) => l.taskId)).toEqual(out.awardTotal > 0 ? ['e'] : []);
+    expect(out.heldTaskIds).toEqual(['e']);
+    expect(stages[0].tasks.find((t) => t.taskId === 'b')).toMatchObject({ skipCause: 'exclusive' });
+    expect(stages[0].tasks.find((t) => t.taskId === 'c')).toMatchObject({ earnedScore: 0, closedByOrganizer: true });
+    expect(stages[0].tasks.find((t) => t.taskId === 'd')).toMatchObject({ skipCause: 'operator', earnedScore: 5 });
+    expect(stages[1].status).toBe('active');
+  });
+
+  test('does not open a next stage before its scheduled release', () => {
+    const g2 = game([{ id: 's1', tasks: [{ id: 'a' }] }, { id: 's2', isFinal: true, tasks: [{ id: 'z' }] }]);
+    (g2.stages[1] as unknown as { releaseAfterMinutes: number }).releaseAfterMinutes = 60;
+    const stages = [stage('s1', 'active', [rec('a')]), stage('s2', 'locked', [rec('z')])];
+    applySkipStage(stages, 0, g2, LAUNCH, at(5), 'op');
+    expect(stages[0].status).toBe('completed');
+    expect(stages[1].status).toBe('locked');
+  });
+});
+
+describe('activeTaskId follows the record', () => {
+  test('heldTaskIdOf names the assigned record of the active stage, or null', () => {
+    expect(heldTaskIdOf([stage('s1', 'completed', [rec('a', 'completed')]), stage('s2', 'active', [rec('b'), rec('c', 'assigned')])])).toBe('c');
+    expect(heldTaskIdOf([stage('s1', 'active', [rec('a', 'skipped')])])).toBeNull();
   });
 });
