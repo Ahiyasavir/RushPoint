@@ -99,6 +99,7 @@ import {
   isExpired,
   hasScheduleGate,
   scheduleRefusal,
+  isTaskAssignable,
   expiryInstantMs,
   isTimeLimitUp,
   timeLimitRemainingMs,
@@ -1364,6 +1365,14 @@ export async function completeTaskForTeam(
     // prerequisites cannot be completed, whatever path funnels here (completeTask,
     // submitTaskAnswer, submitSequenceStep, verifyStationCode, photo review).
     // Completed ids come from the freshly-read team state INSIDE this transaction.
+    // run-gate-integrity: a mission NOBODY handed out cannot be completed while the organizers have
+    // it paused (or closed) — the hand-crafted call routing would never have allowed. A held mission
+    // is unaffected: a pause never takes a mission from a team already standing at it.
+    if (gameTask && taskRec.status === 'unassigned' && taskRec.gateOverride !== true
+      && !isTaskAssignable(gameTask, runData?.taskStatusOverrides)) {
+      throw new functions.https.HttpsError('failed-precondition', 'This task is paused right now');
+    }
+
     // run-gate-integrity: a mission an operator put this team on PAST its gate is not locked, and
     // neither is one the team already HOLDS. The gate decides what may be handed out — routing and
     // forceAssignTask check it — so it is re-checked here only for a record nobody handed out (the
