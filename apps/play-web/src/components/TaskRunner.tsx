@@ -1451,7 +1451,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       {/* run-gate-integrity: staff sent the team here PAST its window; the server accepts the
           submission, so announcing the mission as closed would tell the player to give up on it. */}
       {assignedRec?.gateOverride !== true && (
-        <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
+        <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} leftMs={state.activeTaskClosesInMs} onExpired={onChanged} />
       )}
       <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} onTimeUp={onChanged} />
 
@@ -1724,11 +1724,21 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
 // `expiresAfterMinutes` + the run's launchedAt (both already in the payload).
 // On hitting zero it triggers the state refresh, so the server sweep skips the
 // closed task and reroutes the team. The server clock decides — this is display.
-function ExpiryCountdown({ task, launchedAt, onExpired }: {
-  task: SafeTask; launchedAt?: string | null; onExpired: () => void;
+function ExpiryCountdown({ task, launchedAt, leftMs, onExpired }: {
+  task: SafeTask; launchedAt?: string | null;
+  /** Server-measured time until the window closes (run-gate-integrity). `undefined` = an older
+   *  server that does not send it: fall back to the launch-relative instant. */
+  leftMs?: number | null;
+  onExpired: () => void;
 }) {
   const { t } = useT();
-  const closesAt = expiryInstantMs(task, launchedAt ?? undefined);
+  // Anchor the server's DURATION to when it arrived (never the phone's idea of the close instant);
+  // re-anchored on every poll, like TimeLimitCountdown.
+  const [anchor, setAnchor] = useState(() => ({ leftMs, at: Date.now() }));
+  if (anchor.leftMs !== leftMs) setAnchor({ leftMs, at: Date.now() });
+  const closesAt = leftMs === undefined
+    ? expiryInstantMs(task, launchedAt ?? undefined)
+    : (typeof anchor.leftMs === 'number' ? anchor.at + anchor.leftMs : null);
   const [now, setNow] = useState(() => Date.now());
   const fired = useRef(false);
   useEffect(() => {

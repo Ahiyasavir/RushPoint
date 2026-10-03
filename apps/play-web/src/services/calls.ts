@@ -199,6 +199,8 @@ export interface MyTeamState {
   nextStageReleaseAt?: number | null;
   /** mission-time-limit: time this team has left on the held mission, as a duration. null = no limit. */
   activeTaskTimeLeftMs?: number | null;
+  /** run-gate-integrity: server-measured time until the held mission's window closes. */
+  activeTaskClosesInMs?: number | null;
   // Shared team devices: this caller's role on the team (controller = may
   // submit; viewer = read-only until control is transferred/claimed).
   myRole: 'controller' | 'viewer' | null;

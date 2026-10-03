@@ -99,6 +99,7 @@ import {
   isExpired,
   hasScheduleGate,
   scheduleRefusal,
+  expiryInstantMs,
   isTimeLimitUp,
   timeLimitRemainingMs,
   isUnlocked,
@@ -5868,6 +5869,15 @@ async function evaluateTeamOutOfBounds(
   }
 }
 
+/** How long until the held mission's window closes, or null (no held mission, no window, override). */
+export function activeTaskClosesInMs(team: RunTeam, game: Game, launchedAt: string | undefined, nowMs: number): number | null {
+  const stage = (team.stages ?? []).find((st) => st.status === 'active');
+  const rec = stage?.tasks?.find((r) => r.status === 'assigned');
+  if (!rec || rec.gateOverride === true) return null;
+  const closesAt = expiryInstantMs(findGameTask(game, rec.taskId), launchedAt);
+  return closesAt === null ? null : Math.max(0, closesAt - nowMs);
+}
+
 /** The held mission's remaining time for this team, or null (no held mission, no limit). */
 function activeTaskTimeLeftMs(team: RunTeam, game: Game, nowMs: number): number | null {
   const stage = (team.stages ?? []).find((st) => st.status === 'active');
@@ -6826,6 +6836,12 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     // mission-time-limit: how long this team has left on the mission it holds, on the SERVER's
     // clock, as a DURATION (the phone counts it down from when it received it). null = no limit.
     activeTaskTimeLeftMs: activeTaskTimeLeftMs(team, game, Date.now()),
+    // run-gate-integrity: how long until the held mission's WINDOW closes (expiresAt /
+    // expiresAfterMinutes), as a server-measured DURATION — the same rule as above. The phone used
+    // to compute the close instant itself and compare it with its own clock, so a phone running
+    // fast announced "this mission has closed" while the server still accepted it. null = no
+    // window, or staff sent the team there past it (gateOverride).
+    activeTaskClosesInMs: activeTaskClosesInMs(team, game, run.launchedAt, Date.now()),
     // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
     // genuinely release/unlock-gated (routing cannot hand them out yet). The play
     // UI uses this — NOT the presence of omitted content — to decide "all
