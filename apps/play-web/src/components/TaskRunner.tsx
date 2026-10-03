@@ -233,6 +233,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // `lockedTaskIds` (release/unlock-gated ids), driven by game-rule + team-record
   // state, not by whether content happens to be on the wire.
   const lockedIds = state.lockedTaskIds ?? [];
+  // run-gate-integrity: when the server's lock list changes (a release time arrived, a pause was
+  // lifted, a prerequisite was met), ask for a mission at once — the routing effect depends on it.
+  const lockKey = lockedIds.slice().sort().join(',');
   const allRemainingLocked = unassigned.length > 0
     && unassigned.every((rec) => lockedIds.includes(rec.taskId));
 
@@ -297,11 +300,14 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           // for reasons that can change on their own — a held-for-consent team waits for a human.
           if (!res.taskId && res.reason !== 'guardian_consent' && runStatusRef.current !== 'finished') {
             if (reaskTimer.current) window.clearTimeout(reaskTimer.current);
+            // A SLOW fallback only: the immediate re-ask comes from the lock list changing (below),
+            // which the status poll already delivers for free. This catches what that list cannot
+            // show (a window closing, a stage to heal) without a read storm while many teams wait.
             reaskTimer.current = window.setTimeout(() => {
               reaskTimer.current = null;
               if (routingInFlight.current) return;
               setRoutingAttempt((n) => n + 1);
-            }, 15000 + Math.random() * 5000);
+            }, 60000 + Math.random() * 15000);
           }
         })
         .catch(() => { routingInFlight.current = false; setRoutingError(true); });
@@ -310,7 +316,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       () => { void requestRouting(undefined); },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignedRec, unassigned.length, routingAttempt, isViewer]);
+  }, [assignedRec, unassigned.length, routingAttempt, isViewer, lockKey]);
 
   // Routing wait (change: play-no-silent-failures): "finding your next task" used
   // to be a motionless sentence with no spinner and no escape, able to sit for the
