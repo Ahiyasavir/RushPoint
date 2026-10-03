@@ -11036,6 +11036,79 @@ async function main() {
       pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
   }); // scenario: closing a mission mid-run
 
+  // ═══ Run gate integrity (change: run-gate-integrity) ═════════════════════════
+  //
+  // Four ways a team used to be stranded or handed a mission it could not finish, played through
+  // the real callables: a mission whose window closed before anyone took it (never retired, so a
+  // stage that needs every mission never ended); a prerequisite that was benched before launch
+  // (its dependent stayed locked forever); a staff override past an unlock gate (the completion
+  // door still said "locked"); and "put back in play" on a CLOSED mission (it changed the badge and
+  // nothing else). The pure liveness simulation (functions/src/runs/runLiveness.property.test.ts)
+  // covers the combinations; this proves the wiring.
+  await scenario('run gate integrity (expired-before-taken · benched prerequisite · override · closure is final)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const t = (id, extra = {}) => ({
+      id, title: `Mission ${id}`, type: 'self_report', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9,
+      ...extra,
+    });
+    const { gameId: gg } = await creator.call('createGame', { title: 'Gate Integrity Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: gg, scoringPreset: 'fixed_points_speed', stages: [
+      // Every mission required (no requiredTaskCount).
+      { id: 'gi-s1', order: 0, title: 'Gates', tasks: [
+        t('gi-a'),
+        t('gi-exp', { expiresAfterMinutes: 0.1 }), // closes 6s after launch
+        t('gi-h', { hidden: true }),               // benched: never enters the run
+        t('gi-y', { unlockAfterTaskIds: ['gi-h'] }),
+        t('gi-c', { unlockAfterTaskIds: ['gi-a'] }),
+      ] },
+      { id: 'gi-s2', order: 1, title: 'End', isFinal: true, tasks: [t('gi-end'), t('gi-z')] },
+    ] });
+    const { runId: gr, accessCode: gc } = await creator.call('launchRun', { gameId: gg });
+    const G = { ownerUid: OWNER, gameId: gg, runId: gr };
+    const teamPath = (uid) => `users/${OWNER}/games/${gg}/runs/${gr}/teams/${uid}`;
+    const rec = (team, id) => (team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === id);
+    const p = makeParty('gateIntegrity');
+    const pUid = (await signInAnonymously(p.auth)).user.uid;
+    await p.call('joinRun', { code: gc, displayName: 'Gate Tester' });
+    await creator.call('startTeams', { gameId: gg, runId: gr });
+
+    // Override past an unlock gate: gi-c waits for gi-a, staff send the team there anyway.
+    await creator.call('forceAssignTask', { ...G, teamId: pUid, taskId: 'gi-c', override: true, reason: 'e2e' });
+    const done = await p.call('completeTask', { ...G, taskId: 'gi-c' });
+    const afterC = (await creator.getDocAt(teamPath(pUid))).data ?? {};
+    check('override: a mission staff put the team on past its gate can be completed',
+      done?.ok === true && rec(afterC, 'gi-c')?.status === 'completed', JSON.stringify({ done, rec: rec(afterC, 'gi-c') }));
+
+    // Let gi-exp's window close before anyone took it, then play the stage out.
+    const launchedMs = Date.parse((await creator.getDocAt(`users/${OWNER}/games/${gg}/runs/${gr}`)).data?.launchedAt);
+    const closeAt = launchedMs + 0.1 * 60_000 + 700;
+    if (Date.now() < closeAt) await new Promise((r) => setTimeout(r, closeAt - Date.now()));
+    for (let i = 0; i < 6; i++) {
+      const st = await p.call('getMyTeamState', { code: gc });
+      let cur = st?.team?.activeTaskId;
+      if (!cur) cur = (await p.call('requestNextTask', { ...G }))?.taskId ?? null;
+      if (!cur || cur.startsWith('gi-end') || cur === 'gi-z') break;
+      await p.call('completeTask', { ...G, taskId: cur });
+    }
+    const team = (await creator.getDocAt(teamPath(pUid))).data ?? {};
+    check('benched prerequisite: the mission behind it was played, not stranded',
+      rec(team, 'gi-y')?.status === 'completed', JSON.stringify(rec(team, 'gi-y')));
+    check('expired before taken: the mission is retired, not left open',
+      rec(team, 'gi-exp')?.status === 'skipped' && rec(team, 'gi-exp')?.skipCause === 'expired', JSON.stringify(rec(team, 'gi-exp')));
+    check('expired before taken: the stage that needed every mission still ends',
+      team.stages?.[0]?.status === 'completed' && team.stages?.[1]?.status === 'active', JSON.stringify(team.stages?.map((s) => s.status)));
+
+    // A closure is final: putting it back in play is refused, loudly, with a code the console reads.
+    await creator.call('setRunTaskStatus', { ...G, taskId: 'gi-z', status: 'closed', reason: 'e2e' });
+    const reopen = await expectError('closure is final: putting a closed mission back in play is refused',
+      creator.call('setRunTaskStatus', { ...G, taskId: 'gi-z', status: 'active' }),
+      { codeIn: ['functions/failed-precondition'] });
+    check('closure is final: the refusal carries closedIsFinal', reopen?.details?.code === 'closedIsFinal', JSON.stringify(reopen?.details));
+    const runDoc = (await creator.getDocAt(`users/${OWNER}/games/${gg}/runs/${gr}`)).data ?? {};
+    check('closure is final: the override is still closed', runDoc.taskStatusOverrides?.['gi-z'] === 'closed', JSON.stringify(runDoc.taskStatusOverrides));
+  }); // scenario: run gate integrity
+
   // ═══ Mission time limits (change: mission-time-limit) ═══════════════════════
   //
   // Owner (2026-09-27): two kinds. A countdown PER TEAM from the moment it got the mission (time up

@@ -88,6 +88,9 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
       copy(out, r, 'skipCause');
       // live-task-close-rules: the organizers closed this mission (not the team's doing).
       copy(out, r, 'closedByOrganizer');
+      // run-gate-integrity: staff put the team on this mission past its window, so the phone must not
+      // announce it as closed. An operational fact about the team's own progress, not a secret.
+      copy(out, r, 'gateOverride');
       copy(out, r, 'startedAt');
       copy(out, r, 'completedAt');
       copy(out, r, 'actualMinutes');

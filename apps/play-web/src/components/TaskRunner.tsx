@@ -1448,7 +1448,11 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           overflow menu surviving into the next mission. Keys need only be unique
           among SIBLINGS, so a per-component prefix keeps the remount and removes
           the collision. */}
-      <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
+      {/* run-gate-integrity: staff sent the team here PAST its window; the server accepts the
+          submission, so announcing the mission as closed would tell the player to give up on it. */}
+      {assignedRec?.gateOverride !== true && (
+        <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
+      )}
       <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} onTimeUp={onChanged} />
 
       {task.locationHidden ? (
