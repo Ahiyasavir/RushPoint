@@ -5044,6 +5044,12 @@ export async function advanceTeamStateOnPoll(args: {
   healDurably?: () => Promise<unknown>;
   /** Durable expiry sweep (sweepTeamDurably), same reason as healDurably. */
   sweepDurably?: () => Promise<unknown>;
+  /**
+   * The run is finalized (run-gate-integrity). Every grading path refuses a finished run; the poll
+   * must not keep sweeping and healing it either, or the team documents the recap and replay are
+   * rebuilt from drift away from the frozen final board.
+   */
+  runFinished?: boolean;
   persist: (patch: Record<string, unknown>) => Promise<unknown>;
   release: (taskId: string) => Promise<unknown>;
   onPersistError: (op: string, err: unknown) => void;
@@ -5055,6 +5061,7 @@ export async function advanceTeamStateOnPoll(args: {
   // injury lost the mission in its hands to the time-limit sweep while it stood still. The read
   // itself still answers (that is how the phone explains the pause); it advances nothing.
   if (team.held === true) return;
+  if (args.runFinished === true) return;
 
   // (0) A closure this team MISSED (run-gate-integrity). closeTaskForAllTeams lists the teams once,
   // and joinRun reads the overrides once: a team whose join raced the closure is in neither, and
@@ -5726,6 +5733,13 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
   // Staff hold (staff-console-field-ops) — before every other read/write, so a held
   // team causes zero side effects: no station slot reserved, no stage sweep persisted.
   assertTeamNotHeld(team);
+  // run-gate-integrity: a finalized run is frozen — every grading path refuses it, and routing must
+  // not keep handing out missions, reserving station slots and healing team documents after the
+  // final board is published. Through the read cache (the run doc is already a hot cached read).
+  {
+    const runDoc = await cachedGetDoc<Run>(db, docCachePolicy, runPath(ctx.ownerUid, ctx.gameId, ctx.runId));
+    if ((runDoc.data as Run | undefined)?.status === 'finished') return { taskId: null, reason: 'none' };
+  }
   // Soft-pause (safe-zone-boundary): no new task while the team is out of bounds.
   // Test-run bypass (wave-J): a desk rehearsal must never dead-end on the safe-zone
   // latch. The run-doc read happens ONLY when already flagged out of bounds (an
@@ -6785,6 +6799,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     nowMs: Date.now(),
     isController: resolveDeviceRole(team, uid) === 'controller',
     taskStatusOverrides: run.taskStatusOverrides,
+    runFinished: run.status === 'finished',
     healDurably: () => healTeamDurably(ctx.ownerUid, ctx.gameId, ctx.runId, team.id, game, run.launchedAt, run.taskStatusOverrides),
     sweepDurably: () => sweepTeamDurably(ctx.ownerUid, ctx.gameId, ctx.runId, team.id, game, run.launchedAt),
     persist: (patch) => db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update(patch),
