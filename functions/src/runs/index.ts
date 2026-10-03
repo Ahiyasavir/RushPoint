@@ -2187,6 +2187,14 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
  * its own state; that is the only way the app can say "staff paused you" instead
  * of failing silently, and a read grants nothing a hold is meant to prevent.
  */
+/** Refuse a scoring action on a finalized run (the frozen final board must stay true). Cached read. */
+export async function assertRunNotFinished(ownerUid: string, gameId: string, runId: string): Promise<void> {
+  const runDoc = await cachedGetDoc<Run>(db, docCachePolicy, runPath(ownerUid, gameId, runId));
+  if ((runDoc.data as Run | undefined)?.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
+}
+
 export function assertTeamNotHeld(team: Pick<RunTeam, 'held' | 'heldReason'>): void {
   if (team?.held !== true) return;
   // `failed-precondition` (not permission-denied): the caller is legitimate, the
@@ -3178,6 +3186,9 @@ export const claimDiscoveryPoi = loggedCallable('claimDiscoveryPoi', async (data
     throw new functions.https.HttpsError('invalid-argument', 'poiId and answer required');
   }
   const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  // run-gate-integrity: a claim pays points, so nothing after the final board (the hold is checked
+  // on the fresh team read inside the transaction below).
+  await assertRunNotFinished(ctx.ownerUid, ctx.gameId, ctx.runId);
 
   const poiSnap = await db.doc(`users/${ctx.ownerUid}/games/${ctx.gameId}/discoveryPois/${poiId}`).get();
   if (!poiSnap.exists) throw new functions.https.HttpsError('not-found', 'POI not found');
@@ -3195,6 +3206,7 @@ export const claimDiscoveryPoi = loggedCallable('claimDiscoveryPoi', async (data
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
     const team = teamSnap.data() as RunTeam;
+    assertTeamNotHeld(team);
 
     // Idempotent: a POI already answered cannot be claimed again.
     if (isPoiAlreadyClaimed(team.discoveryState, poiId)) {
@@ -4454,6 +4466,10 @@ export const captureZone = loggedCallable('captureZone', async (data, context) =
   if (!zoneId) throw new functions.https.HttpsError('invalid-argument', 'zoneId required');
   // Controller-only; returns the caller's own team + ref for the atomic award.
   const { teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: true });
+  // run-gate-integrity: a capture pays points (bonusPenalty), so it obeys the same two rules as
+  // every other scoring door: no progress on a staff hold, nothing after the final board.
+  assertTeamNotHeld(team);
+  await assertRunNotFinished(ownerUid, gameId, runId);
   const zRef = db.doc(`${runPath(ownerUid, gameId, runId)}/zones/${zoneId}`);
 
   return db.runTransaction(async (tx) => {
