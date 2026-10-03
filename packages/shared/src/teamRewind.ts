@@ -26,15 +26,19 @@
 // of that stage finishes). Pure and total: scripts/test-team-rewind.ts.
 
 import type { RunStageRecord, RunTaskRecord } from './types';
+import { effectiveExclusiveGroups } from './mutualExclusion';
+import { gateSatisfiedTaskIds, isUnlocked } from './gating';
 
 export type RewindTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
 
-export type RewindRefusal = 'badInput' | 'unknownTarget' | 'targetNotTerminal' | 'stageNotReached' | 'taskClosed';
+export type RewindRefusal = 'badInput' | 'unknownTarget' | 'targetNotTerminal' | 'stageNotReached' | 'taskClosed' | 'alternativeCompleted';
 
 export interface RewindGameStage {
   id: string;
   requiredTaskCount?: number;
-  tasks?: { id: string }[];
+  tasks?: { id: string; hidden?: boolean; unlockAfterTaskIds?: string[] }[];
+  /** run-gate-integrity: a reopened alternative must not sit beside its group's winner. */
+  exclusiveGroups?: { id: string; taskIds: string[] }[];
 }
 
 export interface TeamRewindInput {
@@ -43,6 +47,13 @@ export interface TeamRewindInput {
   target: RewindTarget;
   teamScore: number;
   teamStatus?: string;
+  /**
+   * Missions the RUN has closed (run.taskStatusOverrides === 'closed'). run-gate-integrity: a
+   * closed mission is never handed out again, so reopening one — even one this team had completed
+   * or that was skipped before the closure, which therefore carries no `closedByOrganizer` — left
+   * an `unassigned` record nothing will ever assign, in a stage that now needs it.
+   */
+  closedTaskIds?: readonly string[];
 }
 
 export interface TeamRewindPlan {
@@ -132,7 +143,20 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
   // anything (claimSpecificTask refuses a closed mission even with override), so reopening it
   // left an `unassigned` record nothing would ever assign — with the requirement raised to need
   // it, i.e. a team stranded by the button meant to rescue it.
-  if (targetRec && targetRec.closedByOrganizer === true) return refuse('taskClosed', input.stages, teamScore);
+  const closed = new Set(Array.isArray(input.closedTaskIds) ? input.closedTaskIds : []);
+  if (targetRec && (targetRec.closedByOrganizer === true || closed.has(targetRec.taskId))) return refuse('taskClosed', input.stages, teamScore);
+  // run-gate-integrity: the losing alternative of an exclusive group, while the alternative that
+  // beat it stays completed. completeTaskForTeam refuses it ("You already completed an alternative"),
+  // so the team was handed a mission it could never finish. Reopen the winner instead, if that is
+  // what is meant.
+  const gameStageOfTarget = (Array.isArray(input.gameStages) ? input.gameStages : []).find((g) => g?.id === stages[targetStageIdx].stageId);
+  if (targetRec && gameStageOfTarget) {
+    const group = effectiveExclusiveGroups({ tasks: gameStageOfTarget.tasks ?? [], exclusiveGroups: gameStageOfTarget.exclusiveGroups })
+      .find((g) => g.includes(targetRec.taskId));
+    if (group && stages[targetStageIdx].tasks.some((t) => t.taskId !== targetRec.taskId && group.includes(t.taskId) && t.status === 'completed')) {
+      return refuse('alternativeCompleted', input.stages, teamScore);
+    }
+  }
 
   const releaseTaskIds: string[] = [];
   const reopenedTaskIds: string[] = [];
@@ -189,10 +213,25 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
     for (const t of stage.tasks) {
       // A CLOSED mission stays closed (run-gate-integrity): its skipCause is 'operator', which this
       // set reopens, but nothing can ever hand a closed mission out again.
-      if (t.status === 'skipped' && REOPENABLE_BY_STAGE.has(t.skipCause) && t.closedByOrganizer !== true) {
+      if (t.status === 'skipped' && REOPENABLE_BY_STAGE.has(t.skipCause) && t.closedByOrganizer !== true && !closed.has(t.taskId)) {
         const award = reopenRecord(t);
         reopenedTaskIds.push(t.taskId);
         if (award > 0) { removed += award; ledger.push({ taskId: t.taskId, delta: -award }); }
+      }
+    }
+  }
+
+  // run-gate-integrity: a stage rewind can reopen a PREREQUISITE of the mission the team is holding
+  // in that stage — the held mission is then locked again, and completeTaskForTeam refuses it. Give
+  // it back to routing instead (it is handed out again once its gate is met).
+  if (!targetRec) {
+    const satisfied = gateSatisfiedTaskIds(stages, input.gameStages);
+    const tpl = (Array.isArray(gameStage?.tasks) ? gameStage!.tasks : []) as { id: string; unlockAfterTaskIds?: string[] }[];
+    for (const t of stage.tasks) {
+      if (t.status !== 'assigned' || t.gateOverride === true) continue;
+      const gt = tpl.find((x) => x.id === t.taskId);
+      if (gt && !isUnlocked(gt, satisfied)) {
+        t.status = 'unassigned'; delete t.startedAt; releaseTaskIds.push(t.taskId);
       }
     }
   }

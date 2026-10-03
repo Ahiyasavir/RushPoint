@@ -65,6 +65,7 @@ export function applyStageCompletion(
     const retire = stageRetirements({
       templateTasks: gameStage ? gameStage.tasks ?? [] : null,
       records: stages[stageIdx].tasks,
+      exclusiveGroups: gameStage?.exclusiveGroups,
       launchedAt,
       nowMs: new Date(now).getTime(),
     });

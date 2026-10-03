@@ -271,7 +271,7 @@ async function uniqueCode(): Promise<string> {
 
 // ─── Build initial stage records from game template ───────────────────────────
 
-function buildInitialStages(game: Game): RunStageRecord[] {
+export function buildInitialStages(game: Game): RunStageRecord[] {
   return game.stages
     .sort((a, b) => a.order - b.order)
     .map((stage, idx) => {
@@ -318,6 +318,21 @@ function buildInitialStages(game: Game): RunStageRecord[] {
 //
 // Mutates `stages` (a copy the caller owns). Returns whether anything changed, whether the team was
 // holding the mission, and the station slots to release after the commit.
+/** What applyStageCompletion will retire in this stage right now, for a planner's preview. */
+export function retiredNow(
+  stageRec: RunStageRecord, gameStage: Game['stages'][number] | undefined, game: Game,
+  launchedAt: string | undefined, now: string,
+): string[] {
+  if (!gameStage && !(Array.isArray(game.stages) && game.stages.length > 0)) return [];
+  return stageRetirements({
+    templateTasks: gameStage ? gameStage.tasks ?? [] : null,
+    records: stageRec.tasks,
+    exclusiveGroups: gameStage?.exclusiveGroups,
+    launchedAt,
+    nowMs: new Date(now).getTime(),
+  }).map((r) => r.taskId);
+}
+
 export function applyTaskClosure(
   stages: RunStageRecord[],
   game: Game,
@@ -341,6 +356,7 @@ export function applyTaskClosure(
     statusByTaskId,
     requiredTaskCount: stageRec.requiredTaskCount,
     skipCauseByTaskId,
+    retiredTaskIds: retiredNow(stageRec, gameStage, game, launchedAt, now),
   }, taskId);
   if (!plan.ok) return { changed: false, wasHolding: false, releaseIds: [] };
   const wasHolding = rec.status === 'assigned';
@@ -1912,6 +1928,7 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
       statusByTaskId,
       requiredTaskCount: stageRec.requiredTaskCount,
       skipCauseByTaskId,
+      retiredTaskIds: retiredNow(stageRec, gameStage, game, run.launchedAt, now),
     }, targetId);
 
     if (!plan.ok) {
@@ -2492,8 +2509,10 @@ export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context)
 
   const planFor = (team: RunTeam) => planTeamRewind({
     stages: team.stages,
-    gameStages: (game.stages ?? []).map((s) => ({ id: s.id, requiredTaskCount: s.requiredTaskCount, tasks: s.tasks })),
+    gameStages: (game.stages ?? []).map((s) => ({ id: s.id, requiredTaskCount: s.requiredTaskCount, tasks: s.tasks, exclusiveGroups: s.exclusiveGroups })),
     target,
+    // run-gate-integrity: what the run closed stays closed (no rewind can reopen it).
+    closedTaskIds: Object.entries(run.taskStatusOverrides ?? {}).filter(([, v]) => v === 'closed').map(([k]) => k),
     teamScore: team.score ?? 0,
     teamStatus: team.status,
   });
@@ -2502,6 +2521,8 @@ export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context)
       ? 'That mission has not been completed or skipped'
       : reasonCode === 'taskClosed'
         ? 'That mission was closed for this run'
+        : reasonCode === 'alternativeCompleted'
+          ? 'This team completed an alternative of that mission — send them back to that one instead'
       : reasonCode === 'stageNotReached'
         ? 'This team has not reached that stage yet'
         : 'That mission or stage is not in this team\'s game';
@@ -4938,6 +4959,43 @@ export async function advanceTeamStateOnPoll(args: {
   }
 }
 
+/**
+ * The routing heal (change: unreachable-task-strand, widened by run-gate-integrity): when the
+ * team's active stage holds records no rule will ever hand out — retired by `stageRetirements` —
+ * settle the stage through applyStageCompletion. Never while a mission is in flight (that team is
+ * playing; completeTaskForTeam applies the same rule when it grades). Mutates `stages` (a copy the
+ * caller owns). Pure, so the liveness simulation runs exactly this.
+ */
+export function healStrandedStage(
+  stages: RunStageRecord[], game: Game, launchedAt: string | undefined, now: string,
+): { changed: boolean; heldAssignedTaskIds: string[] } {
+  const idx = stages.findIndex((s) => s.status === 'active');
+  if (idx < 0) return { changed: false, heldAssignedTaskIds: [] };
+  if (stages[idx].tasks.some((t) => t.status === 'assigned')) return { changed: false, heldAssignedTaskIds: [] };
+  const gs = game.stages?.find((s) => s.id === stages[idx].stageId);
+  const templateLostStage = !gs && Array.isArray(game.stages) && game.stages.length > 0;
+  const retire = !gs && !templateLostStage ? [] : stageRetirements({
+    templateTasks: gs ? gs.tasks ?? [] : null,
+    records: stages[idx].tasks,
+    exclusiveGroups: gs?.exclusiveGroups,
+    launchedAt,
+    nowMs: new Date(now).getTime(),
+  });
+  // A stage that is ALREADY done by applyStageCompletion's own test, but was never evaluated:
+  // completion is otherwise judged only when one of ITS missions finishes, so a stage the team
+  // reaches with nothing left — every mission closed or skipped while it was still locked, a
+  // requirement a closure lowered to what is already banked, or a stage whose every mission was
+  // benched (zero records) — sat `active` with nothing to hand out, forever. Found by the
+  // liveness simulation (runLiveness.property.test.ts).
+  const rec = stages[idx];
+  const completedCount = rec.tasks.filter((t) => t.status === 'completed').length;
+  const required = Math.min(rec.requiredTaskCount ?? rec.tasks.length, rec.tasks.length);
+  const alreadyDone = completedCount >= required || rec.tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
+  if (retire.length === 0 && !alreadyDone) return { changed: false, heldAssignedTaskIds: [] };
+  const { heldAssignedTaskIds } = applyStageCompletion(stages, idx, game, launchedAt, now);
+  return { changed: true, heldAssignedTaskIds };
+}
+
 export async function assignNextInActiveStage(
   ownerUid: string, gameId: string, runId: string, teamId: string,
   teamLocation: { lat: number; lng: number },
@@ -5037,31 +5095,24 @@ export async function assignNextInActiveStage(
     // here too. It needs the run's launchedAt for the expiry arm, read only when the stage
     // actually carries a schedule gate (or the template lost the stage), so a healthy team still
     // performs no extra read and no write.
-    const templateLostStage = !gs && Array.isArray(game.stages) && game.stages.length > 0;
-    if (idx >= 0 && !busy && (gs || templateLostStage)) {
-      const needsLaunch = (gs?.tasks ?? []).some((t) => hasScheduleGate(t));
-      const launchedAt = needsLaunch
-        ? ((await db.doc(runPath(ownerUid, gameId, runId)).get()).data() as Run | undefined)?.launchedAt
-        : undefined;
-      const retire = stageRetirements({
-        templateTasks: gs ? gs.tasks ?? [] : null,
-        records: team.stages[idx].tasks,
-        // Without a schedule gate nothing can expire, so an absent launchedAt changes nothing.
-        launchedAt,
-        nowMs: Date.now(),
+    // (A release-gated NEXT stage needs it too: a heal that completes this stage unlocks that one.)
+    const needsLaunch = !busy && ((gs?.tasks ?? []).some((t) => hasScheduleGate(t))
+      || (game.stages ?? []).some((st) => hasScheduleGate(st)));
+    const launchedAt = needsLaunch
+      ? ((await db.doc(runPath(ownerUid, gameId, runId)).get()).data() as Run | undefined)?.launchedAt
+      : undefined;
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    // Without a schedule gate nothing can expire, so an absent launchedAt changes nothing.
+    const healed = healStrandedStage(stages, game, launchedAt, now);
+    if (healed.changed) {
+      const allDone = stages.every((s) => s.status === 'completed');
+      await teamRef.update({
+        stages,
+        ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+        updatedAt: now,
       });
-      if (retire.length > 0) {
-        const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-        const { heldAssignedTaskIds } = applyStageCompletion(stages, idx, game, launchedAt, now);
-        const allDone = stages.every((s) => s.status === 'completed');
-        await teamRef.update({
-          stages,
-          ...(allDone ? { status: 'finished', finishedAt: now } : {}),
-          updatedAt: now,
-        });
-        for (const id of heldAssignedTaskIds) await releaseTask(id, ownerUid, gameId, runId);
-        team.stages = stages;
-      }
+      for (const id of healed.heldAssignedTaskIds) await releaseTask(id, ownerUid, gameId, runId);
+      team.stages = stages;
     }
   }
 

@@ -44,6 +44,13 @@ export interface SkipTaskInput {
   requiredTaskCount?: number;
   /** Why each skipped record was skipped (skip-keeps-the-stage). Absent reads as legacy. */
   skipCauseByTaskId?: Record<string, unknown>;
+  /**
+   * Records applyStageCompletion will retire regardless of this skip (run-gate-integrity: the
+   * caller's `stageRetirements` — an expired-before-taken mission, one deleted from the template,
+   * one whose alternative is already done). Counted as gone, so the preview names the same outcome
+   * the write produces. Absent = none.
+   */
+  retiredTaskIds?: readonly string[];
 }
 
 /** Why a skip cannot be applied. Reported, never thrown. */
@@ -145,7 +152,9 @@ export function planTaskSkip(input: SkipTaskInput, taskId: string): SkipTaskPlan
   const statusMapAfter: Record<string, SkipTaskStatus> = {};
   const causeMapAfter: Record<string, unknown> = {};
   for (const id of ids) { statusMapAfter[id] = statusAfter(id); causeMapAfter[id] = causeAfter(id); }
-  const dead = new Set(unreachableTaskIds(graph, statusMapAfter, causeMapAfter));
+  const retired = new Set((Array.isArray(input?.retiredTaskIds) ? input.retiredTaskIds : []).filter((id) => id !== taskId));
+  for (const id of retired) if (statusMapAfter[id] === 'unassigned') { statusMapAfter[id] = 'skipped'; causeMapAfter[id] = 'retired'; }
+  const dead = new Set([...unreachableTaskIds(graph, statusMapAfter, causeMapAfter), ...[...retired].filter((id) => statusOf(id) === 'unassigned')]);
 
   const attainableAfter = maxCompletableTasks(
     { tasks: ids.map((id) => ({ id })), exclusiveGroups: stage?.exclusiveGroups },

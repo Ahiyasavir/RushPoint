@@ -8,7 +8,7 @@
 // prerequisites, so the field passes through the participant sanitizer.
 
 import { isReleased, isExpired, type ReleaseGate, type ExpiryGate } from './schedule';
-import { effectiveExclusiveGroups, type ExclusiveGroupLike } from './mutualExclusion';
+import { effectiveExclusiveGroups, blockedTaskIds, type ExclusiveGroupLike } from './mutualExclusion';
 import { isTaskAssignable, type TaskStatusOverrides } from './liveTaskStatus';
 import type { StationStatus } from './types';
 
@@ -137,7 +137,7 @@ export function runStageTasks<T extends UnlockGraphTask>(
 }
 
 /** Why `stageRetirements` retires a still-unassigned record. */
-export type RetirementCause = 'expired' | 'removed' | 'unreachable';
+export type RetirementCause = 'expired' | 'removed' | 'unreachable' | 'exclusive';
 
 /**
  * The still-UNASSIGNED records of one stage that this team can never play, and why
@@ -162,6 +162,14 @@ export function stageRetirements(args: {
   records: readonly (RunGateRecord | null | undefined)[] | null | undefined;
   launchedAt: string | number | null | undefined;
   nowMs: number;
+  /**
+   * The stage's exclusive groups. An open record whose alternative is already COMPLETED is retired
+   * as `exclusive`: completeTaskForTeam would refuse it, and routing does not look at groups, so
+   * it would be handed out and then be impossible to finish. completeTaskForTeam retires those
+   * siblings itself at the moment of completion; this catches every record reopened AFTER that
+   * (send-team-back, an operator skip reopened by a stage rewind).
+   */
+  exclusiveGroups?: ExclusiveGroupLike[];
 }): { taskId: string; cause: RetirementCause }[] {
   const records = (Array.isArray(args?.records) ? args.records : [])
     .filter((r): r is RunGateRecord & { taskId: string } => !!r && typeof r.taskId === 'string' && !!r.taskId);
@@ -176,11 +184,16 @@ export function stageRetirements(args: {
     cause[r.taskId] = r.skipCause;
   }
   const out: { taskId: string; cause: RetirementCause }[] = [];
+  const blocked = new Set(blockedTaskIds(
+    { tasks: tpl.map((t) => ({ id: t.id, hidden: (t as { hidden?: boolean }).hidden })), exclusiveGroups: args.exclusiveGroups },
+    records.filter((r) => status[r.taskId] === 'completed').map((r) => r.taskId),
+  ));
   for (const r of records) {
     if (status[r.taskId] !== 'unassigned') continue;
     const t = tplById.get(r.taskId);
     let why: RetirementCause | null = null;
     if (!t) why = 'removed';
+    else if (blocked.has(r.taskId)) why = 'exclusive';
     else if (isExpired(t, args.launchedAt, args.nowMs)) why = 'expired';
     if (why) {
       out.push({ taskId: r.taskId, cause: why });
