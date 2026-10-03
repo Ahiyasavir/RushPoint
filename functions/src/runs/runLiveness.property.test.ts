@@ -16,7 +16,8 @@
 // and returnTeamTo — those live inside Firestore transactions.
 //
 // A failure prints the seed and the event log; rerun one with RUSHPOINT_LIVENESS_SEED=<n>.
-// RUSHPOINT_LIVENESS_N=<count> and RUSHPOINT_LIVENESS_OFFSET=<first seed - 1> sweep a different range.
+// RUSHPOINT_LIVENESS_N=<count> and RUSHPOINT_LIVENESS_OFFSET=<first seed - 1> sweep a different range;
+// RUSHPOINT_LIVENESS_DEEP=1 plays more teams and longer event sequences.
 import { describe, test, expect } from 'vitest';
 import {
   gateSatisfiedTaskIds, isUnlocked, scheduleRefusal, resolveExclusions, effectiveExclusiveGroups,
@@ -414,7 +415,7 @@ function toggleHold(s: Sim) {
 
 /** MIRROR joinRun for a late joiner on a started run. */
 function lateJoin(s: Sim, r: R) {
-  if (s.teams.length >= 4) return;
+  if (s.teams.length >= 6) return;
   const id = `t${s.teams.length}`;
   // A join that RACED a closure reads the overrides before it was written (run-gate-integrity):
   // the poll's missed-closure repair must catch it.
@@ -630,12 +631,13 @@ async function drain(s: Sim) {
 async function play(seed: number) {
   const r = rng(seed);
   const game = genGame(r);
-  const nTeams = r.int(1, 3);
+  const deep = process.env.RUSHPOINT_LIVENESS_DEEP === '1';
+  const nTeams = r.int(1, deep ? 5 : 3);
   const teams = Array.from({ length: nTeams }, (_, i) =>
     ({ id: `t${i}`, stages: buildInitialStages(clone(game)), status: 'active', launched: true, score: 0, activeTaskId: null } as unknown as RunTeam));
   const s: Sim = { game, launchGame: clone(game), team: teams[0], teams, counts: {}, overrides: {}, now: L, log: [`seed ${seed}`, `game ${JSON.stringify(game.stages.map((g) => ({ id: g.id, req: g.requiredTaskCount, rel: g.releaseAfterMinutes, ex: g.exclusiveGroups?.map((x) => x.taskIds), t: g.tasks.map((t) => [t.id, t.unlockAfterTaskIds, t.hidden ? 'H' : '', t.releaseAfterMinutes, t.expiresAfterMinutes, t.expiresAt ? 'abs' : '', t.timeLimitMinutes, t.locationless ? '' : `cap${t.maxConcurrentTeams}`]) })))}`] };
   assertSafe(s);
-  const steps = r.int(5, 60);
+  const steps = r.int(5, deep ? 120 : 60);
   for (let i = 0; i < steps; i++) {
     s.team = r.pick(s.teams);
     if ((s.team.status as string) === 'finished' && !r.chance(0.2)) continue;
