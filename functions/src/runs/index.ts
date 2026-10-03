@@ -1369,8 +1369,13 @@ export async function completeTaskForTeam(
     // prerequisites cannot be completed, whatever path funnels here (completeTask,
     // submitTaskAnswer, submitSequenceStep, verifyStationCode, photo review).
     // Completed ids come from the freshly-read team state INSIDE this transaction.
-    // run-gate-integrity: a mission an operator put this team on PAST its gate is not locked.
-    if (gameTask && taskRec.gateOverride !== true) {
+    // run-gate-integrity: a mission an operator put this team on PAST its gate is not locked, and
+    // neither is one the team already HOLDS. The gate decides what may be handed out — routing and
+    // forceAssignTask check it — so it is re-checked here only for a record nobody handed out (the
+    // hand-crafted call on an unassigned mission this guard exists for). A prerequisite added to a
+    // held mission by a mid-run template edit used to refuse the team's completion with nothing
+    // ever moving them off it (found by the liveness simulation).
+    if (gameTask && taskRec.gateOverride !== true && taskRec.status !== 'assigned') {
       // skip-keeps-the-stage: an operator-skipped prerequisite satisfies the gate too.
       const satisfiedTaskIds = gateSatisfiedTaskIds(stages, game.stages);
       if (!isUnlocked(gameTask, satisfiedTaskIds)) {

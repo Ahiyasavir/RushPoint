@@ -184,7 +184,7 @@ function tryComplete(s: Sim): 'done' | string {
   // The submission door (completeTask): time limit, then the shared schedule rule.
   if (gameTask?.timeLimitMinutes && rec.startedAt && s.now - Date.parse(rec.startedAt) >= gameTask.timeLimitMinutes * 60_000 + 5_000) return 'timeLimit';
   if (gameTask) { const refusal = scheduleRefusal(gameTask, LAUNCH, s.now, rec); if (refusal) return refusal; }
-  if (gameTask && rec.gateOverride !== true && !isUnlocked(gameTask, gateSatisfiedTaskIds(stages, s.game.stages))) return 'locked';
+  if (gameTask && rec.gateOverride !== true && rec.status !== 'assigned' && !isUnlocked(gameTask, gateSatisfiedTaskIds(stages, s.game.stages))) return 'locked';
   const gs = s.game.stages.find((g) => g.id === stages[idx].stageId);
   const siblings = gs ? resolveExclusions(gs, rec.taskId) : [];
   if (stages[idx].tasks.some((t) => t.status === 'completed' && siblings.includes(t.taskId))) return 'exclusiveTaken';
@@ -366,7 +366,7 @@ let uid = 0;
 /** A creator editing the template while the run is live (updateGame accepts all of these). */
 function editTemplate(s: Sim, r: R) {
   const g = clone(s.game);
-  const kind = r.int(0, 4);
+  const kind = r.int(0, 6);
   const st = r.pick(g.stages);
   if (kind === 0 && st.tasks.length > 1) {
     const victim = r.pick(st.tasks).id;
@@ -391,6 +391,22 @@ function editTemplate(s: Sim, r: R) {
     g.stages = g.stages.filter((x) => x.id !== victim);
     g.stages[g.stages.length - 1].isFinal = true;
     s.log.push(`edit: delete stage ${victim}`);
+  } else if (kind === 5 && st.tasks.length > 1) {
+    // Add a prerequisite on a LATER mission (keeps the graph acyclic, as updateGame requires),
+    // possibly on a mission some team is holding right now.
+    const i = r.int(1, st.tasks.length - 1);
+    const dep = st.tasks[r.int(0, i - 1)].id;
+    const t = st.tasks[i];
+    t.unlockAfterTaskIds = [...new Set([...(t.unlockAfterTaskIds ?? []), dep])];
+    s.log.push(`edit: ${t.id} now waits for ${dep}`);
+  } else if (kind === 6) {
+    // Push a mission's release later (its window must stay valid: release < expiry).
+    const t = r.pick(st.tasks);
+    const later = Math.round((s.now - L) / 60_000) + r.int(5, 40);
+    if (typeof t.expiresAfterMinutes === 'number' && t.expiresAfterMinutes <= later) t.expiresAfterMinutes = later + 10;
+    if (t.expiresAt) delete t.expiresAt;
+    t.releaseAfterMinutes = later;
+    s.log.push(`edit: ${t.id} released at ${later}m`);
   } else {
     // Insert a stage at the front of the order.
     g.stages.forEach((x) => { x.order += 1; });

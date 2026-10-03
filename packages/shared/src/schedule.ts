@@ -160,10 +160,14 @@ export function scheduleRefusal(
   gate: (ReleaseGate & ExpiryGate) | null | undefined,
   runStartedAt: string | number | null | undefined,
   nowMs: number,
-  rec?: { gateOverride?: unknown } | null,
+  rec?: { gateOverride?: unknown; status?: unknown } | null,
 ): 'notReleased' | 'expired' | null {
   if (rec && rec.gateOverride === true) return null;
-  if (!isReleased(gate, runStartedAt, nowMs)) return 'notReleased';
+  // A release time decides whether a mission may be HANDED OUT. A mission the team already holds
+  // was handed out (routing checked the release), so a release moved later by a mid-run template
+  // edit must not lock the team out of the mission in its hands — nothing would ever move it off.
+  // Expiry still applies to a held mission: that is what the expiry sweep exists for.
+  if (!(rec && rec.status === 'assigned') && !isReleased(gate, runStartedAt, nowMs)) return 'notReleased';
   if (isExpired(gate, runStartedAt, nowMs)) return 'expired';
   return null;
 }
