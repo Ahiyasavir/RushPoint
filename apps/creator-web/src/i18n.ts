@@ -2058,6 +2058,7 @@ const HE = {
     // mission-time-limit
     windowOpensAt: 'נפתחת ב',
     windowClosesAt: 'נסגרת ב',
+    windowClosedAlready: 'שעת הסגירה הזו כבר עברה, ואף קבוצה לא תוכל לשחק במשימה. עדכנו אותה או מחקו אותה',
     timeLimitLead: 'זמן לכל קבוצה',
     timeLimitUnit: 'דקות מהרגע שהקבוצה מקבלת את המשימה (ריק = ללא הגבלה)',
     timeLimitHelp: 'כשהזמן נגמר, הקבוצה עוברת למשימה הבאה בלי נקודות ומקבלת הודעה. תשובה או תמונה שנשלחו בזמן נחשבות גם אם אושרו אחר כך.',
@@ -4970,6 +4971,7 @@ const EN: typeof HE = {
     expiryReleaseAtWarn: (when: string) => `This mission opens at ${when}`,
     windowOpensAt: 'Opens at',
     windowClosesAt: 'Closes at',
+    windowClosedAlready: 'This closing time has already passed, so no team will be able to play the mission. Update it or clear it',
     timeLimitLead: 'Time per team',
     timeLimitUnit: 'minutes from when the team gets the mission (empty = no limit)',
     timeLimitHelp: 'When time runs out, the team moves on to its next mission with no points and gets a message. An answer or photo sent in time still counts, even if it is approved later.',
