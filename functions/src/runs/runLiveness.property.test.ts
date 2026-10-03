@@ -26,7 +26,7 @@ import {
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
 import { applyTaskClosure, advanceTeamStateOnPoll, buildInitialStages, healStrandedStage, retiredNow, applySkipStage, applyRunClosures, heldTaskIdOf } from './index';
-import { isRoutingCandidate } from '../routing/assignNextTask';
+import { isRoutingCandidate, stationCap } from '../routing/assignNextTask';
 
 const LAUNCH = '2026-03-01T09:00:00.000Z';
 const L = Date.parse(LAUNCH);
@@ -63,7 +63,7 @@ function genGame(r: R): Game {
       const t: Record<string, unknown> = {
         id, title: id, type: 'field', difficulty: 5, estimatedMinutes: 5, pointValue: 10,
         // Some stations are physical and capped, so several teams contend for a slot.
-        locationless: r.chance(0.5), maxConcurrentTeams: r.int(1, 3),
+        locationless: r.chance(0.5), maxConcurrentTeams: r.chance(0.05) ? 0 : r.int(1, 3), // 0: an imported file the Builder never clamped
       };
       if (ti > 0 && r.chance(0.4)) {
         const earlier = Array.from({ length: ti }, (_, j) => `s${si}t${j}`);
@@ -134,7 +134,7 @@ function dec(s: Sim, id: string) {
   if ((s.counts[id] ?? 0) <= 0) fail(s, `slot for ${id} released more times than it was claimed`);
   s.counts[id] -= 1;
 }
-const capped = (s: Sim, t: Task) => !t.locationless && (s.counts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3);
+const capped = (s: Sim, t: Task) => !t.locationless && (s.counts[t.id] ?? 0) >= stationCap(t);
 
 class Violation extends Error {}
 function fail(s: Sim, msg: string): never { throw new Violation(`${msg}\n  log:\n    ${[...s.log.slice(0, 2), '…', ...s.log.slice(2).slice(-60)].join('\n    ')}`); }
@@ -457,7 +457,7 @@ function assertSafe(s: Sim) {
   for (const id of new Set([...Object.keys(holders), ...Object.keys(s.counts)])) {
     if ((holders[id] ?? 0) !== (s.counts[id] ?? 0)) fail(s, `slot count for ${id} is ${s.counts[id] ?? 0} but ${holders[id] ?? 0} team(s) hold it`);
     const t = findTask(s, id);
-    if (t && !t.locationless && (holders[id] ?? 0) > (t.maxConcurrentTeams ?? 3)) fail(s, `${id} held by ${holders[id]} teams over its cap ${t.maxConcurrentTeams}`);
+    if (t && !t.locationless && (holders[id] ?? 0) > stationCap(t)) fail(s, `${id} held by ${holders[id]} teams over its cap ${t.maxConcurrentTeams}`);
   }
 }
 

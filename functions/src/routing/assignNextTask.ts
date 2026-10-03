@@ -27,6 +27,18 @@ export const HOT_ZONE_ROUTING_BONUS = 0.35;
 
 // Runtime counter path for a task within a run
 // (stored as a flat map on the Run doc: run.taskCounts[taskId])
+/**
+ * How many teams a station holds at once (change: run-gate-integrity). The Builder clamps the input
+ * to >= 1, but the server never validated it, so an imported game file or an older document could
+ * carry 0, a negative or a fraction — and `count >= 0` is true for every count: the mission was
+ * "full" forever, routing answered stationsFull, and a team that needed it waited for the rest of
+ * the event. Anything that is not a whole number >= 1 reads as the default, exactly like an absent value.
+ */
+export function stationCap(task: Pick<Task, 'maxConcurrentTeams'>): number {
+  const c = task.maxConcurrentTeams;
+  return typeof c === 'number' && Number.isFinite(c) && c >= 1 ? Math.floor(c) : 3;
+}
+
 const runPath = (ownerUid: string, gameId: string, runId: string) =>
   `users/${ownerUid}/games/${gameId}/runs/${runId}`;
 
@@ -38,7 +50,7 @@ function loadFactor(task: Task, taskCounts: Record<string, number>): number {
   // full availability. Use a constant here (NOT cap=Infinity, which makes
   // (Infinity-current)/Infinity → NaN and poisons priorityScore).
   if (task.locationless) return 1;
-  const cap = task.maxConcurrentTeams ?? 3;
+  const cap = stationCap(task);
   const current = taskCounts[task.id] ?? 0;
   return cap > 0 ? Math.max(0, (cap - current) / cap) : 0;
 }
@@ -210,7 +222,7 @@ export function isRoutingCandidate(
   // Unlockable tasks (change: unlockable-tasks): unmet prerequisites hide it.
   if (!isUnlocked(t, satisfiedTaskIds)) return false;
   // WO Fix 4: locationless tasks are uncapped — skip the cap exclusion.
-  if (!t.locationless && (taskCounts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3)) return false;
+  if (!t.locationless && (taskCounts[t.id] ?? 0) >= stationCap(t)) return false;
   return true;
 }
 
@@ -261,8 +273,8 @@ export async function buildRecommendations(
       estimatedMinutes: task.estimatedMinutes,
       difficulty: task.difficulty ?? 5,
       currentLoad:
-        (task.maxConcurrentTeams ?? 3) > 0
-          ? (taskCounts[task.id] ?? 0) / (task.maxConcurrentTeams ?? 3)
+        stationCap(task) > 0
+          ? (taskCounts[task.id] ?? 0) / stationCap(task)
           : 0,
       distanceKm: Math.round(distanceKm * 100) / 100,
     }));
@@ -348,7 +360,7 @@ export function classifyNoAssignment(
     // WO Fix 4: locationless tasks are uncapped — never mis-report them stationsFull.
     if (t.locationless) continue;
     const current = taskCounts[t.id] ?? 0;
-    if (current >= (t.maxConcurrentTeams ?? 3)) { anyCapBlocked = true; }
+    if (current >= stationCap(t)) { anyCapBlocked = true; }
   }
   if (anyCapBlocked) return 'stationsFull';
   if (anyLocked) return 'allLocked';
@@ -459,7 +471,7 @@ export async function claimSpecificTask(
     // The cap check and the increment are in ONE transaction, exactly as in
     // assignTask — a check-then-increment split here would let two concurrent
     // force-assigns both pass a cap of 1.
-    if (!task.locationless && (taskCounts[task.id] ?? 0) >= (task.maxConcurrentTeams ?? 3)) {
+    if (!task.locationless && (taskCounts[task.id] ?? 0) >= stationCap(task)) {
       return { ok: false, reason: 'stationsFull' as const };
     }
 
