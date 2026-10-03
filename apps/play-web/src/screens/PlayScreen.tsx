@@ -828,7 +828,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           <StageDropCountdown
             // run-gate-integrity: a server DURATION anchored to when it arrived, never the phone clock
             // against an instant. An older server sends only the instant: the old behaviour.
-            releaseAt={typeof state.nextStageReleaseInMs === 'number' ? 0 : state.nextStageReleaseAt!}
+            releaseAt={typeof state.nextStageReleaseInMs === 'number' ? 0 : (state.nextStageReleaseAt ?? 0)}
             waitMs={state.nextStageReleaseInMs ?? undefined}
             onOpen={refresh}
           />
