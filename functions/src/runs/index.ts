@@ -4954,7 +4954,10 @@ function sweepExpiredInFlight(
   // mission-time-limit: this team's own countdown ran out. A submission already waiting for the
   // organizers was sent in time, so it is never swept (time is judged at submission).
   const pendingReview = (team as { taskSubmissions?: Record<string, { status?: string }> }).taskSubmissions?.[assignedRec.taskId]?.status === 'pending';
-  const timeUp = !pendingReview && isTimeLimitUp(gameTask, assignedRec.startedAt, nowMs, 0);
+  // run-gate-integrity: the SAME grace the submission doors give (assertWithinTimeLimit, default
+  // TIME_LIMIT_GRACE_MS). Sweeping at zero grace took the mission from a team whose answer was in
+  // flight at the buzzer — the very answer the grace exists to accept.
+  const timeUp = !pendingReview && isTimeLimitUp(gameTask, assignedRec.startedAt, nowMs);
   // run-gate-integrity: a mission an operator sent this team to past its window is theirs to
   // finish; sweeping it on the next poll undid the override seconds after it was given. The
   // team's own countdown (timeLimit) still applies — it starts at that claim.
@@ -5015,6 +5018,8 @@ export async function advanceTeamStateOnPoll(args: {
    * poll's read is never overwritten by stages built from the stale copy.
    */
   healDurably?: () => Promise<unknown>;
+  /** Durable expiry sweep (sweepTeamDurably), same reason as healDurably. */
+  sweepDurably?: () => Promise<unknown>;
   persist: (patch: Record<string, unknown>) => Promise<unknown>;
   release: (taskId: string) => Promise<unknown>;
   onPersistError: (op: string, err: unknown) => void;
@@ -5084,15 +5089,20 @@ export async function advanceTeamStateOnPoll(args: {
       if (swept.timeUp) team.timeUpNotice = { taskId: swept.expiredTaskId, title: swept.title, at: nowIso };
       if (isController) {
         try {
-          await args.persist({
-            stages: swept.stages,
-            activeTaskId: null,
-            // mission-time-limit: why the phone moved on.
-            ...(swept.timeUp ? { timeUpNotice: { taskId: swept.expiredTaskId, title: swept.title, at: nowIso } } : {}),
-            ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}),
-            updatedAt: nowIso,
-          });
-          await args.release(swept.expiredTaskId);
+          if (args.sweepDurably) {
+            // run-gate-integrity: on a fresh read, in a transaction (see sweepTeamDurably).
+            await args.sweepDurably();
+          } else {
+            await args.persist({
+              stages: swept.stages,
+              activeTaskId: null,
+              // mission-time-limit: why the phone moved on.
+              ...(swept.timeUp ? { timeUpNotice: { taskId: swept.expiredTaskId, title: swept.title, at: nowIso } } : {}),
+              ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}),
+              updatedAt: nowIso,
+            });
+            await args.release(swept.expiredTaskId);
+          }
         } catch (e) { args.onPersistError('poll.sweep', e); }
       }
     }
@@ -5181,6 +5191,42 @@ export function healStrandedStage(
   if (retire.length === 0 && !alreadyDone) return { changed: releasedHeld.length > 0, heldAssignedTaskIds: releasedHeld };
   const { heldAssignedTaskIds } = applyStageCompletion(stages, idx, game, launchedAt, now);
   return { changed: true, heldAssignedTaskIds: [...releasedHeld, ...heldAssignedTaskIds] };
+}
+
+/**
+ * The expiry / time-limit sweep, DURABLY (run-gate-integrity): re-decided inside a transaction on a
+ * fresh read, so a submission that committed after the caller's read (an answer in the buzzer's
+ * grace window, from the very phone that is polling) is never overwritten by stages built from the
+ * stale copy. Returns the swept stages, or null when nothing (any longer) needed sweeping.
+ */
+export async function sweepTeamDurably(
+  ownerUid: string, gameId: string, runId: string, teamId: string, game: Game, launchedAt: string | undefined,
+): Promise<RunStageRecord[] | null> {
+  const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+  let releaseId: string | null = null;
+  const out = await withLockRetry(() => db.runTransaction(async (tx) => {
+    releaseId = null;
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) return null;
+    const team = snap.data() as RunTeam;
+    if (team.held === true) return null;
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    const swept = sweepExpiredInFlight(team, game, launchedAt, nowMs);
+    if (!swept) return null;
+    const allDone = swept.stages.every((st) => st.status === 'completed');
+    tx.update(teamRef, {
+      stages: swept.stages,
+      activeTaskId: null,
+      ...(swept.timeUp ? { timeUpNotice: { taskId: swept.expiredTaskId, title: swept.title, at: now } } : {}),
+      ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+      updatedAt: now,
+    });
+    releaseId = swept.expiredTaskId;
+    return swept.stages;
+  }));
+  if (releaseId) await releaseTask(releaseId, ownerUid, gameId, runId);
+  return out;
 }
 
 /**
@@ -5296,18 +5342,14 @@ export async function assignNextInActiveStage(
     if (assignedRec && gt && (gt.expiresAfterMinutes || gt.expiresAt || gt.timeLimitMinutes)) {
       const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
       const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
-      const swept = sweepExpiredInFlight(team, game, launchedAt, Date.now());
-      if (swept) {
-        const allDone = swept.stages.every((s) => s.status === 'completed');
-        await teamRef.update({
-          stages: swept.stages,
-          activeTaskId: null,
-          ...(swept.timeUp ? { timeUpNotice: { taskId: swept.expiredTaskId, title: swept.title, at: now } } : {}),
-          ...(allDone ? { status: 'finished', finishedAt: now } : {}),
-          updatedAt: now,
-        });
-        await releaseTask(swept.expiredTaskId, ownerUid, gameId, runId);
-        team.stages = swept.stages;
+      // The pure probe decides whether a write is needed; the write is re-decided on a fresh read
+      // inside a transaction (sweepTeamDurably), never built from this call's earlier read.
+      if (sweepExpiredInFlight(team, game, launchedAt, Date.now())) {
+        const sweptStages = await sweepTeamDurably(ownerUid, gameId, runId, teamId, game, launchedAt);
+        if (sweptStages) {
+          team.stages = sweptStages;
+          team.activeTaskId = null;
+        }
       }
     }
   }
@@ -6720,6 +6762,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     isController: resolveDeviceRole(team, uid) === 'controller',
     taskStatusOverrides: run.taskStatusOverrides,
     healDurably: () => healTeamDurably(ctx.ownerUid, ctx.gameId, ctx.runId, team.id, game, run.launchedAt, run.taskStatusOverrides),
+    sweepDurably: () => sweepTeamDurably(ctx.ownerUid, ctx.gameId, ctx.runId, team.id, game, run.launchedAt),
     persist: (patch) => db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update(patch),
     release: (taskId) => releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId),
     onPersistError: (op, e) => logBestEffort(op, { runId: ctx.runId, teamId: team.id }, e),
