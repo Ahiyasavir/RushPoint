@@ -1456,6 +1456,7 @@ const HE = {
     taskAvailStatusActive: 'פעילה',
     taskAvailStatusPaused: 'מושהית',
     taskAvailStatusClosed: 'סגורה',
+    taskAvailClosedFinal: 'סגירה היא סופית להרצה הזו',
     taskAvailPause: 'השהיה',
     taskAvailClose: 'סגירה',
     taskAvailResume: 'החזרה למשחק',
@@ -2024,6 +2025,8 @@ const HE = {
     exclusiveUnwinnableWarn: 'שימו לב: מספר המשימות הנדרש להשלמה גבוה ממספר המשימות שאפשר להשלים אחרי שהקבוצות נועלות את החלופות, והשלב יסתיים מוקדם',
     // unreachable-task-strand: אזהרה בלבד. זו הצעה לגיטימית של מסלול מתפצל,
     // והשרת כבר מדלג על המשימה אוטומטית כדי שאף קבוצה לא תיתקע.
+    exclusiveUnlockNeverWarn: (task: string, prereq: string) =>
+      `המשימה "${task}" לא תשוחק אף פעם: היא נפתחת רק אחרי "${prereq}", אבל שתיהן באותה קבוצת חלופות, ולכן ברגע ש"${prereq}" מושלמת היא נסגרת. הוציאו אחת מהן מהקבוצה או בטלו את התנאי`,
     exclusiveUnlockRiskWarn: (task: string, prereq: string) =>
       `שימו לב: המשימה "${task}" נפתחת רק אחרי "${prereq}", ו"${prereq}" היא אחת מכמה חלופות. קבוצה שתבחר חלופה אחרת לא תוכל להגיע ל"${task}", והמשימה תסומן עבורה כמדולגת`,
     exclusiveGroupLetter: (i: number) => 'אבגדהוזחטיכלמנסעפצקרשת'[i] ?? String(i + 1),
@@ -2055,6 +2058,9 @@ const HE = {
     // mission-time-limit
     windowOpensAt: 'נפתחת ב',
     windowClosesAt: 'נסגרת ב',
+    windowClosedAlready: 'שעת הסגירה הזו כבר עברה, ואף קבוצה לא תוכל לשחק במשימה. עדכנו אותה או מחקו אותה',
+    liveRunEditTitle: 'המשחק הזה רץ עכשיו',
+    liveRunEditBody: 'שינויים בתנאי פתיחה, בשעות ובחלופות חלים מיד על הקבוצות שמשחקות. משימה חדשה תגיע רק לקבוצות שיצטרפו מעכשיו, ומשימה שתמחקו תיסגר לקבוצות שעוד לא עשו אותה',
     timeLimitLead: 'זמן לכל קבוצה',
     timeLimitUnit: 'דקות מהרגע שהקבוצה מקבלת את המשימה (ריק = ללא הגבלה)',
     timeLimitHelp: 'כשהזמן נגמר, הקבוצה עוברת למשימה הבאה בלי נקודות ומקבלת הודעה. תשובה או תמונה שנשלחו בזמן נחשבות גם אם אושרו אחר כך.',
@@ -2437,8 +2443,8 @@ const HE = {
     },
     presetLabels: {
       time_only: { name: 'מרוץ מהירות', desc: 'דירוג לפי זמן כולל בלבד. אין נקודות, הקבוצה המהירה ביותר מנצחת.' },
-      fixed_points_speed: { name: 'נקודות + בונוס מהירות', desc: "כל משימה מזכה בערך הנקודות הקבוע שלה. סיימו את כל השלבים מהר מהצפוי לבונוס (עד +200 נק')." },
-      smart_weighted: { name: 'ניקוד חכם', desc: 'ניקוד לפי רמת הקושי של המשימה ומהירות הביצוע ביחס להערכה. משימות קשות שוות יותר.' },
+      fixed_points_speed: { name: 'נקודות + בונוס מהירות', desc: 'כל משימה מזכה בערך הנקודות הקבוע שלה. מי שמסיים את הכול מקבל עוד 10%, ומי שמהיר יותר משאר הקבוצות מקבל עד 15% נוספים.' },
+      smart_weighted: { name: 'ניקוד חכם', desc: 'ניקוד לפי רמת הקושי של המשימה, ומהירות הביצוע משנה אותו בעד 30% לכל כיוון. משימות קשות שוות יותר, והערכת זמן לא מדויקת לא תהרוס את הניקוד.' },
     },
     advRegistration: 'שדות הרשמה מתקדמים',
     regNameNote: '"שם" (לכל חבר) תמיד נדרש.',
@@ -4371,6 +4377,7 @@ const EN: typeof HE = {
     taskAvailStatusActive: 'In play',
     taskAvailStatusPaused: 'Paused',
     taskAvailStatusClosed: 'Closed',
+    taskAvailClosedFinal: 'A closure is final for this run',
     taskAvailPause: 'Pause',
     taskAvailClose: 'Close',
     taskAvailResume: 'Put back in play',
@@ -4934,6 +4941,8 @@ const EN: typeof HE = {
     exclusiveUnwinnableWarn: 'Heads up: the required completion count is higher than the number of missions a team can complete once the groups lock their alternatives, so the stage would end early',
     // unreachable-task-strand: advisory only. The shape is a legitimate branch,
     // and the server now retires the dead branch so no team can be stranded.
+    exclusiveUnlockNeverWarn: (task: string, prereq: string) =>
+      `Mission "${task}" can never be played: it unlocks only after "${prereq}", but both are in the same group of alternatives, so completing "${prereq}" closes it. Take one of them out of the group, or remove the condition`,
     exclusiveUnlockRiskWarn: (task: string, prereq: string) =>
       `Heads up: mission "${task}" unlocks only after "${prereq}", and "${prereq}" is one of several alternatives. A team that picks a different alternative can never reach "${task}", so it will be marked skipped for them`,
     exclusiveGroupLetter: (i: number) => (i <= 25 ? String.fromCharCode(65 + i) : String(i + 1)),
@@ -4964,6 +4973,9 @@ const EN: typeof HE = {
     expiryReleaseAtWarn: (when: string) => `This mission opens at ${when}`,
     windowOpensAt: 'Opens at',
     windowClosesAt: 'Closes at',
+    windowClosedAlready: 'This closing time has already passed, so no team will be able to play the mission. Update it or clear it',
+    liveRunEditTitle: 'This game is being played right now',
+    liveRunEditBody: 'Changes to unlock conditions, times and alternatives apply at once to the teams playing. A new mission reaches only teams that join from now on, and a mission you delete is closed for the teams that have not done it yet',
     timeLimitLead: 'Time per team',
     timeLimitUnit: 'minutes from when the team gets the mission (empty = no limit)',
     timeLimitHelp: 'When time runs out, the team moves on to its next mission with no points and gets a message. An answer or photo sent in time still counts, even if it is approved later.',
@@ -5351,8 +5363,8 @@ const EN: typeof HE = {
     },
     presetLabels: {
       time_only: { name: 'Speed Race', desc: 'Ranked purely by total race time. No points, fastest team wins.' },
-      fixed_points_speed: { name: 'Points + Speed Bonus', desc: 'Each mission earns its fixed point value. Complete all stages faster than expected for a bonus (up to +200 pts).' },
-      smart_weighted: { name: 'Smart Score', desc: 'Score based on mission difficulty and how fast each mission was completed relative to its estimate. Harder missions are worth more.' },
+      fixed_points_speed: { name: 'Points + Speed Bonus', desc: 'Each mission earns its fixed point value. Finishing everything adds 10%, and being faster than the other teams adds up to 15% more.' },
+      smart_weighted: { name: 'Smart Score', desc: 'Score based on mission difficulty, with speed moving it by up to 30% either way. Harder missions are worth more, and an inaccurate time estimate cannot wreck the score.' },
     },
     advRegistration: 'Advanced registration fields',
     regNameNote: '"Name" (per member) is always required.',

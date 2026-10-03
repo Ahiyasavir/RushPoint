@@ -15,7 +15,7 @@ import { lastFixStore, lastFixKey } from './lastFixStore';
 import { trackStore } from './trackStore';
 import * as admin from 'firebase-admin';
 import { chunk, MAX_BATCH_OPS } from './batchUtil';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, hasScheduleGate, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, hasScheduleGate, scheduleRefusal, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 // The recorded answer sheet (change: post-run-player-report) — every submission,
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
 // added to sanitizeTeamForParticipant's allow-list.
@@ -69,7 +69,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -1615,12 +1615,8 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   if (hasScheduleGate(stationTask)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
-    if (!isReleased(stationTask, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task is not available yet');
-    }
-    if (isExpired(stationTask, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task has expired');
-    }
+    // run-gate-integrity: the shared rule, honouring an operator override.
+    throwScheduleRefusal(scheduleRefusal(stationTask, launchedAt, Date.now(), teamTaskRecord(team, stationTask.id)));
   }
 
   // wave-h #1: enforce the station's attemptLimit (mirrors submitTaskAnswer's cap at
@@ -1873,12 +1869,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   if (scheduleGate && hasScheduleGate(scheduleGate)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
-    if (!isReleased(scheduleGate, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task is not available yet');
-    }
-    if (isExpired(scheduleGate, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task has expired');
-    }
+    // run-gate-integrity: the shared rule, honouring an operator override.
+    throwScheduleRefusal(scheduleRefusal(scheduleGate, launchedAt, Date.now(), teamTaskRecord(team, taskId)));
   }
   const priorSubmission = (team as { taskSubmissions?: Record<string, { status?: string }> })
     .taskSubmissions?.[taskId];
@@ -2418,7 +2410,12 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
   const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[]; exclusiveGroups?: { id: string; taskIds: string[] }[] }[] };
-  const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides };
+  const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides; status?: string };
+  // run-gate-integrity: a finalized run is frozen. A closure after the final board would skip
+  // records and shrink requirements the published standings were computed without.
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
 
   const stage = (game.stages ?? []).find((s) => (s.tasks ?? []).some((t) => t?.id === ids.taskId));
   if (!stage) throw new functions.https.HttpsError('not-found', 'Task not found in this game');
@@ -2451,6 +2448,20 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
   if (!plan.ok) {
     // emptyStage / taskNotInStage are structural; unknownStatus was screened above.
     throw new functions.https.HttpsError('failed-precondition', `Cannot change this task: ${plan.reason}`);
+  }
+
+  // run-gate-integrity: a CLOSED mission is final for this run. Closing it skipped it for every
+  // team (closedByOrganizer), opened what waited for it and lowered each team's requirement;
+  // writing `active` back afterwards changed the console's badge and nothing else, so the
+  // organizer saw a mission "back in play" that no team that had joined could ever be handed —
+  // while a team joining later DID get it. Refused loudly instead of half-applied. A template
+  // `status: 'closed'` (no run override) never touched a team, so putting it back stays allowed.
+  if (run.taskStatusOverrides?.[ids.taskId] === 'closed' && status !== 'closed') {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'This mission was closed for this run, and a closure is final',
+      { code: 'closedIsFinal' },
+    );
   }
 
   // The organizer learns about a dead-ended stage HERE, not through stuck teams.

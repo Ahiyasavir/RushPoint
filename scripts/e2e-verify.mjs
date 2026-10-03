@@ -1664,6 +1664,65 @@ async function main() {
 
   }); // scenario: paid hints
 
+  // scoring-v2: every bonus is a PERCENTAGE of the mission points a team earned. The old flat +500
+  // completion bonus outweighed every mission of a game whose missions are worth 10 points each, and
+  // a lone finisher's speed was judged against the author's estimate even when that estimate was
+  // obviously wrong. Real server, real clocks.
+  await scenario('scoring-v2: percentage bonuses, field-relative pace', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const sv2Task = (id) => ({
+      id, title: `Riddle ${id}`, type: 'quiz', answers: ['olive'],
+      choices: ['olive', 'wrong-a', 'wrong-b', 'wrong-c'],
+      coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 30, expectedDurationMinutes: 30,
+      pointValue: 40, maxConcurrentTeams: 5, triggerMode: 'instant',
+    });
+    const { gameId: g } = await creator.call('createGame', { title: 'Scoring v2', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'st-sv2', order: 0, title: 'Quiz', isFinal: true, tasks: [sv2Task('sv2-1')] }],
+    });
+
+    // A. One team. It finishes in seconds against a 30-minute estimate — an estimate no real run
+    //    matches — so no pace term is paid, and finishing adds 10% of 40, not 500.
+    const { runId: r1, accessCode: c1 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p1 = makeParty('scoringV2Solo');
+    await signInAnonymously(p1.auth);
+    await p1.call('joinRun', { code: c1, displayName: 'Solo' });
+    await creator.call('startTeams', { gameId: g, runId: r1 });
+    const a1 = await p1.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r1, taskId: 'sv2-1', answer: 'olive' });
+    check('scoring-v2: the solo team answered correctly', a1?.correct === true, JSON.stringify(a1));
+    const soloId = (await p1.call('getMyTeamState', { code: c1 }))?.team?.id;
+    const live1 = await creator.call('refreshLeaderboard', { gameId: g, runId: r1, publish: false });
+    assertLeaderboardInvariants('scoring-v2 solo live', live1?.rankings, [soloId]);
+    check('scoring-v2: completion adds 10% of the points (40 → 44), not a flat +500',
+      live1?.rankings?.[0]?.score === 44, JSON.stringify(live1?.rankings?.[0]));
+    const fin1 = await creator.call('finalizeRun', { gameId: g, runId: r1 });
+    const fin1R = fin1?.rankings ?? fin1?.leaderboard?.rankings ?? [];
+    check('scoring-v2: the final board agrees with the live one', fin1R[0]?.score === 44, JSON.stringify(fin1R[0]));
+
+    // B. Two teams: speed is now relative to the field, so each moves by at most ±15% of its
+    //    40 points on top of the +4 for finishing — never by hundreds.
+    const { runId: r2, accessCode: c2 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const pa = makeParty('scoringV2A');
+    const pb = makeParty('scoringV2B');
+    await signInAnonymously(pa.auth);
+    await signInAnonymously(pb.auth);
+    await pa.call('joinRun', { code: c2, displayName: 'Swift' });
+    await pb.call('joinRun', { code: c2, displayName: 'Steady' });
+    await creator.call('startTeams', { gameId: g, runId: r2 });
+    await pa.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r2, taskId: 'sv2-1', answer: 'olive' });
+    await new Promise((r) => setTimeout(r, 1500));
+    await pb.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r2, taskId: 'sv2-1', answer: 'olive' });
+    const idA = (await pa.call('getMyTeamState', { code: c2 }))?.team?.id;
+    const idB = (await pb.call('getMyTeamState', { code: c2 }))?.team?.id;
+    const fin2 = await creator.call('finalizeRun', { gameId: g, runId: r2 });
+    const fin2R = fin2?.rankings ?? fin2?.leaderboard?.rankings ?? [];
+    assertLeaderboardInvariants('scoring-v2 pair final', fin2R, [idA, idB]);
+    check('scoring-v2: every finisher stays within 44 ± 15% of its points',
+      fin2R.every((r) => r.score >= 44 - 6 && r.score <= 44 + 6), JSON.stringify(fin2R.map((r) => r.score)));
+    check('scoring-v2: the faster team ranks first', fin2R[0]?.teamId === idA, JSON.stringify(fin2R.map((r) => r.teamName)));
+  });
+
   await scenario('wrong answers cost (escalate, cap, cooldown, replay, preset)', async () => {
 
   // ── Wrong-answer cost (change: wrong-answer-cost) ───────────────────────────
@@ -11035,6 +11094,79 @@ async function main() {
     check('pause: the refusal counts the locked dependent as unavailable (1 of 2)',
       pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
   }); // scenario: closing a mission mid-run
+
+  // ═══ Run gate integrity (change: run-gate-integrity) ═════════════════════════
+  //
+  // Four ways a team used to be stranded or handed a mission it could not finish, played through
+  // the real callables: a mission whose window closed before anyone took it (never retired, so a
+  // stage that needs every mission never ended); a prerequisite that was benched before launch
+  // (its dependent stayed locked forever); a staff override past an unlock gate (the completion
+  // door still said "locked"); and "put back in play" on a CLOSED mission (it changed the badge and
+  // nothing else). The pure liveness simulation (functions/src/runs/runLiveness.property.test.ts)
+  // covers the combinations; this proves the wiring.
+  await scenario('run gate integrity (expired-before-taken · benched prerequisite · override · closure is final)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const t = (id, extra = {}) => ({
+      id, title: `Mission ${id}`, type: 'self_report', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9,
+      ...extra,
+    });
+    const { gameId: gg } = await creator.call('createGame', { title: 'Gate Integrity Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: gg, scoringPreset: 'fixed_points_speed', stages: [
+      // Every mission required (no requiredTaskCount).
+      { id: 'gi-s1', order: 0, title: 'Gates', tasks: [
+        t('gi-a'),
+        t('gi-exp', { expiresAfterMinutes: 0.1 }), // closes 6s after launch
+        t('gi-h', { hidden: true }),               // benched: never enters the run
+        t('gi-y', { unlockAfterTaskIds: ['gi-h'] }),
+        t('gi-c', { unlockAfterTaskIds: ['gi-a'] }),
+      ] },
+      { id: 'gi-s2', order: 1, title: 'End', isFinal: true, tasks: [t('gi-end'), t('gi-z')] },
+    ] });
+    const { runId: gr, accessCode: gc } = await creator.call('launchRun', { gameId: gg });
+    const G = { ownerUid: OWNER, gameId: gg, runId: gr };
+    const teamPath = (uid) => `users/${OWNER}/games/${gg}/runs/${gr}/teams/${uid}`;
+    const rec = (team, id) => (team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === id);
+    const p = makeParty('gateIntegrity');
+    const pUid = (await signInAnonymously(p.auth)).user.uid;
+    await p.call('joinRun', { code: gc, displayName: 'Gate Tester' });
+    await creator.call('startTeams', { gameId: gg, runId: gr });
+
+    // Override past an unlock gate: gi-c waits for gi-a, staff send the team there anyway.
+    await creator.call('forceAssignTask', { ...G, teamId: pUid, taskId: 'gi-c', override: true, reason: 'e2e' });
+    const done = await p.call('completeTask', { ...G, taskId: 'gi-c' });
+    const afterC = (await creator.getDocAt(teamPath(pUid))).data ?? {};
+    check('override: a mission staff put the team on past its gate can be completed',
+      done?.ok === true && rec(afterC, 'gi-c')?.status === 'completed', JSON.stringify({ done, rec: rec(afterC, 'gi-c') }));
+
+    // Let gi-exp's window close before anyone took it, then play the stage out.
+    const launchedMs = Date.parse((await creator.getDocAt(`users/${OWNER}/games/${gg}/runs/${gr}`)).data?.launchedAt);
+    const closeAt = launchedMs + 0.1 * 60_000 + 700;
+    if (Date.now() < closeAt) await new Promise((r) => setTimeout(r, closeAt - Date.now()));
+    for (let i = 0; i < 6; i++) {
+      const st = await p.call('getMyTeamState', { code: gc });
+      let cur = st?.team?.activeTaskId;
+      if (!cur) cur = (await p.call('requestNextTask', { ...G }))?.taskId ?? null;
+      if (!cur || cur.startsWith('gi-end') || cur === 'gi-z') break;
+      await p.call('completeTask', { ...G, taskId: cur });
+    }
+    const team = (await creator.getDocAt(teamPath(pUid))).data ?? {};
+    check('benched prerequisite: the mission behind it was played, not stranded',
+      rec(team, 'gi-y')?.status === 'completed', JSON.stringify(rec(team, 'gi-y')));
+    check('expired before taken: the mission is retired, not left open',
+      rec(team, 'gi-exp')?.status === 'skipped' && rec(team, 'gi-exp')?.skipCause === 'expired', JSON.stringify(rec(team, 'gi-exp')));
+    check('expired before taken: the stage that needed every mission still ends',
+      team.stages?.[0]?.status === 'completed' && team.stages?.[1]?.status === 'active', JSON.stringify(team.stages?.map((s) => s.status)));
+
+    // A closure is final: putting it back in play is refused, loudly, with a code the console reads.
+    await creator.call('setRunTaskStatus', { ...G, taskId: 'gi-z', status: 'closed', reason: 'e2e' });
+    const reopen = await expectError('closure is final: putting a closed mission back in play is refused',
+      creator.call('setRunTaskStatus', { ...G, taskId: 'gi-z', status: 'active' }),
+      { codeIn: ['functions/failed-precondition'] });
+    check('closure is final: the refusal carries closedIsFinal', reopen?.details?.code === 'closedIsFinal', JSON.stringify(reopen?.details));
+    const runDoc = (await creator.getDocAt(`users/${OWNER}/games/${gg}/runs/${gr}`)).data ?? {};
+    check('closure is final: the override is still closed', runDoc.taskStatusOverrides?.['gi-z'] === 'closed', JSON.stringify(runDoc.taskStatusOverrides));
+  }); // scenario: run gate integrity
 
   // ═══ Mission time limits (change: mission-time-limit) ═══════════════════════
   //

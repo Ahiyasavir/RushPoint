@@ -233,6 +233,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // `lockedTaskIds` (release/unlock-gated ids), driven by game-rule + team-record
   // state, not by whether content happens to be on the wire.
   const lockedIds = state.lockedTaskIds ?? [];
+  // run-gate-integrity: when the server's lock list changes (a release time arrived, a pause was
+  // lifted, a prerequisite was met), ask for a mission at once — the routing effect depends on it.
+  const lockKey = lockedIds.slice().sort().join(',');
   const allRemainingLocked = unassigned.length > 0
     && unassigned.every((rec) => lockedIds.includes(rec.taskId));
 
@@ -240,10 +243,24 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // A failed request surfaces a retryable error instead of an infinite spinner.
   // Viewer phones never request routing — the controller drives assignment and
   // the team-doc snapshot brings the result here.
+  // run-gate-integrity: the slow re-ask while every remaining mission waits (see below). Held in a
+  // ref so a re-run of the effect or an unmount cancels it instead of stacking a second chain.
+  const reaskTimer = useRef<number | null>(null);
+  const recheckAfterFlight = useRef(false);
+  // A finalized run hands out nothing ever again: stop re-asking (each ask costs reads).
+  const runStatusRef = useRef(state.run.status);
+  runStatusRef.current = state.run.status;
+  useEffect(() => () => { if (reaskTimer.current) window.clearTimeout(reaskTimer.current); }, []);
   useEffect(() => {
+    // Any re-run supersedes a pending slow re-ask: it is either about to ask now or has no reason to.
+    if (reaskTimer.current) { window.clearTimeout(reaskTimer.current); reaskTimer.current = null; }
     if (isViewer) return;
     if (assignedRec || unassigned.length === 0) return;
-    if (routingInFlight.current) return; // don't stampede a slow request
+    if (routingInFlight.current) {
+      // A change (e.g. the lock list) arrived mid-request: remember it, ask again when that returns.
+      recheckAfterFlight.current = true;
+      return; // don't stampede a slow request
+    }
     routingInFlight.current = true;
     setRoutingError(false);
     // wave-f (next-task-regression, Bug B): routing does NOT require a GPS fix —
@@ -280,6 +297,32 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           setStationBusy(false);
           routingInFlight.current = false;
           onChanged();
+          // run-gate-integrity: nothing handed out while missions remain — every one is waiting on
+          // an unlock, a release time or an organizer's pause. Nothing else re-asks: this effect
+          // re-runs only when the record set changes, and a release time arriving or a pause being
+          // lifted changes no record. So the phone sat on "locked" (or a spinner) until somebody
+          // tapped retry. Ask again on a slow backoff; the server also heals a stranded stage on
+          // exactly this call (stageRetirements).
+          // ONE pending re-ask at a time (cleared on unmount and on every effect re-run), and only
+          // for reasons that can change on their own — a held-for-consent team waits for a human.
+          if (!res.taskId && recheckAfterFlight.current && runStatusRef.current !== 'finished') {
+            // Something changed while this request was in flight: ask again now, not in a minute.
+            recheckAfterFlight.current = false;
+            setRoutingAttempt((n) => n + 1);
+            return;
+          }
+          recheckAfterFlight.current = false;
+          if (!res.taskId && res.reason !== 'guardian_consent' && runStatusRef.current !== 'finished') {
+            if (reaskTimer.current) window.clearTimeout(reaskTimer.current);
+            // A SLOW fallback only: the immediate re-ask comes from the lock list changing (below),
+            // which the status poll already delivers for free. This catches what that list cannot
+            // show (a window closing, a stage to heal) without a read storm while many teams wait.
+            reaskTimer.current = window.setTimeout(() => {
+              reaskTimer.current = null;
+              if (routingInFlight.current) return;
+              setRoutingAttempt((n) => n + 1);
+            }, 60000 + Math.random() * 15000);
+          }
         })
         .catch(() => { routingInFlight.current = false; setRoutingError(true); });
     withLocation(
@@ -287,7 +330,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       () => { void requestRouting(undefined); },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignedRec, unassigned.length, routingAttempt, isViewer]);
+  }, [assignedRec, unassigned.length, routingAttempt, isViewer, lockKey]);
 
   // Routing wait (change: play-no-silent-failures): "finding your next task" used
   // to be a motionless sentence with no spinner and no escape, able to sit for the
@@ -1436,8 +1479,12 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           overflow menu surviving into the next mission. Keys need only be unique
           among SIBLINGS, so a per-component prefix keeps the remount and removes
           the collision. */}
-      <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
-      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} onTimeUp={onChanged} />
+      {/* run-gate-integrity: staff sent the team here PAST its window; the server accepts the
+          submission, so announcing the mission as closed would tell the player to give up on it. */}
+      {assignedRec?.gateOverride !== true && (
+        <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} leftMs={state.activeTaskClosesInMs} onExpired={onChanged} />
+      )}
+      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} frozen={state.team.held === true} onTimeUp={onChanged} />
 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
@@ -1708,11 +1755,21 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
 // `expiresAfterMinutes` + the run's launchedAt (both already in the payload).
 // On hitting zero it triggers the state refresh, so the server sweep skips the
 // closed task and reroutes the team. The server clock decides — this is display.
-function ExpiryCountdown({ task, launchedAt, onExpired }: {
-  task: SafeTask; launchedAt?: string | null; onExpired: () => void;
+function ExpiryCountdown({ task, launchedAt, leftMs, onExpired }: {
+  task: SafeTask; launchedAt?: string | null;
+  /** Server-measured time until the window closes (run-gate-integrity). `undefined` = an older
+   *  server that does not send it: fall back to the launch-relative instant. */
+  leftMs?: number | null;
+  onExpired: () => void;
 }) {
   const { t } = useT();
-  const closesAt = expiryInstantMs(task, launchedAt ?? undefined);
+  // Anchor the server's DURATION to when it arrived (never the phone's idea of the close instant);
+  // re-anchored on every poll, like TimeLimitCountdown.
+  const [anchor, setAnchor] = useState(() => ({ leftMs, at: Date.now() }));
+  if (anchor.leftMs !== leftMs) setAnchor({ leftMs, at: Date.now() });
+  const closesAt = leftMs === undefined
+    ? expiryInstantMs(task, launchedAt ?? undefined)
+    : (typeof anchor.leftMs === 'number' ? anchor.at + anchor.leftMs : null);
   const [now, setNow] = useState(() => Date.now());
   const fired = useRef(false);
   useEffect(() => {
@@ -1753,7 +1810,12 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
 // mission-time-limit: this team's own countdown. The server sends the time LEFT; it is counted down
 // from when it arrived (lib/timeLimitCountdown.ts), and at zero the state is refreshed so the
 // server's sweep can move the team on.
-function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTimeUp: () => void }) {
+function TimeLimitCountdown({ leftMs, frozen = false, onTimeUp }: {
+  leftMs?: number | null;
+  /** run-gate-integrity: the team is on a staff hold — its mission clock is stopped, so is this. */
+  frozen?: boolean;
+  onTimeUp: () => void;
+}) {
   const { t } = useT();
   // Re-anchored every time a fresh value arrives (each poll), which keeps the display honest.
   // Derived state, adjusted during render (React's documented pattern for "reset on prop change").
@@ -1761,21 +1823,23 @@ function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTi
   if (anchor.leftMs !== leftMs) setAnchor({ leftMs, at: Date.now() });
   const [now, setNow] = useState(() => Date.now());
   const fired = useRef(false);
-  const left = countdownLeftMs(anchor.leftMs, anchor.at, now);
-  const running = left !== null && left > 0;
+  const left = frozen
+    ? (typeof anchor.leftMs === 'number' && Number.isFinite(anchor.leftMs) ? Math.max(0, anchor.leftMs) : null)
+    : countdownLeftMs(anchor.leftMs, anchor.at, now);
+  const running = !frozen && left !== null && left > 0;
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [running]);
   useEffect(() => {
-    if (left === 0 && !fired.current) {
+    if (!frozen && left === 0 && !fired.current) {
       fired.current = true;
       // A beat later, so the server's clock has passed the limit too.
       const id = setTimeout(onTimeUp, 1500);
       return () => clearTimeout(id);
     }
-  }, [left, onTimeUp]);
+  }, [left, frozen, onTimeUp]);
   if (left === null) return null;
   if (left <= 0) {
     return <p className="mt-2 text-sm text-ink-alert font-medium" data-testid="time-limit-up">⌛ {t.task.timeLimitUpNotice}</p>;

@@ -15,7 +15,7 @@ import {
   SURVEY_MAX_DURATION_MINUTES,
   TASK_DURATION_FALLBACK_MINUTES,
 } from '../packages/shared/src/taskDuration';
-import { scoreFixedPointsSpeed } from '../packages/shared/src/scoringPresets';
+import { teamExpectedRouteMinutes } from '../packages/shared/src/scoringPresets';
 
 let failures = 0;
 function ok(label: string, cond: boolean): void {
@@ -151,19 +151,17 @@ console.log('\n── scoring is UNCHANGED (no in-flight re-scoring) ───�
 // same value the old reduce did. The intent is unchanged: the type-derived DEFAULT must
 // never leak into scoring; a task with no explicit durations contributes 0.
 const gameNoDurations = { stages: [{ tasks: [{ id: 't' /* no durations at all */ }] }] } as never;
-const started = '2026-01-01T10:00:00.000Z';
-const finished = '2026-01-01T10:10:00.000Z';
 const finishedTeamStages = [{
   stageId: 's', order: 0, status: 'completed',
   tasks: [{ taskId: 't', taskIndex: 0, status: 'completed' }],
 }] as never;
-eq('expected total of 0 still yields no speed bonus',
-  scoreFixedPointsSpeed(finishedTeamStages, started, finished, gameNoDurations), 0);
-// And an explicit expectedDurationMinutes still drives the bonus exactly as before (via
-// the fallback): 30 expected - 10 actual = 20 min * 10 pts = 200, capped at 200.
+// scoring-v2: the expected total is the denominator of the team's pace; it is read directly.
+eq('a task with no explicit durations contributes 0 to the expected total',
+  teamExpectedRouteMinutes(finishedTeamStages, gameNoDurations), 0);
+// And an explicit expectedDurationMinutes still reaches it exactly as before (via the fallback).
 const gameExplicit = { stages: [{ tasks: [{ id: 't', estimatedMinutes: 30, expectedDurationMinutes: 30 }] }] } as never;
-eq('an explicit expected total still pays the same speed bonus',
-  scoreFixedPointsSpeed(finishedTeamStages, started, finished, gameExplicit), 200);
+eq('an explicit expected duration still counts',
+  teamExpectedRouteMinutes(finishedTeamStages, gameExplicit), 30);
 
 console.log('');
 if (failures > 0) {

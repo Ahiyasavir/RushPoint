@@ -41,6 +41,9 @@ function p90(values: number[]): number {
  * `gameTasks` is the flat list of the game's tasks (id + type), which fixes the
  * output order so the result is deterministic regardless of team ordering.
  */
+/** Skip causes that mean "this team was never meant to play it", not "it gave up". */
+const SKIPPED_BY_DESIGN = new Set<string>(['stageSatisfied', 'exclusive', 'unreachable', 'removed']);
+
 export function computeRunAnalytics(teams: RunTeam[], gameTasks: AnalyticsTask[]): RunAnalytics {
   const tasks: TaskAnalytics[] = gameTasks.map((gt) => {
     let attempts = 0, completions = 0, skips = 0, hintCount = 0;
@@ -50,6 +53,15 @@ export function computeRunAnalytics(teams: RunTeam[], gameTasks: AnalyticsTask[]
       for (const stage of team.stages ?? []) {
         for (const rec of stage.tasks ?? []) {
           if (rec.taskId !== gt.id) continue;
+          // run-gate-integrity: a record skipped BY DESIGN never faced this team — a partial
+          // stage's leftover, an exclusive alternative it did not pick, a mission retired behind a
+          // dead prerequisite or deleted from the game, one the organizers closed. Counting those
+          // as skips (and the team as having attempted) made every "pick 2 of 5" mission read as
+          // mostly skipped. A legacy skip with no recorded cause still counts, as it always did.
+          if (rec.status === 'skipped' && (SKIPPED_BY_DESIGN.has(rec.skipCause as string) || rec.closedByOrganizer === true
+            // A window that closed before this team was ever handed the mission (no startedAt):
+            // retired, not given up on. A held mission that expired keeps counting.
+            || (rec.skipCause === 'expired' && !rec.startedAt))) continue;
           had = true;
           if (rec.status === 'completed') {
             completed = true;

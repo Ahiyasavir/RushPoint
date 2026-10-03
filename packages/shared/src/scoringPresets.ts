@@ -10,7 +10,6 @@
 // Keep this file free of Firebase/Node imports so it can run in any context.
 
 import type { Game, RunTeam, RunStageRecord, ScoringPreset, Task } from './types';
-import { adjustedElapsedMs } from './pausedClock';
 
 // ─── Preset A — Time Only ────────────────────────────────────────────────────
 // Rank by total race duration. No points at all.
@@ -28,21 +27,12 @@ export function durationSeconds(startedAt?: string, finishedAt?: string): number
 }
 
 
-// ─── Preset B — Fixed Points + Speed Bonus ───────────────────────────────────
-// Each completed task awards its fixed pointValue.
-// Teams that finish faster than their personal route target earn a speed bonus.
-
-export const SPEED_BONUS_PER_MINUTE = 10;
-export const SPEED_BONUS_CAP        = 200;
-
-export function speedBonus(
-  expectedTotalMinutes: number,
-  actualTotalMinutes: number,
-): number {
-  const delta = expectedTotalMinutes - actualTotalMinutes;
-  if (delta <= 0) return 0;
-  return Math.min(SPEED_BONUS_CAP, Math.round(delta * SPEED_BONUS_PER_MINUTE));
-}
+// ─── Preset B — Fixed Points + Speed ─────────────────────────────────────────
+// Each completed task awards its fixed pointValue. Speed is rewarded at RANKING time, as a
+// percentage of those points measured against the field (fieldPaceRatios / pacePct below —
+// change: scoring-v2). The old flat "+10 per minute under the expected route, up to +200" bonus
+// is retired: it was decided by the author's time estimates, so a wrong estimate handed every
+// team the full +200 or nobody anything.
 
 /**
  * One task's resolved expected route-minutes, guarded exactly as the old reduce:
@@ -58,18 +48,20 @@ export function resolveExpectedMinutes(
 }
 
 /**
- * Route expected-total minutes for a team, summed from the STAMP the server wrote
- * on each terminal (completed/skipped) record — never re-derived from the live
- * template. A record missing the stamp (pre-change / legacy) falls back to that
- * task's resolved template value (matched by taskId), so old runs keep scoring and
- * nothing throws. A record whose template task can no longer be found contributes
- * its stamp if present, else 0 — never NaN.
+ * Route expected-total minutes for a team, summed from the STAMP the server wrote on each
+ * COMPLETED record — never re-derived from the live template. A record missing the stamp
+ * (pre-change / legacy) falls back to that task's resolved template value (matched by taskId), so
+ * old runs keep scoring and nothing throws; a record whose template task is gone contributes 0.
+ *
+ * scoring-v2: SKIPPED records no longer count. A mission that was closed, expired, unreachable,
+ * lost to an exclusive group or left over in a satisfied stage cost the team no time, so counting
+ * its minutes measured a team that played LESS against a LONGER route — and paid it a bigger
+ * speed bonus for it.
  */
 export function teamExpectedRouteMinutes(
   stages: RunStageRecord[],
   game: Pick<Game, 'stages'>,
 ): number {
-  // Build a taskId → template task lookup once for the fallback path.
   const templateById = new Map<string, Task>();
   for (const stage of game.stages) {
     for (const t of stage.tasks) templateById.set(t.id, t);
@@ -77,15 +69,12 @@ export function teamExpectedRouteMinutes(
   let total = 0;
   for (const stageRec of stages) {
     for (const taskRec of stageRec.tasks) {
-      if (taskRec.status !== 'completed' && taskRec.status !== 'skipped') continue;
+      if (taskRec.status !== 'completed') continue;
       const stamp = taskRec.expectedDurationMinutesAtCompletion;
-      if (Number.isFinite(stamp)) {
+      if (Number.isFinite(stamp) && (stamp as number) >= 0) {
         total += stamp as number;
         continue;
       }
-      // Legacy / in-flight record with no stamp: fall back to the resolved
-      // template value for that task (pre-change behavior), or 0 if the template
-      // task is gone — never NaN, never a throw.
       const templateTask = templateById.get(taskRec.taskId);
       total += templateTask ? resolveExpectedMinutes(templateTask) : 0;
     }
@@ -93,44 +82,28 @@ export function teamExpectedRouteMinutes(
   return total;
 }
 
-export function scoreFixedPointsSpeed(
-  stages: RunStageRecord[],
-  startedAt: string | undefined,
-  finishedAt: string | undefined,
-  game: Pick<Game, 'stages'>,
-  // Pause-clock tasks (change: pause-clock-tasks): milliseconds already stamped
-  // as excluded on this team's own task records. Subtracted from the measured
-  // span BEFORE the speed bonus, so a paused task cannot be bought back as
-  // "slowness". Optional and defaulting to 0, so every pre-existing call site
-  // (and every game with no paused task) is byte-for-byte unchanged. Guarded for
-  // finiteness and sign in adjustedElapsedMs — it can only ever subtract.
-  excludedMs = 0,
-): number {
-  let taskPoints = 0;
+/**
+ * Σ earnedScore over completed and skipped records (a skip consolation is a skipped record's
+ * earnedScore). A non-finite record counts as 0 — NaN ?? 0 is NaN, and one poisoned record must
+ * not NaN the team total and the whole board with it.
+ */
+export function sumEarnedPoints(stages: RunStageRecord[]): number {
+  let total = 0;
   for (const stageRec of stages) {
     for (const taskRec of stageRec.tasks) {
       if (taskRec.status === 'completed' || taskRec.status === 'skipped') {
-        // NaN ?? 0 === NaN, so a single poisoned per-task record would NaN the
-        // whole team total (parseRunTeam validates top-level score, not nested
-        // earnedScore). Guard for finiteness, not just null-ish.
         const e = taskRec.earnedScore;
-        taskPoints += Number.isFinite(e) ? (e as number) : 0;
+        total += Number.isFinite(e) ? (e as number) : 0;
       }
     }
   }
+  return total;
+}
 
-  if (!startedAt || !finishedAt) return taskPoints;
-
-  // Build expected total from the per-task stamps the server wrote at each record's
-  // terminal transition (fix-fixed-points-speed-template-drift) — never re-read from
-  // the live template — so a mid-run edit to a task's expectedDurationMinutes cannot
-  // retroactively re-score a finished team. Legacy records with no stamp fall back to
-  // the resolved template value, so unedited/old runs score byte-identically.
-  const expectedTotal = teamExpectedRouteMinutes(stages, game);
-  const rawTotalMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
-  const actualTotal = adjustedElapsedMs(rawTotalMs, excludedMs) / 60_000;
-
-  return taskPoints + speedBonus(expectedTotal, actualTotal);
+/** The mission points of a fixed_points_speed team. Speed is a ranking-time percentage
+ *  (scoring-v2), so this is exactly the points sum. */
+export function scoreFixedPointsSpeed(stages: RunStageRecord[]): number {
+  return sumEarnedPoints(stages);
 }
 
 // Awarded score for a single task under this preset
@@ -144,11 +117,22 @@ export function taskScoreFixed(task: Pick<{ pointValue: number }, 'pointValue'>)
 
 
 // ─── Preset C — Smart Weighted (Sigmoid) ─────────────────────────────────────
-// Each task earns 100 × (difficulty/10) × sigmoid(actualMinutes / estimatedMinutes).
+// Each task earns 100 × (difficulty/10) × multiplier(actualMinutes / estimatedMinutes).
 // Faster than the estimate earns more; slower earns less.
+//
+// scoring-v2: the multiplier is BOUNDED to 0.7 … 1.3 and pays exactly 1.0 on target. It used to
+// range 0.2 … 1.5 — a 7.5× swing decided by the author's estimate — so a 2-minute guess on a
+// mission that really takes 15 (walking included: startedAt is stamped at assignment) paid every
+// team a fifth of the mission. Kahoot's rule is the model: a correct answer is never worth much
+// less than its value, speed only scales it. Who was FASTER than whom is rewarded at ranking time,
+// against the field, where a wrong estimate cancels out (fieldPaceRatios).
+
+export const SMART_MULT_MIN = 0.7;
+export const SMART_MULT_MAX = 1.3;
+const SMART_MULT_STEEPNESS = 2.5;
 
 export function sigmoidMultiplier(x: number): number {
-  return 0.2 + 1.3 / (1 + Math.exp(3 * (x - 1)));
+  return SMART_MULT_MIN + (SMART_MULT_MAX - SMART_MULT_MIN) / (1 + Math.exp(SMART_MULT_STEEPNESS * (x - 1)));
 }
 
 export function taskScoreSmart(
@@ -167,37 +151,108 @@ export function taskScoreSmart(
 }
 
 export function scoreSmartWeighted(stages: RunStageRecord[]): number {
-  let total = 0;
-  for (const stageRec of stages) {
-    for (const taskRec of stageRec.tasks) {
-      if (taskRec.status === 'completed' || taskRec.status === 'skipped') {
-        // Guard non-finite per-task earnedScore (NaN ?? 0 === NaN) — one poisoned
-        // record must not NaN the whole team total.
-        const e = taskRec.earnedScore;
-        total += Number.isFinite(e) ? (e as number) : 0;
-      }
-    }
-  }
-  return total;
+  return sumEarnedPoints(stages);
 }
 
 
-// ─── Shared final score formula ───────────────────────────────────────────────
-// Applied on top of any preset when running finalizeRun.
+// ─── Shared final score formula (scoring-v2) ─────────────────────────────────
+// Every bonus is a PERCENTAGE of the mission points the team earned, never a flat amount. A flat
+// +500 for finishing outweighed every mission of a game whose missions are worth 10 points each,
+// and the ±200-per-standard-deviation speed term jumped the board the same way. Flat ADJUSTMENTS
+// (hints, staff ±, discovery, zone capture, power-ups) still ride bonusPenalty and are applied
+// once, LAST, so a 20-point fine is exactly 20 points and never changes a bonus.
 
-export const COMPLETION_BONUS = 500;
+export const COMPLETION_BONUS_PCT = 0.10;
 
-export function applyCompletionBonus(
-  rawScore: number,
-  stages: Pick<RunStageRecord, 'status'>[],
-): number {
-  const allDone = stages.every((s) => s.status === 'completed');
-  return rawScore + (allDone ? COMPLETION_BONUS : 0);
+export function completionBonus(points: number, allStagesDone: boolean): number {
+  if (!allStagesDone || !Number.isFinite(points) || points <= 0) return 0;
+  return Math.round(points * COMPLETION_BONUS_PCT);
+}
+
+export function allStagesCompleted(stages: Pick<RunStageRecord, 'status'>[]): boolean {
+  return stages.length > 0 && stages.every((s) => s.status === 'completed');
 }
 
 // bonusPenalty is subtracted after all other scoring:
 export function applyPenalties(score: number, bonusPenalty: number): number {
   return Math.max(0, score - bonusPenalty);
+}
+
+export function composeLeaderboardScore(args: {
+  points: number;
+  allStagesDone: boolean;
+  /** A fraction from pacePct (−PACE_MAX_PCT … +PACE_MAX_PCT); 0 for an unfinished team. */
+  pacePct: number;
+  bonusPenalty: number;
+}): number {
+  const points = Number.isFinite(args.points) ? Math.max(0, args.points) : 0;
+  const pct = Number.isFinite(args.pacePct) ? args.pacePct : 0;
+  const penalty = Number.isFinite(args.bonusPenalty) ? args.bonusPenalty : 0;
+  const pace = Math.round(points * pct);
+  return Math.max(0, points + completionBonus(points, args.allStagesDone) + pace - penalty);
+}
+
+
+// ─── Field-relative pace (scoring-v2) ────────────────────────────────────────
+// Orienteering's lesson: the reference time comes from the FIELD, not from the course setter, so
+// a badly set estimate cannot decide the result. A finished team's pace is its adjusted duration
+// over the expected minutes of the missions it actually COMPLETED (so teams that played different
+// subsets stay comparable), relative to the MEDIAN pace of every finisher (robust to one team that
+// got lost). If every estimate is wrong by the same factor, every pace is wrong by it too and the
+// ratio is untouched.
+
+export const PACE_WEIGHT = 0.5;
+export const PACE_MAX_PCT = 0.15;
+/** A lone finisher is measured against the author's estimate only when its real time is within
+ *  this factor of it either way; outside, the estimate is judged unreliable and nothing is paid. */
+export const LONE_FINISHER_PLAUSIBLE_RATIO = 3;
+
+export interface PaceInput {
+  /** Adjusted race duration in minutes (paused tasks and staff holds already excluded). */
+  durationMin: number;
+  /** teamExpectedRouteMinutes: the expected minutes of the missions the team completed. */
+  expectedMin: number;
+}
+
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Each finisher's pace relative to the field (1 = the median, < 1 = faster), or null when there is
+ * nothing trustworthy to compare against. Paced (duration ÷ expected) when EVERY finisher has
+ * expected minutes; otherwise the whole field races on raw duration, so a game with no estimates
+ * is still a fair race. Total: never throws, never returns a non-finite number.
+ */
+export function fieldPaceRatios(finishers: PaceInput[]): (number | null)[] {
+  const ok = (v: number) => Number.isFinite(v) && v >= 0;
+  const usable = finishers.map((f) => ok(f.durationMin) && ok(f.expectedMin));
+  const field = finishers.filter((_, i) => usable[i]);
+  if (field.length === 0) return finishers.map(() => null);
+  const paced = field.every((f) => f.expectedMin > 0);
+  const value = (f: PaceInput) => (paced ? f.durationMin / f.expectedMin : f.durationMin);
+
+  if (field.length === 1) {
+    // No field to compare against: trust the author's estimate only when it is plausible.
+    return finishers.map((f, i) => {
+      if (!usable[i] || !paced) return null;
+      const q = value(f);
+      return q >= 1 / LONE_FINISHER_PLAUSIBLE_RATIO && q <= LONE_FINISHER_PLAUSIBLE_RATIO ? q : null;
+    });
+  }
+  const ref = medianOf(field.map(value));
+  if (!(ref > 0) || !Number.isFinite(ref)) return finishers.map(() => null);
+  return finishers.map((f, i) => (usable[i] ? value(f) / ref : null));
+}
+
+/** A pace ratio as a bonus fraction: half the relative difference, capped at ±PACE_MAX_PCT.
+ *  20% faster than the field median ⇒ +10%. Null / non-finite ⇒ 0. */
+export function pacePct(r: number | null | undefined): number {
+  if (typeof r !== 'number' || !Number.isFinite(r)) return 0;
+  const pct = PACE_WEIGHT * (1 - r);
+  return Math.max(-PACE_MAX_PCT, Math.min(PACE_MAX_PCT, pct)) || 0;
 }
 
 
@@ -218,24 +273,6 @@ export function sprintPenalty(secondsLate: number): number {
 }
 
 
-// ─── Z-Score normalization (finalizeRun) ─────────────────────────────────────
-// Applied to all finishers when the run ends. Faster than average → bonus.
-
-export function applyZScoreBonus(
-  rawScore: number,
-  teamDurationMinutes: number,
-  allDurationMinutes: number[],
-): number {
-  if (allDurationMinutes.length < 2) return rawScore;
-  const mu = allDurationMinutes.reduce((a, b) => a + b, 0) / allDurationMinutes.length;
-  const variance = allDurationMinutes.reduce((s, d) => s + (d - mu) ** 2, 0) / allDurationMinutes.length;
-  const sigma = Math.sqrt(variance);
-  if (!Number.isFinite(sigma) || sigma === 0) return rawScore;
-  const z = (teamDurationMinutes - mu) / sigma;
-  return Math.max(0, rawScore + Math.round(-z * 200));
-}
-
-
 // ─── Preset label helpers (for creator UI) ───────────────────────────────────
 
 export const PRESET_LABELS: Record<ScoringPreset, { en: string; description: string }> = {
@@ -245,11 +282,11 @@ export const PRESET_LABELS: Record<ScoringPreset, { en: string; description: str
   },
   fixed_points_speed: {
     en: 'Points + Speed Bonus',
-    description: 'Each task earns its fixed point value. Complete all stages faster than expected for a bonus (up to +200 pts).',
+    description: 'Each task earns its fixed point value. Finishing faster than the other teams adds up to +15%; finishing everything adds 10%.',
   },
   smart_weighted: {
     en: 'Smart Score',
-    description: 'Score based on task difficulty and how fast each task was completed relative to its estimate. Harder tasks are worth more.',
+    description: 'Score based on task difficulty, with speed moving it by up to 30% either way. Harder tasks are worth more.',
   },
 };
 
@@ -272,7 +309,7 @@ export function skipAward(
       // or a negative value and poison the whole leaderboard (nightly hardening / J4).
       return Number.isFinite(task.pointValue) ? Math.max(0, task.pointValue) : 0;
     case 'smart_weighted':
-      // On-target sigmoid score (x=1)
+      // On-target score (x=1): exactly 100 × difficulty/10
       return taskScoreSmart(task.difficulty, task.estimatedMinutes, task.estimatedMinutes);
   }
 }

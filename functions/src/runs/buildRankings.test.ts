@@ -126,26 +126,26 @@ describe('buildRankings — fixed_points_speed bonus gated on completion', () =>
     expect(teamAt2[0].score).toBe(teamAt1[0].score);
   });
 
-  test('a finished team still earns its speed bonus', () => {
-    // game() task has expectedDurationMinutes 5. A team that finishes the whole run
-    // in 1 min (well under the 5-min expected total) earns a speed bonus.
-    const fast: RunTeam = {
+  test('a finished team still earns its speed bonus (scoring-v2: a percentage of its points)', () => {
+    // game() task has expectedDurationMinutes 5. A lone finisher in 4 min is at pace 0.8 against
+    // a plausible estimate ⇒ +10% of 50 = 5; completion +10% = 5.
+    const finishedIn = (ms: number): RunTeam => ({
       id: 'f', displayName: 'f', status: 'finished',
       startedAt: new Date(1_700_000_000_000).toISOString(),
-      finishedAt: new Date(1_700_000_060_000).toISOString(), // +1 min from start
+      finishedAt: new Date(1_700_000_000_000 + ms).toISOString(),
       score: 0, bonusPenalty: 0,
       stages: [{ stageId: 's0', status: 'completed', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: 50 }] }],
-    } as unknown as RunTeam;
-    const board = buildRankings(game('fixed_points_speed'), [fast], now1);
-    // 50 taskPoints + 500 completion bonus + a positive speed bonus (finished under
-    // expected). The exact bonus is (5-1)*10 = 40. Assert the bonus is present.
-    expect(board[0].score).toBe(50 + 500 + 40);
+    } as unknown as RunTeam);
+    expect(buildRankings(game('fixed_points_speed'), [finishedIn(240_000)], now1)[0].score).toBe(50 + 5 + 5);
+    // 1 minute against a 5-minute estimate is 5× faster than the author said: the estimate is
+    // implausible, so a lone finisher is paid no pace term at all (the old flat bonus paid +40).
+    expect(buildRankings(game('fixed_points_speed'), [finishedIn(60_000)], now1)[0].score).toBe(50 + 5);
   });
 });
 
 // Wave-G #1 (discovery-poi-bonus-channel): claimDiscoveryPoi awards its surprise-
 // trivia-waypoint bonus. buildRankings derives ranked score ONLY from
-// stages[].earnedScore + completionBonus − bonusPenalty, and NEVER reads team.score.
+// stages[].earnedScore (+ percentage bonuses) − bonusPenalty, and NEVER reads team.score.
 // So a bonus must ride the counted bonusPenalty channel (a bonus is a NEGATIVE penalty,
 // exactly like captureZone) to appear on the live + final board. This locks the fix
 // direction: a bonusPenalty of -40 with no completed tasks must rank as score 40, and a
