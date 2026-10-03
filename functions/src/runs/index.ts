@@ -2190,6 +2190,23 @@ export function assertTeamNotHeld(team: Pick<RunTeam, 'held' | 'heldReason'>): v
   );
 }
 
+/** The team's stages with its held mission's startedAt moved forward by `ms`, or null if nothing moved. */
+export function shiftHeldMissionStart(stages: RunStageRecord[], ms: number): RunStageRecord[] | null {
+  if (!(ms > 0)) return null;
+  let moved = false;
+  const out = stages.map((st) => ({
+    ...st,
+    tasks: (st.tasks ?? []).map((t) => {
+      if (st.status !== 'active' || t.status !== 'assigned') return t;
+      const at = Date.parse(t.startedAt ?? '');
+      if (!Number.isFinite(at)) return t;
+      moved = true;
+      return { ...t, startedAt: new Date(at + ms).toISOString() };
+    }),
+  }));
+  return moved ? out : null;
+}
+
 export const setTeamHold = loggedCallable('setTeamHold', async (data, context) => {
   const {
     ownerUid: ownerUidIn, gameId, runId, teamId, held, reason,
@@ -2266,7 +2283,15 @@ export const setTeamHold = loggedCallable('setTeamHold', async (data, context) =
       const startedMs = Date.parse(team.heldAt ?? '');
       const elapsed = Number.isFinite(startedMs) ? Date.now() - startedMs : 0;
       addedMs = Math.max(0, elapsed);
+      // run-gate-integrity: the clock stops for the MISSION in hand too. Its per-team countdown
+      // (timeLimitMinutes) and its measured duration both run from the record's startedAt, so a team
+      // held for ten minutes on a fifteen-minute mission came back with five — or none, swept as
+      // "time up" for a stop staff made it take. Moving startedAt forward by the hold resumes both
+      // where they stopped (and keeps a clock-pausing task from excluding the hold twice: heldMs
+      // already removes it from the team's race clock).
+      const stagesAfter = shiftHeldMissionStart(team.stages ?? [], addedMs);
       tx.update(teamRef, {
+        ...(stagesAfter ? { stages: stagesAfter } : {}),
         held: false,
         heldAt: FieldValue.delete(),
         heldReason: FieldValue.delete(),
@@ -4977,6 +5002,11 @@ export async function advanceTeamStateOnPoll(args: {
 }): Promise<void> {
   const { team, game, launchedAt, nowMs, isController } = args;
   const nowIso = new Date(nowMs).toISOString();
+  // run-gate-integrity: a team on a staff hold is PARKED — every write path refuses it
+  // (assertTeamNotHeld), and so does this one. The poll used to keep sweeping: a team held for an
+  // injury lost the mission in its hands to the time-limit sweep while it stood still. The read
+  // itself still answers (that is how the phone explains the pause); it advances nothing.
+  if (team.held === true) return;
 
   // (0) A closure this team MISSED (run-gate-integrity). closeTaskForAllTeams lists the teams once,
   // and joinRun reads the overrides once: a team whose join raced the closure is in neither, and
@@ -5159,6 +5189,9 @@ export async function assignNextInActiveStage(
   // `completeTaskForTeam` already blocks the matching GRADING path with the same
   // `team.launched !== true` check; this closes the ASSIGNMENT-side gap.
   if (!canReceiveTaskAssignment(team)) return { reason: 'guardian_consent' };
+  // run-gate-integrity: a team on a staff hold is parked — no slot reserved, no sweep, no heal. A
+  // closure or startTeams fanning out over every team must not route it; on resume the phone asks.
+  if (team.held === true) return {};
 
   // Poll re-check: a scheduled-release stage that has since opened gets unlocked
   // here, so a team waiting on a timed drop advances the moment its gate opens.

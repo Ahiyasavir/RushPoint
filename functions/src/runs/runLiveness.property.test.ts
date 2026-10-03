@@ -26,7 +26,7 @@ import {
   type Game, type RunStageRecord, type RunTeam, type StationStatus, type Task,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
-import { applyTaskClosure, advanceTeamStateOnPoll, buildInitialStages, healStrandedStage, retiredNow, applySkipStage, applyRunClosures, heldTaskIdOf } from './index';
+import { applyTaskClosure, advanceTeamStateOnPoll, buildInitialStages, healStrandedStage, retiredNow, applySkipStage, applyRunClosures, heldTaskIdOf, shiftHeldMissionStart } from './index';
 import { isRoutingCandidate, stationCap } from '../routing/assignNextTask';
 
 const LAUNCH = '2026-03-01T09:00:00.000Z';
@@ -147,7 +147,9 @@ async function poll(s: Sim) {
     persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
   });
   settleFinished(s);
-  // MIRROR assignNextInActiveStage: stage unlock is covered by the poll above.
+  // MIRROR assignNextInActiveStage: a held team is parked before anything else runs.
+  if (s.team.held === true) return;
+  // stage unlock is covered by the poll above.
   const stages = clone(s.team.stages);
   const healed = healStrandedStage(stages, s.game, LAUNCH, iso(s.now));
   if (healed.changed) { s.team.stages = stages; s.team.activeTaskId = heldTaskIdOf(stages); settleFinished(s); s.log.push(`heal ${s.team.id}`); healed.heldAssignedTaskIds.forEach((id) => dec(s, id)); }
@@ -156,6 +158,7 @@ async function poll(s: Sim) {
     team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true, taskStatusOverrides: s.overrides,
     persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
   });
+  if (s.team.held === true) return; // assignNextInActiveStage parks a held team
   const idx = activeIdx(s);
   if (idx < 0) return;
   const stageRec = s.team.stages[idx];
@@ -196,6 +199,7 @@ async function phone(s: Sim) {
 
 /** MIRROR completeTaskForTeam's guard sequence + its exclusive-sibling retirement. */
 function tryComplete(s: Sim): 'done' | string {
+  if (s.team.held === true) return 'held'; // assertTeamNotHeld on every submission door
   const idx = activeIdx(s);
   if (idx < 0) return 'no active stage';
   const stages = clone(s.team.stages);
@@ -291,6 +295,7 @@ function skipOne(s: Sim, r: R) {
 
 /** MIRROR forceAssignTask (with override) — claimSpecificTask never overrides a pause/closure. */
 function forceAssign(s: Sim, r: R) {
+  if (s.team.held === true) return; // assertTeamNotHeld
   const idx = activeIdx(s);
   if (idx < 0) return;
   const open = s.team.stages[idx].tasks.filter((t) => t.status === 'unassigned');
@@ -313,6 +318,7 @@ function forceAssign(s: Sim, r: R) {
 
 /** MIRROR returnTeamTo. */
 function rewind(s: Sim, r: R) {
+  if (s.team.held === true) return; // assertTeamNotHeld
   const reached = s.team.stages.filter((st) => st.status !== 'locked');
   if (reached.length === 0) return;
   const st = r.pick(reached);
@@ -359,6 +365,7 @@ function skipWholeStage(s: Sim) {
 
 /** MIRROR checkOutTask: the player walks away from the mission in hand. */
 function checkOut(s: Sim) {
+  if (s.team.held === true) return; // assertTeamNotHeld
   const idx = activeIdx(s);
   if (idx < 0) return;
   const rec = s.team.stages[idx].tasks.find((t) => t.status === 'assigned');
@@ -368,6 +375,23 @@ function checkOut(s: Sim) {
   s.team.activeTaskId = null;
   dec(s, rec.taskId);
   s.log.push(`${s.team.id} checkOut ${rec.taskId}`);
+}
+
+/** MIRROR setTeamHold. While held, nothing automatic may take the mission in the team's hands. */
+function toggleHold(s: Sim) {
+  const team = s.team;
+  if (team.held !== true) {
+    team.held = true;
+    team.heldAt = iso(s.now);
+    s.log.push(`${team.id} held`);
+  } else {
+    const added = Math.max(0, s.now - Date.parse(team.heldAt ?? iso(s.now)));
+    const shifted = shiftHeldMissionStart(team.stages, added);
+    if (shifted) team.stages = shifted;
+    team.held = false;
+    delete team.heldAt;
+    s.log.push(`${team.id} resumed after ${added / 60_000}m`);
+  }
 }
 
 /** MIRROR joinRun for a late joiner on a started run. */
@@ -548,6 +572,7 @@ function nextInterestingInstant(s: Sim): number | null {
 async function drain(s: Sim) {
   // The organizers lift every pause they can (a closure is final).
   for (const [id, st] of Object.entries(s.overrides)) if (st === 'paused') s.overrides = { ...s.overrides, [id]: 'active' };
+  for (const team of s.teams) if (team.held === true) { s.team = team; toggleHold(s); }
   s.log.push('— drain —');
   for (let round = 0; round < 400; round++) {
     let progressed = false;
@@ -598,6 +623,9 @@ async function play(seed: number) {
     if ((s.team.status as string) === 'finished' && !r.chance(0.2)) continue;
     const roll = r.next();
     const allIds = s.game.stages.flatMap((g) => playableTasks(g).map((t) => t.id));
+    // Automatic events (a poll, time passing) must never take a held team's mission.
+    const auto = roll < 0.28 || (roll >= 0.46 && roll < 0.56);
+    const heldBefore = auto ? s.teams.filter((t) => t.held === true).map((t) => [t, heldTaskIdOf(t.stages)] as const) : [];
     if (roll < 0.28) await poll(s);
     else if (roll < 0.46) tryComplete(s);
     else if (roll < 0.56) { s.now += r.int(1, 25) * 60_000; s.log.push(`+time → ${(s.now - L) / 60_000}m`); }
@@ -608,8 +636,11 @@ async function play(seed: number) {
     else if (roll < 0.81) forceAssign(s, r);
     else if (roll < 0.85) rewind(s, r);
     else if (roll < 0.89) checkOut(s);
-    else if (roll < 0.92) lateJoin(s, r);
+    else if (roll < 0.92) { if (r.chance(0.5)) toggleHold(s); else lateJoin(s, r); }
     else editTemplate(s, r);
+    for (const [t, id] of heldBefore) {
+      if (id && heldTaskIdOf(t.stages) !== id) fail(s, `${t.id} lost ${id} to an automatic step while on a staff hold`);
+    }
     assertSafe(s);
   }
   await drain(s);
