@@ -5089,7 +5089,7 @@ export async function advanceTeamStateOnPoll(args: {
   // was never healed. Pure; a write only when something changed; controller-only like (1) and (2).
   {
     const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-    const healed = healStrandedStage(stages, game, launchedAt, nowIso);
+    const healed = healStrandedStage(stages, game, launchedAt, nowIso, team.taskAttempts);
     if (healed.changed) {
       const allDone = stages.every((s) => s.status === 'completed');
       team.stages = stages;
@@ -5118,6 +5118,8 @@ export async function advanceTeamStateOnPoll(args: {
  */
 export function healStrandedStage(
   stages: RunStageRecord[], game: Game, launchedAt: string | undefined, now: string,
+  // The team's wrong-attempt counts (RunTeam.taskAttempts). Optional: absent = no attempt rule.
+  taskAttempts?: Record<string, number>,
 ): { changed: boolean; heldAssignedTaskIds: string[] } {
   const idx = stages.findIndex((s) => s.status === 'active');
   if (idx < 0) return { changed: false, heldAssignedTaskIds: [] };
@@ -5129,9 +5131,16 @@ export function healStrandedStage(
   const releasedHeld: string[] = [];
   if (Array.isArray(game.stages) && game.stages.length > 0) {
     for (const t of stages[idx].tasks) {
-      if (t.status === 'assigned' && !findGameTask(game, t.taskId)) {
+      if (t.status !== 'assigned') continue;
+      const gt = findGameTask(game, t.taskId);
+      // A held mission whose attempt cap the team has used up: every further answer is refused
+      // ('No attempts left'), even a right one, and nothing else ever moved the team off it — the
+      // team held a mission it could never finish until staff noticed and skipped it. Retired like
+      // a per-team time limit running out: no points, the team routed on.
+      const exhausted = !!gt && attemptLimitReached(taskAttempts?.[t.taskId] ?? 0, gt.smart?.attemptLimit);
+      if (!gt || exhausted) {
         t.status = 'skipped';
-        t.skipCause = 'removed';
+        t.skipCause = gt ? 'attempts' : 'removed';
         t.earnedScore = 0;
         delete t.gateOverride;
         releasedHeld.push(t.taskId);
@@ -5184,7 +5193,7 @@ export async function healTeamDurably(
     if (team.held === true) return null;
     const now = new Date().toISOString();
     const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
-    const out = healStrandedStage(stages, game, launchedAt, now);
+    const out = healStrandedStage(stages, game, launchedAt, now, team.taskAttempts);
     if (!out.changed) return null;
     const allDone = stages.every((st) => st.status === 'completed');
     tx.update(teamRef, {
@@ -5314,7 +5323,7 @@ export async function assignNextInActiveStage(
     // Without a schedule gate nothing can expire, so an absent launchedAt changes nothing. The pure
     // probe decides whether a write is needed at all (a healthy team pays nothing); the write itself
     // is re-derived on a fresh read inside a transaction (healTeamDurably).
-    if (healStrandedStage(probe, game, launchedAt, now).changed) {
+    if (healStrandedStage(probe, game, launchedAt, now, team.taskAttempts).changed) {
       const healedStages = await healTeamDurably(ownerUid, gameId, runId, teamId, game, launchedAt);
       if (healedStages) {
         team.stages = healedStages;

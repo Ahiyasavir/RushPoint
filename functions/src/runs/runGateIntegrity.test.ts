@@ -8,7 +8,7 @@ import {
   type Game, type RunStageRecord, type RunTaskRecord,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
-import { applyTaskClosure, applySkipStage, heldTaskIdOf, advanceTeamStateOnPoll } from './index';
+import { applyTaskClosure, applySkipStage, heldTaskIdOf, advanceTeamStateOnPoll, healStrandedStage } from './index';
 
 const LAUNCH = '2026-01-01T10:00:00.000Z';
 const L = Date.parse(LAUNCH);
@@ -232,5 +232,24 @@ describe('a photo waiting for review when the window closes', () => {
     const t = { ...team(false), held: true } as ReturnType<typeof team>;
     await poll(t);
     expect(t.stages[0].tasks[0].status).toBe('assigned');
+  });
+});
+
+describe('a held mission whose attempt cap is used up', () => {
+  test('is retired with no points and the team is free to be routed on', () => {
+    const g = game([{ id: 's1', isFinal: true, tasks: [{ id: 'q' }, { id: 'r' }] }]);
+    (g.stages[0].tasks[0] as unknown as { smart: { attemptLimit: number } }).smart = { attemptLimit: 2 };
+    const stages = [stage('s1', 'active', [rec('q', 'assigned'), rec('r')])];
+    const out = healStrandedStage(stages, g, LAUNCH, at(5), { q: 2 });
+    expect(out).toEqual({ changed: true, heldAssignedTaskIds: ['q'] });
+    expect(stages[0].tasks[0]).toMatchObject({ status: 'skipped', skipCause: 'attempts', earnedScore: 0 });
+    expect(heldTaskIdOf(stages)).toBeNull();
+  });
+
+  test('one attempt short of the cap keeps the mission', () => {
+    const g = game([{ id: 's1', isFinal: true, tasks: [{ id: 'q' }] }]);
+    (g.stages[0].tasks[0] as unknown as { smart: { attemptLimit: number } }).smart = { attemptLimit: 2 };
+    const stages = [stage('s1', 'active', [rec('q', 'assigned')])];
+    expect(healStrandedStage(stages, g, LAUNCH, at(5), { q: 1 }).changed).toBe(false);
   });
 });

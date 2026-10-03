@@ -1117,6 +1117,7 @@ export type SkipCause =
   | 'timeLimit'       // mission-time-limit: this team's own countdown ran out
   | 'unreachable'     // retired: gated behind a task this team can never satisfy
   | 'removed'         // run-gate-integrity: the mission was deleted from the game mid-run (satisfies gates)
+  | 'attempts'        // run-gate-integrity: the team used every attempt the mission allows
   | 'stageSatisfied'; // leftover: the stage's requirement was already met
 
 export interface RunTaskRecord {

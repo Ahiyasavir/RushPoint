@@ -75,6 +75,7 @@ function genGame(r: R): Game {
       if (r.chance(0.2)) t.expiresAfterMinutes = ((t.releaseAfterMinutes as number | undefined) ?? 0) + r.int(5, 60);
       if (r.chance(0.08)) t.expiresAt = new Date(L + r.int(10, 120) * 60_000).toISOString();
       if (r.chance(0.1)) t.timeLimitMinutes = r.int(2, 15);
+      if (r.chance(0.12)) t.smart = { enabled: true, attemptLimit: r.int(1, 3) };
       tasks.push(t as unknown as Task);
     }
     const stage: Record<string, unknown> = { id: `s${si}`, order: si, title: `S${si}`, tasks, isFinal: si === nStages - 1 };
@@ -151,7 +152,7 @@ async function poll(s: Sim) {
   if (s.team.held === true) return;
   // stage unlock is covered by the poll above.
   const stages = clone(s.team.stages);
-  const healed = healStrandedStage(stages, s.game, LAUNCH, iso(s.now));
+  const healed = healStrandedStage(stages, s.game, LAUNCH, iso(s.now), s.team.taskAttempts);
   if (healed.changed) { s.team.stages = stages; s.team.activeTaskId = heldTaskIdOf(stages); settleFinished(s); s.log.push(`heal ${s.team.id}`); healed.heldAssignedTaskIds.forEach((id) => dec(s, id)); }
   // The stage the heal just completed may have unlocked the next one (computeStageUnlock path).
   await advanceTeamStateOnPoll({
@@ -208,6 +209,8 @@ function tryComplete(s: Sim): 'done' | string {
   // The phone renders a mission from its template content: a mission deleted from the game while
   // held reaches the phone with NO content, so the player cannot submit it at all.
   if (!gameTask) return 'noContent';
+  const lim = gameTask.smart?.attemptLimit;
+  if (typeof lim === 'number' && lim > 0 && (s.team.taskAttempts?.[rec.taskId] ?? 0) >= lim) return 'noAttempts';
   // The submission door (completeTask): time limit, then the shared schedule rule.
   if (gameTask?.timeLimitMinutes && rec.startedAt && s.now - Date.parse(rec.startedAt) >= gameTask.timeLimitMinutes * 60_000 + 5_000) return 'timeLimit';
   if (gameTask) { const refusal = scheduleRefusal(gameTask, LAUNCH, s.now, rec); if (refusal) return refusal; }
@@ -347,6 +350,21 @@ function rewind(s: Sim, r: R) {
   s.team.activeTaskId = stages.find((x) => x.status === 'active')?.tasks.find((t) => t.status === 'assigned')?.taskId ?? null;
   s.team.status = stages.every((x) => x.status === 'completed') ? 'finished' : 'active';
   s.log.push(`rewind ${JSON.stringify(target)}`);
+}
+
+/** MIRROR submitTaskAnswer / verifyStationCode with a WRONG answer on the held mission. */
+function wrongAnswer(s: Sim) {
+  if (s.team.held === true) return;
+  const idx = activeIdx(s);
+  if (idx < 0) return;
+  const rec = s.team.stages[idx].tasks.find((t) => t.status === 'assigned');
+  if (!rec) return;
+  const gt = findTask(s, rec.taskId);
+  const limit = gt?.smart?.attemptLimit;
+  const used = s.team.taskAttempts?.[rec.taskId] ?? 0;
+  if (typeof limit === 'number' && limit > 0 && used >= limit) { s.log.push(`${s.team.id} no attempts left on ${rec.taskId}`); return; }
+  s.team.taskAttempts = { ...(s.team.taskAttempts ?? {}), [rec.taskId]: used + 1 };
+  s.log.push(`${s.team.id} wrong on ${rec.taskId} (${used + 1}/${limit ?? '∞'})`);
 }
 
 /** MIRROR skipStage. */
@@ -587,7 +605,7 @@ async function drain(s: Sim) {
       if ((team.status as string) === 'finished') { progressed = true; continue; }
       const res = tryComplete(s);
       assertSafe(s);
-      if (res === 'locked' || res === 'exclusiveTaken' || res === 'notReleased' || res === 'noContent') {
+      if (res === 'locked' || res === 'exclusiveTaken' || res === 'notReleased' || res === 'noContent' || res === 'noAttempts') {
         fail(s, `${team.id} holds a mission it cannot complete: ${res}`);
       }
       if (res === 'done' || JSON.stringify(team.stages) !== before) progressed = true;
@@ -626,7 +644,7 @@ async function play(seed: number) {
     const auto = roll < 0.28 || (roll >= 0.46 && roll < 0.56);
     const heldBefore = auto ? s.teams.filter((t) => t.held === true).map((t) => [t, heldTaskIdOf(t.stages)] as const) : [];
     if (roll < 0.28) await poll(s);
-    else if (roll < 0.46) tryComplete(s);
+    else if (roll < 0.46) { if (r.chance(0.3)) wrongAnswer(s); else tryComplete(s); }
     else if (roll < 0.56) { s.now += r.int(1, 25) * 60_000; s.log.push(`+time → ${(s.now - L) / 60_000}m`); }
     else if (roll < 0.63 && allIds.length) setStatus(s, r.pick(allIds), r.pick(['paused', 'active'] as StationStatus[]), r);
     else if (roll < 0.67 && allIds.length) setStatus(s, r.pick(allIds), 'closed', r);
