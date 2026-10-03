@@ -2443,8 +2443,8 @@ const HE = {
     },
     presetLabels: {
       time_only: { name: 'מרוץ מהירות', desc: 'דירוג לפי זמן כולל בלבד. אין נקודות, הקבוצה המהירה ביותר מנצחת.' },
-      fixed_points_speed: { name: 'נקודות + בונוס מהירות', desc: "כל משימה מזכה בערך הנקודות הקבוע שלה. סיימו את כל השלבים מהר מהצפוי לבונוס (עד +200 נק')." },
-      smart_weighted: { name: 'ניקוד חכם', desc: 'ניקוד לפי רמת הקושי של המשימה ומהירות הביצוע ביחס להערכה. משימות קשות שוות יותר.' },
+      fixed_points_speed: { name: 'נקודות + בונוס מהירות', desc: 'כל משימה מזכה בערך הנקודות הקבוע שלה. מי שמסיים את הכול מקבל עוד 10%, ומי שמהיר יותר משאר הקבוצות מקבל עד 15% נוספים.' },
+      smart_weighted: { name: 'ניקוד חכם', desc: 'ניקוד לפי רמת הקושי של המשימה, ומהירות הביצוע משנה אותו בעד 30% לכל כיוון. משימות קשות שוות יותר, והערכת זמן לא מדויקת לא תהרוס את הניקוד.' },
     },
     advRegistration: 'שדות הרשמה מתקדמים',
     regNameNote: '"שם" (לכל חבר) תמיד נדרש.',
@@ -5363,8 +5363,8 @@ const EN: typeof HE = {
     },
     presetLabels: {
       time_only: { name: 'Speed Race', desc: 'Ranked purely by total race time. No points, fastest team wins.' },
-      fixed_points_speed: { name: 'Points + Speed Bonus', desc: 'Each mission earns its fixed point value. Complete all stages faster than expected for a bonus (up to +200 pts).' },
-      smart_weighted: { name: 'Smart Score', desc: 'Score based on mission difficulty and how fast each mission was completed relative to its estimate. Harder missions are worth more.' },
+      fixed_points_speed: { name: 'Points + Speed Bonus', desc: 'Each mission earns its fixed point value. Finishing everything adds 10%, and being faster than the other teams adds up to 15% more.' },
+      smart_weighted: { name: 'Smart Score', desc: 'Score based on mission difficulty, with speed moving it by up to 30% either way. Harder missions are worth more, and an inaccurate time estimate cannot wreck the score.' },
     },
     advRegistration: 'Advanced registration fields',
     regNameNote: '"Name" (per member) is always required.',

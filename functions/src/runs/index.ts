@@ -145,17 +145,18 @@ import {
   playableTasks,
 } from '@rushpoint/shared';
 import {
-  scoreFixedPointsSpeed,
-  scoreSmartWeighted,
   durationSeconds,
-  applyCompletionBonus,
-  applyPenalties,
-  applyZScoreBonus,
   skipAward,
   taskScoreFixed,
   taskScoreSmart,
-  COMPLETION_BONUS,
   resolveExpectedMinutes,
+  // scoring-v2: percentage bonuses and field-relative pace (buildRankings).
+  sumEarnedPoints,
+  teamExpectedRouteMinutes,
+  allStagesCompleted,
+  composeLeaderboardScore,
+  fieldPaceRatios,
+  pacePct,
   FIRESTORE_PATHS,
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
@@ -2883,14 +2884,16 @@ export const getRunOutline = loggedCallable('getRunOutline', async (data, contex
 // finalizeRun (terminal) and refreshLeaderboard (live, mid-run) so the two can
 // never drift. `now` is the reference time for not-yet-finished teams.
 export function buildRankings(game: Game, teams: RunTeam[], now: string): LeaderboardEntry[] {
-  type ScoredTeam = LeaderboardEntry & { durationMin: number };
+  type ScoredTeam = LeaderboardEntry & {
+    durationMin: number; points: number; expectedMin: number; bonusPenalty: number; allDone: boolean;
+  };
   const scored: ScoredTeam[] = teams.map((team) => {
     let rawScore = 0;
 
     // Pause-clock tasks (change: pause-clock-tasks): ONE excluded amount per team,
     // summed from the values the server STAMPED on each completed paused task, and
     // fed to EVERY time-derived term below (speed bonus, emitted duration, the
-    // time_only ordering, and the Z-Score's durationMin). Summing the stamps rather
+    // time_only ordering, and the field pace's durationMin). Summing the stamps rather
     // than re-reading `task.pausesTimer` off the template is deliberate: a creator
     // may edit the template mid-run, and re-deriving would retroactively re-time
     // finished work and make the live board jump. Because this is a pure function
@@ -2908,40 +2911,22 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     // live board and the final board still read the identical number.
     const excludedMs = teamExcludedMs(team.stages) + teamHeldExclusionMs(team);
 
-    switch (game.scoringPreset) {
-      case 'time_only':
-        rawScore = 0;
-        break;
-      case 'fixed_points_speed':
-        // Gate the speed bonus on REAL completion. Passing `team.finishedAt ?? now`
-        // scored an unfinished (started, no finishedAt) team as if it had finished at
-        // `now`, so its speed bonus decayed as wall-clock advanced — a phantom score
-        // that shrank between refreshes and broke live/final parity. Only a genuinely
-        // finished team feeds a finishedAt into the bonus math; otherwise
-        // scoreFixedPointsSpeed short-circuits to taskPoints (time-invariant).
-        // fix-fixed-points-speed-template-drift: the ROUTE EXPECTED-TOTAL is likewise
-        // summed from the per-task expectedDurationMinutesAtCompletion stamps the
-        // server wrote at each record's terminal transition (with a template fallback
-        // for legacy records), NOT re-reduced over game.stages — so a mid-run edit to
-        // a task's expected duration cannot retroactively re-score a finished team.
-        rawScore = scoreFixedPointsSpeed(
-          team.stages,
-          team.startedAt,
-          team.status === 'finished' ? team.finishedAt : undefined,
-          game,
-          excludedMs,
-        );
-        break;
-      case 'smart_weighted':
-        rawScore = scoreSmartWeighted(team.stages);
-        break;
-    }
-
-    rawScore = applyCompletionBonus(rawScore, team.stages);
+    // scoring-v2: the mission points (Σ earnedScore — the same sum for both point presets; speed is
+    // a ranking-time PERCENTAGE added below, measured against the field, so the author's time
+    // estimates can no longer decide it). time_only carries no points at all.
+    const points = game.scoringPreset === 'time_only' ? 0 : sumEarnedPoints(team.stages);
+    // The expected minutes of the missions this team COMPLETED, from the server's own stamps (never
+    // the live template, so a mid-run edit cannot re-score a finished team) — the denominator of
+    // its pace. Skipped missions cost it no time and do not count.
+    const expectedMin = teamExpectedRouteMinutes(team.stages, game);
     // Default a missing bonusPenalty to 0 (every other read of it in this file
     // does) — the auto-refresh path reads teams with a raw cast (no parseRunTeam),
     // so an absent field here would otherwise yield NaN in run.leaderboard.
-    rawScore = applyPenalties(rawScore, team.bonusPenalty ?? 0);
+    const bonusPenalty = team.bonusPenalty ?? 0;
+    const allDone = allStagesCompleted(team.stages);
+    // time_only ranks on duration; its score column still carries flat bonuses (discovery, zone
+    // capture) through bonusPenalty, as it always did, and 0 points means 0 percentage bonuses.
+    rawScore = composeLeaderboardScore({ points, allStagesDone: allDone, pacePct: 0, bonusPenalty });
 
     // Gate the emitted duration on REAL completion, exactly as the fixed_points_speed
     // score above does. Passing `team.finishedAt ?? now` made an unfinished (started,
@@ -2983,21 +2968,27 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
       durationSeconds: durFinite,
       totalMinutes: durFinite != null ? durFinite / 60 : undefined,
       durationMin: durSec / 60,
+      points,
+      expectedMin,
+      bonusPenalty,
+      allDone,
     };
   });
 
-  // Apply Z-Score for non-time presets (only meaningful once teams have finished)
-  if (game.scoringPreset !== 'time_only' && scored.length >= 2) {
-    const finishedDurations = scored
-      .filter((t) => t.finishedAt && Number.isFinite(t.durationMin))
-      .map((t) => t.durationMin);
-    if (finishedDurations.length >= 2) {
-      for (const t of scored) {
-        if (t.finishedAt && Number.isFinite(t.durationMin)) {
-          t.score = applyZScoreBonus(t.score, t.durationMin, finishedDurations);
-        }
-      }
-    }
+  // scoring-v2: field-relative pace for the point presets, FINISHED teams only (an unfinished
+  // team's score stays a pure function of its own stored records, time-invariant between
+  // refreshes). Replaces the flat ±200-per-σ Z-score: the pace is a percentage of the team's own
+  // mission points, capped at ±PACE_MAX_PCT, and the reference is the median finisher — so a
+  // wrong time estimate cancels out and one lost team cannot drag the reference.
+  if (game.scoringPreset !== 'time_only') {
+    const finishers = scored.filter((t) => t.finishedAt && Number.isFinite(t.durationMin));
+    const ratios = fieldPaceRatios(finishers.map((t) => ({ durationMin: t.durationMin, expectedMin: t.expectedMin })));
+    finishers.forEach((t, i) => {
+      const score = composeLeaderboardScore({
+        points: t.points, allStagesDone: t.allDone, pacePct: pacePct(ratios[i]), bonusPenalty: t.bonusPenalty,
+      });
+      t.score = Number.isFinite(score) ? score : 0;
+    });
   }
 
   scored.sort((a, b) => {

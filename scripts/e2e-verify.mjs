@@ -1664,6 +1664,65 @@ async function main() {
 
   }); // scenario: paid hints
 
+  // scoring-v2: every bonus is a PERCENTAGE of the mission points a team earned. The old flat +500
+  // completion bonus outweighed every mission of a game whose missions are worth 10 points each, and
+  // a lone finisher's speed was judged against the author's estimate even when that estimate was
+  // obviously wrong. Real server, real clocks.
+  await scenario('scoring-v2: percentage bonuses, field-relative pace', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const sv2Task = (id) => ({
+      id, title: `Riddle ${id}`, type: 'quiz', answers: ['olive'],
+      choices: ['olive', 'wrong-a', 'wrong-b', 'wrong-c'],
+      coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 30, expectedDurationMinutes: 30,
+      pointValue: 40, maxConcurrentTeams: 5, triggerMode: 'instant',
+    });
+    const { gameId: g } = await creator.call('createGame', { title: 'Scoring v2', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'st-sv2', order: 0, title: 'Quiz', isFinal: true, tasks: [sv2Task('sv2-1')] }],
+    });
+
+    // A. One team. It finishes in seconds against a 30-minute estimate — an estimate no real run
+    //    matches — so no pace term is paid, and finishing adds 10% of 40, not 500.
+    const { runId: r1, accessCode: c1 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p1 = makeParty('scoringV2Solo');
+    await signInAnonymously(p1.auth);
+    await p1.call('joinRun', { code: c1, displayName: 'Solo' });
+    await creator.call('startTeams', { gameId: g, runId: r1 });
+    const a1 = await p1.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r1, taskId: 'sv2-1', answer: 'olive' });
+    check('scoring-v2: the solo team answered correctly', a1?.correct === true, JSON.stringify(a1));
+    const soloId = (await p1.call('getMyTeamState', { code: c1 }))?.team?.id;
+    const live1 = await creator.call('refreshLeaderboard', { gameId: g, runId: r1, publish: false });
+    assertLeaderboardInvariants('scoring-v2 solo live', live1?.rankings, [soloId]);
+    check('scoring-v2: completion adds 10% of the points (40 → 44), not a flat +500',
+      live1?.rankings?.[0]?.score === 44, JSON.stringify(live1?.rankings?.[0]));
+    const fin1 = await creator.call('finalizeRun', { gameId: g, runId: r1 });
+    const fin1R = fin1?.rankings ?? fin1?.leaderboard?.rankings ?? [];
+    check('scoring-v2: the final board agrees with the live one', fin1R[0]?.score === 44, JSON.stringify(fin1R[0]));
+
+    // B. Two teams: speed is now relative to the field, so each moves by at most ±15% of its
+    //    40 points on top of the +4 for finishing — never by hundreds.
+    const { runId: r2, accessCode: c2 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const pa = makeParty('scoringV2A');
+    const pb = makeParty('scoringV2B');
+    await signInAnonymously(pa.auth);
+    await signInAnonymously(pb.auth);
+    await pa.call('joinRun', { code: c2, displayName: 'Swift' });
+    await pb.call('joinRun', { code: c2, displayName: 'Steady' });
+    await creator.call('startTeams', { gameId: g, runId: r2 });
+    await pa.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r2, taskId: 'sv2-1', answer: 'olive' });
+    await new Promise((r) => setTimeout(r, 1500));
+    await pb.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r2, taskId: 'sv2-1', answer: 'olive' });
+    const idA = (await pa.call('getMyTeamState', { code: c2 }))?.team?.id;
+    const idB = (await pb.call('getMyTeamState', { code: c2 }))?.team?.id;
+    const fin2 = await creator.call('finalizeRun', { gameId: g, runId: r2 });
+    const fin2R = fin2?.rankings ?? fin2?.leaderboard?.rankings ?? [];
+    assertLeaderboardInvariants('scoring-v2 pair final', fin2R, [idA, idB]);
+    check('scoring-v2: every finisher stays within 44 ± 15% of its points',
+      fin2R.every((r) => r.score >= 44 - 6 && r.score <= 44 + 6), JSON.stringify(fin2R.map((r) => r.score)));
+    check('scoring-v2: the faster team ranks first', fin2R[0]?.teamId === idA, JSON.stringify(fin2R.map((r) => r.teamName)));
+  });
+
   await scenario('wrong answers cost (escalate, cap, cooldown, replay, preset)', async () => {
 
   // ── Wrong-answer cost (change: wrong-answer-cost) ───────────────────────────
