@@ -6811,6 +6811,9 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     },
     // Scheduled-release countdown to the next timed stage drop (ms epoch or null).
     nextStageReleaseAt,
+    // run-gate-integrity: the same wait as a server-measured DURATION, so the phone never compares
+    // the release instant with its own clock (a fast phone hid the countdown early).
+    nextStageReleaseInMs: nextStageReleaseAt === null ? null : Math.max(0, nextStageReleaseAt - Date.now()),
     game: {
       id: game.id,
       title: game.title,
