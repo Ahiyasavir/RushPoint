@@ -4948,7 +4948,10 @@ function sweepExpiredInFlight(
   // run-gate-integrity: a mission an operator sent this team to past its window is theirs to
   // finish; sweeping it on the next poll undid the override seconds after it was given. The
   // team's own countdown (timeLimit) still applies — it starts at that claim.
-  const windowClosed = assignedRec.gateOverride !== true && isExpired(gameTask, launchedAt, nowMs);
+  // A submission already waiting for review was sent in time, for the window too: the rule above
+  // ("time is judged at submission") applied to the per-team countdown only, so a photo sent before
+  // the window closed was swept with no points because the reviewers were slower than the window.
+  const windowClosed = assignedRec.gateOverride !== true && !pendingReview && isExpired(gameTask, launchedAt, nowMs);
   if (!timeUp && !windowClosed) return null;
 
   const now = new Date(nowMs).toISOString();

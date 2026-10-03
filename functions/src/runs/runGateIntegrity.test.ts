@@ -8,7 +8,7 @@ import {
   type Game, type RunStageRecord, type RunTaskRecord,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
-import { applyTaskClosure, applySkipStage, heldTaskIdOf } from './index';
+import { applyTaskClosure, applySkipStage, heldTaskIdOf, advanceTeamStateOnPoll } from './index';
 
 const LAUNCH = '2026-01-01T10:00:00.000Z';
 const L = Date.parse(LAUNCH);
@@ -200,5 +200,37 @@ describe('the send-back picker', () => {
       [{ id: 's1', title: 'S1', tasks: [{ id: 'a' }, { id: 'c' }, { id: 'd' }] }],
     );
     expect(out[0].missions.map((m) => [m.taskId, m.selectable])).toEqual([['a', true], ['c', false], ['d', true]]);
+  });
+});
+
+describe('a photo waiting for review when the window closes', () => {
+  const g = game([{ id: 's1', isFinal: true, tasks: [{ id: 'p', expiresAfterMinutes: 10 }, { id: 'q' }] }]);
+  const team = (pending: boolean) => ({
+    id: 't', status: 'active', launched: true,
+    stages: [stage('s1', 'active', [rec('p', 'assigned', { startedAt: at(1) }), rec('q')])],
+    activeTaskId: 'p',
+    ...(pending ? { taskSubmissions: { p: { status: 'pending' } } } : {}),
+  }) as unknown as Parameters<typeof advanceTeamStateOnPoll>[0]['team'];
+  const poll = async (t: ReturnType<typeof team>) => advanceTeamStateOnPoll({
+    team: t, game: g, launchedAt: LAUNCH, nowMs: L + 30 * 60_000, isController: false,
+    persist: async () => undefined, release: async () => undefined, onPersistError: () => undefined,
+  });
+
+  test('is not swept: it was sent in time, the reviewers decide', async () => {
+    const t = team(true);
+    await poll(t);
+    expect(t.stages[0].tasks[0].status).toBe('assigned');
+  });
+
+  test('without a pending submission, the closed window still sweeps the mission', async () => {
+    const t = team(false);
+    await poll(t);
+    expect(t.stages[0].tasks[0]).toMatchObject({ status: 'skipped', skipCause: 'expired' });
+  });
+
+  test('a team on a staff hold is not swept at all', async () => {
+    const t = { ...team(false), held: true } as ReturnType<typeof team>;
+    await poll(t);
+    expect(t.stages[0].tasks[0].status).toBe('assigned');
   });
 });
