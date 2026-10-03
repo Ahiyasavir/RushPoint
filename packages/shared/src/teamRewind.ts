@@ -27,7 +27,7 @@
 
 import type { RunStageRecord, RunTaskRecord } from './types';
 import { effectiveExclusiveGroups } from './mutualExclusion';
-import { gateSatisfiedTaskIds, isUnlocked, runStageTasks } from './gating';
+import { runStageTasks } from './gating';
 
 export type RewindTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
 
@@ -218,21 +218,6 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
         const award = reopenRecord(t);
         reopenedTaskIds.push(t.taskId);
         if (award > 0) { removed += award; ledger.push({ taskId: t.taskId, delta: -award }); }
-      }
-    }
-  }
-
-  // run-gate-integrity: a stage rewind can reopen a PREREQUISITE of the mission the team is holding
-  // in that stage — the held mission is then locked again, and completeTaskForTeam refuses it. Give
-  // it back to routing instead (it is handed out again once its gate is met).
-  if (!targetRec) {
-    const satisfied = gateSatisfiedTaskIds(stages, input.gameStages);
-    const tpl = (Array.isArray(gameStage?.tasks) ? gameStage!.tasks : []) as { id: string; unlockAfterTaskIds?: string[] }[];
-    for (const t of stage.tasks) {
-      if (t.status !== 'assigned' || t.gateOverride === true) continue;
-      const gt = tpl.find((x) => x.id === t.taskId);
-      if (gt && !isUnlocked(gt, satisfied)) {
-        t.status = 'unassigned'; delete t.startedAt; releaseTaskIds.push(t.taskId);
       }
     }
   }

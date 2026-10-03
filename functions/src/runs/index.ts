@@ -201,7 +201,7 @@ import { isSoloSelfGuidedRun, soloRunReadyToAutoFinalize } from './soloAutoFinal
 import { requireAuth, assertStaffCan } from '../auth';
 import { devicePresence } from '../devicePresenceStore';
 import { shouldFeedTask } from '../feedVisibility';
-import { applyStageCompletion } from './helpers';
+import { applyStageCompletion, stageRetirementsFor } from './helpers';
 // Skipping ONE mission for ONE team (change: skip-single-task): the pure decision
 // plus the durable trail every privileged override leaves.
 import { planTaskSkip } from '@rushpoint/shared';
@@ -307,6 +307,21 @@ export function buildInitialStages(game: Game): RunStageRecord[] {
     });
 }
 
+/** What applyStageCompletion will retire in this stage right now, for a planner's preview. */
+export function retiredNow(
+  stageRec: RunStageRecord, gameStage: Game['stages'][number] | undefined, game: Game,
+  launchedAt: string | undefined, now: string,
+): string[] {
+  void gameStage; // the helper resolves the stage itself, by id
+  return stageRetirementsFor(stageRec, game, launchedAt, now).map((r) => r.taskId);
+}
+
+/** The mission a team is holding in its active stage, from the records (never a stale pointer). */
+export function heldTaskIdOf(stages: RunStageRecord[]): string | null {
+  const active = stages.find((st) => st.status === 'active');
+  return active?.tasks.find((t) => t.status === 'assigned')?.taskId ?? null;
+}
+
 // ─── Closing a mission for every team (change: live-task-close-rules) ─────────
 //
 // Owner (2026-09-27): a CLOSED mission is gone. For every team that has not finished it the record
@@ -318,27 +333,6 @@ export function buildInitialStages(game: Game): RunStageRecord[] {
 //
 // Mutates `stages` (a copy the caller owns). Returns whether anything changed, whether the team was
 // holding the mission, and the station slots to release after the commit.
-/** What applyStageCompletion will retire in this stage right now, for a planner's preview. */
-export function retiredNow(
-  stageRec: RunStageRecord, gameStage: Game['stages'][number] | undefined, game: Game,
-  launchedAt: string | undefined, now: string,
-): string[] {
-  if (gameStage ? !Array.isArray(gameStage.tasks) : !(Array.isArray(game.stages) && game.stages.length > 0)) return [];
-  return stageRetirements({
-    templateTasks: gameStage ? gameStage.tasks : null,
-    records: stageRec.tasks,
-    exclusiveGroups: gameStage?.exclusiveGroups,
-    launchedAt,
-    nowMs: new Date(now).getTime(),
-  }).map((r) => r.taskId);
-}
-
-/** The mission a team is holding in its active stage, from the records (never a stale pointer). */
-export function heldTaskIdOf(stages: RunStageRecord[]): string | null {
-  const active = stages.find((st) => st.status === 'active');
-  return active?.tasks.find((t) => t.status === 'assigned')?.taskId ?? null;
-}
-
 export function applyTaskClosure(
   stages: RunStageRecord[],
   game: Game,
@@ -5051,8 +5045,13 @@ export async function advanceTeamStateOnPoll(args: {
     if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
     if (isController) {
       try {
-        await args.persist({ stages, activeTaskId: team.activeTaskId, ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}), updatedAt: nowIso });
-        for (const id of new Set(releaseIds)) await args.release(id);
+        if (args.healDurably) {
+          // On a fresh read, in a transaction: never a whole-stages write from this poll's copy.
+          await args.healDurably();
+        } else {
+          await args.persist({ stages, activeTaskId: team.activeTaskId, ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}), updatedAt: nowIso });
+          for (const id of new Set(releaseIds)) await args.release(id);
+        }
       } catch (e) { args.onPersistError('poll.missedClosure', e); }
     }
   }
@@ -5153,7 +5152,11 @@ export function healStrandedStage(
       // ('No attempts left'), even a right one, and nothing else ever moved the team off it — the
       // team held a mission it could never finish until staff noticed and skipped it. Retired like
       // a per-team time limit running out: no points, the team routed on.
-      const exhausted = !!gt && attemptLimitReached(taskAttempts?.[t.taskId] ?? 0, gt.smart?.attemptLimit);
+      // Only where a door ENFORCES the cap: a code station always, a quiz/numeric answer outside
+      // test mode (a sealed run never refuses on attempts — wrong answers complete there).
+      const capEnforced = !!gt && (gt.type === 'smart_station'
+        || ((gt.type === 'quiz' || gt.type === 'numeric') && !sealsScoreFromParticipant(game)));
+      const exhausted = capEnforced && attemptLimitReached(taskAttempts?.[t.taskId] ?? 0, gt!.smart?.attemptLimit);
       if (!gt || exhausted) {
         t.status = 'skipped';
         t.skipCause = gt ? 'attempts' : 'removed';
@@ -5164,16 +5167,7 @@ export function healStrandedStage(
     }
   }
   if (stages[idx].tasks.some((t) => t.status === 'assigned')) return { changed: releasedHeld.length > 0, heldAssignedTaskIds: releasedHeld };
-  const gs = game.stages?.find((s) => s.id === stages[idx].stageId);
-  const templateLostStage = !gs && Array.isArray(game.stages) && game.stages.length > 0;
-  // A stage whose `tasks` is not an array is malformed, not emptied: it retires nothing.
-  const retire = (gs ? !Array.isArray(gs.tasks) : !templateLostStage) ? [] : stageRetirements({
-    templateTasks: gs ? gs.tasks : null,
-    records: stages[idx].tasks,
-    exclusiveGroups: gs?.exclusiveGroups,
-    launchedAt,
-    nowMs: new Date(now).getTime(),
-  });
+  const retire = stageRetirementsFor(stages[idx], game, launchedAt, now);
   // A stage that is ALREADY done by applyStageCompletion's own test, but was never evaluated:
   // completion is otherwise judged only when one of ITS missions finishes, so a stage the team
   // reaches with nothing left — every mission closed or skipped while it was still locked, a
@@ -5198,6 +5192,9 @@ export function healStrandedStage(
  */
 export async function healTeamDurably(
   ownerUid: string, gameId: string, runId: string, teamId: string, game: Game, launchedAt: string | undefined,
+  // The run's overrides: a closure this team missed (it joined while the closure was being
+  // applied) is repaired in the SAME transaction, on the fresh read.
+  taskStatusOverrides?: Record<string, string>,
 ): Promise<RunStageRecord[] | null> {
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
   let release: string[] = [];
@@ -5209,8 +5206,17 @@ export async function healTeamDurably(
     if (team.held === true) return null;
     const now = new Date().toISOString();
     const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
+    const closedReleases: string[] = [];
+    let closedSome = false;
+    for (const [id, v] of Object.entries(taskStatusOverrides ?? {})) {
+      if (v !== 'closed') continue;
+      if (!stages.some((st) => st.tasks.some((t) => t.taskId === id && t.status === 'unassigned'))) continue;
+      const res = applyTaskClosure(stages, game, id, launchedAt, now);
+      if (res.changed) { closedSome = true; closedReleases.push(...res.releaseIds); }
+    }
     const out = healStrandedStage(stages, game, launchedAt, now, team.taskAttempts);
-    if (!out.changed) return null;
+    out.heldAssignedTaskIds.push(...closedReleases);
+    if (!out.changed && !closedSome) return null;
     const allDone = stages.every((st) => st.status === 'completed');
     tx.update(teamRef, {
       stages,
@@ -5328,7 +5334,8 @@ export async function assignNextInActiveStage(
     // actually carries a schedule gate (or the template lost the stage), so a healthy team still
     // performs no extra read and no write.
     // (A release-gated NEXT stage needs it too: a heal that completes this stage unlocks that one.)
-    const needsLaunch = !busy && ((gs?.tasks ?? []).some((t) => hasScheduleGate(t))
+    void busy; // a held mission can still be retired here, after which expiry and release apply
+    const needsLaunch = ((gs?.tasks ?? []).some((t) => hasScheduleGate(t))
       || (game.stages ?? []).some((st) => hasScheduleGate(st)));
     // Through the read cache: launchedAt never changes once a run exists, and this runs on every
     // routing call of a game with any timed mission (change: hot-path-read-cost).
@@ -6509,15 +6516,21 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   // INTERNAL on every call, a mission the team could never finish. Retry the completion instead.
   if (done >= task.steps.length) {
     const now = new Date().toISOString();
-    const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+    // The same verdict the normal last step passes (test mode): correct only if no step was missed.
+    const { completed } = await completeTaskForTeam(
+      ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now,
+      seqSealed ? { wasCorrect: (team.taskAttempts?.[taskId] ?? 0) === 0 } : undefined,
+    );
     if (completed) {
       const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
       await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
     }
+    // Complete only if it really is: the record may have been skipped (closed, swept) meanwhile.
+    const isDone = completed || teamTaskRecord(team, taskId)?.status === 'completed';
     const total = task.steps.length;
     return seqSealed
-      ? { recorded: true, stepsDone: total, totalSteps: total, taskComplete: true }
-      : { stepCorrect: true, stepsDone: total, totalSteps: total, taskComplete: true };
+      ? { recorded: true, stepsDone: total, totalSteps: total, taskComplete: isDone }
+      : { stepCorrect: true, stepsDone: total, totalSteps: total, taskComplete: isDone };
   }
 
   // Must answer steps in order; ignore replays of already-cleared steps. This is a
@@ -6702,7 +6715,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     nowMs: Date.now(),
     isController: resolveDeviceRole(team, uid) === 'controller',
     taskStatusOverrides: run.taskStatusOverrides,
-    healDurably: () => healTeamDurably(ctx.ownerUid, ctx.gameId, ctx.runId, team.id, game, run.launchedAt),
+    healDurably: () => healTeamDurably(ctx.ownerUid, ctx.gameId, ctx.runId, team.id, game, run.launchedAt, run.taskStatusOverrides),
     persist: (patch) => db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update(patch),
     release: (taskId) => releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId),
     onPersistError: (op, e) => logBestEffort(op, { runId: ctx.runId, teamId: team.id }, e),

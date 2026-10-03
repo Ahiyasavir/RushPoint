@@ -240,6 +240,10 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // A failed request surfaces a retryable error instead of an infinite spinner.
   // Viewer phones never request routing — the controller drives assignment and
   // the team-doc snapshot brings the result here.
+  // run-gate-integrity: the slow re-ask while every remaining mission waits (see below). Held in a
+  // ref so a re-run of the effect or an unmount cancels it instead of stacking a second chain.
+  const reaskTimer = useRef<number | null>(null);
+  useEffect(() => () => { if (reaskTimer.current) window.clearTimeout(reaskTimer.current); }, []);
   useEffect(() => {
     if (isViewer) return;
     if (assignedRec || unassigned.length === 0) return;
@@ -286,8 +290,12 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           // lifted changes no record. So the phone sat on "locked" (or a spinner) until somebody
           // tapped retry. Ask again on a slow backoff; the server also heals a stranded stage on
           // exactly this call (stageRetirements).
-          if (!res.taskId) {
-            window.setTimeout(() => {
+          // ONE pending re-ask at a time (cleared on unmount and on every effect re-run), and only
+          // for reasons that can change on their own — a held-for-consent team waits for a human.
+          if (!res.taskId && res.reason !== 'guardian_consent') {
+            if (reaskTimer.current) window.clearTimeout(reaskTimer.current);
+            reaskTimer.current = window.setTimeout(() => {
+              reaskTimer.current = null;
               if (routingInFlight.current) return;
               setRoutingAttempt((n) => n + 1);
             }, 15000 + Math.random() * 5000);

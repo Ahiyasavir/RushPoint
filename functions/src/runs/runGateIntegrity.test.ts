@@ -238,7 +238,7 @@ describe('a photo waiting for review when the window closes', () => {
 describe('a held mission whose attempt cap is used up', () => {
   test('is retired with no points and the team is free to be routed on', () => {
     const g = game([{ id: 's1', isFinal: true, tasks: [{ id: 'q' }, { id: 'r' }] }]);
-    (g.stages[0].tasks[0] as unknown as { smart: { attemptLimit: number } }).smart = { attemptLimit: 2 };
+    Object.assign(g.stages[0].tasks[0], { type: 'quiz', smart: { attemptLimit: 2 } });
     const stages = [stage('s1', 'active', [rec('q', 'assigned'), rec('r')])];
     const out = healStrandedStage(stages, g, LAUNCH, at(5), { q: 2 });
     expect(out).toEqual({ changed: true, heldAssignedTaskIds: ['q'] });
@@ -246,9 +246,16 @@ describe('a held mission whose attempt cap is used up', () => {
     expect(heldTaskIdOf(stages)).toBeNull();
   });
 
+  test('a type whose door never enforces the cap (a field check-in) is not retired by it', () => {
+    const g = game([{ id: 's1', isFinal: true, tasks: [{ id: 'q' }] }]);
+    Object.assign(g.stages[0].tasks[0], { type: 'field', smart: { attemptLimit: 1 } });
+    const stages = [stage('s1', 'active', [rec('q', 'assigned')])];
+    expect(healStrandedStage(stages, g, LAUNCH, at(5), { q: 5 }).changed).toBe(false);
+  });
+
   test('one attempt short of the cap keeps the mission', () => {
     const g = game([{ id: 's1', isFinal: true, tasks: [{ id: 'q' }] }]);
-    (g.stages[0].tasks[0] as unknown as { smart: { attemptLimit: number } }).smart = { attemptLimit: 2 };
+    Object.assign(g.stages[0].tasks[0], { type: 'quiz', smart: { attemptLimit: 2 } });
     const stages = [stage('s1', 'active', [rec('q', 'assigned')])];
     expect(healStrandedStage(stages, g, LAUNCH, at(5), { q: 1 }).changed).toBe(false);
   });

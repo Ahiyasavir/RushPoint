@@ -75,7 +75,8 @@ function genGame(r: R): Game {
       if (r.chance(0.2)) t.expiresAfterMinutes = ((t.releaseAfterMinutes as number | undefined) ?? 0) + r.int(5, 60);
       if (r.chance(0.08)) t.expiresAt = new Date(L + r.int(10, 120) * 60_000).toISOString();
       if (r.chance(0.1)) t.timeLimitMinutes = r.int(2, 15);
-      if (r.chance(0.12)) t.smart = { enabled: true, attemptLimit: r.int(1, 3) };
+      // An attempt cap is enforced by the quiz / numeric / code-station doors: a capped mission is a quiz.
+      if (r.chance(0.12)) { t.type = 'quiz'; t.smart = { enabled: true, attemptLimit: r.int(1, 3) }; }
       tasks.push(t as unknown as Task);
     }
     const stage: Record<string, unknown> = { id: `s${si}`, order: si, title: `S${si}`, tasks, isFinal: si === nStages - 1 };

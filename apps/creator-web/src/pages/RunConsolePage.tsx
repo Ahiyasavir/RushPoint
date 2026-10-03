@@ -1999,7 +1999,8 @@ export default function RunConsolePage() {
       {sendBackFor && (
         <SendBackPicker
           teamName={sendBackFor.displayName}
-          stages={sendBackTargets(teamStages.get(sendBackFor.id) as never, gameStagesLite)}
+          stages={sendBackTargets(teamStages.get(sendBackFor.id) as never, gameStagesLite,
+            Object.entries(activeRun.taskStatusOverrides ?? {}).filter(([, v]) => v === 'closed').map(([k]) => k))}
           onPick={(choice) => void sendTeamBack(sendBackFor, choice)}
           onClose={() => setSendBackFor(null)}
         />

@@ -14,6 +14,31 @@ function stampSkipExpected(rec: { taskId: string; expectedDurationMinutesAtCompl
   if (gameTask) rec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
 }
 
+/**
+ * What `stageRetirements` retires in one team stage right now, with the ONE reading of "is the
+ * template's view of this stage usable" (run-gate-integrity): a stage whose `tasks` is not an array
+ * is malformed and retires nothing; a stage missing from a game that still HAS stages was deleted
+ * and retires every open record; an unreadable game retires nothing. applyStageCompletion, the
+ * routing heal and the skip/closure previews all call THIS, so they cannot disagree.
+ */
+export function stageRetirementsFor(
+  stageRec: RunStageRecord,
+  game: Game,
+  launchedAt: string | undefined,
+  now: string,
+): { taskId: string; cause: 'expired' | 'removed' | 'unreachable' | 'exclusive' }[] {
+  const gameStage = game.stages?.find((s) => s.id === stageRec.stageId);
+  const templateHasStages = Array.isArray(game.stages) && game.stages.length > 0;
+  if (gameStage ? !Array.isArray(gameStage.tasks) : !templateHasStages) return [];
+  return stageRetirements({
+    templateTasks: gameStage ? gameStage.tasks : null,
+    records: stageRec.tasks,
+    exclusiveGroups: gameStage?.exclusiveGroups,
+    launchedAt,
+    nowMs: new Date(now).getTime(),
+  });
+}
+
 // Shared run-domain helpers.
 //
 // `applyStageCompletion` is the SINGLE source of truth for "a team's active
@@ -61,15 +86,8 @@ export function applyStageCompletion(
   // exactly the strand described above. The template is judged absent only when the game
   // still HAS stages and this one is gone; an unreadable game retires nothing.
   // A stage whose `tasks` is not an array is malformed, not emptied: it retires nothing.
-  const templateHasStages = Array.isArray(game.stages) && game.stages.length > 0;
-  if (gameStage ? Array.isArray(gameStage.tasks) : templateHasStages) {
-    const retire = stageRetirements({
-      templateTasks: gameStage ? gameStage.tasks : null,
-      records: stages[stageIdx].tasks,
-      exclusiveGroups: gameStage?.exclusiveGroups,
-      launchedAt,
-      nowMs: new Date(now).getTime(),
-    });
+  {
+    const retire = stageRetirementsFor(stages[stageIdx], game, launchedAt, now);
     if (retire.length > 0) {
       const causeOf = new Map(retire.map((r) => [r.taskId, r.cause]));
       for (const t of stages[stageIdx].tasks) {
