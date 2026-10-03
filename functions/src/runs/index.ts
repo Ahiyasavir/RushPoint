@@ -4996,6 +4996,12 @@ export async function advanceTeamStateOnPoll(args: {
    * behaviour. Used ONLY to repair a closure this team missed — see step (0) below.
    */
   taskStatusOverrides?: Record<string, string>;
+  /**
+   * Durable heal (run-gate-integrity): when given, step (3) persists through it — a transaction on a
+   * fresh read (healTeamDurably) — instead of `persist`, so a completion that committed after this
+   * poll's read is never overwritten by stages built from the stale copy.
+   */
+  healDurably?: () => Promise<unknown>;
   persist: (patch: Record<string, unknown>) => Promise<unknown>;
   release: (taskId: string) => Promise<unknown>;
   onPersistError: (op: string, err: unknown) => void;
@@ -5088,8 +5094,12 @@ export async function advanceTeamStateOnPoll(args: {
       if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
       if (isController) {
         try {
-          await args.persist({ stages, activeTaskId: team.activeTaskId, ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}), updatedAt: nowIso });
-          for (const id of new Set(healed.heldAssignedTaskIds)) await args.release(id);
+          if (args.healDurably) {
+            await args.healDurably();
+          } else {
+            await args.persist({ stages, activeTaskId: team.activeTaskId, ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}), updatedAt: nowIso });
+            for (const id of new Set(healed.heldAssignedTaskIds)) await args.release(id);
+          }
         } catch (e) { args.onPersistError('poll.heal', e); }
       }
     }
@@ -5149,6 +5159,42 @@ export function healStrandedStage(
   if (retire.length === 0 && !alreadyDone) return { changed: releasedHeld.length > 0, heldAssignedTaskIds: releasedHeld };
   const { heldAssignedTaskIds } = applyStageCompletion(stages, idx, game, launchedAt, now);
   return { changed: true, heldAssignedTaskIds: [...releasedHeld, ...heldAssignedTaskIds] };
+}
+
+/**
+ * Apply healStrandedStage DURABLY: inside a transaction on a FRESH read of the team, so a completion
+ * (or a skip, a closure, a staff move) that committed between the caller's read and this write is
+ * never overwritten by a whole-array write built from a stale copy. The heal is re-derived from the
+ * fresh state, so it only ever writes what is still true. Slots are returned after the commit.
+ * Returns the healed stages (or null when nothing needed healing any more).
+ */
+export async function healTeamDurably(
+  ownerUid: string, gameId: string, runId: string, teamId: string, game: Game, launchedAt: string | undefined,
+): Promise<RunStageRecord[] | null> {
+  const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+  let release: string[] = [];
+  const healed = await withLockRetry(() => db.runTransaction(async (tx) => {
+    release = [];
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) return null;
+    const team = snap.data() as RunTeam;
+    if (team.held === true) return null;
+    const now = new Date().toISOString();
+    const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
+    const out = healStrandedStage(stages, game, launchedAt, now);
+    if (!out.changed) return null;
+    const allDone = stages.every((st) => st.status === 'completed');
+    tx.update(teamRef, {
+      stages,
+      activeTaskId: heldTaskIdOf(stages),
+      ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+      updatedAt: now,
+    });
+    release = out.heldAssignedTaskIds;
+    return stages;
+  }));
+  for (const id of new Set(release)) await releaseTask(id, ownerUid, gameId, runId);
+  return healed;
 }
 
 export async function assignNextInActiveStage(
@@ -5261,21 +5307,16 @@ export async function assignNextInActiveStage(
     const launchedAt = needsLaunch
       ? ((await cachedGetDoc<Run>(db, docCachePolicy, runPath(ownerUid, gameId, runId))).data as Run | undefined)?.launchedAt
       : undefined;
-    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-    // Without a schedule gate nothing can expire, so an absent launchedAt changes nothing.
-    const healed = healStrandedStage(stages, game, launchedAt, now);
-    if (healed.changed) {
-      const allDone = stages.every((s) => s.status === 'completed');
-      await teamRef.update({
-        stages,
-        // A held mission the heal retired (deleted from the game) is no longer the team's.
-        activeTaskId: heldTaskIdOf(stages),
-        ...(allDone ? { status: 'finished', finishedAt: now } : {}),
-        updatedAt: now,
-      });
-      for (const id of healed.heldAssignedTaskIds) await releaseTask(id, ownerUid, gameId, runId);
-      team.stages = stages;
-      team.activeTaskId = heldTaskIdOf(stages);
+    const probe = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    // Without a schedule gate nothing can expire, so an absent launchedAt changes nothing. The pure
+    // probe decides whether a write is needed at all (a healthy team pays nothing); the write itself
+    // is re-derived on a fresh read inside a transaction (healTeamDurably).
+    if (healStrandedStage(probe, game, launchedAt, now).changed) {
+      const healedStages = await healTeamDurably(ownerUid, gameId, runId, teamId, game, launchedAt);
+      if (healedStages) {
+        team.stages = healedStages;
+        team.activeTaskId = heldTaskIdOf(healedStages);
+      }
     }
   }
 
@@ -6616,6 +6657,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     nowMs: Date.now(),
     isController: resolveDeviceRole(team, uid) === 'controller',
     taskStatusOverrides: run.taskStatusOverrides,
+    healDurably: () => healTeamDurably(ctx.ownerUid, ctx.gameId, ctx.runId, team.id, game, run.launchedAt),
     persist: (patch) => db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update(patch),
     release: (taskId) => releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId),
     onPersistError: (op, e) => logBestEffort(op, { runId: ctx.runId, teamId: team.id }, e),
