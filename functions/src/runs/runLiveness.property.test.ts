@@ -16,6 +16,7 @@
 // and returnTeamTo — those live inside Firestore transactions.
 //
 // A failure prints the seed and the event log; rerun one with RUSHPOINT_LIVENESS_SEED=<n>.
+// RUSHPOINT_LIVENESS_N=<count> and RUSHPOINT_LIVENESS_OFFSET=<first seed - 1> sweep a different range.
 import { describe, test, expect } from 'vitest';
 import {
   gateSatisfiedTaskIds, isUnlocked, scheduleRefusal, resolveExclusions, effectiveExclusiveGroups,
@@ -173,6 +174,24 @@ async function poll(s: Sim) {
   s.team.activeTaskId = t.id;
   inc(s, t.id);
   s.log.push(`${s.team.id} assign ${t.id}`);
+}
+
+/**
+ * What the PHONE does, exactly: getMyTeamState on its poll, and requestNextTask only while it holds
+ * nothing and its active stage still has an unassigned record (TaskRunner's routing effect). Used
+ * by the drain, so the simulation cannot heal a team through a call the real app never makes.
+ */
+async function phone(s: Sim) {
+  await advanceTeamStateOnPoll({
+    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true, taskStatusOverrides: s.overrides,
+    persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
+  });
+  settleFinished(s);
+  const st = s.team.stages.find((x) => x.status === 'active');
+  if (!st) return;
+  if (st.tasks.some((t) => t.status === 'assigned')) return;
+  if (!st.tasks.some((t) => t.status === 'unassigned')) return;
+  await poll(s); // requestNextTask
 }
 
 /** MIRROR completeTaskForTeam's guard sequence + its exclusive-sibling retirement. */
@@ -538,8 +557,8 @@ async function drain(s: Sim) {
       const before = JSON.stringify(team.stages);
       // Twice: one requestNextTask can settle a stage and leave the next one to the following
       // call (production's client retries; see TaskRunner's routing backoff).
-      await poll(s);
-      await poll(s);
+      await phone(s);
+      await phone(s);
       assertSafe(s);
       if ((team.status as string) === 'finished') { progressed = true; continue; }
       const res = tryComplete(s);
@@ -600,7 +619,8 @@ describe('run liveness: no combination of rules and live ops strands a team', ()
   const only = process.env.RUSHPOINT_LIVENESS_SEED;
   const N = Number(process.env.RUSHPOINT_LIVENESS_N ?? 3000);
   test(`${only ? `seed ${only}` : `${N} seeded games`} — every team can play to the finish`, async () => {
-    const seeds = only ? [Number(only)] : Array.from({ length: N }, (_, i) => i + 1);
+    const offset = Number(process.env.RUSHPOINT_LIVENESS_OFFSET ?? 0);
+    const seeds = only ? [Number(only)] : Array.from({ length: N }, (_, i) => offset + i + 1);
     const failures: string[] = [];
     for (const seed of seeds) {
       try { await play(seed); } catch (e) {
