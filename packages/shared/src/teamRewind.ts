@@ -29,7 +29,7 @@ import type { RunStageRecord, RunTaskRecord } from './types';
 
 export type RewindTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
 
-export type RewindRefusal = 'badInput' | 'unknownTarget' | 'targetNotTerminal' | 'stageNotReached';
+export type RewindRefusal = 'badInput' | 'unknownTarget' | 'targetNotTerminal' | 'stageNotReached' | 'taskClosed';
 
 export interface RewindGameStage {
   id: string;
@@ -86,6 +86,7 @@ function reopenRecord(rec: RunTaskRecord): number {
   const award = Math.max(0, finite(rec.earnedScore));
   rec.status = 'unassigned';
   delete rec.skipCause;
+  delete rec.gateOverride;
   delete rec.completedAt;
   delete rec.startedAt;
   delete rec.actualMinutes;
@@ -127,6 +128,11 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
   if (targetRec && targetRec.status !== 'completed' && targetRec.status !== 'skipped') {
     return refuse('targetNotTerminal', input.stages, teamScore);
   }
+  // run-gate-integrity: a mission the organizers CLOSED for the run cannot be handed out by
+  // anything (claimSpecificTask refuses a closed mission even with override), so reopening it
+  // left an `unassigned` record nothing would ever assign — with the requirement raised to need
+  // it, i.e. a team stranded by the button meant to rescue it.
+  if (targetRec && targetRec.closedByOrganizer === true) return refuse('taskClosed', input.stages, teamScore);
 
   const releaseTaskIds: string[] = [];
   const reopenedTaskIds: string[] = [];
@@ -144,7 +150,7 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
       relockedStageIds.push(s.stageId);
     }
     for (const t of s.tasks) {
-      if (t.status === 'assigned') { t.status = 'unassigned'; delete t.startedAt; releaseTaskIds.push(t.taskId); }
+      if (t.status === 'assigned') { t.status = 'unassigned'; delete t.startedAt; delete t.gateOverride; releaseTaskIds.push(t.taskId); }
     }
   }
 
@@ -154,15 +160,19 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
 
   // The template's requirement, not the one a skip lowered for this team.
   const gameStage = (Array.isArray(input.gameStages) ? input.gameStages : []).find((g) => g?.id === stage.stageId);
-  if (gameStage && typeof gameStage.requiredTaskCount === 'number') stage.requiredTaskCount = gameStage.requiredTaskCount;
-  else delete stage.requiredTaskCount;
+  // Clamped exactly as buildInitialStages clamps it at launch (run-gate-integrity): a stage authored
+  // "3 of 4" with a mission benched runs as 3 of 3, and restoring the raw 4 asked for a completion
+  // this team has no record to earn.
+  if (gameStage && typeof gameStage.requiredTaskCount === 'number' && Number.isFinite(gameStage.requiredTaskCount)) {
+    stage.requiredTaskCount = Math.max(1, Math.min(gameStage.requiredTaskCount, stage.tasks.length));
+  } else delete stage.requiredTaskCount;
 
   if (targetRec) {
     const rec = stage.tasks.find((t) => t.taskId === targetRec.taskId)!;
     // The mission they are holding in this stage makes way for the one they are sent back to.
     for (const t of stage.tasks) {
       if (t.status === 'assigned' && t.taskId !== rec.taskId) {
-        t.status = 'unassigned'; delete t.startedAt; releaseTaskIds.push(t.taskId);
+        t.status = 'unassigned'; delete t.startedAt; delete t.gateOverride; releaseTaskIds.push(t.taskId);
       }
     }
     const award = reopenRecord(rec);
@@ -177,7 +187,9 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
     if (completedNow >= required) stage.requiredTaskCount = Math.min(stage.tasks.length, completedNow + 1);
   } else {
     for (const t of stage.tasks) {
-      if (t.status === 'skipped' && REOPENABLE_BY_STAGE.has(t.skipCause)) {
+      // A CLOSED mission stays closed (run-gate-integrity): its skipCause is 'operator', which this
+      // set reopens, but nothing can ever hand a closed mission out again.
+      if (t.status === 'skipped' && REOPENABLE_BY_STAGE.has(t.skipCause) && t.closedByOrganizer !== true) {
         const award = reopenRecord(t);
         reopenedTaskIds.push(t.taskId);
         if (award > 0) { removed += award; ledger.push({ taskId: t.taskId, delta: -award }); }

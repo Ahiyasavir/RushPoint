@@ -2757,6 +2757,10 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
                           {rc.taskAvailClose}
                         </Button>
                       </>
+                    ) : status === 'closed' && overrides?.[tk.id] === 'closed' ? (
+                      // run-gate-integrity: a closure already skipped this mission for every team, so
+                      // "put back in play" could only ever change this badge. The server refuses it too.
+                      <span className="text-xs text-[--ink-3]">{rc.taskAvailClosedFinal}</span>
                     ) : (
                       <Button variant={runActionVariant('resumeTask')} disabled={busy} onClick={() => apply(tk.id, 'active')}>
                         {rc.taskAvailResume}

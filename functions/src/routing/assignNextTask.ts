@@ -186,6 +186,34 @@ async function getRunRouting(
 }
 
 
+// ─── The candidate filter (change: run-gate-integrity) ───────────────────────
+// ONE definition of "routing may hand this task to this team right now", read by
+// assignTask and buildRecommendations (which each carried a verbatim copy) and by the
+// pure liveness simulation (runs/runLiveness.property.test.ts), so what the simulation
+// proves is what production does. `satisfiedTaskIds` = gateSatisfiedTaskIds(...).
+export function isRoutingCandidate(
+  t: Task,
+  satisfiedTaskIds: string[],
+  taskCounts: Record<string, number>,
+  launchedAt: string | undefined,
+  nowMs: number,
+  taskStatusOverrides?: TaskStatusOverrides,
+): boolean {
+  if (satisfiedTaskIds.includes(t.id)) return false;
+  // Availability = run override, else the template status, else active
+  // (change: live-task-pause). One shared rule for every filter.
+  if (!isTaskAssignable(t, taskStatusOverrides)) return false;
+  // Scheduled-release gate: a not-yet-released task is not a candidate.
+  if (!isReleased(t, launchedAt, nowMs)) return false;
+  // Task expiry gate (change: task-expiry): a closed task is never handed out.
+  if (isExpired(t, launchedAt, nowMs)) return false;
+  // Unlockable tasks (change: unlockable-tasks): unmet prerequisites hide it.
+  if (!isUnlocked(t, satisfiedTaskIds)) return false;
+  // WO Fix 4: locationless tasks are uncapped — skip the cap exclusion.
+  if (!t.locationless && (taskCounts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3)) return false;
+  return true;
+}
+
 // ─── Recommendation list (read-only, no Firestore writes) ────────────────────
 
 export async function buildRecommendations(
@@ -201,21 +229,7 @@ export async function buildRecommendations(
   const { taskCounts, launchedAt, hotZone, taskStatusOverrides } = await getRunRouting(ownerUid, gameId, runId);
   const nowMs = Date.now();
 
-  const candidates = tasks.filter((t) => {
-    if (completedTaskIds.includes(t.id)) return false;
-    // Availability = run override, else the template status, else active
-    // (change: live-task-pause). One shared rule for all three filters below.
-    if (!isTaskAssignable(t, taskStatusOverrides)) return false;
-    // Scheduled-release gate: a not-yet-released task is not a candidate.
-    if (!isReleased(t, launchedAt, nowMs)) return false;
-    // Task expiry gate (change: task-expiry): a closed task is never handed out.
-    if (isExpired(t, launchedAt, nowMs)) return false;
-    // Unlockable tasks (change: unlockable-tasks): unmet prerequisites hide it.
-    if (!isUnlocked(t, completedTaskIds)) return false;
-    // WO Fix 4: locationless tasks are uncapped — skip the cap exclusion.
-    if (!t.locationless && (taskCounts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3)) return false;
-    return true;
-  });
+  const candidates = tasks.filter((t) => isRoutingCandidate(t, completedTaskIds, taskCounts, launchedAt, nowMs, taskStatusOverrides));
 
   return candidates
     .map((task) => ({
@@ -376,19 +390,7 @@ export async function assignTask(
     const taskStatusOverrides = runData?.taskStatusOverrides;
     const nowMs = Date.now();
 
-    const candidates = tasks.filter((t) => {
-      if (completedTaskIds.includes(t.id)) return false;
-      if (!isTaskAssignable(t, taskStatusOverrides)) return false;
-      // Scheduled-release gate: a not-yet-released task can't be assigned.
-      if (!isReleased(t, launchedAt, nowMs)) return false;
-      // Task expiry gate (change: task-expiry): a closed task can't be assigned.
-      if (isExpired(t, launchedAt, nowMs)) return false;
-      // Unlockable tasks (change: unlockable-tasks): locked tasks can't be assigned.
-      if (!isUnlocked(t, completedTaskIds)) return false;
-      // WO Fix 4: locationless tasks are uncapped — skip the cap exclusion.
-      if (!t.locationless && (taskCounts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3)) return false;
-      return true;
-    });
+    const candidates = tasks.filter((t) => isRoutingCandidate(t, completedTaskIds, taskCounts, launchedAt, nowMs, taskStatusOverrides));
 
     if (candidates.length === 0) {
       const reason = classifyNoAssignment(tasks, completedTaskIds, taskCounts, launchedAt, nowMs, taskStatusOverrides);

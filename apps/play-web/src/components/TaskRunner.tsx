@@ -280,6 +280,18 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           setStationBusy(false);
           routingInFlight.current = false;
           onChanged();
+          // run-gate-integrity: nothing handed out while missions remain — every one is waiting on
+          // an unlock, a release time or an organizer's pause. Nothing else re-asks: this effect
+          // re-runs only when the record set changes, and a release time arriving or a pause being
+          // lifted changes no record. So the phone sat on "locked" (or a spinner) until somebody
+          // tapped retry. Ask again on a slow backoff; the server also heals a stranded stage on
+          // exactly this call (stageRetirements).
+          if (!res.taskId) {
+            window.setTimeout(() => {
+              if (routingInFlight.current) return;
+              setRoutingAttempt((n) => n + 1);
+            }, 15000 + Math.random() * 5000);
+          }
         })
         .catch(() => { routingInFlight.current = false; setRoutingError(true); });
     withLocation(

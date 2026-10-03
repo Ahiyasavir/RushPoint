@@ -1,6 +1,6 @@
 import {
-  isReleased, unreachableTaskIds, resolveExpectedMinutes,
-  type Game, type RunStageRecord, type TaskProgressStatus, type Task,
+  isReleased, stageRetirements, resolveExpectedMinutes,
+  type Game, type RunStageRecord, type Task,
 } from '@rushpoint/shared';
 
 // fix-fixed-points-speed-template-drift: stamp the resolved expected route-minutes
@@ -53,23 +53,30 @@ export function applyStageCompletion(
   // the exclusive-group losers (runs/index.ts) and the leftovers auto-skipped
   // below; skipAward is deliberately NOT used, that is the owner-initiated
   // skipStage compensation, not an automatic retirement.
-  if (gameStage && Array.isArray(gameStage.tasks) && gameStage.tasks.length > 0) {
-    const statusByTaskId: Record<string, TaskProgressStatus> = {};
-    // skip-keeps-the-stage: an OPERATOR-skipped prerequisite satisfies its dependents, so a
-    // skip of a chain's head no longer retires the chain (production run 2026-09-22).
-    const skipCauseByTaskId: Record<string, unknown> = {};
-    for (const t of stages[stageIdx].tasks) {
-      statusByTaskId[t.taskId] = t.status;
-      skipCauseByTaskId[t.taskId] = t.skipCause;
-    }
-    const dead = new Set(unreachableTaskIds(gameStage.tasks, statusByTaskId, skipCauseByTaskId));
-    if (dead.size > 0) {
+  //
+  // run-gate-integrity widened this from "unreachable" to every way a record can be
+  // unplayable while still `unassigned` (stageRetirements, the ONE rule the routing heal
+  // also reads): a mission whose time window closed before this team took it, and a
+  // mission deleted from the template mid-run. Both used to sit `unassigned` forever,
+  // exactly the strand described above. The template is judged absent only when the game
+  // still HAS stages and this one is gone; an unreadable game retires nothing.
+  const templateHasStages = Array.isArray(game.stages) && game.stages.length > 0;
+  if (gameStage || templateHasStages) {
+    const retire = stageRetirements({
+      templateTasks: gameStage ? gameStage.tasks ?? [] : null,
+      records: stages[stageIdx].tasks,
+      launchedAt,
+      nowMs: new Date(now).getTime(),
+    });
+    if (retire.length > 0) {
+      const causeOf = new Map(retire.map((r) => [r.taskId, r.cause]));
       for (const t of stages[stageIdx].tasks) {
-        if (dead.has(t.taskId)) {
-          t.status = 'skipped';
-          t.skipCause = 'unreachable';
-          stampSkipExpected(t, gameStage.tasks);
-        }
+        const cause = causeOf.get(t.taskId);
+        if (!cause) continue;
+        t.status = 'skipped';
+        t.skipCause = cause;
+        t.earnedScore = 0;
+        stampSkipExpected(t, gameStage?.tasks);
       }
     }
   }

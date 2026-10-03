@@ -7,8 +7,10 @@
 // backward compatibility). NOT a secret — the locked-task UI names its
 // prerequisites, so the field passes through the participant sanitizer.
 
-import { isReleased, type ReleaseGate } from './schedule';
+import { isReleased, isExpired, type ReleaseGate, type ExpiryGate } from './schedule';
 import { effectiveExclusiveGroups, type ExclusiveGroupLike } from './mutualExclusion';
+import { isTaskAssignable, type TaskStatusOverrides } from './liveTaskStatus';
+import type { StationStatus } from './types';
 
 /** A thing that may carry a same-stage prerequisite gate (a Task). */
 export interface UnlockGate {
@@ -43,22 +45,154 @@ export function isUnlocked(gate: UnlockGate | null | undefined, satisfiedTaskIds
  */
 export function satisfiesGate(rec: { status?: unknown; skipCause?: unknown } | null | undefined): boolean {
   if (!rec || typeof rec !== 'object') return false;
-  return rec.status === 'completed' || (rec.status === 'skipped' && rec.skipCause === 'operator');
+  // `removed` (change: run-gate-integrity): the creator deleted the mission from the game while the
+  // run was live. A mission that is no longer part of the game cannot hold the ones behind it shut.
+  return rec.status === 'completed'
+    || (rec.status === 'skipped' && (rec.skipCause === 'operator' || rec.skipCause === 'removed'));
 }
 
-/** Every task id, across a team's stages, whose record satisfies a gate. Total. */
+/**
+ * Every task id, across a team's stages, whose record satisfies a gate. Total.
+ *
+ * With `gameStages` (change: run-gate-integrity) it ALSO returns every template mission that this
+ * team has no record for at all: a mission benched before launch (buildInitialStages leaves it out)
+ * or added to the template after launch. Neither takes part in this run, so neither can ever be
+ * completed, and a gate on one would otherwise keep its dependents locked for the rest of the event
+ * while nothing retires them. Every routing filter, the completion guard and the participant lock
+ * signal read this ONE list, so they agree with `stageRetirements` about what is open.
+ */
 export function gateSatisfiedTaskIds(
   stages: readonly { tasks?: readonly ({ taskId?: unknown; status?: unknown; skipCause?: unknown } | null | undefined)[] }[] | null | undefined,
+  gameStages?: readonly { tasks?: readonly ({ id?: unknown } | null | undefined)[] }[] | null,
 ): string[] {
   if (!Array.isArray(stages)) return [];
   const out: string[] = [];
+  const recorded = new Set<string>();
   for (const s of stages) {
     const tasks = Array.isArray(s?.tasks) ? s.tasks : [];
     for (const t of tasks) {
-      if (t && typeof t.taskId === 'string' && satisfiesGate(t)) out.push(t.taskId);
+      if (!t || typeof t.taskId !== 'string') continue;
+      recorded.add(t.taskId);
+      if (satisfiesGate(t)) out.push(t.taskId);
+    }
+  }
+  if (Array.isArray(gameStages)) {
+    for (const gs of gameStages) {
+      const tasks = Array.isArray(gs?.tasks) ? gs.tasks : [];
+      for (const t of tasks) {
+        const id = t?.id;
+        if (typeof id === 'string' && id && !recorded.has(id)) out.push(id);
+      }
     }
   }
   return out;
+}
+
+/** A team's per-task record, as much of it as the run-graph helpers read. */
+export interface RunGateRecord {
+  taskId?: unknown;
+  status?: unknown;
+  skipCause?: unknown;
+}
+
+/**
+ * The stage's unlock graph AS THIS TEAM'S RUN PLAYS IT (change: run-gate-integrity).
+ *
+ * The template and the team's records are two different lists, and every planner that treated the
+ * template as the run got a benched or freshly added mission wrong: it counted toward what the stage
+ * can yield, kept groups alive, and — worst — as a prerequisite it stayed "unassigned, still
+ * reachable" forever, so the missions behind it were never handed out and never retired.
+ *
+ * The result holds, in template order, every template task this team HAS a record for, with its
+ * gate stripped of ids that are template tasks of this stage without a record (they are satisfied,
+ * see gateSatisfiedTaskIds); then every record whose mission is no longer in the template, as a bare
+ * `{ id }` (so a planner can still name and skip it). Ids that are not template tasks of this stage
+ * at all stay in the gate: those are structural errors validation rejects, and they stay dead.
+ * Pure and total; the input objects are never mutated.
+ */
+export function runStageTasks<T extends UnlockGraphTask>(
+  templateTasks: readonly T[] | null | undefined,
+  records: readonly (RunGateRecord | null | undefined)[] | null | undefined,
+): (T | UnlockGraphTask)[] {
+  const tpl = (Array.isArray(templateTasks) ? templateTasks : []).filter((t): t is T => !!t && typeof t.id === 'string' && !!t.id);
+  const recIds = new Set<string>();
+  for (const r of Array.isArray(records) ? records : []) {
+    if (r && typeof r.taskId === 'string' && r.taskId) recIds.add(r.taskId);
+  }
+  const unplayed = new Set(tpl.filter((t) => !recIds.has(t.id)).map((t) => t.id));
+  const out: (T | UnlockGraphTask)[] = [];
+  for (const t of tpl) {
+    if (!recIds.has(t.id)) continue;
+    const gate = t.unlockAfterTaskIds;
+    if (Array.isArray(gate) && gate.some((id) => unplayed.has(id))) {
+      const kept = gate.filter((id) => !unplayed.has(id));
+      out.push({ ...t, unlockAfterTaskIds: kept.length > 0 ? kept : undefined });
+    } else {
+      out.push(t);
+    }
+  }
+  const tplIds = new Set(tpl.map((t) => t.id));
+  for (const id of recIds) if (!tplIds.has(id)) out.push({ id });
+  return out;
+}
+
+/** Why `stageRetirements` retires a still-unassigned record. */
+export type RetirementCause = 'expired' | 'removed' | 'unreachable';
+
+/**
+ * The still-UNASSIGNED records of one stage that this team can never play, and why
+ * (change: run-gate-integrity). The SINGLE rule applyStageCompletion applies and the routing heal
+ * tests for, so the two cannot disagree about whether a team is stranded.
+ *
+ *  - `removed`: the mission is no longer in the template (deleted, or moved to another stage, while
+ *    the run was live). Routing builds its candidates from the template, so it is never handed out.
+ *  - `expired`: its time window closed before this team ever took it. Routing already refuses to
+ *    hand it out; until now nothing marked it, so a stage that needed it never ended.
+ *  - `unreachable`: gated behind a mission this team can never satisfy, on the run graph above,
+ *    with the two retirements before it applied (an expired prerequisite still closes what waits
+ *    for it; a removed one does not, it is gone from the game).
+ *
+ * A record the team holds (`assigned`) is never returned: a team standing at a stop is never
+ * stranded by a retirement. `templateTasks` null/undefined means "the template no longer has this
+ * stage": every unassigned record is then `removed`. Pure and total, never throws, idempotent once
+ * applied.
+ */
+export function stageRetirements(args: {
+  templateTasks: readonly (UnlockGraphTask & ExpiryGate)[] | null | undefined;
+  records: readonly (RunGateRecord | null | undefined)[] | null | undefined;
+  launchedAt: string | number | null | undefined;
+  nowMs: number;
+}): { taskId: string; cause: RetirementCause }[] {
+  const records = (Array.isArray(args?.records) ? args.records : [])
+    .filter((r): r is RunGateRecord & { taskId: string } => !!r && typeof r.taskId === 'string' && !!r.taskId);
+  const tpl = Array.isArray(args?.templateTasks) ? args.templateTasks.filter((t) => !!t && typeof t.id === 'string') : [];
+  const tplById = new Map(tpl.map((t) => [t.id, t]));
+  const status: Record<string, TaskProgressStatus> = {};
+  const cause: Record<string, unknown> = {};
+  for (const r of records) {
+    status[r.taskId] = (['unassigned', 'assigned', 'completed', 'skipped'] as const).includes(r.status as TaskProgressStatus)
+      ? r.status as TaskProgressStatus
+      : 'unassigned';
+    cause[r.taskId] = r.skipCause;
+  }
+  const out: { taskId: string; cause: RetirementCause }[] = [];
+  for (const r of records) {
+    if (status[r.taskId] !== 'unassigned') continue;
+    const t = tplById.get(r.taskId);
+    let why: RetirementCause | null = null;
+    if (!t) why = 'removed';
+    else if (isExpired(t, args.launchedAt, args.nowMs)) why = 'expired';
+    if (why) {
+      out.push({ taskId: r.taskId, cause: why });
+      status[r.taskId] = 'skipped';
+      cause[r.taskId] = why;
+    }
+  }
+  const graph = runStageTasks(tpl, records);
+  for (const id of unreachableTaskIds(graph, status, cause)) out.push({ taskId: id, cause: 'unreachable' });
+  // Stage order: the order the records are stored in.
+  const order = records.map((r) => r.taskId);
+  return out.sort((a, b) => order.indexOf(a.taskId) - order.indexOf(b.taskId));
 }
 
 /**
@@ -80,13 +214,19 @@ export function gateSatisfiedTaskIds(
  * emulator. `runStartedAt` is the run's launchedAt; `nowMs` the server clock.
  */
 export function lockedTaskIds(
-  candidates: (UnlockGate & ReleaseGate & { id: string })[],
+  candidates: (UnlockGate & ReleaseGate & { id: string; status?: StationStatus })[],
   completedTaskIds: string[],
   runStartedAt: string | number | null | undefined,
   nowMs: number,
+  // change: run-gate-integrity. A mission the organizers PAUSED is held back exactly like a gated
+  // one — routing will not hand it out until it is resumed. Left out of this list it read as
+  // "awaiting routing", so a team whose only remaining mission was paused watched a spinner that
+  // could never resolve instead of the "locked for now" card. Optional: absent = template status.
+  taskStatusOverrides?: TaskStatusOverrides,
 ): string[] {
   return candidates
-    .filter((t) => !isReleased(t, runStartedAt, nowMs) || !isUnlocked(t, completedTaskIds))
+    .filter((t) => !isReleased(t, runStartedAt, nowMs) || !isUnlocked(t, completedTaskIds)
+      || !isTaskAssignable(t, taskStatusOverrides))
     .map((t) => t.id);
 }
 

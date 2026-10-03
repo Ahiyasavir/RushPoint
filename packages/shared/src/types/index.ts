@@ -1116,6 +1116,7 @@ export type SkipCause =
   | 'expired'         // the task's time window closed while the team held it
   | 'timeLimit'       // mission-time-limit: this team's own countdown ran out
   | 'unreachable'     // retired: gated behind a task this team can never satisfy
+  | 'removed'         // run-gate-integrity: the mission was deleted from the game mid-run (satisfies gates)
   | 'stageSatisfied'; // leftover: the stage's requirement was already met
 
 export interface RunTaskRecord {
@@ -1126,6 +1127,13 @@ export interface RunTaskRecord {
   skipCause?: SkipCause;
   /** live-task-close-rules: skipped because the organizers CLOSED the mission for the run. Earns 0. */
   closedByOrganizer?: boolean;
+  /**
+   * run-gate-integrity: an operator put the team on this mission PAST its unlock / release / expiry
+   * gates (forceAssignTask with override, returnTeamTo). Every completion door and the expiry sweep
+   * honour it, so the mission they sent the team to can actually be finished. Cleared whenever the
+   * record leaves `assigned` without completing.
+   */
+  gateOverride?: boolean;
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;
