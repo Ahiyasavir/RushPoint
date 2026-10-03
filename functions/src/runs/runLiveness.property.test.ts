@@ -108,6 +108,8 @@ function genGame(r: R): Game {
 // ── the simulated run ───────────────────────────────────────────────────────
 interface Sim {
   game: Game;
+  /** The template as launched (never edited). */
+  launchGame: Game;
   /** The team the current event acts on (one of `teams`). */
   team: RunTeam;
   teams: RunTeam[];
@@ -186,8 +188,8 @@ function tryComplete(s: Sim): 'done' | string {
   if (gameTask) { const refusal = scheduleRefusal(gameTask, LAUNCH, s.now, rec); if (refusal) return refusal; }
   if (gameTask && rec.gateOverride !== true && rec.status !== 'assigned' && !isUnlocked(gameTask, gateSatisfiedTaskIds(stages, s.game.stages))) return 'locked';
   const gs = s.game.stages.find((g) => g.id === stages[idx].stageId);
-  const siblings = gs ? resolveExclusions(gs, rec.taskId) : [];
-  if (stages[idx].tasks.some((t) => t.status === 'completed' && siblings.includes(t.taskId))) return 'exclusiveTaken';
+  const siblings = gs ? resolveExclusions({ tasks: runStageTasks(gs.tasks, stages[idx].tasks), exclusiveGroups: gs.exclusiveGroups }, rec.taskId) : [];
+  if (rec.status !== 'assigned' && stages[idx].tasks.some((t) => t.status === 'completed' && siblings.includes(t.taskId))) return 'exclusiveTaken';
   rec.status = 'completed';
   rec.completedAt = iso(s.now);
   rec.earnedScore = 10;
@@ -366,7 +368,7 @@ let uid = 0;
 /** A creator editing the template while the run is live (updateGame accepts all of these). */
 function editTemplate(s: Sim, r: R) {
   const g = clone(s.game);
-  const kind = r.int(0, 6);
+  const kind = r.int(0, 10);
   const st = r.pick(g.stages);
   if (kind === 0 && st.tasks.length > 1) {
     const victim = r.pick(st.tasks).id;
@@ -407,6 +409,31 @@ function editTemplate(s: Sim, r: R) {
     if (t.expiresAt) delete t.expiresAt;
     t.releaseAfterMinutes = later;
     s.log.push(`edit: ${t.id} released at ${later}m`);
+  } else if (kind === 7 && st.tasks.length >= 2) {
+    // Group two missions that are in no group yet as alternatives.
+    const grouped = new Set((st.exclusiveGroups ?? []).flatMap((g2) => g2.taskIds));
+    const free = st.tasks.filter((t) => !grouped.has(t.id)).map((t) => t.id);
+    if (free.length >= 2) {
+      const pair = r.shuffle(free).slice(0, 2);
+      st.exclusiveGroups = [...(st.exclusiveGroups ?? []), { id: `eg${++uid}`, taskIds: pair }];
+      if (typeof st.requiredTaskCount === 'number') st.requiredTaskCount = Math.min(st.requiredTaskCount, Math.max(1, maxCompletableTasks(st)));
+      s.log.push(`edit: group ${pair.join('/')}`);
+    }
+  } else if (kind === 8) {
+    // Bench a mission mid-run (runs already launched keep their records).
+    const t = r.pick(st.tasks);
+    t.hidden = !t.hidden;
+    if (typeof st.requiredTaskCount === 'number') st.requiredTaskCount = Math.min(st.requiredTaskCount, Math.max(1, maxCompletableTasks(st)));
+    s.log.push(`edit: ${t.hidden ? 'bench' : 'unbench'} ${t.id}`);
+  } else if (kind === 9) {
+    const ceiling = maxCompletableTasks(st);
+    if (ceiling > 0) { st.requiredTaskCount = r.int(1, ceiling); s.log.push(`edit: ${st.id} requires ${st.requiredTaskCount}`); }
+  } else if (kind === 10) {
+    // Pull a mission's close time in (it stays after its release).
+    const t = r.pick(st.tasks);
+    const rel = typeof t.releaseAfterMinutes === 'number' ? t.releaseAfterMinutes : 0;
+    t.expiresAfterMinutes = Math.max(rel + 1, Math.round((s.now - L) / 60_000) + r.int(0, 10));
+    s.log.push(`edit: ${t.id} closes at ${t.expiresAfterMinutes}m`);
   } else {
     // Insert a stage at the front of the order.
     g.stages.forEach((x) => { x.order += 1; });
@@ -455,11 +482,18 @@ function assertTeamSafe(s: Sim) {
       }
       void done;
     }
-    const gs = s.game.stages.find((g) => g.id === st.stageId);
-    if (gs) {
-      for (const grp of effectiveExclusiveGroups(gs)) {
-        const won = st.tasks.filter((t) => grp.includes(t.taskId) && t.status === 'completed').length;
-        if (won > 1) fail(s, `exclusive group ${grp} completed ${won} times`);
+    // A pair counts only if it is a pair of alternatives BOTH at launch and in the template now,
+    // judged on this team's records (runStageTasks): a group a creator edits mid-run (adds a member
+    // the team already holds, deletes one) legitimately changes what the team may complete.
+    const launchGs = s.launchGame.stages.find((g) => g.id === st.stageId);
+    const nowGs = s.game.stages.find((g) => g.id === st.stageId);
+    if (launchGs && nowGs) {
+      const nowGroups = effectiveExclusiveGroups({ tasks: runStageTasks(nowGs.tasks, st.tasks).map((t) => ({ id: t.id })), exclusiveGroups: nowGs.exclusiveGroups });
+      for (const grp of effectiveExclusiveGroups(launchGs)) {
+        const won = st.tasks.filter((t) => grp.includes(t.taskId) && t.status === 'completed').map((t) => t.taskId);
+        for (let a = 0; a < won.length; a++) for (let b = a + 1; b < won.length; b++) {
+          if (nowGroups.some((g) => g.includes(won[a]) && g.includes(won[b]))) fail(s, `exclusive alternatives ${won[a]} and ${won[b]} both completed`);
+        }
       }
     }
   });
@@ -534,7 +568,7 @@ async function play(seed: number) {
   const nTeams = r.int(1, 3);
   const teams = Array.from({ length: nTeams }, (_, i) =>
     ({ id: `t${i}`, stages: buildInitialStages(clone(game)), status: 'active', launched: true, score: 0, activeTaskId: null } as unknown as RunTeam));
-  const s: Sim = { game, team: teams[0], teams, counts: {}, overrides: {}, now: L, log: [`seed ${seed}`, `game ${JSON.stringify(game.stages.map((g) => ({ id: g.id, req: g.requiredTaskCount, rel: g.releaseAfterMinutes, ex: g.exclusiveGroups?.map((x) => x.taskIds), t: g.tasks.map((t) => [t.id, t.unlockAfterTaskIds, t.hidden ? 'H' : '', t.releaseAfterMinutes, t.expiresAfterMinutes, t.expiresAt ? 'abs' : '', t.timeLimitMinutes, t.locationless ? '' : `cap${t.maxConcurrentTeams}`]) })))}`] };
+  const s: Sim = { game, launchGame: clone(game), team: teams[0], teams, counts: {}, overrides: {}, now: L, log: [`seed ${seed}`, `game ${JSON.stringify(game.stages.map((g) => ({ id: g.id, req: g.requiredTaskCount, rel: g.releaseAfterMinutes, ex: g.exclusiveGroups?.map((x) => x.taskIds), t: g.tasks.map((t) => [t.id, t.unlockAfterTaskIds, t.hidden ? 'H' : '', t.releaseAfterMinutes, t.expiresAfterMinutes, t.expiresAt ? 'abs' : '', t.timeLimitMinutes, t.locationless ? '' : `cap${t.maxConcurrentTeams}`]) })))}`] };
   assertSafe(s);
   const steps = r.int(5, 60);
   for (let i = 0; i < steps; i++) {

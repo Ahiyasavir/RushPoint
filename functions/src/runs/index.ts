@@ -1394,8 +1394,16 @@ export async function completeTaskForTeam(
     // devices racing two members of one group serialize on the team doc: the loser
     // retries, re-reads its own record as `skipped`, and short-circuits harmlessly.
     const gameStage = game.stages.find((s) => s.id === stages[stageIdx].stageId);
-    const exclusiveSiblingIds = gameStage ? resolveExclusions(gameStage, taskId) : [];
-    if (exclusiveSiblingIds.length) {
+    // run-gate-integrity: the group as THIS team's run holds it (runStageTasks): a member benched
+    // after launch still has a record here and is still an alternative.
+    const exclusiveSiblingIds = gameStage
+      ? resolveExclusions({ tasks: runStageTasks(gameStage.tasks, stages[stageIdx].tasks), exclusiveGroups: gameStage.exclusiveGroups }, taskId)
+      : [];
+    // run-gate-integrity: like the unlock gate above, the group decides what may be HANDED OUT. A
+    // mission the team already holds is finishable even if a mid-run edit has since grouped it with
+    // one the team completed — refusing it left the team holding a mission nothing would move it
+    // off (found by the liveness simulation).
+    if (exclusiveSiblingIds.length && taskRec.status !== 'assigned') {
       const blockedByCompleted = stages[stageIdx].tasks.some(
         (t) => t.status === 'completed' && exclusiveSiblingIds.includes(t.taskId),
       );

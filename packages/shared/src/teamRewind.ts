@@ -27,7 +27,7 @@
 
 import type { RunStageRecord, RunTaskRecord } from './types';
 import { effectiveExclusiveGroups } from './mutualExclusion';
-import { gateSatisfiedTaskIds, isUnlocked } from './gating';
+import { gateSatisfiedTaskIds, isUnlocked, runStageTasks } from './gating';
 
 export type RewindTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
 
@@ -151,7 +151,8 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
   // what is meant.
   const gameStageOfTarget = (Array.isArray(input.gameStages) ? input.gameStages : []).find((g) => g?.id === stages[targetStageIdx].stageId);
   if (targetRec && gameStageOfTarget) {
-    const group = effectiveExclusiveGroups({ tasks: gameStageOfTarget.tasks ?? [], exclusiveGroups: gameStageOfTarget.exclusiveGroups })
+    // On the team's records (runStageTasks): a member benched after launch is still an alternative.
+    const group = effectiveExclusiveGroups({ tasks: runStageTasks(gameStageOfTarget.tasks ?? [], stages[targetStageIdx].tasks), exclusiveGroups: gameStageOfTarget.exclusiveGroups })
       .find((g) => g.includes(targetRec.taskId));
     if (group && stages[targetStageIdx].tasks.some((t) => t.taskId !== targetRec.taskId && group.includes(t.taskId) && t.status === 'completed')) {
       return refuse('alternativeCompleted', input.stages, teamScore);

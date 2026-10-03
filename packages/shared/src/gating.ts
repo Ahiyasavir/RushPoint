@@ -124,9 +124,19 @@ export function runStageTasks<T extends UnlockGraphTask>(
   for (const t of tpl) {
     if (!recIds.has(t.id)) continue;
     const gate = t.unlockAfterTaskIds;
-    if (Array.isArray(gate) && gate.some((id) => unplayed.has(id))) {
-      const kept = gate.filter((id) => !unplayed.has(id));
-      out.push({ ...t, unlockAfterTaskIds: kept.length > 0 ? kept : undefined });
+    const strip = Array.isArray(gate) && gate.some((id) => unplayed.has(id));
+    // In a run, "takes part" means "has a record" — a mission benched AFTER launch is still in this
+    // team's game, so its `hidden` flag must not drop it from the group / ceiling arithmetic
+    // (mutualExclusion filters hidden tasks): that switched its exclusive group off mid-run.
+    const benchedLate = (t as { hidden?: unknown }).hidden === true;
+    if (strip || benchedLate) {
+      const copy = { ...t } as T & { hidden?: unknown };
+      if (benchedLate) delete copy.hidden;
+      if (strip) {
+        const kept = gate!.filter((id) => !unplayed.has(id));
+        copy.unlockAfterTaskIds = kept.length > 0 ? kept : undefined;
+      }
+      out.push(copy);
     } else {
       out.push(t);
     }
@@ -185,7 +195,7 @@ export function stageRetirements(args: {
   }
   const out: { taskId: string; cause: RetirementCause }[] = [];
   const blocked = new Set(blockedTaskIds(
-    { tasks: tpl.map((t) => ({ id: t.id, hidden: (t as { hidden?: boolean }).hidden })), exclusiveGroups: args.exclusiveGroups },
+    { tasks: runStageTasks(tpl, records).map((t) => ({ id: t.id })), exclusiveGroups: args.exclusiveGroups },
     records.filter((r) => status[r.taskId] === 'completed').map((r) => r.taskId),
   ));
   for (const r of records) {
