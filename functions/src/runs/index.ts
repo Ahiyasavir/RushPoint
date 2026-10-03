@@ -5279,7 +5279,20 @@ export async function sweepTeamDurably(
     return swept.stages;
   }));
   if (releaseId) await releaseTask(releaseId, ownerUid, gameId, runId);
+  await finalizeSoloIfDone(ownerUid, gameId, runId, out);
   return out;
+}
+
+/**
+ * A solo self-guided run finalizes itself when its team finishes — but that hook lived only on the
+ * completion path, so a team whose LAST mission was retired (swept, healed) instead of completed
+ * left the run open forever (run-gate-integrity). Best-effort, exactly like the completion hook.
+ */
+async function finalizeSoloIfDone(ownerUid: string, gameId: string, runId: string, stages: RunStageRecord[] | null): Promise<void> {
+  if (!stages || !stages.every((st) => st.status === 'completed')) return;
+  await maybeAutoFinalizeSoloRun(ownerUid, gameId, runId).catch((e) =>
+    logBestEffort('autoFinalizeSolo.retired', { ownerUid, gameId, runId }, e),
+  );
 }
 
 /**
@@ -5327,6 +5340,7 @@ export async function healTeamDurably(
     return stages;
   }));
   for (const id of new Set(release)) await releaseTask(id, ownerUid, gameId, runId);
+  await finalizeSoloIfDone(ownerUid, gameId, runId, healed);
   return healed;
 }
 
