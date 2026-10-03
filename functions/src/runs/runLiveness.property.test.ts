@@ -444,7 +444,7 @@ let uid = 0;
 /** A creator editing the template while the run is live (updateGame accepts all of these). */
 function editTemplate(s: Sim, r: R) {
   const g = clone(s.game);
-  const kind = r.int(0, 10);
+  const kind = r.int(0, 11);
   const st = r.pick(g.stages);
   if (kind === 0 && st.tasks.length > 1) {
     const victim = r.pick(st.tasks).id;
@@ -510,6 +510,16 @@ function editTemplate(s: Sim, r: R) {
     const rel = typeof t.releaseAfterMinutes === 'number' ? t.releaseAfterMinutes : 0;
     t.expiresAfterMinutes = Math.max(rel + 1, Math.round((s.now - L) / 60_000) + r.int(0, 10));
     s.log.push(`edit: ${t.id} closes at ${t.expiresAfterMinutes}m`);
+  } else if (kind === 11 && g.stages.length > 1 && st.tasks.length > 1) {
+    // Move a mission to another stage (the Builder's reorder prunes its gates on both sides).
+    const victim = r.pick(st.tasks);
+    st.tasks = st.tasks.filter((t) => t.id !== victim.id);
+    for (const t of st.tasks) if (t.unlockAfterTaskIds) t.unlockAfterTaskIds = t.unlockAfterTaskIds.filter((x) => x !== victim.id);
+    if (st.exclusiveGroups) st.exclusiveGroups = st.exclusiveGroups.map((x) => ({ ...x, taskIds: x.taskIds.filter((y) => y !== victim.id) }));
+    if (typeof st.requiredTaskCount === 'number') st.requiredTaskCount = Math.min(st.requiredTaskCount, Math.max(1, maxCompletableTasks(st)));
+    const dest = r.pick(g.stages.filter((x) => x.id !== st.id));
+    dest.tasks.push({ ...victim, unlockAfterTaskIds: undefined });
+    s.log.push(`edit: move ${victim.id} ${st.id} → ${dest.id}`);
   } else {
     // Insert a stage at the front of the order.
     g.stages.forEach((x) => { x.order += 1; });

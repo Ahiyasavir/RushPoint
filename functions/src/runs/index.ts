@@ -6855,9 +6855,22 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   const recByTaskId = new Map(
     (activeStageIdx >= 0 ? team.stages[activeStageIdx].tasks : []).map((r) => [r.taskId, r]),
   );
+  // run-gate-integrity: content is resolved by mission id across the WHOLE game, not only from the
+  // template's copy of this stage. A held mission the creator moved to another stage mid-run is still
+  // the team's (its record lives here); reading only this stage sent the phone a held mission with no
+  // content and nothing to submit, while the heal correctly left it alone (it still exists).
+  const contentTasks: Task[] = activeGameStage ? [...activeGameStage.tasks] : [];
+  if (activeStageIdx >= 0) {
+    for (const r of team.stages[activeStageIdx].tasks) {
+      if ((r.status === 'assigned' || r.status === 'completed') && !contentTasks.some((t) => t.id === r.taskId)) {
+        const moved = findGameTask(game, r.taskId);
+        if (moved) contentTasks.push(moved);
+      }
+    }
+  }
   const activeStageTasks =
-    activeGameStage
-      ? activeGameStage.tasks.filter((t) => {
+    activeStageIdx >= 0
+      ? contentTasks.filter((t) => {
           const st = recByTaskId.get(t.id)?.status;
           return st === 'assigned' || st === 'completed';
         }).map((t) => {
