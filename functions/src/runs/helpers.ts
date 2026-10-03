@@ -60,10 +60,11 @@ export function applyStageCompletion(
   // mission deleted from the template mid-run. Both used to sit `unassigned` forever,
   // exactly the strand described above. The template is judged absent only when the game
   // still HAS stages and this one is gone; an unreadable game retires nothing.
+  // A stage whose `tasks` is not an array is malformed, not emptied: it retires nothing.
   const templateHasStages = Array.isArray(game.stages) && game.stages.length > 0;
-  if (gameStage || templateHasStages) {
+  if (gameStage ? Array.isArray(gameStage.tasks) : templateHasStages) {
     const retire = stageRetirements({
-      templateTasks: gameStage ? gameStage.tasks ?? [] : null,
+      templateTasks: gameStage ? gameStage.tasks : null,
       records: stages[stageIdx].tasks,
       exclusiveGroups: gameStage?.exclusiveGroups,
       launchedAt,

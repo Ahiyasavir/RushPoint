@@ -323,9 +323,9 @@ export function retiredNow(
   stageRec: RunStageRecord, gameStage: Game['stages'][number] | undefined, game: Game,
   launchedAt: string | undefined, now: string,
 ): string[] {
-  if (!gameStage && !(Array.isArray(game.stages) && game.stages.length > 0)) return [];
+  if (gameStage ? !Array.isArray(gameStage.tasks) : !(Array.isArray(game.stages) && game.stages.length > 0)) return [];
   return stageRetirements({
-    templateTasks: gameStage ? gameStage.tasks ?? [] : null,
+    templateTasks: gameStage ? gameStage.tasks : null,
     records: stageRec.tasks,
     exclusiveGroups: gameStage?.exclusiveGroups,
     launchedAt,
@@ -5014,8 +5014,9 @@ export function healStrandedStage(
   if (stages[idx].tasks.some((t) => t.status === 'assigned')) return { changed: false, heldAssignedTaskIds: [] };
   const gs = game.stages?.find((s) => s.id === stages[idx].stageId);
   const templateLostStage = !gs && Array.isArray(game.stages) && game.stages.length > 0;
-  const retire = !gs && !templateLostStage ? [] : stageRetirements({
-    templateTasks: gs ? gs.tasks ?? [] : null,
+  // A stage whose `tasks` is not an array is malformed, not emptied: it retires nothing.
+  const retire = (gs ? !Array.isArray(gs.tasks) : !templateLostStage) ? [] : stageRetirements({
+    templateTasks: gs ? gs.tasks : null,
     records: stages[idx].tasks,
     exclusiveGroups: gs?.exclusiveGroups,
     launchedAt,

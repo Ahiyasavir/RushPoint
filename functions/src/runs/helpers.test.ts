@@ -161,7 +161,9 @@ describe('applyStageCompletion', () => {
     expect(stages[0].tasks[2].skipCause).toBe('unreachable');
 
     const partial = [stageRec('s0', 'active', [task('t1', 'completed', 10), task('t2', 'unassigned')], 1)];
-    applyStageCompletion(partial, 0, game([{ id: 's0' }]), NOW, NOW);
+    // The template must carry the missions: a record whose mission the template lacks is retired as
+    // `removed` (run-gate-integrity), which is a different cause.
+    applyStageCompletion(partial, 0, game([{ id: 's0', tasks: [{ id: 't1' }, { id: 't2' }] }]), NOW, NOW);
     expect(partial[0].tasks[1].skipCause).toBe('stageSatisfied');
   });
 
