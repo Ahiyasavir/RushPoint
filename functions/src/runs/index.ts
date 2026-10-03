@@ -100,6 +100,7 @@ import {
   hasScheduleGate,
   scheduleRefusal,
   isTaskAssignable,
+  blockedTaskIds,
   expiryInstantMs,
   isTimeLimitUp,
   timeLimitRemainingMs,
@@ -2418,6 +2419,20 @@ export const forceAssignTask = loggedCallable('forceAssignTask', async (data, co
   const gameTask = gameStage?.tasks.find((t) => t.id === ids.taskId);
   if (!gameTask) {
     throw new functions.https.HttpsError('not-found', 'Mission not found in the game');
+  }
+
+  // run-gate-integrity: an alternative of a mission this team already completed is not open either.
+  // Routing never offers one (completion retires the siblings), but a record reopened since (a stage
+  // rewind of an operator skip) could be force-assigned and then completed beside its winner. Like
+  // the other soft gates, an explicit override lets the operator do it on purpose.
+  if (!useOverride && gameStage) {
+    const blocked = blockedTaskIds(
+      { tasks: runStageTasks(gameStage.tasks, stageRec.tasks).map((t) => ({ id: t.id })), exclusiveGroups: gameStage.exclusiveGroups },
+      stageRec.tasks.filter((t) => t.status === 'completed').map((t) => t.taskId),
+    );
+    if (blocked.includes(ids.taskId)) {
+      throw new functions.https.HttpsError('failed-precondition', 'This team already completed an alternative of that mission');
+    }
   }
 
   const now = new Date().toISOString();
