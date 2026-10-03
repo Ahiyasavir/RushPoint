@@ -104,7 +104,6 @@ import {
   timeLimitRemainingMs,
   isUnlocked,
   lockedTaskIds,
-  unreachableTaskIds,
   stageRetirements,
   runStageTasks,
   // skip-keeps-the-stage: completed + operator-skipped, the ids that satisfy an unlock gate.
