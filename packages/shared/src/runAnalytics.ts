@@ -58,7 +58,10 @@ export function computeRunAnalytics(teams: RunTeam[], gameTasks: AnalyticsTask[]
           // dead prerequisite or deleted from the game, one the organizers closed. Counting those
           // as skips (and the team as having attempted) made every "pick 2 of 5" mission read as
           // mostly skipped. A legacy skip with no recorded cause still counts, as it always did.
-          if (rec.status === 'skipped' && (SKIPPED_BY_DESIGN.has(rec.skipCause as string) || rec.closedByOrganizer === true)) continue;
+          if (rec.status === 'skipped' && (SKIPPED_BY_DESIGN.has(rec.skipCause as string) || rec.closedByOrganizer === true
+            // A window that closed before this team was ever handed the mission (no startedAt):
+            // retired, not given up on. A held mission that expired keeps counting.
+            || (rec.skipCause === 'expired' && !rec.startedAt))) continue;
           had = true;
           if (rec.status === 'completed') {
             completed = true;

@@ -81,6 +81,12 @@ export function effectiveTaskStatus(task: TaskStatusView, overrides?: TaskStatus
   return isStationStatus(task?.status) ? task.status : 'active';
 }
 
+/** The ids the RUN has closed (run-gate-integrity): one reading for every caller. Total. */
+export function closedTaskIds(overrides: unknown): string[] {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return [];
+  return Object.entries(overrides as Record<string, unknown>).filter(([, v]) => v === 'closed').map(([k]) => k);
+}
+
 /** True when routing may hand this task out. The single rule behind all three filters. */
 export function isTaskAssignable(task: TaskStatusView, overrides?: TaskStatusOverrides): boolean {
   return effectiveTaskStatus(task, overrides) === 'active';

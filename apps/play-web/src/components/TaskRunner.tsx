@@ -246,14 +246,21 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // run-gate-integrity: the slow re-ask while every remaining mission waits (see below). Held in a
   // ref so a re-run of the effect or an unmount cancels it instead of stacking a second chain.
   const reaskTimer = useRef<number | null>(null);
+  const recheckAfterFlight = useRef(false);
   // A finalized run hands out nothing ever again: stop re-asking (each ask costs reads).
   const runStatusRef = useRef(state.run.status);
   runStatusRef.current = state.run.status;
   useEffect(() => () => { if (reaskTimer.current) window.clearTimeout(reaskTimer.current); }, []);
   useEffect(() => {
+    // Any re-run supersedes a pending slow re-ask: it is either about to ask now or has no reason to.
+    if (reaskTimer.current) { window.clearTimeout(reaskTimer.current); reaskTimer.current = null; }
     if (isViewer) return;
     if (assignedRec || unassigned.length === 0) return;
-    if (routingInFlight.current) return; // don't stampede a slow request
+    if (routingInFlight.current) {
+      // A change (e.g. the lock list) arrived mid-request: remember it, ask again when that returns.
+      recheckAfterFlight.current = true;
+      return; // don't stampede a slow request
+    }
     routingInFlight.current = true;
     setRoutingError(false);
     // wave-f (next-task-regression, Bug B): routing does NOT require a GPS fix —
@@ -298,6 +305,13 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           // exactly this call (stageRetirements).
           // ONE pending re-ask at a time (cleared on unmount and on every effect re-run), and only
           // for reasons that can change on their own — a held-for-consent team waits for a human.
+          if (!res.taskId && recheckAfterFlight.current && runStatusRef.current !== 'finished') {
+            // Something changed while this request was in flight: ask again now, not in a minute.
+            recheckAfterFlight.current = false;
+            setRoutingAttempt((n) => n + 1);
+            return;
+          }
+          recheckAfterFlight.current = false;
           if (!res.taskId && res.reason !== 'guardian_consent' && runStatusRef.current !== 'finished') {
             if (reaskTimer.current) window.clearTimeout(reaskTimer.current);
             // A SLOW fallback only: the immediate re-ask comes from the lock list changing (below),

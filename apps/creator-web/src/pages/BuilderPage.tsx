@@ -339,8 +339,16 @@ export default function BuilderPage() {
   useEffect(() => {
     if (!gameId || !user?.uid) return;
     let alive = true;
-    getDocs(query(collection(db, `${FIRESTORE_PATHS.game(user.uid, gameId)}/runs`), where('status', '==', 'live'), limit(1)))
-      .then((snap) => { if (alive) setHasLiveRun(!snap.empty); })
+    // A solo instant-play run and a test drive are 'live' too, and are often simply abandoned:
+    // only a real event counts, or the note would be permanent noise.
+    getDocs(query(collection(db, FIRESTORE_PATHS.runsCol(user.uid, gameId)), where('status', '==', 'live'), limit(10)))
+      .then((snap) => {
+        if (!alive) return;
+        setHasLiveRun(snap.docs.some((d) => {
+          const r = d.data() as { selfGuided?: boolean; isTestDrive?: boolean };
+          return r.selfGuided !== true && r.isTestDrive !== true;
+        }));
+      })
       .catch(() => { /* best-effort: no note */ });
     return () => { alive = false; };
   }, [gameId, user?.uid]);

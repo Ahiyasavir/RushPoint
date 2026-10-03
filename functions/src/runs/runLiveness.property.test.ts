@@ -289,7 +289,7 @@ function skipOne(s: Sim, r: R) {
   const statusByTaskId: Record<string, 'unassigned' | 'assigned' | 'completed' | 'skipped'> = {};
   const skipCauseByTaskId: Record<string, unknown> = {};
   for (const t of stageRec.tasks) { statusByTaskId[t.taskId] = t.status; skipCauseByTaskId[t.taskId] = t.skipCause; }
-  const plan = planTaskSkip({ stage: { tasks: runStageTasks(gs?.tasks, stageRec.tasks), exclusiveGroups: gs?.exclusiveGroups }, statusByTaskId, requiredTaskCount: stageRec.requiredTaskCount, skipCauseByTaskId, retiredTaskIds: retiredNow(stageRec, gs, s.game, LAUNCH, iso(s.now)) }, target);
+  const plan = planTaskSkip({ stage: { tasks: runStageTasks(gs?.tasks, stageRec.tasks), exclusiveGroups: gs?.exclusiveGroups }, statusByTaskId, requiredTaskCount: stageRec.requiredTaskCount, skipCauseByTaskId, retiredTaskIds: retiredNow(stageRec, s.game, LAUNCH, iso(s.now)) }, target);
   if (!plan.ok) fail(s, `skip refused for an open mission ${target}: ${plan.reason}`);
   const rec = stageRec.tasks.find((t) => t.taskId === target)!;
   rec.status = 'skipped';

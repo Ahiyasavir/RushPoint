@@ -4,7 +4,7 @@ import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } fr
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, closedTaskIds, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -2000,7 +2000,7 @@ export default function RunConsolePage() {
         <SendBackPicker
           teamName={sendBackFor.displayName}
           stages={sendBackTargets(teamStages.get(sendBackFor.id) as never, gameStagesLite,
-            Object.entries(activeRun.taskStatusOverrides ?? {}).filter(([, v]) => v === 'closed').map(([k]) => k))}
+            closedTaskIds(activeRun.taskStatusOverrides))}
           onPick={(choice) => void sendTeamBack(sendBackFor, choice)}
           onClose={() => setSendBackFor(null)}
         />

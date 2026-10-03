@@ -70,6 +70,9 @@ export const FIRESTORE_PATHS = {
   run:        (ownerUid: string, gameId: string, runId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}`,
 
+  runsCol:    (ownerUid: string, gameId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs`,
+
   team:       (ownerUid: string, gameId: string, runId: string, teamId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`,
 

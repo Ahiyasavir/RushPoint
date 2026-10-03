@@ -100,6 +100,7 @@ import {
   hasScheduleGate,
   scheduleRefusal,
   isTaskAssignable,
+  closedTaskIds,
   blockedTaskIds,
   expiryInstantMs,
   isTimeLimitUp,
@@ -311,10 +312,8 @@ export function buildInitialStages(game: Game): RunStageRecord[] {
 
 /** What applyStageCompletion will retire in this stage right now, for a planner's preview. */
 export function retiredNow(
-  stageRec: RunStageRecord, gameStage: Game['stages'][number] | undefined, game: Game,
-  launchedAt: string | undefined, now: string,
+  stageRec: RunStageRecord, game: Game, launchedAt: string | undefined, now: string,
 ): string[] {
-  void gameStage; // the helper resolves the stage itself, by id
   return stageRetirementsFor(stageRec, game, launchedAt, now).map((r) => r.taskId);
 }
 
@@ -358,7 +357,7 @@ export function applyTaskClosure(
     statusByTaskId,
     requiredTaskCount: stageRec.requiredTaskCount,
     skipCauseByTaskId,
-    retiredTaskIds: retiredNow(stageRec, gameStage, game, launchedAt, now),
+    retiredTaskIds: retiredNow(stageRec, game, launchedAt, now),
   }, taskId);
   if (!plan.ok) return { changed: false, wasHolding: false, releaseIds: [] };
   const wasHolding = rec.status === 'assigned';
@@ -386,6 +385,25 @@ export function applyRunClosures(stages: RunStageRecord[], game: Game, run: Pick
 }
 
 /**
+ * Apply every closure of the run that this team's OPEN records missed (run-gate-integrity): a team
+ * whose join raced a closure is in neither closeTaskForAllTeams' team list nor joinRun's read of the
+ * overrides. Only an UNASSIGNED record is repaired (a held one is closeTaskForAllTeams' to move, with
+ * its notice). Mutates `stages`; the ONE implementation the poll and healTeamDurably both use.
+ */
+export function applyMissedClosures(
+  stages: RunStageRecord[], game: Game, overrides: unknown, launchedAt: string | undefined, now: string,
+): { changed: boolean; releaseIds: string[] } {
+  const releaseIds: string[] = [];
+  let changed = false;
+  for (const id of closedTaskIds(overrides)) {
+    if (!stages.some((st) => (st.tasks ?? []).some((t) => t.taskId === id && t.status === 'unassigned'))) continue;
+    const res = applyTaskClosure(stages, game, id, launchedAt, now);
+    if (res.changed) { changed = true; releaseIds.push(...res.releaseIds); }
+  }
+  return { changed, releaseIds };
+}
+
+/**
  * Apply a closure to every team of the run, one transaction per team, then give each team that
  * was standing on the mission its station slot back and its next mission. Best effort per team: one
  * team's failure is logged and never undoes the others (the override is already written, and a
@@ -409,6 +427,7 @@ export async function closeTaskForAllTeams(
         if (!snap.exists) return;
         const team = snap.data() as RunTeam;
         const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
+        const heldBefore = heldTaskIdOf(stages);
         outcome = applyTaskClosure(stages, game, taskId, launchedAt, now);
         if (!outcome.changed) return;
         // run-gate-integrity: the closure can END the stage, auto-skipping a DIFFERENT mission the
@@ -416,8 +435,8 @@ export async function closeTaskForAllTeams(
         // and re-routed exactly like a holder of the closed mission — not left pointing at a record
         // that is no longer theirs.
         const stillHeld = heldTaskIdOf(stages);
-        const holding = outcome.wasHolding || team.activeTaskId === taskId
-          || (!!team.activeTaskId && team.activeTaskId !== stillHeld);
+        // Judged on the RECORDS before and after, never on a pointer that may already have been stale.
+        const holding = outcome.wasHolding || (!!heldBefore && heldBefore !== stillHeld);
         const allDone = stages.every((st) => st.status === 'completed');
         tx.update(doc.ref, {
           stages,
@@ -1369,7 +1388,10 @@ export async function completeTaskForTeam(
     // run-gate-integrity: a mission NOBODY handed out cannot be completed while the organizers have
     // it paused (or closed) — the hand-crafted call routing would never have allowed. A held mission
     // is unaffected: a pause never takes a mission from a team already standing at it.
-    if (gameTask && taskRec.status === 'unassigned' && taskRec.gateOverride !== true
+    // A SUBMISSION for it (a photo sent while the team held it, approved now) was made in time and is
+    // credited whatever the mission's status today — time is judged at submission.
+    const hasSubmission = !!(team as { taskSubmissions?: Record<string, unknown> }).taskSubmissions?.[taskId];
+    if (gameTask && taskRec.status === 'unassigned' && taskRec.gateOverride !== true && !hasSubmission
       && !isTaskAssignable(gameTask, runData?.taskStatusOverrides)) {
       throw new functions.https.HttpsError('failed-precondition', 'This task is paused right now');
     }
@@ -1992,7 +2014,7 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
       statusByTaskId,
       requiredTaskCount: stageRec.requiredTaskCount,
       skipCauseByTaskId,
-      retiredTaskIds: retiredNow(stageRec, gameStage, game, run.launchedAt, now),
+      retiredTaskIds: retiredNow(stageRec, game, run.launchedAt, now),
     }, targetId);
 
     if (!plan.ok) {
@@ -2626,7 +2648,7 @@ export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context)
     gameStages: (game.stages ?? []).map((s) => ({ id: s.id, requiredTaskCount: s.requiredTaskCount, tasks: s.tasks, exclusiveGroups: s.exclusiveGroups })),
     target,
     // run-gate-integrity: what the run closed stays closed (no rewind can reopen it).
-    closedTaskIds: Object.entries(run.taskStatusOverrides ?? {}).filter(([, v]) => v === 'closed').map(([k]) => k),
+    closedTaskIds: closedTaskIds(run.taskStatusOverrides),
     teamScore: team.score ?? 0,
     teamStatus: team.status,
   });
@@ -5091,12 +5113,12 @@ export async function advanceTeamStateOnPoll(args: {
   // stage that needs it. Only an UNASSIGNED record is repaired here (it holds no station slot and
   // no notice is owed); a held one is closeTaskForAllTeams' to move. Pure on the in-memory team,
   // persisted like the other steps; the run document is already in the caller's hands.
-  const closedIds = Object.entries(args.taskStatusOverrides ?? {}).filter(([, v]) => v === 'closed').map(([k]) => k);
-  const missed = closedIds.filter((id) => team.stages.some((st) => st.tasks.some((t) => t.taskId === id && t.status === 'unassigned')));
-  if (missed.length > 0) {
-    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-    const releaseIds: string[] = [];
-    for (const id of missed) releaseIds.push(...applyTaskClosure(stages, game, id, launchedAt, nowIso).releaseIds);
+  let durableHealDone = false;
+  const missedStages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+  const missed = applyMissedClosures(missedStages, game, args.taskStatusOverrides, launchedAt, nowIso);
+  if (missed.changed) {
+    const stages = missedStages;
+    const releaseIds = missed.releaseIds;
     const allDone = stages.every((s) => s.status === 'completed');
     team.stages = stages;
     team.activeTaskId = heldTaskIdOf(stages);
@@ -5105,7 +5127,9 @@ export async function advanceTeamStateOnPoll(args: {
       try {
         if (args.healDurably) {
           // On a fresh read, in a transaction: never a whole-stages write from this poll's copy.
+          // The same call applies the stranded-stage heal, so step (3) need not run it again.
           await args.healDurably();
+          durableHealDone = true;
         } else {
           await args.persist({ stages, activeTaskId: team.activeTaskId, ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}), updatedAt: nowIso });
           for (const id of new Set(releaseIds)) await args.release(id);
@@ -5173,7 +5197,7 @@ export async function advanceTeamStateOnPoll(args: {
       team.stages = stages;
       team.activeTaskId = heldTaskIdOf(stages);
       if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
-      if (isController) {
+      if (isController && !durableHealDone) {
         try {
           if (args.healDurably) {
             await args.healDurably();
@@ -5318,17 +5342,10 @@ export async function healTeamDurably(
     if (team.held === true) return null;
     const now = new Date().toISOString();
     const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
-    const closedReleases: string[] = [];
-    let closedSome = false;
-    for (const [id, v] of Object.entries(taskStatusOverrides ?? {})) {
-      if (v !== 'closed') continue;
-      if (!stages.some((st) => st.tasks.some((t) => t.taskId === id && t.status === 'unassigned'))) continue;
-      const res = applyTaskClosure(stages, game, id, launchedAt, now);
-      if (res.changed) { closedSome = true; closedReleases.push(...res.releaseIds); }
-    }
+    const missed = applyMissedClosures(stages, game, taskStatusOverrides, launchedAt, now);
     const out = healStrandedStage(stages, game, launchedAt, now, team.taskAttempts);
-    out.heldAssignedTaskIds.push(...closedReleases);
-    if (!out.changed && !closedSome) return null;
+    out.heldAssignedTaskIds.push(...missed.releaseIds);
+    if (!out.changed && !missed.changed) return null;
     const allDone = stages.every((st) => st.status === 'completed');
     tx.update(teamRef, {
       stages,
@@ -5436,14 +5453,13 @@ export async function assignNextInActiveStage(
   {
     const idx = team.stages.findIndex((s) => s.status === 'active');
     const gs = idx >= 0 ? game.stages.find((s) => s.id === team.stages[idx].stageId) : undefined;
-    const busy = idx >= 0 && team.stages[idx].tasks.some((t) => t.status === 'assigned');
     // run-gate-integrity: the SAME rule applyStageCompletion applies (stageRetirements), so an
     // expired-before-taken mission, a mission deleted mid-run, or a stage deleted mid-run heals
     // here too. It needs the run's launchedAt for the expiry arm, read only when the stage
     // actually carries a schedule gate (or the template lost the stage), so a healthy team still
     // performs no extra read and no write.
     // (A release-gated NEXT stage needs it too: a heal that completes this stage unlocks that one.)
-    void busy; // a held mission can still be retired here, after which expiry and release apply
+    // Read even while a mission is held: the heal can retire it, after which expiry and release apply.
     const needsLaunch = ((gs?.tasks ?? []).some((t) => hasScheduleGate(t))
       || (game.stages ?? []).some((st) => hasScheduleGate(st)));
     // Through the read cache: launchedAt never changes once a run exists, and this runs on every
@@ -6639,7 +6655,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   // write below commits BEFORE completeTaskForTeam, so a completion that failed (a transient abort,
   // a refusal) left the team here — and the next step index read past the end of `steps` and threw
   // INTERNAL on every call, a mission the team could never finish. Retry the completion instead.
-  if (done >= task.steps.length) {
+  if (done >= task.steps.length && teamTaskRecord(team, taskId)?.status !== 'completed') {
     const now = new Date().toISOString();
     // The same verdict the normal last step passes (test mode): correct only if no step was missed.
     const { completed } = await completeTaskForTeam(
