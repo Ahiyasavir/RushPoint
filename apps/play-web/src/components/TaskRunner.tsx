@@ -243,6 +243,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // run-gate-integrity: the slow re-ask while every remaining mission waits (see below). Held in a
   // ref so a re-run of the effect or an unmount cancels it instead of stacking a second chain.
   const reaskTimer = useRef<number | null>(null);
+  // A finalized run hands out nothing ever again: stop re-asking (each ask costs reads).
+  const runStatusRef = useRef(state.run.status);
+  runStatusRef.current = state.run.status;
   useEffect(() => () => { if (reaskTimer.current) window.clearTimeout(reaskTimer.current); }, []);
   useEffect(() => {
     if (isViewer) return;
@@ -292,7 +295,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           // exactly this call (stageRetirements).
           // ONE pending re-ask at a time (cleared on unmount and on every effect re-run), and only
           // for reasons that can change on their own — a held-for-consent team waits for a human.
-          if (!res.taskId && res.reason !== 'guardian_consent') {
+          if (!res.taskId && res.reason !== 'guardian_consent' && runStatusRef.current !== 'finished') {
             if (reaskTimer.current) window.clearTimeout(reaskTimer.current);
             reaskTimer.current = window.setTimeout(() => {
               reaskTimer.current = null;
