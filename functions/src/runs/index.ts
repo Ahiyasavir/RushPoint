@@ -1793,6 +1793,12 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
   if ((runSnap.data() as Run).ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
+  // run-gate-integrity: a finalized run is frozen (skipTaskForTeam, forceAssignTask and
+  // returnTeamTo already refuse it). Skipping a stage after the final board would pay consolations
+  // and rewrite records the frozen standings no longer reflect.
+  if ((runSnap.data() as Run).status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
   const game = gameSnap.data() as Game;

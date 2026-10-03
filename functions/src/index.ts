@@ -2410,7 +2410,12 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
   const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[]; exclusiveGroups?: { id: string; taskIds: string[] }[] }[] };
-  const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides };
+  const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides; status?: string };
+  // run-gate-integrity: a finalized run is frozen. A closure after the final board would skip
+  // records and shrink requirements the published standings were computed without.
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
 
   const stage = (game.stages ?? []).find((s) => (s.tasks ?? []).some((t) => t?.id === ids.taskId));
   if (!stage) throw new functions.https.HttpsError('not-found', 'Task not found in this game');
