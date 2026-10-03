@@ -158,7 +158,6 @@ async function poll(s: Sim) {
     team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true, taskStatusOverrides: s.overrides,
     persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
   });
-  if (s.team.held === true) return; // assignNextInActiveStage parks a held team
   const idx = activeIdx(s);
   if (idx < 0) return;
   const stageRec = s.team.stages[idx];

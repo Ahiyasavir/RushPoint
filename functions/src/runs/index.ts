@@ -426,7 +426,8 @@ export async function closeTaskForAllTeams(
         const allDone = stages.every((st) => st.status === 'completed');
         tx.update(doc.ref, {
           stages,
-          ...(holding ? { activeTaskId: null, closedTaskNotice: { taskId, title, at: now } } : {}),
+          // The mission the team still holds (never a blind null: a stale pointer must not blank it).
+          ...(holding ? { activeTaskId: stillHeld, closedTaskNotice: { taskId, title, at: now } } : {}),
           ...(allDone ? { status: 'finished', finishedAt: now } : {}),
           updatedAt: now,
         });
