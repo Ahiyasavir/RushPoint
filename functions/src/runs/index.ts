@@ -2686,11 +2686,27 @@ export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context)
       const subs = (fresh as { taskSubmissions?: Record<string, unknown> }).taskSubmissions ?? {};
       const keptSubs: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(subs)) if (!reopened.has(k)) keptSubs[k] = v;
+      // run-gate-integrity: a reopened mission starts clean. Its per-team progress lives OUTSIDE the
+      // record, so reopenRecord never reached it: a completed SEQUENCE kept stepsDone == steps.length
+      // and refused every step (the next index read past the end of the steps and threw INTERNAL),
+      // and a quiz retired for 'attempts' kept a full attempt count, so the heal retired it again
+      // the moment it was handed back. Paid hints stay paid (they are already in bonusPenalty).
+      const without = <V,>(m: Record<string, V> | undefined): Record<string, V> => {
+        const out: Record<string, V> = {};
+        for (const [k, v] of Object.entries(m ?? {})) if (!reopened.has(k)) out[k] = v;
+        return out;
+      };
+      const progressReset = reopened.size === 0 ? {} : {
+        taskStepProgress: without((fresh as { taskStepProgress?: Record<string, number> }).taskStepProgress),
+        taskAttempts: without(fresh.taskAttempts),
+        answerPenalties: without(fresh.answerPenalties as Record<string, unknown> | undefined),
+      };
 
       tx.update(teamRef, {
         stages,
         score: plan.nextTeamScore,
         taskSubmissions: keptSubs,
+        ...progressReset,
         scoreLedger: appendScoreLedger(fresh.scoreLedger, plan.ledger.map((l) => ({
           at: now, delta: l.delta, kind: 'reversal', taskId: l.taskId,
           reason: cleanReason || 'returned', by: (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer',
@@ -6486,6 +6502,23 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task, team);
 
   const done = team.taskStepProgress?.[taskId] ?? 0;
+
+  // run-gate-integrity: every step already cleared, yet the mission is not completed. The progress
+  // write below commits BEFORE completeTaskForTeam, so a completion that failed (a transient abort,
+  // a refusal) left the team here — and the next step index read past the end of `steps` and threw
+  // INTERNAL on every call, a mission the team could never finish. Retry the completion instead.
+  if (done >= task.steps.length) {
+    const now = new Date().toISOString();
+    const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+    if (completed) {
+      const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+      await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+    }
+    const total = task.steps.length;
+    return seqSealed
+      ? { recorded: true, stepsDone: total, totalSteps: total, taskComplete: true }
+      : { stepCorrect: true, stepsDone: total, totalSteps: total, taskComplete: true };
+  }
 
   // Must answer steps in order; ignore replays of already-cleared steps. This is a
   // REPLAY, not a wrong answer, so it stays a no-op in both modes — it just cannot
