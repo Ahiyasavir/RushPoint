@@ -1461,7 +1461,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       {assignedRec?.gateOverride !== true && (
         <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} leftMs={state.activeTaskClosesInMs} onExpired={onChanged} />
       )}
-      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} onTimeUp={onChanged} />
+      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} frozen={state.team.held === true} onTimeUp={onChanged} />
 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
@@ -1787,7 +1787,12 @@ function ExpiryCountdown({ task, launchedAt, leftMs, onExpired }: {
 // mission-time-limit: this team's own countdown. The server sends the time LEFT; it is counted down
 // from when it arrived (lib/timeLimitCountdown.ts), and at zero the state is refreshed so the
 // server's sweep can move the team on.
-function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTimeUp: () => void }) {
+function TimeLimitCountdown({ leftMs, frozen = false, onTimeUp }: {
+  leftMs?: number | null;
+  /** run-gate-integrity: the team is on a staff hold — its mission clock is stopped, so is this. */
+  frozen?: boolean;
+  onTimeUp: () => void;
+}) {
   const { t } = useT();
   // Re-anchored every time a fresh value arrives (each poll), which keeps the display honest.
   // Derived state, adjusted during render (React's documented pattern for "reset on prop change").
@@ -1795,21 +1800,23 @@ function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTi
   if (anchor.leftMs !== leftMs) setAnchor({ leftMs, at: Date.now() });
   const [now, setNow] = useState(() => Date.now());
   const fired = useRef(false);
-  const left = countdownLeftMs(anchor.leftMs, anchor.at, now);
-  const running = left !== null && left > 0;
+  const left = frozen
+    ? (typeof anchor.leftMs === 'number' && Number.isFinite(anchor.leftMs) ? Math.max(0, anchor.leftMs) : null)
+    : countdownLeftMs(anchor.leftMs, anchor.at, now);
+  const running = !frozen && left !== null && left > 0;
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [running]);
   useEffect(() => {
-    if (left === 0 && !fired.current) {
+    if (!frozen && left === 0 && !fired.current) {
       fired.current = true;
       // A beat later, so the server's clock has passed the limit too.
       const id = setTimeout(onTimeUp, 1500);
       return () => clearTimeout(id);
     }
-  }, [left, onTimeUp]);
+  }, [left, frozen, onTimeUp]);
   if (left === null) return null;
   if (left <= 0) {
     return <p className="mt-2 text-sm text-ink-alert font-medium" data-testid="time-limit-up">⌛ {t.task.timeLimitUpNotice}</p>;

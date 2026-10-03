@@ -6033,7 +6033,11 @@ function activeTaskTimeLeftMs(team: RunTeam, game: Game, nowMs: number): number 
   const stage = (team.stages ?? []).find((st) => st.status === 'active');
   const rec = stage?.tasks?.find((r) => r.status === 'assigned');
   if (!rec) return null;
-  return timeLimitRemainingMs(findGameTask(game, rec.taskId), rec.startedAt, nowMs);
+  // run-gate-integrity: on a staff hold the mission's clock is stopped (resume moves startedAt on by
+  // the hold), so what is left is what was left when the hold began — not a countdown to "time up"
+  // that the server will never act on.
+  const heldAtMs = team.held === true ? Date.parse(team.heldAt ?? '') : NaN;
+  return timeLimitRemainingMs(findGameTask(game, rec.taskId), rec.startedAt, Number.isFinite(heldAtMs) ? heldAtMs : nowMs);
 }
 
 // mission-time-limit: this team's own countdown for the mission. Judged at SUBMISSION (a photo
