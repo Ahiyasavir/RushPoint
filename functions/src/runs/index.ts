@@ -5043,6 +5043,27 @@ export async function advanceTeamStateOnPoll(args: {
       }
     }
   }
+
+  // (3) The routing heal, on the poll too (run-gate-integrity). requestNextTask runs it, but the
+  // phone only calls requestNextTask while it holds NOTHING — a team holding a mission that was
+  // deleted from the game (no content reaches the phone, nothing to submit) never called it, so it
+  // was never healed. Pure; a write only when something changed; controller-only like (1) and (2).
+  {
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    const healed = healStrandedStage(stages, game, launchedAt, nowIso);
+    if (healed.changed) {
+      const allDone = stages.every((s) => s.status === 'completed');
+      team.stages = stages;
+      team.activeTaskId = heldTaskIdOf(stages);
+      if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
+      if (isController) {
+        try {
+          await args.persist({ stages, activeTaskId: team.activeTaskId, ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}), updatedAt: nowIso });
+          for (const id of new Set(healed.heldAssignedTaskIds)) await args.release(id);
+        } catch (e) { args.onPersistError('poll.heal', e); }
+      }
+    }
+  }
 }
 
 /**
@@ -5057,7 +5078,24 @@ export function healStrandedStage(
 ): { changed: boolean; heldAssignedTaskIds: string[] } {
   const idx = stages.findIndex((s) => s.status === 'active');
   if (idx < 0) return { changed: false, heldAssignedTaskIds: [] };
-  if (stages[idx].tasks.some((t) => t.status === 'assigned')) return { changed: false, heldAssignedTaskIds: [] };
+  // A HELD mission that no longer exists anywhere in the game (deleted from the template while the
+  // team was on it). The phone renders a mission from its template content, so it receives none and
+  // the player cannot submit anything; nothing else ever moved the team off it (found by the liveness
+  // simulation). Retired as `removed`, its slot returned, so routing hands out the next one. Only
+  // when the GAME is readable and has stages — an unreadable template retires nothing.
+  const releasedHeld: string[] = [];
+  if (Array.isArray(game.stages) && game.stages.length > 0) {
+    for (const t of stages[idx].tasks) {
+      if (t.status === 'assigned' && !findGameTask(game, t.taskId)) {
+        t.status = 'skipped';
+        t.skipCause = 'removed';
+        t.earnedScore = 0;
+        delete t.gateOverride;
+        releasedHeld.push(t.taskId);
+      }
+    }
+  }
+  if (stages[idx].tasks.some((t) => t.status === 'assigned')) return { changed: releasedHeld.length > 0, heldAssignedTaskIds: releasedHeld };
   const gs = game.stages?.find((s) => s.id === stages[idx].stageId);
   const templateLostStage = !gs && Array.isArray(game.stages) && game.stages.length > 0;
   // A stage whose `tasks` is not an array is malformed, not emptied: it retires nothing.
@@ -5078,9 +5116,9 @@ export function healStrandedStage(
   const completedCount = rec.tasks.filter((t) => t.status === 'completed').length;
   const required = Math.min(rec.requiredTaskCount ?? rec.tasks.length, rec.tasks.length);
   const alreadyDone = completedCount >= required || rec.tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
-  if (retire.length === 0 && !alreadyDone) return { changed: false, heldAssignedTaskIds: [] };
+  if (retire.length === 0 && !alreadyDone) return { changed: releasedHeld.length > 0, heldAssignedTaskIds: releasedHeld };
   const { heldAssignedTaskIds } = applyStageCompletion(stages, idx, game, launchedAt, now);
-  return { changed: true, heldAssignedTaskIds };
+  return { changed: true, heldAssignedTaskIds: [...releasedHeld, ...heldAssignedTaskIds] };
 }
 
 export async function assignNextInActiveStage(
@@ -5197,11 +5235,14 @@ export async function assignNextInActiveStage(
       const allDone = stages.every((s) => s.status === 'completed');
       await teamRef.update({
         stages,
+        // A held mission the heal retired (deleted from the game) is no longer the team's.
+        activeTaskId: heldTaskIdOf(stages),
         ...(allDone ? { status: 'finished', finishedAt: now } : {}),
         updatedAt: now,
       });
       for (const id of healed.heldAssignedTaskIds) await releaseTask(id, ownerUid, gameId, runId);
       team.stages = stages;
+      team.activeTaskId = heldTaskIdOf(stages);
     }
   }
 
