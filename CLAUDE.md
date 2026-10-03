@@ -1200,6 +1200,27 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   it is how this surfaced, and the short-input case wants an EXHAUSTIVE sweep rather than sampling);
   and that test's own collision assertion compared RAW strings, so two inputs that normalize to the
   same answer — which SHOULD share a hash — would have failed it for the wrong reason.
+- **A gate decides what may be HANDED OUT, never what a team already holds — and in a run,
+  "part of the game" means "has a record"** (change: run-gate-integrity). Unlock gates, release
+  times and exclusive groups are checked by routing (`isRoutingCandidate`, the ONE candidate
+  filter) and by `forceAssignTask`; the completion doors re-check them only for a record nobody
+  handed out (the hand-crafted call). Re-checking a HELD mission is how a live template edit — a
+  prerequisite added, a release pushed later, a regroup — or a staff override left a team holding a
+  mission it could never finish, with nothing ever moving it off. Expiry still applies to a held
+  mission (the sweep), except one carrying `gateOverride`. At run time, membership comes from the
+  team's records (`runStageTasks`), never from the template's `hidden` flag: a mission benched
+  after launch is still in that team's game, and a benched/added-later prerequisite is satisfied
+  (`gateSatisfiedTaskIds(stages, game.stages)`). Every open record that can never be played —
+  expired before taken, deleted from the template, behind a dead prerequisite, an alternative of a
+  completed mission — is retired by ONE rule, `stageRetirements`, which both `applyStageCompletion`
+  and the routing heal (`healStrandedStage`) apply; the heal also settles a stage that is already
+  done but was never evaluated (all benched, all closed before the team arrived). A closure is
+  final (`setRunTaskStatus` refuses `closedIsFinal`). **`functions/src/runs/runLiveness.property.test.ts`
+  is the gate for all of it**: seeded multi-team games through every live op and mid-run edit,
+  asserting slot counts, `activeTaskId`, stage totals and exclusive groups after every event and
+  that every team can finish at the end (3,000 games in `npm test`; `RUSHPOINT_LIVENESS_N` for more,
+  `RUSHPOINT_LIVENESS_SEED=<n>` to replay one). It found most of these bugs. **Adding a gate, a
+  skip cause, a live op or a template field routing reads ⇒ teach the simulation the new move.**
 - **The port-offset lane removes PORT contention, not CPU contention — and the load sim fails on
   CPU.** `RUSHPOINT_EMULATOR_PORT_OFFSET=1000 npm run verify:emulator` really does run beside a live
   stack without fighting for 8080/9099/5001, but it is still the same laptop. Run beside `dev:all`
