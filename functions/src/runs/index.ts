@@ -5515,7 +5515,12 @@ export async function assignNextInActiveStage(
         if (localIdx < 0) return { taskId: undefined, mine: false };
         const stages = curTeam.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
         stages[activeStageIdx].tasks[localIdx].status = 'assigned';
-        stages[activeStageIdx].tasks[localIdx].startedAt = now;
+        // run-gate-integrity: a mission with a per-team countdown that this team already held and
+        // walked away from (checkOutTask leaves its startedAt) keeps its ORIGINAL start, so checking
+        // out and asking again cannot buy a fresh countdown. Everything else starts now.
+        const prevStart = stages[activeStageIdx].tasks[localIdx].startedAt;
+        const timed = !!findGameTask(game, result.taskId!)?.timeLimitMinutes;
+        stages[activeStageIdx].tasks[localIdx].startedAt = timed && prevStart && Number.isFinite(Date.parse(prevStart)) ? prevStart : now;
         tx.update(teamRef, { stages, activeTaskId: result.taskId, updatedAt: now });
         return { taskId: result.taskId, mine: true };
       }));
