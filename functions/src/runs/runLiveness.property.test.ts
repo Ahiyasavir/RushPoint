@@ -23,7 +23,7 @@ import {
   gateSatisfiedTaskIds, isUnlocked, scheduleRefusal, resolveExclusions, effectiveExclusiveGroups,
   planTaskStatusChange, planTaskSkip, runStageTasks, planTeamRewind, isTaskAssignable,
   validateUnlockGraph, requiredTaskCountProblem, maxCompletableTasks, isExpired, isReleased,
-  releaseInstantMs, expiryInstantMs, playableTasks,
+  releaseInstantMs, expiryInstantMs, playableTasks, lockedTaskIds,
   type Game, type RunStageRecord, type RunTeam, type StationStatus, type Task,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
@@ -196,7 +196,18 @@ async function phone(s: Sim) {
   if (!st) return;
   if (st.tasks.some((t) => t.status === 'assigned')) return;
   if (!st.tasks.some((t) => t.status === 'unassigned')) return;
+  // What getMyTeamState tells the phone: the active stage's unassigned missions routing cannot hand
+  // out now. If EVERY one is in that list the phone shows the lock card — so routing must then find
+  // nothing either, or the player is told "locked" while a mission is waiting.
+  const gs = s.game.stages.find((g) => g.id === st.stageId);
+  const unassignedTpl = (gs?.tasks ?? []).filter((t) => st.tasks.find((r) => r.taskId === t.id)?.status === 'unassigned');
+  const shownLocked = lockedTaskIds(unassignedTpl, gateSatisfiedTaskIds(s.team.stages, s.game.stages), LAUNCH, s.now, s.overrides);
+  const lockCard = unassignedTpl.length > 0 && unassignedTpl.length === st.tasks.filter((r) => r.status === 'unassigned').length
+    && unassignedTpl.every((t) => shownLocked.includes(t.id));
   await poll(s); // requestNextTask
+  if (lockCard && heldTaskIdOf(s.team.stages) && s.team.stages.find((x) => x.stageId === st.stageId)?.status === 'active') {
+    fail(s, `${s.team.id}: the phone showed every remaining mission locked, yet routing handed out ${heldTaskIdOf(s.team.stages)}`);
+  }
 }
 
 /** MIRROR completeTaskForTeam's guard sequence + its exclusive-sibling retirement. */
