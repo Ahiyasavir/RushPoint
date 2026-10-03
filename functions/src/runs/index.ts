@@ -1749,7 +1749,10 @@ export function applySkipStage(
   }
   stages[activeIdx].status = 'completed';
   stages[activeIdx].completedAt = now;
-  stages[activeIdx].earnedScore = (stages[activeIdx].earnedScore ?? 0) + awardTotal;
+  // The stage total is the sum of its records, exactly as applyStageCompletion writes it. Adding the
+  // awards to the running value left out every point the team had already EARNED in this stage
+  // (a stage's total is only written when it completes, so it held just earlier consolations).
+  stages[activeIdx].earnedScore = stages[activeIdx].tasks.reduce((sum, t) => sum + (t.earnedScore ?? 0), 0);
 
   const gameStage = game.stages?.find((st) => st.id === stages[activeIdx].stageId);
   const isLastStage = gameStage?.isFinal ?? (activeIdx === stages.length - 1);
@@ -4949,12 +4952,41 @@ export async function advanceTeamStateOnPoll(args: {
   launchedAt: string | undefined;
   nowMs: number;
   isController: boolean;
+  /**
+   * run.taskStatusOverrides (run-gate-integrity). Optional so existing callers keep their exact
+   * behaviour. Used ONLY to repair a closure this team missed — see step (0) below.
+   */
+  taskStatusOverrides?: Record<string, string>;
   persist: (patch: Record<string, unknown>) => Promise<unknown>;
   release: (taskId: string) => Promise<unknown>;
   onPersistError: (op: string, err: unknown) => void;
 }): Promise<void> {
   const { team, game, launchedAt, nowMs, isController } = args;
   const nowIso = new Date(nowMs).toISOString();
+
+  // (0) A closure this team MISSED (run-gate-integrity). closeTaskForAllTeams lists the teams once,
+  // and joinRun reads the overrides once: a team whose join raced the closure is in neither, and
+  // keeps an open record of a closed mission that routing will never hand out — stranded, in a
+  // stage that needs it. Only an UNASSIGNED record is repaired here (it holds no station slot and
+  // no notice is owed); a held one is closeTaskForAllTeams' to move. Pure on the in-memory team,
+  // persisted like the other steps; the run document is already in the caller's hands.
+  const closedIds = Object.entries(args.taskStatusOverrides ?? {}).filter(([, v]) => v === 'closed').map(([k]) => k);
+  const missed = closedIds.filter((id) => team.stages.some((st) => st.tasks.some((t) => t.taskId === id && t.status === 'unassigned')));
+  if (missed.length > 0) {
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    const releaseIds: string[] = [];
+    for (const id of missed) releaseIds.push(...applyTaskClosure(stages, game, id, launchedAt, nowIso).releaseIds);
+    const allDone = stages.every((s) => s.status === 'completed');
+    team.stages = stages;
+    team.activeTaskId = heldTaskIdOf(stages);
+    if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
+    if (isController) {
+      try {
+        await args.persist({ stages, activeTaskId: team.activeTaskId, ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}), updatedAt: nowIso });
+        for (const id of new Set(releaseIds)) await args.release(id);
+      } catch (e) { args.onPersistError('poll.missedClosure', e); }
+    }
+  }
 
   // (1) Scheduled-release unlock while between stages.
   if (team.stages.findIndex((s) => s.status === 'active') < 0) {
@@ -5139,8 +5171,10 @@ export async function assignNextInActiveStage(
     // (A release-gated NEXT stage needs it too: a heal that completes this stage unlocks that one.)
     const needsLaunch = !busy && ((gs?.tasks ?? []).some((t) => hasScheduleGate(t))
       || (game.stages ?? []).some((st) => hasScheduleGate(st)));
+    // Through the read cache: launchedAt never changes once a run exists, and this runs on every
+    // routing call of a game with any timed mission (change: hot-path-read-cost).
     const launchedAt = needsLaunch
-      ? ((await db.doc(runPath(ownerUid, gameId, runId)).get()).data() as Run | undefined)?.launchedAt
+      ? ((await cachedGetDoc<Run>(db, docCachePolicy, runPath(ownerUid, gameId, runId))).data as Run | undefined)?.launchedAt
       : undefined;
     const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
     // Without a schedule gate nothing can expire, so an absent launchedAt changes nothing.
@@ -6484,6 +6518,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     launchedAt: run.launchedAt,
     nowMs: Date.now(),
     isController: resolveDeviceRole(team, uid) === 'controller',
+    taskStatusOverrides: run.taskStatusOverrides,
     persist: (patch) => db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update(patch),
     release: (taskId) => releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId),
     onPersistError: (op, e) => logBestEffort(op, { runId: ctx.runId, teamId: team.id }, e),

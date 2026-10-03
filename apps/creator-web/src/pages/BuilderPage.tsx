@@ -3359,7 +3359,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 this never blocks a save or a launch. */}
             {exclusiveUnlockRisks(activeStage).slice(0, 1).map((risk) => (
               <p key={risk.taskId} className="text-xs text-amber-400">
-                ⚠ {b.exclusiveUnlockRiskWarn(
+                ⚠ {(risk.neverPlayable ? b.exclusiveUnlockNeverWarn : b.exclusiveUnlockRiskWarn)(
                   activeStage.tasks.find((t) => t.id === risk.taskId)?.title || risk.taskId,
                   activeStage.tasks.find((t) => t.id === risk.prerequisiteId)?.title || risk.prerequisiteId,
                 )}

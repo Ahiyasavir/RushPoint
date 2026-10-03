@@ -140,7 +140,7 @@ function fail(s: Sim, msg: string): never { throw new Violation(`${msg}\n  log:\
 /** getMyTeamState's poll + requestNextTask (assignNextInActiveStage), in order. */
 async function poll(s: Sim) {
   await advanceTeamStateOnPoll({
-    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true,
+    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true, taskStatusOverrides: s.overrides,
     persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
   });
   settleFinished(s);
@@ -150,7 +150,7 @@ async function poll(s: Sim) {
   if (healed.changed) { s.team.stages = stages; settleFinished(s); s.log.push(`heal ${s.team.id}`); healed.heldAssignedTaskIds.forEach((id) => dec(s, id)); }
   // The stage the heal just completed may have unlocked the next one (computeStageUnlock path).
   await advanceTeamStateOnPoll({
-    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true,
+    team: s.team, game: s.game, launchedAt: LAUNCH, nowMs: s.now, isController: true, taskStatusOverrides: s.overrides,
     persist: async () => undefined, release: async (id) => dec(s, id), onPersistError: () => undefined,
   });
   const idx = activeIdx(s);
@@ -347,15 +347,19 @@ function checkOut(s: Sim) {
 }
 
 /** MIRROR joinRun for a late joiner on a started run. */
-function lateJoin(s: Sim) {
+function lateJoin(s: Sim, r: R) {
   if (s.teams.length >= 4) return;
   const id = `t${s.teams.length}`;
-  const stages = applyRunClosures(buildInitialStages(clone(s.game)), s.game, { taskStatusOverrides: s.overrides, launchedAt: LAUNCH }, iso(s.now));
+  // A join that RACED a closure reads the overrides before it was written (run-gate-integrity):
+  // the poll's missed-closure repair must catch it.
+  const raced = r.chance(0.3);
+  const fresh = buildInitialStages(clone(s.game));
+  const stages = raced ? fresh : applyRunClosures(fresh, s.game, { taskStatusOverrides: s.overrides, launchedAt: LAUNCH }, iso(s.now));
   const team = { id, stages, status: 'active', launched: true, score: 0, activeTaskId: null } as unknown as RunTeam;
   s.teams.push(team);
   s.team = team;
   settleFinished(s);
-  s.log.push(`join ${id}`);
+  s.log.push(`join ${id}${raced ? ' (raced a closure)' : ''}`);
 }
 
 let uid = 0;
@@ -429,6 +433,10 @@ function assertTeamSafe(s: Sim) {
       const done = st.tasks.filter((t) => t.status === 'completed').length;
       const allTerminal = st.tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
       if (!allTerminal) fail(s, `completed stage ${st.stageId} still has open records`);
+      const sum = st.tasks.reduce((n, t) => n + (t.earnedScore ?? 0), 0);
+      if ((st.earnedScore ?? 0) !== sum && !st.tasks.some((t) => t.status === 'skipped' && t.skipCause === 'operator' && (t.earnedScore ?? 0) > 0)) {
+        fail(s, `completed stage ${st.stageId} total ${st.earnedScore} but its records sum to ${sum}`);
+      }
       void done;
     }
     const gs = s.game.stages.find((g) => g.id === st.stageId);
@@ -528,7 +536,7 @@ async function play(seed: number) {
     else if (roll < 0.81) forceAssign(s, r);
     else if (roll < 0.85) rewind(s, r);
     else if (roll < 0.89) checkOut(s);
-    else if (roll < 0.92) lateJoin(s);
+    else if (roll < 0.92) lateJoin(s, r);
     else editTemplate(s, r);
     assertSafe(s);
   }

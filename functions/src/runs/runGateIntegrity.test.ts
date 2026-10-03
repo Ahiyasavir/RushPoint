@@ -4,7 +4,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   stageRetirements, runStageTasks, gateSatisfiedTaskIds, lockedTaskIds, scheduleRefusal,
-  planTeamRewind, planTaskSkip, satisfiesGate,
+  planTeamRewind, planTaskSkip, satisfiesGate, sendBackTargets,
   type Game, type RunStageRecord, type RunTaskRecord,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
@@ -171,6 +171,9 @@ describe('skipStage (applySkipStage)', () => {
     expect(stages[0].tasks.find((t) => t.taskId === 'c')).toMatchObject({ earnedScore: 0, closedByOrganizer: true });
     expect(stages[0].tasks.find((t) => t.taskId === 'd')).toMatchObject({ skipCause: 'operator', earnedScore: 5 });
     expect(stages[1].status).toBe('active');
+    // The stage total is the sum of its records, including the 10 already earned on 'a'.
+    expect(stages[0].earnedScore).toBe(stages[0].tasks.reduce((n, t) => n + (t.earnedScore ?? 0), 0));
+    expect(stages[0].earnedScore).toBeGreaterThanOrEqual(15);
   });
 
   test('does not open a next stage before its scheduled release', () => {
@@ -187,5 +190,15 @@ describe('activeTaskId follows the record', () => {
   test('heldTaskIdOf names the assigned record of the active stage, or null', () => {
     expect(heldTaskIdOf([stage('s1', 'completed', [rec('a', 'completed')]), stage('s2', 'active', [rec('b'), rec('c', 'assigned')])])).toBe('c');
     expect(heldTaskIdOf([stage('s1', 'active', [rec('a', 'skipped')])])).toBeNull();
+  });
+});
+
+describe('the send-back picker', () => {
+  test('does not offer a mission the organizers closed', () => {
+    const out = sendBackTargets(
+      [stage('s1', 'active', [rec('a', 'completed'), rec('c', 'skipped', { skipCause: 'operator', closedByOrganizer: true }), rec('d', 'skipped', { skipCause: 'operator' })])],
+      [{ id: 's1', title: 'S1', tasks: [{ id: 'a' }, { id: 'c' }, { id: 'd' }] }],
+    );
+    expect(out[0].missions.map((m) => [m.taskId, m.selectable])).toEqual([['a', true], ['c', false], ['d', true]]);
   });
 });

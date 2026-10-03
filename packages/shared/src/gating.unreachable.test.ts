@@ -138,7 +138,7 @@ describe('exclusiveUnlockRisks — the build time warning', () => {
     const risks = exclusiveUnlockRisks(stage([task('a1'), task('a2'), task('b', ['a1'])], [
       { id: 'g1', taskIds: ['a1', 'a2'] },
     ]));
-    expect(risks).toEqual([{ taskId: 'b', prerequisiteId: 'a1', groupId: 'g1', alternativeIds: ['a2'] }]);
+    expect(risks).toEqual([{ taskId: 'b', prerequisiteId: 'a1', groupId: 'g1', alternativeIds: ['a2'], neverPlayable: false }]);
   });
 
   it('reports a transitive gate: c requires b requires a group member', () => {
@@ -146,7 +146,7 @@ describe('exclusiveUnlockRisks — the build time warning', () => {
       { id: 'g1', taskIds: ['a1', 'a2'] },
     ]));
     expect(risks.map((r) => r.taskId)).toEqual(['b', 'c']);
-    expect(risks[1]).toEqual({ taskId: 'c', prerequisiteId: 'a1', groupId: 'g1', alternativeIds: ['a2'] });
+    expect(risks[1]).toEqual({ taskId: 'c', prerequisiteId: 'a1', groupId: 'g1', alternativeIds: ['a2'], neverPlayable: false });
   });
 
   it('ignores an inert group of one, which locks nothing', () => {
@@ -166,6 +166,7 @@ describe('exclusiveUnlockRisks — the build time warning', () => {
     const risks = exclusiveUnlockRisks(stage([task('a1'), task('b', ['a1'])], [
       { id: 'g1', taskIds: ['a1', 'b'] },
     ]));
-    expect(risks).toEqual([{ taskId: 'b', prerequisiteId: 'a1', groupId: 'g1', alternativeIds: [] }]);
+    // run-gate-integrity: flagged, so the Builder says "never playable" instead of "some teams miss it".
+    expect(risks).toEqual([{ taskId: 'b', prerequisiteId: 'a1', groupId: 'g1', alternativeIds: [], neverPlayable: true }]);
   });
 });

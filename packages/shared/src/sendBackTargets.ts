@@ -50,12 +50,15 @@ export function sendBackTargets(
       const t = tasks.find((x) => x?.id === id);
       return typeof t?.title === 'string' && t.title ? t.title : id;
     };
-    const recs = Array.isArray(s.tasks) ? (s.tasks as { taskId?: unknown; status?: unknown }[]) : [];
+    const recs = Array.isArray(s.tasks) ? (s.tasks as { taskId?: unknown; status?: unknown; closedByOrganizer?: unknown }[]) : [];
     const missions: SendBackMission[] = recs
       .filter((r) => typeof r?.taskId === 'string')
       .map((r) => {
         const status = missionStatus(r.status);
-        return { taskId: r.taskId as string, title: titleOf(r.taskId as string), status, selectable: status === 'done' || status === 'skipped' };
+        // run-gate-integrity: a mission the organizers CLOSED cannot be reopened (returnTeamTo refuses it),
+        // so it is not offered.
+        const closed = r.closedByOrganizer === true;
+        return { taskId: r.taskId as string, title: titleOf(r.taskId as string), status, selectable: !closed && (status === 'done' || status === 'skipped') };
       });
     out.push({
       stageId: s.stageId,

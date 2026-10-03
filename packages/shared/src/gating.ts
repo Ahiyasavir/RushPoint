@@ -487,6 +487,12 @@ export interface ExclusiveUnlockRisk {
   groupId: string;
   /** The other members of that group whose choice kills `taskId`. May be empty. */
   alternativeIds: string[];
+  /**
+   * run-gate-integrity: `taskId` is itself a member of the SAME group as its prerequisite, so no
+   * team can ever play it: completing the prerequisite retires it as the losing alternative, and
+   * completing any other member retires the prerequisite. Not "some teams miss it" — nobody gets it.
+   */
+  neverPlayable: boolean;
 }
 
 /**
@@ -552,7 +558,9 @@ export function exclusiveUnlockRisks(stage: {
       prerequisiteId,
       groupId: groupIdOf.get(prerequisiteId) ?? '',
       alternativeIds: members.filter((m) => m !== prerequisiteId && m !== t.id),
+      neverPlayable: members.includes(t.id),
     });
   }
-  return risks;
+  // The unplayable ones first: a Builder that shows one warning shows the worst.
+  return risks.sort((a, b) => Number(b.neverPlayable) - Number(a.neverPlayable));
 }

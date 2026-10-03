@@ -2025,6 +2025,8 @@ const HE = {
     exclusiveUnwinnableWarn: 'שימו לב: מספר המשימות הנדרש להשלמה גבוה ממספר המשימות שאפשר להשלים אחרי שהקבוצות נועלות את החלופות, והשלב יסתיים מוקדם',
     // unreachable-task-strand: אזהרה בלבד. זו הצעה לגיטימית של מסלול מתפצל,
     // והשרת כבר מדלג על המשימה אוטומטית כדי שאף קבוצה לא תיתקע.
+    exclusiveUnlockNeverWarn: (task: string, prereq: string) =>
+      `המשימה "${task}" לא תשוחק אף פעם: היא נפתחת רק אחרי "${prereq}", אבל שתיהן באותה קבוצת חלופות, ולכן ברגע ש"${prereq}" מושלמת היא נסגרת. הוציאו אחת מהן מהקבוצה או בטלו את התנאי`,
     exclusiveUnlockRiskWarn: (task: string, prereq: string) =>
       `שימו לב: המשימה "${task}" נפתחת רק אחרי "${prereq}", ו"${prereq}" היא אחת מכמה חלופות. קבוצה שתבחר חלופה אחרת לא תוכל להגיע ל"${task}", והמשימה תסומן עבורה כמדולגת`,
     exclusiveGroupLetter: (i: number) => 'אבגדהוזחטיכלמנסעפצקרשת'[i] ?? String(i + 1),
@@ -4936,6 +4938,8 @@ const EN: typeof HE = {
     exclusiveUnwinnableWarn: 'Heads up: the required completion count is higher than the number of missions a team can complete once the groups lock their alternatives, so the stage would end early',
     // unreachable-task-strand: advisory only. The shape is a legitimate branch,
     // and the server now retires the dead branch so no team can be stranded.
+    exclusiveUnlockNeverWarn: (task: string, prereq: string) =>
+      `Mission "${task}" can never be played: it unlocks only after "${prereq}", but both are in the same group of alternatives, so completing "${prereq}" closes it. Take one of them out of the group, or remove the condition`,
     exclusiveUnlockRiskWarn: (task: string, prereq: string) =>
       `Heads up: mission "${task}" unlocks only after "${prereq}", and "${prereq}" is one of several alternatives. A team that picks a different alternative can never reach "${task}", so it will be marked skipped for them`,
     exclusiveGroupLetter: (i: number) => (i <= 25 ? String.fromCharCode(65 + i) : String(i + 1)),
