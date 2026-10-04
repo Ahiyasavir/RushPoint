@@ -570,23 +570,33 @@ two places: the creator preview, and the server (`completeTaskForTeam` per-task 
 - **`time_only`** — 0 (ranking is purely by elapsed time).
 - **`fixed_points_speed`** — `task.pointValue`.
 - **`smart_weighted`** — `100 × (difficulty/10) × sigmoid(actual/estimated)`, where
-  `sigmoid(x) = 0.2 + 1.3 / (1 + e^(3(x−1)))`. On-target (x=1) ≈ multiplier 0.85; much faster → up to ~1.5; much slower → 0.2.
+  `sigmoid(x) = 0.7 + 0.6 / (1 + e^(2.5(x−1)))` (scoring-v2). On-target (x=1) = exactly 1.0; much
+  faster → up to 1.3; much slower → 0.7. Bounded on purpose: a wrong estimate moves a mission's
+  value by at most ±30% (it used to be a 0.2…1.5 swing, so a bad guess paid a fifth).
 
-### Final ranking (`buildRankings`)
-For each team:
+### Final ranking (`buildRankings`) — scoring-v2
+Every bonus is a **percentage of the team's mission points**, never a flat amount:
 ```
-raw = presetTotal                       // sum of task earnedScore (or 0 for time_only)
-raw = applyCompletionBonus(raw, stages) // +500 if every stage completed
-raw = applyPenalties(raw, bonusPenalty) // − hints − fines, floored at 0
+points  = Σ earnedScore of completed + skipped records   // 0 for time_only
+score   = points
+        + round(points × 10%)          if every stage completed
+        + round(points × pacePct(r))   finished teams only, −10% … +15%
+        − bonusPenalty                 // hints, fines, flat bonuses; applied LAST
+score   = max(0, score)
 ```
-Then, for non-`time_only` presets with ≥2 **finished** teams, a **Z-Score time bonus** is applied to
-finished teams: `score + round(−z × 200)`, where `z = (teamDurationMin − μ) / σ` across finishers
-(faster than average → bonus; 1σ ≈ ±200 pts), floored at 0.
+`r` is the team's **pace relative to the field** (`fieldPaceRatios`): its adjusted duration over
+`teamExpectedRouteMinutes` (the expected-minute stamps of the missions it COMPLETED), divided by the
+**median** pace of all finishers. `pacePct(r) = clamp(0.5 × (1 − r), −10%, +15%)` (the slow side never eats more than the completion bonus, so finishing never hurts). Because every team's pace
+is divided by the field's, a time estimate that is wrong by the same factor everywhere cancels out
+exactly. A finisher with no expected minutes (every mission skipped) gets no pace term; the field races on raw duration only when no finisher has any. A LONE finisher
+is compared with the author's estimate only when its real time is within 3× of it; otherwise it gets
+no pace term. This replaces the old flat +500 completion bonus, the +10/min (cap +200) speed bonus and
+the ±200-per-σ Z-Score.
 
-Every time-derived term (speed bonus, emitted duration, the `time_only` ordering, the Z-Score's
-`durationMin`) is first reduced by `teamExcludedMs(team.stages)` — the SUM of the `excludedMs` the
-server stamped on each completed `pausesTimer` task. **Parity rule:** `buildRankings` must stay a
-pure function of the stored team document (never `now`, never the current template, never client
+Every time-derived term (emitted duration, the `time_only` ordering, the pace's `durationMin`) is
+first reduced by `teamExcludedMs(team.stages)` — the SUM of the `excludedMs` the
+server stamped on each completed `pausesTimer` task — plus staff holds. **Parity rule:** `buildRankings` must stay a
+pure function of the stored team documents (never `now`, never the current template, never client
 input), or a mid-run template edit would retroactively re-time finished work and `finalizeRun` and
 `refreshLeaderboard` would disagree.
 
@@ -604,7 +614,7 @@ positive delta is a bonus that *reduces* the penalty). Every adjustment writes a
 late, cap 300) exist in shared + `scoring/calculateScore.ts`. **Note:** `calculateScore.ts` also
 contains v1-era helpers (8-slot completion bonus, green-slot tie-breaker `computeTieMetrics` /
 `compareForRanking`) that are unit-tested but **not wired into the v2 `buildRankings` path** — the
-live final ranking is the Z-Score model above.
+live final ranking is the percentage + field-pace model above.
 
 ---
 

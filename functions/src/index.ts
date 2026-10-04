@@ -15,7 +15,7 @@ import { lastFixStore, lastFixKey } from './lastFixStore';
 import { trackStore } from './trackStore';
 import * as admin from 'firebase-admin';
 import { chunk, MAX_BATCH_OPS } from './batchUtil';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, hasScheduleGate, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, hasScheduleGate, scheduleRefusal, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 // The recorded answer sheet (change: post-run-player-report) — every submission,
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
 // added to sanitizeTeamForParticipant's allow-list.
@@ -69,7 +69,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, closeTaskForTeam, assertRunNotFinished, assertMissionInPlay, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -1573,6 +1573,7 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   // wrong code and a correct code on a locked stage now throw the identical
   // "stage not active" error instead of 'Incorrect code' vs a stage error.
   assertStageActiveForTask(team, taskId);
+  assertMissionInPlay(team, taskId); // run-gate-integrity
 
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -1615,12 +1616,8 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   if (hasScheduleGate(stationTask)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
-    if (!isReleased(stationTask, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task is not available yet');
-    }
-    if (isExpired(stationTask, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task has expired');
-    }
+    // run-gate-integrity: the shared rule, honouring an operator override.
+    throwScheduleRefusal(scheduleRefusal(stationTask, launchedAt, Date.now(), teamTaskRecord(team, stationTask.id)));
   }
 
   // wave-h #1: enforce the station's attemptLimit (mirrors submitTaskAnswer's cap at
@@ -1736,6 +1733,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   const submittedBy = { uid, name: String(senderDevice?.name ?? (uid === team.id ? team.displayName : '') ?? '').slice(0, 60) };
   // Staff hold (staff-console-field-ops) — a parked team cannot bank a submission.
   assertTeamNotHeld(team);
+  await assertRunNotFinished(ownerUid, gameId, runId); // run-gate-integrity: a finished run is frozen
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
   // OWN team. A payload teamId that isn't the caller's team is rejected.
   if (teamId && teamId !== resolvedTeamId) {
@@ -1873,12 +1871,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   if (scheduleGate && hasScheduleGate(scheduleGate)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
-    if (!isReleased(scheduleGate, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task is not available yet');
-    }
-    if (isExpired(scheduleGate, launchedAt, Date.now())) {
-      throw new functions.https.HttpsError('failed-precondition', 'This task has expired');
-    }
+    // run-gate-integrity: the shared rule, honouring an operator override.
+    throwScheduleRefusal(scheduleRefusal(scheduleGate, launchedAt, Date.now(), teamTaskRecord(team, taskId)));
   }
   const priorSubmission = (team as { taskSubmissions?: Record<string, { status?: string }> })
     .taskSubmissions?.[taskId];
@@ -1887,6 +1881,17 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   );
   if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
     return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), already: true };
+  }
+  // run-gate-integrity: a mission the team can no longer play (closed by the organizer, skipped,
+  // retired) takes no submission: it would sit in the staff review queue as a photo whose approval
+  // can score nothing.
+  // A photo for ANY retired mission is refused (not just an organizer's close): it would otherwise sit
+  // in the staff review queue as a submission whose approval can score nothing.
+  {
+    const photoRec = teamTaskRecord(team, taskId);
+    if (photoRec?.status === 'skipped' && photoRec.skipCause !== 'attempts') {
+      throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
+    }
   }
   // background-media-upload D1: a deferral the server would not auto-approve writes NOTHING. The
   // phone then uploads and submits the ordinary way, so the review path never sees a fileless row.
@@ -2084,6 +2089,10 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   if (!teamSnap.exists) {
     throw new functions.https.HttpsError('not-found', 'Team not found');
   }
+  // run-gate-integrity: a finished run is frozen. Refused BEFORE anything is written — the approval
+  // used to stamp the submission "approved" and only then fail in completeTaskForTeam, leaving an
+  // approved photo with nothing scored behind it.
+  await assertRunNotFinished(ownerUid, gameId, runId);
   // ── Reversing an approval (change: approval-can-be-undone) ────────────────
   //
   // `approved + reject` used to be refused outright, because there was no way to take
@@ -2158,6 +2167,25 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
     },
     { merge: true },
   );
+
+  // run-gate-integrity: a closure leaves a mission whose photo awaits review alone
+  // (closeTaskForTeam). A REJECTION of that photo is the moment the closure applies: the
+  // team must not be left holding a closed mission it could only resubmit into.
+  if (!approved) {
+    try {
+      const runData = (await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get()).data() as
+        { taskStatusOverrides?: Record<string, string>; launchedAt?: string } | undefined;
+      if (runData?.taskStatusOverrides?.[taskId] === 'closed') {
+        const gameDoc = (await db.doc(`users/${ownerUid}/games/${gameId}`).get()).data() as Game | undefined;
+        if (gameDoc) {
+          const title = gameDoc.stages?.flatMap((st) => st.tasks).find((t) => t.id === taskId)?.title ?? '';
+          await closeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, gameDoc, runData.launchedAt, title);
+        }
+      }
+    } catch (e) {
+      functions.logger.warn('reviewStationSubmission: closure after rejection skipped', { runId, err: String(e) });
+    }
+  }
 
   // Approved photo = task complete → score it + advance the team.
   if (approved) {
@@ -2418,7 +2446,12 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
   const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[]; exclusiveGroups?: { id: string; taskIds: string[] }[] }[] };
-  const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides };
+  const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides; status?: string };
+  // run-gate-integrity: a finalized run is frozen. A closure after the final board would skip
+  // records and shrink requirements the published standings were computed without.
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
 
   const stage = (game.stages ?? []).find((s) => (s.tasks ?? []).some((t) => t?.id === ids.taskId));
   if (!stage) throw new functions.https.HttpsError('not-found', 'Task not found in this game');
@@ -2451,6 +2484,20 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
   if (!plan.ok) {
     // emptyStage / taskNotInStage are structural; unknownStatus was screened above.
     throw new functions.https.HttpsError('failed-precondition', `Cannot change this task: ${plan.reason}`);
+  }
+
+  // run-gate-integrity: a CLOSED mission is final for this run. Closing it skipped it for every
+  // team (closedByOrganizer), opened what waited for it and lowered each team's requirement;
+  // writing `active` back afterwards changed the console's badge and nothing else, so the
+  // organizer saw a mission "back in play" that no team that had joined could ever be handed —
+  // while a team joining later DID get it. Refused loudly instead of half-applied. A template
+  // `status: 'closed'` (no run override) never touched a team, so putting it back stays allowed.
+  if (run.taskStatusOverrides?.[ids.taskId] === 'closed' && status !== 'closed') {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'This mission was closed for this run, and a closure is final',
+      { code: 'closedIsFinal' },
+    );
   }
 
   // The organizer learns about a dead-ended stage HERE, not through stuck teams.

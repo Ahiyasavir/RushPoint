@@ -17,6 +17,9 @@ import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWeb
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
 import { defaultCodeCapabilities } from '@rushpoint/shared';
+import { FIRESTORE_PATHS } from '@rushpoint/shared';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { db } from '../services/firebase';
 import { CapabilityChecklist } from '../components/StaffCodesPanel';
 import { resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import {
@@ -330,6 +333,25 @@ export default function BuilderPage() {
   const setGame = history.set as (g: Game) => void;
   const { undo, redo, canUndo, canRedo } = history;
   const [tab, setTab] = useState<BuilderTab>('build');
+  // run-gate-integrity: is this game being played right now? One owner-readable query per open
+  // (rules: runs are owner-readable), best-effort — a failure just shows no note.
+  const [hasLiveRun, setHasLiveRun] = useState(false);
+  useEffect(() => {
+    if (!gameId || !user?.uid) return;
+    let alive = true;
+    // A solo instant-play run and a test drive are 'live' too, and are often simply abandoned:
+    // only a real event counts, or the note would be permanent noise.
+    getDocs(query(collection(db, FIRESTORE_PATHS.runsCol(user.uid, gameId)), where('status', '==', 'live'), limit(10)))
+      .then((snap) => {
+        if (!alive) return;
+        setHasLiveRun(snap.docs.some((d) => {
+          const r = d.data() as { selfGuided?: boolean; isTestDrive?: boolean };
+          return r.selfGuided !== true && r.isTestDrive !== true;
+        }));
+      })
+      .catch(() => { /* best-effort: no note */ });
+    return () => { alive = false; };
+  }, [gameId, user?.uid]);
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
   // The readiness surface (change: builder-first-task-flow): a persistent list of
   // every launch blocker, openable without attempting a launch. `focusIssue`
@@ -1594,6 +1616,17 @@ export default function BuilderPage() {
           tab, only while there is something to clean, and dismissible — it is an
           offer, not a blocker, and a creator who likes their text as it is must
           be able to say so and never see it again this session. */}
+      {/* run-gate-integrity: editing a game while a run is live is allowed, but not every edit
+          reaches the teams already playing — say which, before the creator finds out mid-event. */}
+      {hasLiveRun && activeTab === 'build' && !qsFocusMode && (
+        <div className="shrink-0 mx-2 mt-2 rounded-xl border border-rp-amber/50 bg-rp-amber/5 px-3 py-2 flex items-start gap-3" data-testid="live-run-edit-note">
+          <span aria-hidden className="text-base leading-6">📡</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[--ink-1]">{b.liveRunEditTitle}</p>
+            <p className="text-xs text-[--ink-3] leading-snug mt-0.5">{b.liveRunEditBody}</p>
+          </div>
+        </div>
+      )}
       {needsNoteCleanup && !cleanupDismissed && activeTab === 'build' && !qsFocusMode && (
         <div className="shrink-0 mx-2 mt-2 rounded-xl border border-rp-amber/50 bg-rp-amber/5 px-3 py-2 flex items-start gap-3">
           <span aria-hidden className="text-base leading-6">🧹</span>
@@ -3359,7 +3392,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 this never blocks a save or a launch. */}
             {exclusiveUnlockRisks(activeStage).slice(0, 1).map((risk) => (
               <p key={risk.taskId} className="text-xs text-amber-400">
-                ⚠ {b.exclusiveUnlockRiskWarn(
+                ⚠ {(risk.neverPlayable ? b.exclusiveUnlockNeverWarn : b.exclusiveUnlockRiskWarn)(
                   activeStage.tasks.find((t) => t.id === risk.taskId)?.title || risk.taskId,
                   activeStage.tasks.find((t) => t.id === risk.prerequisiteId)?.title || risk.prerequisiteId,
                 )}

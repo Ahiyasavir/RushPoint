@@ -48,6 +48,31 @@ const pruned = computeRunAnalytics([{ id: 'P', displayName: 'P', stages: [], tas
 ok(pruned.tasks[0].attempts === 0 && pruned.tasks[0].completionRate === 0, 'pruned team → 0, no crash');
 ok(pruned.overallCompletionRate === 0, 'no attempts → 0 overall');
 
+// A window that closed before a team was ever handed the mission (no startedAt) is a retirement,
+// not a skip; one that closed while the team HELD it (startedAt set) still counts.
+{
+  const r3 = computeRunAnalytics([
+    team('A', [rec('t1', 'completed', 1), { ...rec('t2', 'skipped'), skipCause: 'expired' } as never]),
+    team('B', [rec('t1', 'completed', 1), { ...rec('t2', 'skipped'), skipCause: 'expired', startedAt: '2026-01-01T10:00:00Z' } as never]),
+  ] as never[], gameTasks);
+  const q3 = r3.tasks.find((t) => t.taskId === 't2')!;
+  ok(q3.attempts === 1 && q3.skips === 1, 'never-held expiry excluded, held expiry counted: ' + JSON.stringify({ a: q3.attempts, s: q3.skips }));
+}
+
+// run-gate-integrity: a skip BY DESIGN (a partial stage's leftover, an exclusive alternative not
+// picked, a retirement, a closure) is neither a skip nor an attempt; a real skip still is both.
+{
+  const r2 = computeRunAnalytics([
+    team('A', [rec('t1', 'completed', 1), { ...rec('t2', 'skipped'), skipCause: 'stageSatisfied' } as never]),
+    team('B', [rec('t1', 'completed', 1), { ...rec('t2', 'skipped'), skipCause: 'exclusive' } as never]),
+    team('C', [rec('t1', 'completed', 1), { ...rec('t2', 'skipped'), skipCause: 'operator', closedByOrganizer: true } as never]),
+    team('D', [rec('t1', 'completed', 1), { ...rec('t2', 'skipped'), skipCause: 'timeLimit' } as never]),
+    team('E', [rec('t1', 'completed', 1), rec('t2', 'completed', 2)]),
+  ] as never[], gameTasks);
+  const q = r2.tasks.find((t) => t.taskId === 't2')!;
+  ok(q.attempts === 2 && q.skips === 1 && q.completions === 1, 'by-design skips are not counted: ' + JSON.stringify({ a: q.attempts, s: q.skips, c: q.completions }));
+}
+
 // Empty.
 const empty = computeRunAnalytics([], gameTasks);
 ok(empty.teamCount === 0 && empty.tasks.length === 2, 'empty teams → zeroed per-task rows');

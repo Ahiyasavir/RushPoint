@@ -4,7 +4,7 @@ import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } fr
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, closedTaskIds, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -1999,7 +1999,8 @@ export default function RunConsolePage() {
       {sendBackFor && (
         <SendBackPicker
           teamName={sendBackFor.displayName}
-          stages={sendBackTargets(teamStages.get(sendBackFor.id) as never, gameStagesLite)}
+          stages={sendBackTargets(teamStages.get(sendBackFor.id) as never, gameStagesLite,
+            closedTaskIds(activeRun.taskStatusOverrides))}
           onPick={(choice) => void sendTeamBack(sendBackFor, choice)}
           onClose={() => setSendBackFor(null)}
         />
@@ -2757,6 +2758,10 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
                           {rc.taskAvailClose}
                         </Button>
                       </>
+                    ) : status === 'closed' && overrides?.[tk.id] === 'closed' ? (
+                      // run-gate-integrity: a closure already skipped this mission for every team, so
+                      // "put back in play" could only ever change this badge. The server refuses it too.
+                      <span className="text-xs text-[--ink-3]">{rc.taskAvailClosedFinal}</span>
                     ) : (
                       <Button variant={runActionVariant('resumeTask')} disabled={busy} onClick={() => apply(tk.id, 'active')}>
                         {rc.taskAvailResume}

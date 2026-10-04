@@ -26,15 +26,19 @@
 // of that stage finishes). Pure and total: scripts/test-team-rewind.ts.
 
 import type { RunStageRecord, RunTaskRecord } from './types';
+import { effectiveExclusiveGroups } from './mutualExclusion';
+import { runStageTasks } from './gating';
 
 export type RewindTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
 
-export type RewindRefusal = 'badInput' | 'unknownTarget' | 'targetNotTerminal' | 'stageNotReached';
+export type RewindRefusal = 'badInput' | 'unknownTarget' | 'targetNotTerminal' | 'stageNotReached' | 'taskClosed' | 'alternativeCompleted';
 
 export interface RewindGameStage {
   id: string;
   requiredTaskCount?: number;
-  tasks?: { id: string }[];
+  tasks?: { id: string; hidden?: boolean; unlockAfterTaskIds?: string[] }[];
+  /** run-gate-integrity: a reopened alternative must not sit beside its group's winner. */
+  exclusiveGroups?: { id: string; taskIds: string[] }[];
 }
 
 export interface TeamRewindInput {
@@ -43,6 +47,13 @@ export interface TeamRewindInput {
   target: RewindTarget;
   teamScore: number;
   teamStatus?: string;
+  /**
+   * Missions the RUN has closed (run.taskStatusOverrides === 'closed'). run-gate-integrity: a
+   * closed mission is never handed out again, so reopening one — even one this team had completed
+   * or that was skipped before the closure, which therefore carries no `closedByOrganizer` — left
+   * an `unassigned` record nothing will ever assign, in a stage that now needs it.
+   */
+  closedTaskIds?: readonly string[];
 }
 
 export interface TeamRewindPlan {
@@ -86,6 +97,7 @@ function reopenRecord(rec: RunTaskRecord): number {
   const award = Math.max(0, finite(rec.earnedScore));
   rec.status = 'unassigned';
   delete rec.skipCause;
+  delete rec.gateOverride;
   delete rec.completedAt;
   delete rec.startedAt;
   delete rec.actualMinutes;
@@ -127,6 +139,25 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
   if (targetRec && targetRec.status !== 'completed' && targetRec.status !== 'skipped') {
     return refuse('targetNotTerminal', input.stages, teamScore);
   }
+  // run-gate-integrity: a mission the organizers CLOSED for the run cannot be handed out by
+  // anything (claimSpecificTask refuses a closed mission even with override), so reopening it
+  // left an `unassigned` record nothing would ever assign — with the requirement raised to need
+  // it, i.e. a team stranded by the button meant to rescue it.
+  const closed = new Set(Array.isArray(input.closedTaskIds) ? input.closedTaskIds : []);
+  if (targetRec && (targetRec.closedByOrganizer === true || closed.has(targetRec.taskId))) return refuse('taskClosed', input.stages, teamScore);
+  // run-gate-integrity: the losing alternative of an exclusive group, while the alternative that
+  // beat it stays completed. completeTaskForTeam refuses it ("You already completed an alternative"),
+  // so the team was handed a mission it could never finish. Reopen the winner instead, if that is
+  // what is meant.
+  const gameStageOfTarget = (Array.isArray(input.gameStages) ? input.gameStages : []).find((g) => g?.id === stages[targetStageIdx].stageId);
+  if (targetRec && gameStageOfTarget) {
+    // On the team's records (runStageTasks): a member benched after launch is still an alternative.
+    const group = effectiveExclusiveGroups({ tasks: runStageTasks(gameStageOfTarget.tasks ?? [], stages[targetStageIdx].tasks), exclusiveGroups: gameStageOfTarget.exclusiveGroups })
+      .find((g) => g.includes(targetRec.taskId));
+    if (group && stages[targetStageIdx].tasks.some((t) => t.taskId !== targetRec.taskId && group.includes(t.taskId) && t.status === 'completed')) {
+      return refuse('alternativeCompleted', input.stages, teamScore);
+    }
+  }
 
   const releaseTaskIds: string[] = [];
   const reopenedTaskIds: string[] = [];
@@ -144,7 +175,7 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
       relockedStageIds.push(s.stageId);
     }
     for (const t of s.tasks) {
-      if (t.status === 'assigned') { t.status = 'unassigned'; delete t.startedAt; releaseTaskIds.push(t.taskId); }
+      if (t.status === 'assigned') { t.status = 'unassigned'; delete t.startedAt; delete t.gateOverride; releaseTaskIds.push(t.taskId); }
     }
   }
 
@@ -154,15 +185,19 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
 
   // The template's requirement, not the one a skip lowered for this team.
   const gameStage = (Array.isArray(input.gameStages) ? input.gameStages : []).find((g) => g?.id === stage.stageId);
-  if (gameStage && typeof gameStage.requiredTaskCount === 'number') stage.requiredTaskCount = gameStage.requiredTaskCount;
-  else delete stage.requiredTaskCount;
+  // Clamped exactly as buildInitialStages clamps it at launch (run-gate-integrity): a stage authored
+  // "3 of 4" with a mission benched runs as 3 of 3, and restoring the raw 4 asked for a completion
+  // this team has no record to earn.
+  if (gameStage && typeof gameStage.requiredTaskCount === 'number' && Number.isFinite(gameStage.requiredTaskCount)) {
+    stage.requiredTaskCount = Math.max(1, Math.min(gameStage.requiredTaskCount, stage.tasks.length));
+  } else delete stage.requiredTaskCount;
 
   if (targetRec) {
     const rec = stage.tasks.find((t) => t.taskId === targetRec.taskId)!;
     // The mission they are holding in this stage makes way for the one they are sent back to.
     for (const t of stage.tasks) {
       if (t.status === 'assigned' && t.taskId !== rec.taskId) {
-        t.status = 'unassigned'; delete t.startedAt; releaseTaskIds.push(t.taskId);
+        t.status = 'unassigned'; delete t.startedAt; delete t.gateOverride; releaseTaskIds.push(t.taskId);
       }
     }
     const award = reopenRecord(rec);
@@ -177,7 +212,9 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
     if (completedNow >= required) stage.requiredTaskCount = Math.min(stage.tasks.length, completedNow + 1);
   } else {
     for (const t of stage.tasks) {
-      if (t.status === 'skipped' && REOPENABLE_BY_STAGE.has(t.skipCause)) {
+      // A CLOSED mission stays closed (run-gate-integrity): its skipCause is 'operator', which this
+      // set reopens, but nothing can ever hand a closed mission out again.
+      if (t.status === 'skipped' && REOPENABLE_BY_STAGE.has(t.skipCause) && t.closedByOrganizer !== true && !closed.has(t.taskId)) {
         const award = reopenRecord(t);
         reopenedTaskIds.push(t.taskId);
         if (award > 0) { removed += award; ledger.push({ taskId: t.taskId, delta: -award }); }

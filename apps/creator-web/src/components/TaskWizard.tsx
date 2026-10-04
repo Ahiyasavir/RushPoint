@@ -2170,6 +2170,11 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               aria-label={b.windowClosesAt} data-testid="task-closes-at"
               onChange={(e) => set({ expiresAt: localInputToIso(e.target.value) })} />
           </div>
+          {/* run-gate-integrity: a reused game keeps last week's clock times, and a mission whose
+              absolute close is already behind us is retired for every team the moment it starts. */}
+          {typeof task.expiresAt === 'string' && Number.isFinite(Date.parse(task.expiresAt)) && Date.parse(task.expiresAt) <= Date.now() && (
+            <p className="text-[13px] text-amber-400 mt-1" data-testid="task-closed-already">⚠ {b.windowClosedAlready}</p>
+          )}
           {/* mission-time-limit: a countdown PER TEAM from the moment it gets the mission. */}
           <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3] mt-2">
             <InlineLabel>⏱️ {b.timeLimitLead}</InlineLabel>

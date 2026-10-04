@@ -10,8 +10,9 @@
 // devDependency to the functions workspace.
 import { describe, test, expect } from 'vitest';
 import {
-  speedBonus, SPEED_BONUS_CAP, sigmoidMultiplier, taskScoreSmart, taskScoreFixed,
-  scoreFixedPointsSpeed,
+  sigmoidMultiplier, taskScoreSmart, taskScoreFixed,
+  // scoring-v2: field-relative pace + percentage bonuses.
+  fieldPaceRatios, pacePct, composeLeaderboardScore, PACE_MAX_PCT, SMART_MULT_MIN, SMART_MULT_MAX,
   // pause-clock-tasks: the excluded-duration rule.
   taskExcludedMs, teamExcludedMs, adjustedElapsedMs,
   matchesTaskAnswer, evaluateTrigger, rateLimit, haversineKm,
@@ -33,27 +34,59 @@ function makeRng(seed: number) {
 const N = 300; // samples per property
 
 describe('scoringPresets — value invariants', () => {
-  test('speedBonus is bounded [0, CAP], zero when slower, monotonic non-increasing in elapsed time', () => {
+  test('pacePct is bounded [-MAX, +MAX], finite, and non-increasing in the pace ratio', () => {
     const rng = makeRng(1);
     for (let i = 0; i < N; i++) {
-      const expected = rng() * 120;
-      const actual = rng() * 120;
-      const b = speedBonus(expected, actual);
-      expect(b).toBeGreaterThanOrEqual(0);
-      expect(b).toBeLessThanOrEqual(SPEED_BONUS_CAP);
-      if (actual >= expected) expect(b).toBe(0);            // no bonus for being slow
-      // slower can never earn MORE bonus than faster
-      expect(speedBonus(expected, actual + 5)).toBeLessThanOrEqual(b);
+      const r = rng() * 4;
+      const p = pacePct(r);
+      expect(Number.isFinite(p)).toBe(true);
+      expect(Math.abs(p)).toBeLessThanOrEqual(PACE_MAX_PCT + 1e-12);
+      expect(pacePct(r + 0.1)).toBeLessThanOrEqual(p + 1e-12); // slower never earns more
     }
   });
 
-  test('sigmoidMultiplier stays in (0.2, 1.5) and is monotonic decreasing in x', () => {
+  test('fieldPaceRatios is invariant to a uniform error in every estimate', () => {
+    const rng = makeRng(101);
+    for (let i = 0; i < N; i++) {
+      const n = 1 + Math.floor(rng() * 6);
+      const field = Array.from({ length: n }, () => ({ durationMin: rng() * 120, expectedMin: 1 + rng() * 90 }));
+      const k = 0.05 + rng() * 20;
+      const base = fieldPaceRatios(field);
+      const scaled = fieldPaceRatios(field.map((f) => ({ ...f, expectedMin: f.expectedMin * k })));
+      expect(base.every((v) => v === null || Number.isFinite(v))).toBe(true);
+      if (n >= 2) {
+        base.forEach((v, j) => {
+          if (v === null) expect(scaled[j]).toBeNull();
+          else expect(scaled[j]).toBeCloseTo(v, 9);
+        });
+      }
+    }
+  });
+
+  test('composeLeaderboardScore: bonuses stay within +25% of points, never negative, always finite', () => {
+    const rng = makeRng(102);
+    const junk = [NaN, Infinity, -Infinity];
+    for (let i = 0; i < N; i++) {
+      const points = rng() < 0.1 ? junk[i % 3] : Math.round(rng() * 2000);
+      const pct = rng() < 0.1 ? junk[i % 3] : (rng() - 0.5) * 0.4;
+      const penalty = rng() < 0.1 ? junk[i % 3] : Math.round((rng() - 0.3) * 300);
+      const s = composeLeaderboardScore({ points, allStagesDone: rng() < 0.5, pacePct: Math.max(-PACE_MAX_PCT, Math.min(PACE_MAX_PCT, pct)), bonusPenalty: penalty });
+      expect(Number.isFinite(s)).toBe(true);
+      expect(s).toBeGreaterThanOrEqual(0);
+      const p = Number.isFinite(points) ? points : 0;
+      const pen = Number.isFinite(penalty) ? penalty : 0;
+      expect(s).toBeLessThanOrEqual(Math.round(p * 1.25) + 1 + Math.max(0, -pen));
+    }
+  });
+
+  test('sigmoidMultiplier stays in [0.7, 1.3], is 1.0 on target, and is monotonic decreasing in x', () => {
     const rng = makeRng(2);
+    expect(sigmoidMultiplier(1)).toBeCloseTo(1, 12);
     for (let i = 0; i < N; i++) {
       const x = (rng() - 0.5) * 8; // wide range around the estimate ratio 1
       const m = sigmoidMultiplier(x);
-      expect(m).toBeGreaterThan(0.2);
-      expect(m).toBeLessThan(1.5);
+      expect(m).toBeGreaterThanOrEqual(SMART_MULT_MIN);
+      expect(m).toBeLessThanOrEqual(SMART_MULT_MAX);
       expect(sigmoidMultiplier(x + 0.3)).toBeLessThanOrEqual(m + 1e-9);
     }
   });
@@ -670,19 +703,16 @@ describe('pausedClock — excluded-time invariants', () => {
     }
   });
 
-  test('an excluded amount can only INCREASE a fixed_points_speed score, and stays capped', () => {
+  test('an excluded amount can only IMPROVE a finished team\'s pace, and the bonus stays capped', () => {
     const rng = makeRng(35);
-    const game = gameFor('fixed_points_speed');
     for (let i = 0; i < N; i++) {
-      const start = new Date(1_700_000_000_000).toISOString();
-      const finish = new Date(1_700_000_000_000 + rng() * 7_200_000).toISOString();
-      const stages = [{ stageId: 's0', order: 0, status: 'completed' as const,
-        tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed' as const, earnedScore: 50 }] }];
-      const exc = rng() * 9_000_000;
-      const withOut = scoreFixedPointsSpeed(stages, start, finish, game);
-      const withExc = scoreFixedPointsSpeed(stages, start, finish, game, exc);
-      expect(withExc).toBeGreaterThanOrEqual(withOut);
-      expect(withExc - 50).toBeLessThanOrEqual(SPEED_BONUS_CAP);
+      const elapsed = rng() * 120;
+      const exc = rng() * elapsed;
+      const other = { durationMin: 10 + rng() * 100, expectedMin: 50 };
+      const without = fieldPaceRatios([{ durationMin: elapsed, expectedMin: 50 }, other])[0] as number;
+      const withExc = fieldPaceRatios([{ durationMin: elapsed - exc, expectedMin: 50 }, other])[0] as number;
+      expect(pacePct(withExc)).toBeGreaterThanOrEqual(pacePct(without));
+      expect(pacePct(withExc)).toBeLessThanOrEqual(PACE_MAX_PCT);
     }
   });
 });
@@ -692,7 +722,7 @@ describe('buildRankings — a run in which EVERY task pauses the clock', () => {
 
   // The degenerate case the feature makes reachable: total excluded >= total
   // elapsed, so every adjusted duration floors at exactly 0. Nothing divides by
-  // the elapsed time, and the Z-Score's sigma-of-zeros guard must hold.
+  // the elapsed time, and the field pace's zero-reference guard must hold.
   function allPausedTeam(i: number, elapsedMs: number): RunTeam {
     const start = 1_700_000_000_000;
     return {

@@ -618,10 +618,10 @@ async function main() {
       id: 'stage-2',
       order: 1,
       title: 'Stage Two — photo station (staff review)',
-      // audio-tasks: two tasks in this stage but only ONE is required, so the
-      // existing photo-approval flow still completes the stage while the audio
-      // task can be submitted + reviewed independently in the same scenario.
-      requiredTaskCount: 1,
+      // audio-tasks / video-submission-task: photo, audio and video are ALL required, so each is still
+      // a live mission when it is submitted + reviewed below (a submission for a retired mission is
+      // refused: run-gate-integrity). The video approval is what completes the stage.
+      requiredTaskCount: 3,
       tasks: [
         {
           id: PHOTO_TASK_ID,
@@ -1268,10 +1268,6 @@ async function main() {
   check('review marks the submission approved (nested update)',
     state?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.status === 'approved',
     state?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.status);
-  check('approved photo completes the stage', state?.team?.stages?.[1]?.status === 'completed',
-    state?.team?.stages?.[1]?.status);
-  check('final stage unlocked after photo', state?.team?.stages?.[2]?.status === 'active',
-    state?.team?.stages?.[2]?.status);
 
   // ── 8d. Audio task (audio-tasks): same photo pipeline, captureKind:'audio' ────
   // Upload real audio bytes to the Storage emulator under the caller's OWN
@@ -1397,21 +1393,18 @@ async function main() {
     state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status === 'approved',
     state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status);
 
-  // NOTE: this stage has requiredTaskCount:1 and PHOTO_TASK_ID already satisfied
-  // it above, so AUDIO_TASK_ID/VIDEO_TASK_ID were auto-skipped as the stage
-  // completed — completeTaskForTeam is a no-op (completed:false) for both, so
-  // NEITHER can ever reach the feed here regardless of kind. That is a property
-  // of this shared fixture's partial-stage setup, not evidence about video's
-  // feed eligibility — see the dedicated "video submissions enter the live photo
-  // feed (mediaKind)" scenario below for real coverage of the autoApprove path,
-  // the staff-review path, the hidden-location exclusion, and the mediaKind
-  // field (change: run-media-gallery-and-video-feed).
+  check('the approved photo + audio + video complete the stage', state?.team?.stages?.[1]?.status === 'completed',
+    state?.team?.stages?.[1]?.status);
+  check('final stage unlocked after the stage completes', state?.team?.stages?.[2]?.status === 'active',
+    state?.team?.stages?.[2]?.status);
+  // The video was a LIVE mission when approved, so — unlike audio — it reaches the photo feed (the
+  // dedicated "video submissions enter the live photo feed" scenario covers the rest of that path).
   const feedItemsAfterVideo = await player.getColAt(
     `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/feedItems`,
   ).catch(() => []);
-  check('no feed item for the video submission on an already-satisfied requiredTaskCount stage',
-    !feedItemsAfterVideo.some((f) => f?.taskId === VIDEO_TASK_ID),
-    JSON.stringify(feedItemsAfterVideo.map((f) => f?.taskId)));
+  check('the staff-approved video enters the feed with mediaKind video',
+    feedItemsAfterVideo.some((f) => f?.taskId === VIDEO_TASK_ID && f?.mediaKind === 'video'),
+    JSON.stringify(feedItemsAfterVideo.map((f) => [f?.taskId, f?.mediaKind])));
 
   // ── 9. Complete the final plain task ────────────────────────────────────────
   const completeRes = await player.call('completeTask', {
@@ -1637,7 +1630,17 @@ async function main() {
         coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5, pointValue: 100, maxConcurrentTeams: 3,
         smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'OLIVE' },
         hint: 'It grows on a tree and makes oil.', hintPenalty: 30,
+      }, {
+        // A second hinted mission the organizer closes below: its hint must no longer be for sale.
+        id: 'h-2', title: 'The other riddle', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3,
+        hint: 'Look up.', hintPenalty: 40,
+      }, {
+        id: 'h-3', title: 'The third riddle', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3,
+        hint: 'Look down.', hintPenalty: 15,
       }],
+      requiredTaskCount: 1,
     }],
   });
   const { runId: r3, accessCode: c3 } = await creator.call('launchRun', { gameId: g3 });
@@ -1662,7 +1665,409 @@ async function main() {
   const afterAgain = await player3.call('getMyTeamState', { code: c3 });
   check('bonusPenalty unchanged after re-request', afterAgain?.team?.bonusPenalty === 30, String(afterAgain?.team?.bonusPenalty));
 
+  // A hint bought for a mission the ORGANIZER then closes is refunded: it can no longer be used.
+  const h2 = await player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-2' });
+  check('the second mission\'s hint is charged', h2?.penalty === 40, JSON.stringify(h2));
+  await creator.call('setRunTaskStatus', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-2', status: 'closed' });
+  const afterRefund = await player3.call('getMyTeamState', { code: c3 });
+  check('closing that mission refunds its hint (70 → 30)', afterRefund?.team?.bonusPenalty === 30, String(afterRefund?.team?.bonusPenalty));
+  // A hint for a mission the team can no longer play is not sold at all.
+  await creator.call('setRunTaskStatus', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-3', status: 'closed' });
+  await expectError('a hint for a CLOSED mission is refused (nothing to spend it on)',
+    player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-3' }),
+    { codeIn: ['functions/failed-precondition'] });
+  const afterClosed = await player3.call('getMyTeamState', { code: c3 });
+  check('no charge for the refused hint', afterClosed?.team?.bonusPenalty === 30, String(afterClosed?.team?.bonusPenalty));
+  // Same for a staff skip of that one mission: the 30 paid for h-1's hint comes back.
+  const p3uid = afterClosed?.team?.id;
+  await creator.call('skipTaskForTeam', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, teamId: p3uid, taskId: 'h-1' });
+  const afterSkip = await player3.call('getMyTeamState', { code: c3 });
+  check('skipping the mission for the team refunds its hint (30 → 0)', afterSkip?.team?.bonusPenalty === 0, String(afterSkip?.team?.bonusPenalty));
+
   }); // scenario: paid hints
+
+  // A hint paid for on a mission that a staff STAGE skip then takes away is refunded too.
+  await scenario('skipping a stage refunds the hints paid in it', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const { gameId: g } = await creator.call('createGame', { title: 'Stage skip refund', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-sr1', order: 0, title: 'S1', tasks: [{ id: 'sr-1', title: 'Riddle', type: 'self_report',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3,
+          hint: 'h', hintPenalty: 25 }] },
+        { id: 'st-sr2', order: 1, title: 'S2', isFinal: true, tasks: [{ id: 'sr-2', title: 'End', type: 'self_report',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3 }] },
+      ],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p = makeParty('stageSkipRefund');
+    const cred = await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: c, displayName: 'SR' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    const h = await p.call('requestTaskHint', { ownerUid, gameId: g, runId: r, taskId: 'sr-1' });
+    check('stage-skip refund: the hint is charged', h?.penalty === 25, JSON.stringify(h));
+    await creator.call('skipStage', { gameId: g, runId: r, teamId: cred.user.uid });
+    const t = (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}/teams/${cred.user.uid}`).get()).data();
+    check('stage-skip refund: skipping the stage gives the 25 back', (t?.bonusPenalty ?? 0) === 0, String(t?.bonusPenalty));
+    assertScoreConservation('stage-skip refund', t);
+  });
+
+  // run-gate-integrity: closing a mission mid-run must not eat a photo that is WAITING FOR REVIEW.
+  // The team did its part before the close; the record stays `assigned` while staff decide, so the
+  // closure used to skip it with 0 points and a later approval silently scored nothing.
+  await scenario('closing a mission keeps photos awaiting review', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const photoUrl = (path) =>
+      `http://127.0.0.1:${EMU.storage}/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token`;
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    const { gameId: g } = await creator.call('createGame', { title: 'Close vs review', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-cr1', order: 0, title: 'Photo', tasks: [{
+          id: 'cr-photo', title: 'Selfie', type: 'photo', coordinates: { lat: 31.78, lng: 35.21 },
+          difficulty: 2, estimatedMinutes: 5, pointValue: 70, maxConcurrentTeams: 5, triggerMode: 'instant',
+        }] },
+        { id: 'st-cr2', order: 1, title: 'End', isFinal: true, tasks: [{
+          id: 'cr-end', title: 'Finish line', type: 'self_report', coordinates: { lat: 31.78, lng: 35.21 },
+          difficulty: 1, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 5, triggerMode: 'instant',
+        }] },
+      ],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g });
+    const parties = {};
+    for (const name of ['crKeep', 'crReject', 'crIdle']) {
+      const p = makeParty(name);
+      const cred = await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: c, displayName: name });
+      parties[name] = { p, uid: cred.user.uid };
+    }
+    await creator.call('startTeams', { gameId: g, runId: r });
+    for (const name of ['crKeep', 'crReject']) {
+      const { p, uid } = parties[name];
+      const path = `runs/${r}/teams/${uid}/cr.jpg`;
+      await p.uploadBytesAt(path, jpeg, 'image/jpeg');
+      const sub = await p.call('submitStationPhoto', { ownerUid, gameId: g, runId: r, teamId: uid, taskId: 'cr-photo', photoUrl: photoUrl(path) });
+      check(`close-vs-review: ${name} photo is pending review`, sub?.submitted === true, JSON.stringify(sub));
+    }
+    await creator.call('setRunTaskStatus', { ownerUid, gameId: g, runId: r, taskId: 'cr-photo', status: 'closed' });
+    const rec = async (name) => {
+      const st = await parties[name].p.call('getMyTeamState', { code: c });
+      return (st?.team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((t) => t.taskId === 'cr-photo');
+    };
+    check('close-vs-review: a team that never submitted loses the closed mission', (await rec('crIdle'))?.status === 'skipped');
+    {
+      const { p, uid } = parties.crIdle;
+      const path = `runs/${r}/teams/${uid}/late.jpg`;
+      await p.uploadBytesAt(path, jpeg, 'image/jpeg');
+      await expectError('close-vs-review: a photo for the closed mission is refused (no dead row in the review queue)',
+        p.call('submitStationPhoto', { ownerUid, gameId: g, runId: r, teamId: uid, taskId: 'cr-photo', photoUrl: photoUrl(path) }),
+        { codeIn: ['functions/failed-precondition'] });
+    }
+    check('close-vs-review: a team whose photo awaits review keeps it', (await rec('crKeep'))?.status === 'assigned',
+      JSON.stringify(await rec('crKeep')));
+    await creator.call('reviewStationSubmission', { ownerUid, gameId: g, runId: r, teamId: parties.crKeep.uid, taskId: 'cr-photo', approved: true });
+    const kept = await rec('crKeep');
+    check('close-vs-review: approving it after the close scores it', kept?.status === 'completed' && kept?.earnedScore === 70,
+      JSON.stringify(kept));
+    await creator.call('reviewStationSubmission', { ownerUid, gameId: g, runId: r, teamId: parties.crReject.uid, taskId: 'cr-photo', approved: false });
+    const rejected = await rec('crReject');
+    check('close-vs-review: rejecting it after the close applies the closure (no resubmit into a closed mission)',
+      rejected?.status === 'skipped' && rejected?.closedByOrganizer === true, JSON.stringify(rejected));
+    const rejState = await parties.crReject.p.call('getMyTeamState', { code: c });
+    check('close-vs-review: the rejected team moves on to the next stage',
+      rejState?.team?.activeTaskId !== 'cr-photo', JSON.stringify({ active: rejState?.team?.activeTaskId }));
+
+    // A photo still waiting when the run is FINISHED: the review is refused cleanly, and the stored
+    // submission is not flipped to "approved" with nothing scored behind it.
+    {
+      const { runId: r2, accessCode: c2 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+      const p = makeParty('crAfterEnd');
+      const cred = await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: c2, displayName: 'late' });
+      await creator.call('startTeams', { gameId: g, runId: r2 });
+      const path = `runs/${r2}/teams/${cred.user.uid}/end.jpg`;
+      await p.uploadBytesAt(path, jpeg, 'image/jpeg');
+      await p.call('submitStationPhoto', { ownerUid, gameId: g, runId: r2, teamId: cred.user.uid, taskId: 'cr-photo', photoUrl: photoUrl(path) });
+      await creator.call('finalizeRun', { gameId: g, runId: r2 });
+      await expectError('close-vs-review: reviewing after the run finished is refused',
+        creator.call('reviewStationSubmission', { ownerUid, gameId: g, runId: r2, teamId: cred.user.uid, taskId: 'cr-photo', approved: true }),
+        { codeIn: ['functions/failed-precondition'] });
+      const after = (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r2}/teams/${cred.user.uid}`).get()).data();
+      check('close-vs-review: the submission is not marked approved after the end',
+        after?.taskSubmissions?.['cr-photo']?.status === 'pending', after?.taskSubmissions?.['cr-photo']?.status);
+    }
+  });
+
+  // run-gate-integrity: LIVE-OP RACES against the real server — two conflicting actions fired at the
+  // same instant, repeated so the interleaving varies, then the invariants every outcome must keep:
+  // score == Σ earned, station slots == who holds what, activeTaskId == the held record, hint charges
+  // == the ledger, and the team can still play to the finish.
+  await scenario('live-op races keep every invariant', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const q = (id, answer) => ({
+      id, title: `Q ${id}`, type: 'quiz', answers: [answer], choices: [answer, 'x', 'y', 'z'],
+      coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5, pointValue: 50,
+      maxConcurrentTeams: 5, triggerMode: 'instant', hint: 'h', hintPenalty: 20,
+    });
+    const ANSWERS = { 'rq-a': 'a', 'rq-b': 'b', 'rq-c': 'c', 'rq-z': 'z' };
+    const { gameId: g } = await creator.call('createGame', { title: 'Races', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-rq1', order: 0, title: 'Q', tasks: [q('rq-a', 'a'), q('rq-b', 'b'), q('rq-c', 'c')], requiredTaskCount: 2 },
+        { id: 'st-rq2', order: 1, title: 'End', isFinal: true, tasks: [q('rq-z', 'z')] },
+      ],
+    });
+    const teamDoc = async (r, uid) => (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}/teams/${uid}`).get()).data();
+    const runDoc = async (r) => (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}`).get()).data();
+    const held = (t) => (t?.stages ?? []).flatMap((s) => s.tasks ?? []).find((x) => x.status === 'assigned')?.taskId ?? null;
+
+    async function invariants(label, r, parties) {
+      const docs = [];
+      for (const { uid } of parties) docs.push(await teamDoc(r, uid));
+      for (const t of docs) {
+        assertScoreConservation(`${label} ${t?.displayName}`, t);
+        check(`${label} ${t?.displayName}: activeTaskId is the held record`,
+          (t?.activeTaskId ?? null) === held(t), JSON.stringify({ active: t?.activeTaskId, held: held(t) }));
+        const ledger = (t?.scoreLedger ?? []).filter((e) => e.kind === 'hint' || e.kind === 'hintRefund');
+        const fromLedger = -ledger.reduce((a, e) => a + e.delta, 0);
+        check(`${label} ${t?.displayName}: hint charges match the ledger`, (t?.bonusPenalty ?? 0) === fromLedger,
+          JSON.stringify({ bonusPenalty: t?.bonusPenalty, fromLedger }));
+      }
+      const counts = (await runDoc(r))?.taskCounts ?? {};
+      const expected = {};
+      for (const t of docs) { const h = held(t); if (h) expected[h] = (expected[h] ?? 0) + 1; }
+      const keys = new Set([...Object.keys(counts), ...Object.keys(expected)]);
+      check(`${label}: station slots == who is holding what`,
+        [...keys].every((k) => (counts[k] ?? 0) === (expected[k] ?? 0)), JSON.stringify({ counts, expected }));
+    }
+
+    async function finishAll(label, r, c, parties) {
+      for (const { p, uid } of parties) {
+        for (let i = 0; i < 8; i++) {
+          let t = await teamDoc(r, uid);
+          if (t?.status === 'finished') break;
+          await p.call('getMyTeamState', { code: c });
+          try { await p.call('requestNextTask', { ownerUid, gameId: g, runId: r }); } catch { /* nothing to hand out */ }
+          t = await teamDoc(r, uid);
+          const h = held(t);
+          if (h) { try { await p.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] }); } catch { /* raced */ } }
+        }
+        const t = await teamDoc(r, uid);
+        check(`${label} ${t?.displayName}: can still play to the finish`, t?.status === 'finished',
+          JSON.stringify((t?.stages ?? []).map((s) => [s.stageId, s.status, (s.tasks ?? []).map((x) => [x.taskId, x.status])])));
+      }
+    }
+
+    async function launch(n, tag) {
+      const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g });
+      const parties = [];
+      for (let i = 0; i < n; i++) {
+        const p = makeParty(`race-${tag}-${i}`);
+        const cred = await signInAnonymously(p.auth);
+        await p.call('joinRun', { code: c, displayName: `${tag}${i}` });
+        parties.push({ p, uid: cred.user.uid });
+      }
+      await creator.call('startTeams', { gameId: g, runId: r });
+      return { r, c, parties };
+    }
+
+    for (let round = 0; round < 3; round++) {
+      // A) a correct answer vs the organizer closing that very mission.
+      {
+        const { r, c, parties } = await launch(2, `A${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        await Promise.allSettled([
+          p.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] }),
+          creator.call('setRunTaskStatus', { ownerUid, gameId: g, runId: r, taskId: h, status: 'closed' }),
+        ]);
+        await invariants(`race A${round} (answer vs close)`, r, parties);
+        await finishAll(`race A${round}`, r, c, parties);
+      }
+      // B) a correct answer vs a staff skip of that mission for this team.
+      {
+        const { r, c, parties } = await launch(1, `B${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        await Promise.allSettled([
+          p.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] }),
+          creator.call('skipTaskForTeam', { ownerUid, gameId: g, runId: r, teamId: uid, taskId: h }),
+        ]);
+        await invariants(`race B${round} (answer vs skip)`, r, parties);
+        await finishAll(`race B${round}`, r, c, parties);
+      }
+      // C) buying the hint vs the mission closing (refund must match the charge).
+      {
+        const { r, c, parties } = await launch(1, `C${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        await Promise.allSettled([
+          p.call('requestTaskHint', { ownerUid, gameId: g, runId: r, taskId: h }),
+          creator.call('setRunTaskStatus', { ownerUid, gameId: g, runId: r, taskId: h, status: 'closed' }),
+        ]);
+        await invariants(`race C${round} (hint vs close)`, r, parties);
+        await finishAll(`race C${round}`, r, c, parties);
+      }
+      // D) a double tap of the right answer + a "next mission" request, all at once.
+      {
+        const { r, c, parties } = await launch(1, `D${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        const ans = { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] };
+        await Promise.allSettled([
+          p.call('submitTaskAnswer', ans), p.call('submitTaskAnswer', ans),
+          p.call('requestNextTask', { ownerUid, gameId: g, runId: r }),
+        ]);
+        await invariants(`race D${round} (double tap + next)`, r, parties);
+        const t = await teamDoc(r, uid);
+        const rec = (t?.stages ?? []).flatMap((s) => s.tasks ?? []).find((x) => x.taskId === h);
+        check(`race D${round}: the double-tapped mission is paid exactly once`, rec?.earnedScore === 50 && t?.score === 50,
+          JSON.stringify({ rec, score: t?.score }));
+        await finishAll(`race D${round}`, r, c, parties);
+      }
+    }
+  });
+
+  // run-gate-integrity: a FINISHED run is frozen for players too — no hint charge, no wrong-answer
+  // charge, no photo in a review queue nobody can work.
+  await scenario('a finished run takes no more player actions', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const { gameId: g } = await creator.call('createGame', { title: 'Frozen run', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed', scoringOptions: { wrongAnswerPenalty: 'standard' },
+      stages: [{ id: 'st-fz', order: 0, title: 'Q', isFinal: true, tasks: [
+        { id: 'fz-q', title: 'Q', type: 'quiz', answers: ['olive'], choices: ['olive', 'x', 'y', 'z'],
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5, pointValue: 50,
+          maxConcurrentTeams: 5, triggerMode: 'instant', hint: 'tree', hintPenalty: 20 },
+        { id: 'fz-p', title: 'P', type: 'photo', coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2,
+          estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 5, triggerMode: 'instant' },
+      ] }],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p = makeParty('frozenRun');
+    const cred = await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: c, displayName: 'FZ' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    await creator.call('finalizeRun', { gameId: g, runId: r });
+    const ctx = { ownerUid, gameId: g, runId: r };
+    const refused = { codeIn: ['functions/failed-precondition'] };
+    await expectError('frozen: a hint is refused after the run finished', p.call('requestTaskHint', { ...ctx, taskId: 'fz-q' }), refused);
+    for (let i = 0; i < 2; i++) { try { await p.call('submitTaskAnswer', { ...ctx, taskId: 'fz-q', answer: `no${i}` }); } catch { /* refused */ } }
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    const path = `runs/${r}/teams/${cred.user.uid}/fz.jpg`;
+    try { await p.uploadBytesAt(path, jpeg, 'image/jpeg'); } catch { /* storage may refuse too */ }
+    await expectError('frozen: a photo is refused after the run finished',
+      p.call('submitStationPhoto', { ...ctx, teamId: cred.user.uid, taskId: 'fz-p',
+        photoUrl: `http://127.0.0.1:${EMU.storage}/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token` }),
+      refused);
+    const t = (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}/teams/${cred.user.uid}`).get()).data();
+    check('frozen: nothing was charged after the end', (t?.bonusPenalty ?? 0) === 0, String(t?.bonusPenalty));
+    check('frozen: no submission was queued after the end', !t?.taskSubmissions?.['fz-p'], JSON.stringify(t?.taskSubmissions ?? {}));
+  });
+
+  // scoring-v2: every bonus is a PERCENTAGE of the mission points a team earned. The old flat +500
+  // completion bonus outweighed every mission of a game whose missions are worth 10 points each, and
+  // a lone finisher's speed was judged against the author's estimate even when that estimate was
+  // obviously wrong. Real server, real clocks.
+  await scenario('scoring-v2: percentage bonuses, field-relative pace', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const sv2Task = (id) => ({
+      id, title: `Riddle ${id}`, type: 'quiz', answers: ['olive'],
+      choices: ['olive', 'wrong-a', 'wrong-b', 'wrong-c'],
+      coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 30, expectedDurationMinutes: 30,
+      pointValue: 40, maxConcurrentTeams: 5, triggerMode: 'instant',
+    });
+    const { gameId: g } = await creator.call('createGame', { title: 'Scoring v2', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'st-sv2', order: 0, title: 'Quiz', isFinal: true, tasks: [sv2Task('sv2-1')] }],
+    });
+
+    // A. One team. It finishes in seconds against a 30-minute estimate — an estimate no real run
+    //    matches — so no pace term is paid, and finishing adds 10% of 40, not 500.
+    const { runId: r1, accessCode: c1 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p1 = makeParty('scoringV2Solo');
+    await signInAnonymously(p1.auth);
+    await p1.call('joinRun', { code: c1, displayName: 'Solo' });
+    await creator.call('startTeams', { gameId: g, runId: r1 });
+    const a1 = await p1.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r1, taskId: 'sv2-1', answer: 'olive' });
+    check('scoring-v2: the solo team answered correctly', a1?.correct === true, JSON.stringify(a1));
+    const soloId = (await p1.call('getMyTeamState', { code: c1 }))?.team?.id;
+    const live1 = await creator.call('refreshLeaderboard', { gameId: g, runId: r1, publish: false });
+    assertLeaderboardInvariants('scoring-v2 solo live', live1?.rankings, [soloId]);
+    check('scoring-v2: completion adds 10% of the points (40 → 44), not a flat +500',
+      live1?.rankings?.[0]?.score === 44, JSON.stringify(live1?.rankings?.[0]));
+    const fin1 = await creator.call('finalizeRun', { gameId: g, runId: r1 });
+    const fin1R = fin1?.rankings ?? fin1?.leaderboard?.rankings ?? [];
+    check('scoring-v2: the final board agrees with the live one', fin1R[0]?.score === 44, JSON.stringify(fin1R[0]));
+
+    // B. Two teams: speed is now relative to the field, so each moves by at most ±15% of its
+    //    40 points on top of the +4 for finishing — never by hundreds.
+    const { runId: r2, accessCode: c2 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const pa = makeParty('scoringV2A');
+    const pb = makeParty('scoringV2B');
+    await signInAnonymously(pa.auth);
+    await signInAnonymously(pb.auth);
+    await pa.call('joinRun', { code: c2, displayName: 'Swift' });
+    await pb.call('joinRun', { code: c2, displayName: 'Steady' });
+    await creator.call('startTeams', { gameId: g, runId: r2 });
+    await pa.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r2, taskId: 'sv2-1', answer: 'olive' });
+    await new Promise((r) => setTimeout(r, 1500));
+    await pb.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r2, taskId: 'sv2-1', answer: 'olive' });
+    const idA = (await pa.call('getMyTeamState', { code: c2 }))?.team?.id;
+    const idB = (await pb.call('getMyTeamState', { code: c2 }))?.team?.id;
+    const fin2 = await creator.call('finalizeRun', { gameId: g, runId: r2 });
+    const fin2R = fin2?.rankings ?? fin2?.leaderboard?.rankings ?? [];
+    assertLeaderboardInvariants('scoring-v2 pair final', fin2R, [idA, idB]);
+    check('scoring-v2: every finisher stays within 44 ± 15% of its points',
+      fin2R.every((r) => r.score >= 44 - 6 && r.score <= 44 + 6), JSON.stringify(fin2R.map((r) => r.score)));
+    check('scoring-v2: the faster team ranks first', fin2R[0]?.teamId === idA, JSON.stringify(fin2R.map((r) => r.teamName)));
+  });
+
+  // run-gate-integrity: a wrong answer is never charged on a mission the team can no longer play.
+  await scenario('wrong answers on a closed or finished mission cost nothing', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const q = (id, answer) => ({
+      id, title: `Riddle ${id}`, type: 'quiz', answers: [answer], choices: [answer, 'x', 'y', 'z'],
+      coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5,
+      pointValue: 100, maxConcurrentTeams: 5, triggerMode: 'instant',
+    });
+    const { gameId: g } = await creator.call('createGame', { title: 'Wrong on closed', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed', scoringOptions: { wrongAnswerPenalty: 'standard' },
+      stages: [
+        { id: 'st-wc1', order: 0, title: 'Q', tasks: [q('wc-1', 'olive'), q('wc-2', 'fig')], requiredTaskCount: 1 },
+        { id: 'st-wc2', order: 1, title: 'End', isFinal: true, tasks: [q('wc-3', 'date')] },
+      ],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p = makeParty('wrongOnClosed');
+    await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: c, displayName: 'WC' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    const ctx = { ownerUid, gameId: g, runId: r };
+    await creator.call('setRunTaskStatus', { ...ctx, taskId: 'wc-2', status: 'closed' });
+    // Twice: a free first miss would hide a charge, so the second wrong answer is the one that costs.
+    for (let i = 0; i < 2; i++) {
+      try { await p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-2', answer: `nope${i}` }); } catch { /* refused is fine */ }
+    }
+    await expectError('even the RIGHT answer on a closed mission is refused, not acknowledged',
+      p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-2', answer: 'fig' }), { codeIn: ['functions/failed-precondition'] });
+    const afterClosed = await p.call('getMyTeamState', { code: c });
+    check('wrong answers on a CLOSED mission are not charged', (afterClosed?.team?.bonusPenalty ?? 0) === 0,
+      String(afterClosed?.team?.bonusPenalty));
+    const ok = await p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-1', answer: 'olive' });
+    check('the open mission still completes', ok?.correct === true, JSON.stringify(ok));
+    for (let i = 0; i < 2; i++) {
+      try { await p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-1', answer: `late${i}` }); } catch { /* refused is fine */ }
+    }
+    const afterDone = await p.call('getMyTeamState', { code: c });
+    check('wrong answers on a FINISHED mission are not charged', (afterDone?.team?.bonusPenalty ?? 0) === 0,
+      String(afterDone?.team?.bonusPenalty));
+  });
 
   await scenario('wrong answers cost (escalate, cap, cooldown, replay, preset)', async () => {
 
@@ -11035,6 +11440,79 @@ async function main() {
     check('pause: the refusal counts the locked dependent as unavailable (1 of 2)',
       pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
   }); // scenario: closing a mission mid-run
+
+  // ═══ Run gate integrity (change: run-gate-integrity) ═════════════════════════
+  //
+  // Four ways a team used to be stranded or handed a mission it could not finish, played through
+  // the real callables: a mission whose window closed before anyone took it (never retired, so a
+  // stage that needs every mission never ended); a prerequisite that was benched before launch
+  // (its dependent stayed locked forever); a staff override past an unlock gate (the completion
+  // door still said "locked"); and "put back in play" on a CLOSED mission (it changed the badge and
+  // nothing else). The pure liveness simulation (functions/src/runs/runLiveness.property.test.ts)
+  // covers the combinations; this proves the wiring.
+  await scenario('run gate integrity (expired-before-taken · benched prerequisite · override · closure is final)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const t = (id, extra = {}) => ({
+      id, title: `Mission ${id}`, type: 'self_report', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9,
+      ...extra,
+    });
+    const { gameId: gg } = await creator.call('createGame', { title: 'Gate Integrity Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: gg, scoringPreset: 'fixed_points_speed', stages: [
+      // Every mission required (no requiredTaskCount).
+      { id: 'gi-s1', order: 0, title: 'Gates', tasks: [
+        t('gi-a'),
+        t('gi-exp', { expiresAfterMinutes: 0.1 }), // closes 6s after launch
+        t('gi-h', { hidden: true }),               // benched: never enters the run
+        t('gi-y', { unlockAfterTaskIds: ['gi-h'] }),
+        t('gi-c', { unlockAfterTaskIds: ['gi-a'] }),
+      ] },
+      { id: 'gi-s2', order: 1, title: 'End', isFinal: true, tasks: [t('gi-end'), t('gi-z')] },
+    ] });
+    const { runId: gr, accessCode: gc } = await creator.call('launchRun', { gameId: gg });
+    const G = { ownerUid: OWNER, gameId: gg, runId: gr };
+    const teamPath = (uid) => `users/${OWNER}/games/${gg}/runs/${gr}/teams/${uid}`;
+    const rec = (team, id) => (team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === id);
+    const p = makeParty('gateIntegrity');
+    const pUid = (await signInAnonymously(p.auth)).user.uid;
+    await p.call('joinRun', { code: gc, displayName: 'Gate Tester' });
+    await creator.call('startTeams', { gameId: gg, runId: gr });
+
+    // Override past an unlock gate: gi-c waits for gi-a, staff send the team there anyway.
+    await creator.call('forceAssignTask', { ...G, teamId: pUid, taskId: 'gi-c', override: true, reason: 'e2e' });
+    const done = await p.call('completeTask', { ...G, taskId: 'gi-c' });
+    const afterC = (await creator.getDocAt(teamPath(pUid))).data ?? {};
+    check('override: a mission staff put the team on past its gate can be completed',
+      done?.ok === true && rec(afterC, 'gi-c')?.status === 'completed', JSON.stringify({ done, rec: rec(afterC, 'gi-c') }));
+
+    // Let gi-exp's window close before anyone took it, then play the stage out.
+    const launchedMs = Date.parse((await creator.getDocAt(`users/${OWNER}/games/${gg}/runs/${gr}`)).data?.launchedAt);
+    const closeAt = launchedMs + 0.1 * 60_000 + 700;
+    if (Date.now() < closeAt) await new Promise((r) => setTimeout(r, closeAt - Date.now()));
+    for (let i = 0; i < 6; i++) {
+      const st = await p.call('getMyTeamState', { code: gc });
+      let cur = st?.team?.activeTaskId;
+      if (!cur) cur = (await p.call('requestNextTask', { ...G }))?.taskId ?? null;
+      if (!cur || cur.startsWith('gi-end') || cur === 'gi-z') break;
+      await p.call('completeTask', { ...G, taskId: cur });
+    }
+    const team = (await creator.getDocAt(teamPath(pUid))).data ?? {};
+    check('benched prerequisite: the mission behind it was played, not stranded',
+      rec(team, 'gi-y')?.status === 'completed', JSON.stringify(rec(team, 'gi-y')));
+    check('expired before taken: the mission is retired, not left open',
+      rec(team, 'gi-exp')?.status === 'skipped' && rec(team, 'gi-exp')?.skipCause === 'expired', JSON.stringify(rec(team, 'gi-exp')));
+    check('expired before taken: the stage that needed every mission still ends',
+      team.stages?.[0]?.status === 'completed' && team.stages?.[1]?.status === 'active', JSON.stringify(team.stages?.map((s) => s.status)));
+
+    // A closure is final: putting it back in play is refused, loudly, with a code the console reads.
+    await creator.call('setRunTaskStatus', { ...G, taskId: 'gi-z', status: 'closed', reason: 'e2e' });
+    const reopen = await expectError('closure is final: putting a closed mission back in play is refused',
+      creator.call('setRunTaskStatus', { ...G, taskId: 'gi-z', status: 'active' }),
+      { codeIn: ['functions/failed-precondition'] });
+    check('closure is final: the refusal carries closedIsFinal', reopen?.details?.code === 'closedIsFinal', JSON.stringify(reopen?.details));
+    const runDoc = (await creator.getDocAt(`users/${OWNER}/games/${gg}/runs/${gr}`)).data ?? {};
+    check('closure is final: the override is still closed', runDoc.taskStatusOverrides?.['gi-z'] === 'closed', JSON.stringify(runDoc.taskStatusOverrides));
+  }); // scenario: run gate integrity
 
   // ═══ Mission time limits (change: mission-time-limit) ═══════════════════════
   //

@@ -822,8 +822,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
             />
             <LockedTasksList stage={activeStage} state={state} />
           </>
-        ) : state.nextStageReleaseAt && state.nextStageReleaseAt > Date.now() ? (
-          <StageDropCountdown releaseAt={state.nextStageReleaseAt} onOpen={refresh} />
+        ) : (typeof state.nextStageReleaseInMs === 'number'
+          ? state.nextStageReleaseInMs > 0
+          : !!state.nextStageReleaseAt && state.nextStageReleaseAt > Date.now()) ? (
+          <StageDropCountdown
+            // run-gate-integrity: a server DURATION anchored to when it arrived, never the phone clock
+            // against an instant. An older server sends only the instant: the old behaviour.
+            releaseAt={typeof state.nextStageReleaseInMs === 'number' ? 0 : (state.nextStageReleaseAt ?? 0)}
+            waitMs={state.nextStageReleaseInMs ?? undefined}
+            onOpen={refresh}
+          />
         ) : (
           /* Not a dead end any more (change: play-no-silent-failures): a bare
               sentence gave the player nothing to do. Same recovery shape as the
@@ -1402,17 +1410,23 @@ function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTea
 // nextStageReleaseAt, so a slow phone clock can no longer pin a stale card up.
 const MAX_STAGE_DROP_COUNTDOWN_MS = 24 * 60 * 60 * 1000;
 
-function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: () => void }) {
+function StageDropCountdown({ releaseAt, waitMs, onOpen }: { releaseAt: number; waitMs?: number; onOpen: () => void }) {
   const { t } = useT();
-  const [remainingMs, setRemainingMs] = useState(() => releaseAt - Date.now());
+  // With a server duration the target is "received + wait" on THIS device's clock, so only elapsed
+  // time on the phone matters, never its absolute setting. Re-anchored whenever a poll sends a new one.
+  const [anchor, setAnchor] = useState(() => ({ waitMs, at: Date.now() }));
+  if (anchor.waitMs !== waitMs) setAnchor({ waitMs, at: Date.now() });
+  const target = typeof anchor.waitMs === 'number' ? anchor.at + anchor.waitMs : releaseAt;
+  const [remainingMs, setRemainingMs] = useState(() => target - Date.now());
   useEffect(() => {
+    setRemainingMs(target - Date.now());
     const id = setInterval(() => {
-      const left = releaseAt - Date.now();
+      const left = target - Date.now();
       setRemainingMs(left);
       if (left <= 0) { clearInterval(id); onOpen(); }
     }, 1000);
     return () => clearInterval(id);
-  }, [releaseAt, onOpen]);
+  }, [target, onOpen]);
 
   // Past the release instant → stop rendering; don't leave a stuck 00:00 card up.
   if (remainingMs <= 0) return null;

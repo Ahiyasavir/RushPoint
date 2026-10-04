@@ -148,6 +148,31 @@ export function expiryInstantMs(
 }
 
 /**
+ * Whether a SUBMISSION for this mission is refused by its time window (change: run-gate-integrity).
+ * The one rule every completion door applies — completeTask, submitTaskAnswer, submitSequenceStep,
+ * verifyStationCode, submitStationPhoto — so they cannot drift (two of them checked expiry and not
+ * release, which let a hand-crafted call answer a mission before it opened).
+ *
+ * A record carrying `gateOverride` was put there by an operator PAST these gates, and is never
+ * refused: the alternative is the staff override that hands a team a mission it can then not finish.
+ */
+export function scheduleRefusal(
+  gate: (ReleaseGate & ExpiryGate) | null | undefined,
+  runStartedAt: string | number | null | undefined,
+  nowMs: number,
+  rec?: { gateOverride?: unknown; status?: unknown } | null,
+): 'notReleased' | 'expired' | null {
+  if (rec && rec.gateOverride === true) return null;
+  // A release time decides whether a mission may be HANDED OUT. A mission the team already holds
+  // was handed out (routing checked the release), so a release moved later by a mid-run template
+  // edit must not lock the team out of the mission in its hands — nothing would ever move it off.
+  // Expiry still applies to a held mission: that is what the expiry sweep exists for.
+  if (!(rec && rec.status === 'assigned') && !isReleased(gate, runStartedAt, nowMs)) return 'notReleased';
+  if (isExpired(gate, runStartedAt, nowMs)) return 'expired';
+  return null;
+}
+
+/**
  * Static save-time validation of a release+expiry window. Returns an error
  * string when BOTH `releaseAfterMinutes` and `expiresAfterMinutes` are set and
  * the expiry is ≤ the release (an empty window — the task could never be
