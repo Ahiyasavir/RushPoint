@@ -51,7 +51,7 @@ The changes:
     and no pace term is applied.
 - **All bonuses are percentages of the points the team earned on missions.**
   - Completion: **+10%**.
-  - Pace: ±(half the relative pace difference), capped at **±15%**.
+  - Pace: half the relative pace difference, capped at **+15%** fast and **−10%** slow (finishing never hurts).
   - These replace the +500 flat completion bonus, the +200 speed bonus and the ±200/σ Z-score.
   - Penalties and flat bonuses (hints, staff adjustments, discovery, zone capture) still ride
     `bonusPenalty` and are applied last, so a 20-point fine is still exactly 20 points.

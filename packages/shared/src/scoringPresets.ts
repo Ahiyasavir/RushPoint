@@ -181,7 +181,7 @@ export function applyPenalties(score: number, bonusPenalty: number): number {
 export function composeLeaderboardScore(args: {
   points: number;
   allStagesDone: boolean;
-  /** A fraction from pacePct (−PACE_MAX_PCT … +PACE_MAX_PCT); 0 for an unfinished team. */
+  /** A fraction from pacePct (−COMPLETION_BONUS_PCT … +PACE_MAX_PCT); 0 for an unfinished team. */
   pacePct: number;
   bonusPenalty: number;
 }): number {
@@ -250,12 +250,14 @@ export function fieldPaceRatios(finishers: PaceInput[]): (number | null)[] {
   return finishers.map((f, i) => (usable[i] ? value(f) / ref : null));
 }
 
-/** A pace ratio as a bonus fraction: half the relative difference, capped at ±PACE_MAX_PCT.
+/** A pace ratio as a bonus fraction: half the relative difference, capped at +PACE_MAX_PCT on the
+ *  fast side and at −COMPLETION_BONUS_PCT on the slow side — slowness can eat the bonus for finishing
+ *  but never more, so FINISHING never scores below an unfinished team with the same mission points.
  *  20% faster than the field median ⇒ +10%. Null / non-finite ⇒ 0. */
 export function pacePct(r: number | null | undefined): number {
   if (typeof r !== 'number' || !Number.isFinite(r)) return 0;
   const pct = PACE_WEIGHT * (1 - r);
-  return Math.max(-PACE_MAX_PCT, Math.min(PACE_MAX_PCT, pct)) || 0;
+  return Math.max(-COMPLETION_BONUS_PCT, Math.min(PACE_MAX_PCT, pct)) || 0;
 }
 
 

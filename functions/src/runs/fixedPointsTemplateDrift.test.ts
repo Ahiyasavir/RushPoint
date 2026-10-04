@@ -104,10 +104,11 @@ describe('fixed_points_speed template drift — a finished team is immutable', (
           difficulty: 3, estimatedMinutes: 20, expectedDurationMinutes: 20, pointValue: 50, maxConcurrentTeams: 3 },
       ] }],
     } as unknown as Game;
-    // s0t0 gone + no stamp → expected 20, pace 27/20 = 1.35 ⇒ −17.5% capped at −15% ⇒ 100 + 10 − 15.
+    // s0t0 gone + no stamp → expected 20, pace 27/20 = 1.35 ⇒ −17.5%, capped at the −10% completion
+    // bonus (finishing never hurts) ⇒ 100 + 10 − 10.
     const score = buildRankings(gameMissingT0, [legacy], now)[0].score;
     expect(Number.isFinite(score)).toBe(true);
-    expect(score).toBe(95);
+    expect(score).toBe(100);
   });
 
   test('1.4 a mid-run edit cannot move two close finished teams', () => {

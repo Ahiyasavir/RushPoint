@@ -97,7 +97,7 @@ check('curve: faster pays more than slower', sigmoidMultiplier(0.5) > sigmoidMul
   check('pacePct: 20% faster → +10%', near(pacePct(0.8), 0.10));
   check('pacePct: 20% slower → -10%', near(pacePct(1.2), -0.10));
   check('pacePct: capped at +15%', pacePct(0) === PACE_MAX_PCT);
-  check('pacePct: capped at -15%', pacePct(10) === -PACE_MAX_PCT);
+  check('pacePct: the slow side is capped at the completion bonus (-10%)', pacePct(10) === -COMPLETION_BONUS_PCT);
   check('pacePct: null → 0', pacePct(null) === 0);
   check('pacePct: NaN → 0', pacePct(NaN) === 0);
 }
@@ -145,6 +145,14 @@ check('compose: non-finite inputs never yield a non-finite score',
   ]);
   check('a finisher with no expected minutes gets no pace term', r[2] === null, JSON.stringify(r));
   check('…and the others are still compared paced, among themselves', near(r[0] as number, 0.8) && near(r[1] as number, 1.2), JSON.stringify(r));
+}
+
+{
+  // Finishing must never hurt: the slowest finisher still scores at least what an unfinished team
+  // with the same mission points scores.
+  const slowest = composeLeaderboardScore({ points: 100, allStagesDone: true, pacePct: pacePct(100), bonusPenalty: 0 });
+  const unfinished = composeLeaderboardScore({ points: 100, allStagesDone: false, pacePct: 0, bonusPenalty: 0 });
+  check('the slowest finisher never scores below an unfinished team with the same points', slowest >= unfinished, `${slowest} vs ${unfinished}`);
 }
 
 console.log(`\n${failures === 0 ? 'ALL SCORING-V2 TESTS PASSED' : failures + ' TEST(S) FAILED'}`);

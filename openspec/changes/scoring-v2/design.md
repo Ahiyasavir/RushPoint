@@ -41,7 +41,8 @@ Computing the pace ratio `r` (pure `fieldPaceRatios`):
 - **n = 1, raw mode.** `r = null`.
 
 Turning `r` into a bonus:
-- `pacePct(r) = clamp(0.5 × (1 − r), −0.15, +0.15)`, and `null ⇒ 0`.
+- `pacePct(r) = clamp(0.5 × (1 − r), −0.10, +0.15)`, and `null ⇒ 0`. The slow side is capped at the
+  completion bonus, so the slowest finisher never scores below an unfinished team with the same points.
   For example, 20% faster than the field median earns +10%.
 - `paceBonus = round(points × pacePct)`.
 

@@ -580,13 +580,13 @@ Every bonus is a **percentage of the team's mission points**, never a flat amoun
 points  = Σ earnedScore of completed + skipped records   // 0 for time_only
 score   = points
         + round(points × 10%)          if every stage completed
-        + round(points × pacePct(r))   finished teams only, −15% … +15%
+        + round(points × pacePct(r))   finished teams only, −10% … +15%
         − bonusPenalty                 // hints, fines, flat bonuses; applied LAST
 score   = max(0, score)
 ```
 `r` is the team's **pace relative to the field** (`fieldPaceRatios`): its adjusted duration over
 `teamExpectedRouteMinutes` (the expected-minute stamps of the missions it COMPLETED), divided by the
-**median** pace of all finishers. `pacePct(r) = clamp(0.5 × (1 − r), ±15%)`. Because every team's pace
+**median** pace of all finishers. `pacePct(r) = clamp(0.5 × (1 − r), −10%, +15%)` (the slow side never eats more than the completion bonus, so finishing never hurts). Because every team's pace
 is divided by the field's, a time estimate that is wrong by the same factor everywhere cancels out
 exactly. A finisher with no expected minutes (every mission skipped) gets no pace term; the field races on raw duration only when no finisher has any. A LONE finisher
 is compared with the author's estimate only when its real time is within 3× of it; otherwise it gets

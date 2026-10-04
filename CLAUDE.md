@@ -461,7 +461,7 @@ strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify vi
 - `time_only` — ranked purely by completion time.
 - `fixed_points_speed` — fixed points per task + a speed bonus.
 - `smart_weighted` — bounded time multiplier (0.7…1.3, exactly 1.0 on target) × difficulty.
-Final ranking (`finalizeRun`, change scoring-v2): `points + 10% if finished + field pace % (±15%,
+Final ranking (`finalizeRun`, change scoring-v2): `points + 10% if finished + field pace % (−10%…+15%,
 finished teams) − bonusPenalty`. Every bonus is a PERCENTAGE of the team's mission points, never a
 flat amount, and speed is measured against the MEDIAN finisher's pace (duration ÷ expected minutes of
 the missions actually completed), so a wrong time estimate cancels out (`fieldPaceRatios`, TECH_SPEC
