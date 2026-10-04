@@ -1796,6 +1796,46 @@ async function main() {
     check('scoring-v2: the faster team ranks first', fin2R[0]?.teamId === idA, JSON.stringify(fin2R.map((r) => r.teamName)));
   });
 
+  // run-gate-integrity: a wrong answer is never charged on a mission the team can no longer play.
+  await scenario('wrong answers on a closed or finished mission cost nothing', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const q = (id, answer) => ({
+      id, title: `Riddle ${id}`, type: 'quiz', answers: [answer], choices: [answer, 'x', 'y', 'z'],
+      coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5,
+      pointValue: 100, maxConcurrentTeams: 5, triggerMode: 'instant',
+    });
+    const { gameId: g } = await creator.call('createGame', { title: 'Wrong on closed', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed', scoringOptions: { wrongAnswerPenalty: 'standard' },
+      stages: [
+        { id: 'st-wc1', order: 0, title: 'Q', tasks: [q('wc-1', 'olive'), q('wc-2', 'fig')], requiredTaskCount: 1 },
+        { id: 'st-wc2', order: 1, title: 'End', isFinal: true, tasks: [q('wc-3', 'date')] },
+      ],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p = makeParty('wrongOnClosed');
+    await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: c, displayName: 'WC' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    const ctx = { ownerUid, gameId: g, runId: r };
+    await creator.call('setRunTaskStatus', { ...ctx, taskId: 'wc-2', status: 'closed' });
+    // Twice: a free first miss would hide a charge, so the second wrong answer is the one that costs.
+    for (let i = 0; i < 2; i++) {
+      try { await p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-2', answer: `nope${i}` }); } catch { /* refused is fine */ }
+    }
+    const afterClosed = await p.call('getMyTeamState', { code: c });
+    check('wrong answers on a CLOSED mission are not charged', (afterClosed?.team?.bonusPenalty ?? 0) === 0,
+      String(afterClosed?.team?.bonusPenalty));
+    const ok = await p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-1', answer: 'olive' });
+    check('the open mission still completes', ok?.correct === true, JSON.stringify(ok));
+    for (let i = 0; i < 2; i++) {
+      try { await p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-1', answer: `late${i}` }); } catch { /* refused is fine */ }
+    }
+    const afterDone = await p.call('getMyTeamState', { code: c });
+    check('wrong answers on a FINISHED mission are not charged', (afterDone?.team?.bonusPenalty ?? 0) === 0,
+      String(afterDone?.team?.bonusPenalty));
+  });
+
   await scenario('wrong answers cost (escalate, cap, cooldown, replay, preset)', async () => {
 
   // ── Wrong-answer cost (change: wrong-answer-cost) ───────────────────────────

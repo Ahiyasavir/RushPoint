@@ -5900,7 +5900,8 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
     // the organizer, skipped, retired or already finished. Judged on the fresh record inside the
     // transaction, so a close landing while the hint sheet is open cannot be charged for.
     const recNow = team.stages.flatMap((s) => s.tasks).find((r) => r.taskId === taskId);
-    if (!recNow || recNow.status === 'completed' || recNow.status === 'skipped') {
+    // (A mission retired for exhausting its attempts still shows its — by then free — hint.)
+    if (!recNow || recNow.status === 'completed' || (recNow.status === 'skipped' && recNow.skipCause !== 'attempts')) {
       throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
     }
     // Hint auto escalation (change: hint-auto-escalation): the charge decision is
@@ -6285,6 +6286,14 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // computation (and before the attempt-limit read, so a probe consumes no slot).
   // A wrong and a correct answer on a locked stage now throw the identical error.
   assertStageActiveForTask(team, taskId);
+  // run-gate-integrity: an answer for a mission the team can no longer play (closed by the
+  // organizer, skipped, retired) is refused before grading — it used to be graded and, when wrong,
+  // CHARGED, for a mission that could never score.
+  // (A mission retired for exhausting its attempts keeps answering with the attempt-cap error below.)
+  const answerRec = teamTaskRecord(team, taskId);
+  if (answerRec?.status === 'skipped' && answerRec.skipCause !== 'attempts') {
+    throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
+  }
 
   // Optional presence gate (change: quiz-location-verification): when the creator
   // opted this task into requirePresence AND it has real coordinates, the submitted
@@ -6502,6 +6511,9 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       ? matchesOrderedAnswer(task.orderItems as string[], orderedAnswer)
       : matchesTaskAnswer(task, String(answer));
   if (!correct) {
+    // A FINISHED mission is graded (a double-tapped correct answer stays an idempotent repeat) but a
+    // wrong answer on it records and costs nothing: there is nothing left to get wrong.
+    if (teamTaskRecord(team, taskId)?.status === 'completed') return { correct: false };
     // Record the wrong attempt under a real nested map (not a dotted key).
     // Tracked when ANY consumer needs it: the attempt-limit cap (row 42), hint
     // auto escalation (change: hint-auto-escalation), or the wrong-answer cost
