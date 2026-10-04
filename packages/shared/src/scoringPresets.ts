@@ -222,16 +222,19 @@ function medianOf(values: number[]): number {
 
 /**
  * Each finisher's pace relative to the field (1 = the median, < 1 = faster), or null when there is
- * nothing trustworthy to compare against. Paced (duration ÷ expected) when EVERY finisher has
- * expected minutes; otherwise the whole field races on raw duration, so a game with no estimates
- * is still a fair race. Total: never throws, never returns a non-finite number.
+ * nothing trustworthy to compare against. Paced (duration ÷ expected) among the finishers that have
+ * expected minutes; raw duration only when NONE has, so a game with no estimates is still a fair race. Total: never throws, never returns a non-finite number.
  */
 export function fieldPaceRatios(finishers: PaceInput[]): (number | null)[] {
   const ok = (v: number) => Number.isFinite(v) && v >= 0;
-  const usable = finishers.map((f) => ok(f.durationMin) && ok(f.expectedMin));
+  const valid = finishers.map((f) => ok(f.durationMin) && ok(f.expectedMin));
+  // Paced whenever ANY finisher has expected minutes; a finisher WITHOUT them (every mission skipped,
+  // say) then gets no pace term rather than dragging the whole field onto raw durations — where it
+  // would also be the fastest "racer" and skew the median for everyone else.
+  const paced = finishers.some((f, i) => valid[i] && f.expectedMin > 0);
+  const usable = valid.map((v, i) => v && (!paced || finishers[i].expectedMin > 0));
   const field = finishers.filter((_, i) => usable[i]);
   if (field.length === 0) return finishers.map(() => null);
-  const paced = field.every((f) => f.expectedMin > 0);
   const value = (f: PaceInput) => (paced ? f.durationMin / f.expectedMin : f.durationMin);
 
   if (field.length === 1) {

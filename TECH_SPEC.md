@@ -588,7 +588,7 @@ score   = max(0, score)
 `teamExpectedRouteMinutes` (the expected-minute stamps of the missions it COMPLETED), divided by the
 **median** pace of all finishers. `pacePct(r) = clamp(0.5 × (1 − r), ±15%)`. Because every team's pace
 is divided by the field's, a time estimate that is wrong by the same factor everywhere cancels out
-exactly. If a finisher has no expected minutes, the whole field races on raw duration. A LONE finisher
+exactly. A finisher with no expected minutes (every mission skipped) gets no pace term; the field races on raw duration only when no finisher has any. A LONE finisher
 is compared with the author's estimate only when its real time is within 3× of it; otherwise it gets
 no pace term. This replaces the old flat +500 completion bonus, the +10/min (cap +200) speed bonus and
 the ±200-per-σ Z-Score.

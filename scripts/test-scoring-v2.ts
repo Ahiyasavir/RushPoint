@@ -81,10 +81,10 @@ check('curve: faster pays more than slower', sigmoidMultiplier(0.5) > sigmoidMul
   check('lone finisher: no estimates at all → no pace term', fieldPaceRatios([{ durationMin: 40, expectedMin: 0 }])[0] === null);
 }
 {
-  // Raw mode: any finisher without estimates ⇒ the whole field races on raw duration.
+  // Raw mode only when NO finisher has expected minutes; mixed ⇒ the one without gets no pace term.
   const r = fieldPaceRatios([
     { durationMin: 30, expectedMin: 0 },
-    { durationMin: 60, expectedMin: 40 },
+    { durationMin: 60, expectedMin: 0 },
   ]);
   check('raw mode: median of 30 and 60 is 45', near(r[0] as number, 30 / 45) && near(r[1] as number, 60 / 45), JSON.stringify(r));
   check('everyone at zero duration → no pace term', fieldPaceRatios([{ durationMin: 0, expectedMin: 0 }, { durationMin: 0, expectedMin: 0 }]).every((v) => v === null));
@@ -133,6 +133,18 @@ check('compose: non-finite inputs never yield a non-finite score',
     String(teamExpectedRouteMinutes(stages, { stages: [] })));
   check('points: completed and skipped (consolation) both count', sumEarnedPoints(stages) === 250);
   check('points: a poisoned record counts as 0', sumEarnedPoints([{ stageId: 's', order: 0, status: 'active', tasks: [rec('completed', 1, NaN)] }]) === 0);
+}
+
+{
+  // One finisher with NO expected minutes (every mission skipped by staff) must not drag the whole
+  // field onto raw durations: it gets no pace term, the others keep their paced comparison.
+  const r = fieldPaceRatios([
+    { durationMin: 40, expectedMin: 50 },
+    { durationMin: 60, expectedMin: 50 },
+    { durationMin: 2, expectedMin: 0 },
+  ]);
+  check('a finisher with no expected minutes gets no pace term', r[2] === null, JSON.stringify(r));
+  check('…and the others are still compared paced, among themselves', near(r[0] as number, 0.8) && near(r[1] as number, 1.2), JSON.stringify(r));
 }
 
 console.log(`\n${failures === 0 ? 'ALL SCORING-V2 TESTS PASSED' : failures + ' TEST(S) FAILED'}`);

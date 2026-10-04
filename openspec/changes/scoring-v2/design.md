@@ -33,7 +33,7 @@ For each finished team:
   for legacy records is kept.
 
 Computing the pace ratio `r` (pure `fieldPaceRatios`):
-- **Mode.** If every finisher has `E > 0`, use paced values `v = d / E`. Otherwise use raw
+- **Mode.** If any finisher has `E > 0`, use paced values `v = d / E` among those, and a finisher with `E = 0` gets `r = null`. Otherwise use raw
   durations `v = d`, so a game with no estimates is still a plain race against the field.
 - **n ≥ 2 finishers.** `ref = median(v)`, and `r = v / ref`. If `ref ≤ 0`, then `r = null`.
 - **n = 1, paced mode.** `q = d / E`. Then `r = q` when `1/3 ≤ q ≤ 3`, else `null` (the estimate is
