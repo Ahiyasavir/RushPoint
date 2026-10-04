@@ -618,10 +618,10 @@ async function main() {
       id: 'stage-2',
       order: 1,
       title: 'Stage Two — photo station (staff review)',
-      // audio-tasks: two tasks in this stage but only ONE is required, so the
-      // existing photo-approval flow still completes the stage while the audio
-      // task can be submitted + reviewed independently in the same scenario.
-      requiredTaskCount: 1,
+      // audio-tasks / video-submission-task: photo, audio and video are ALL required, so each is still
+      // a live mission when it is submitted + reviewed below (a submission for a retired mission is
+      // refused: run-gate-integrity). The video approval is what completes the stage.
+      requiredTaskCount: 3,
       tasks: [
         {
           id: PHOTO_TASK_ID,
@@ -1268,10 +1268,6 @@ async function main() {
   check('review marks the submission approved (nested update)',
     state?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.status === 'approved',
     state?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.status);
-  check('approved photo completes the stage', state?.team?.stages?.[1]?.status === 'completed',
-    state?.team?.stages?.[1]?.status);
-  check('final stage unlocked after photo', state?.team?.stages?.[2]?.status === 'active',
-    state?.team?.stages?.[2]?.status);
 
   // ── 8d. Audio task (audio-tasks): same photo pipeline, captureKind:'audio' ────
   // Upload real audio bytes to the Storage emulator under the caller's OWN
@@ -1397,21 +1393,18 @@ async function main() {
     state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status === 'approved',
     state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status);
 
-  // NOTE: this stage has requiredTaskCount:1 and PHOTO_TASK_ID already satisfied
-  // it above, so AUDIO_TASK_ID/VIDEO_TASK_ID were auto-skipped as the stage
-  // completed — completeTaskForTeam is a no-op (completed:false) for both, so
-  // NEITHER can ever reach the feed here regardless of kind. That is a property
-  // of this shared fixture's partial-stage setup, not evidence about video's
-  // feed eligibility — see the dedicated "video submissions enter the live photo
-  // feed (mediaKind)" scenario below for real coverage of the autoApprove path,
-  // the staff-review path, the hidden-location exclusion, and the mediaKind
-  // field (change: run-media-gallery-and-video-feed).
+  check('the approved photo + audio + video complete the stage', state?.team?.stages?.[1]?.status === 'completed',
+    state?.team?.stages?.[1]?.status);
+  check('final stage unlocked after the stage completes', state?.team?.stages?.[2]?.status === 'active',
+    state?.team?.stages?.[2]?.status);
+  // The video was a LIVE mission when approved, so — unlike audio — it reaches the photo feed (the
+  // dedicated "video submissions enter the live photo feed" scenario covers the rest of that path).
   const feedItemsAfterVideo = await player.getColAt(
     `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/feedItems`,
   ).catch(() => []);
-  check('no feed item for the video submission on an already-satisfied requiredTaskCount stage',
-    !feedItemsAfterVideo.some((f) => f?.taskId === VIDEO_TASK_ID),
-    JSON.stringify(feedItemsAfterVideo.map((f) => f?.taskId)));
+  check('the staff-approved video enters the feed with mediaKind video',
+    feedItemsAfterVideo.some((f) => f?.taskId === VIDEO_TASK_ID && f?.mediaKind === 'video'),
+    JSON.stringify(feedItemsAfterVideo.map((f) => [f?.taskId, f?.mediaKind])));
 
   // ── 9. Complete the final plain task ────────────────────────────────────────
   const completeRes = await player.call('completeTask', {
@@ -1722,6 +1715,14 @@ async function main() {
       return (st?.team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((t) => t.taskId === 'cr-photo');
     };
     check('close-vs-review: a team that never submitted loses the closed mission', (await rec('crIdle'))?.status === 'skipped');
+    {
+      const { p, uid } = parties.crIdle;
+      const path = `runs/${r}/teams/${uid}/late.jpg`;
+      await p.uploadBytesAt(path, jpeg, 'image/jpeg');
+      await expectError('close-vs-review: a photo for the closed mission is refused (no dead row in the review queue)',
+        p.call('submitStationPhoto', { ownerUid, gameId: g, runId: r, teamId: uid, taskId: 'cr-photo', photoUrl: photoUrl(path) }),
+        { codeIn: ['functions/failed-precondition'] });
+    }
     check('close-vs-review: a team whose photo awaits review keeps it', (await rec('crKeep'))?.status === 'assigned',
       JSON.stringify(await rec('crKeep')));
     await creator.call('reviewStationSubmission', { ownerUid, gameId: g, runId: r, teamId: parties.crKeep.uid, taskId: 'cr-photo', approved: true });

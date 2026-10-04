@@ -1880,6 +1880,12 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
     return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), already: true };
   }
+  // run-gate-integrity: a mission the team can no longer play (closed by the organizer, skipped,
+  // retired) takes no submission: it would sit in the staff review queue as a photo whose approval
+  // can score nothing.
+  if (teamTaskRecord(team, taskId)?.status === 'skipped') {
+    throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
+  }
   // background-media-upload D1: a deferral the server would not auto-approve writes NOTHING. The
   // phone then uploads and submits the ordinary way, so the review path never sees a fileless row.
   if (deferred && !autoApprove) {
