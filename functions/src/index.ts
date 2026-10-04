@@ -69,7 +69,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, closeTaskForTeam, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, closeTaskForTeam, assertRunNotFinished, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -2082,6 +2082,10 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   if (!teamSnap.exists) {
     throw new functions.https.HttpsError('not-found', 'Team not found');
   }
+  // run-gate-integrity: a finished run is frozen. Refused BEFORE anything is written — the approval
+  // used to stamp the submission "approved" and only then fail in completeTaskForTeam, leaving an
+  // approved photo with nothing scored behind it.
+  await assertRunNotFinished(ownerUid, gameId, runId);
   // ── Reversing an approval (change: approval-can-be-undone) ────────────────
   //
   // `approved + reject` used to be refused outright, because there was no way to take

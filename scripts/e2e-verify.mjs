@@ -1751,6 +1751,26 @@ async function main() {
     const rejState = await parties.crReject.p.call('getMyTeamState', { code: c });
     check('close-vs-review: the rejected team moves on to the next stage',
       rejState?.team?.activeTaskId !== 'cr-photo', JSON.stringify({ active: rejState?.team?.activeTaskId }));
+
+    // A photo still waiting when the run is FINISHED: the review is refused cleanly, and the stored
+    // submission is not flipped to "approved" with nothing scored behind it.
+    {
+      const { runId: r2, accessCode: c2 } = await creator.call('launchRun', { gameId: g, testDrive: true });
+      const p = makeParty('crAfterEnd');
+      const cred = await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: c2, displayName: 'late' });
+      await creator.call('startTeams', { gameId: g, runId: r2 });
+      const path = `runs/${r2}/teams/${cred.user.uid}/end.jpg`;
+      await p.uploadBytesAt(path, jpeg, 'image/jpeg');
+      await p.call('submitStationPhoto', { ownerUid, gameId: g, runId: r2, teamId: cred.user.uid, taskId: 'cr-photo', photoUrl: photoUrl(path) });
+      await creator.call('finalizeRun', { gameId: g, runId: r2 });
+      await expectError('close-vs-review: reviewing after the run finished is refused',
+        creator.call('reviewStationSubmission', { ownerUid, gameId: g, runId: r2, teamId: cred.user.uid, taskId: 'cr-photo', approved: true }),
+        { codeIn: ['functions/failed-precondition'] });
+      const after = (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r2}/teams/${cred.user.uid}`).get()).data();
+      check('close-vs-review: the submission is not marked approved after the end',
+        after?.taskSubmissions?.['cr-photo']?.status === 'pending', after?.taskSubmissions?.['cr-photo']?.status);
+    }
   });
 
   // run-gate-integrity: LIVE-OP RACES against the real server — two conflicting actions fired at the
