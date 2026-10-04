@@ -5875,6 +5875,7 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   assertTeamNotHeld(team); // staff-console-field-ops — no charged action while held
+  await assertRunNotFinished(ctx.ownerUid, ctx.gameId, ctx.runId); // run-gate-integrity: a finished run is frozen
   // Same stage-scope guard as every answer/interaction callable (submitTaskAnswer,
   // submitSequenceStep, verifyStationCode, reportArrival): a hint may only be
   // revealed for a task in the team's ACTIVE (or already-completed) stage. Without
@@ -6526,6 +6527,8 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     // A FINISHED mission is graded (a double-tapped correct answer stays an idempotent repeat) but a
     // wrong answer on it records and costs nothing: there is nothing left to get wrong.
     if (teamTaskRecord(team, taskId)?.status === 'completed') return { correct: false };
+    // A finished run is frozen: a wrong answer there records and costs nothing.
+    await assertRunNotFinished(ctx.ownerUid, ctx.gameId, ctx.runId);
     // Record the wrong attempt under a real nested map (not a dotted key).
     // Tracked when ANY consumer needs it: the attempt-limit cap (row 42), hint
     // auto escalation (change: hint-auto-escalation), or the wrong-answer cost
@@ -6685,6 +6688,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   assertTeamNotHeld(team); // staff-console-field-ops — no step progress while held
+  await assertRunNotFinished(ctx.ownerUid, ctx.gameId, ctx.runId); // run-gate-integrity: a finished run is frozen
 
   // The game template cannot change mid-run, and this is a hot participant path
   // (change: hot-path-read-cost).

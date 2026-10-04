@@ -1732,6 +1732,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   const submittedBy = { uid, name: String(senderDevice?.name ?? (uid === team.id ? team.displayName : '') ?? '').slice(0, 60) };
   // Staff hold (staff-console-field-ops) — a parked team cannot bank a submission.
   assertTeamNotHeld(team);
+  await assertRunNotFinished(ownerUid, gameId, runId); // run-gate-integrity: a finished run is frozen
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
   // OWN team. A payload teamId that isn't the caller's team is rejected.
   if (teamId && teamId !== resolvedTeamId) {

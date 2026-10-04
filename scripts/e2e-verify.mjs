@@ -1904,6 +1904,43 @@ async function main() {
     }
   });
 
+  // run-gate-integrity: a FINISHED run is frozen for players too — no hint charge, no wrong-answer
+  // charge, no photo in a review queue nobody can work.
+  await scenario('a finished run takes no more player actions', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const { gameId: g } = await creator.call('createGame', { title: 'Frozen run', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed', scoringOptions: { wrongAnswerPenalty: 'standard' },
+      stages: [{ id: 'st-fz', order: 0, title: 'Q', isFinal: true, tasks: [
+        { id: 'fz-q', title: 'Q', type: 'quiz', answers: ['olive'], choices: ['olive', 'x', 'y', 'z'],
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5, pointValue: 50,
+          maxConcurrentTeams: 5, triggerMode: 'instant', hint: 'tree', hintPenalty: 20 },
+        { id: 'fz-p', title: 'P', type: 'photo', coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2,
+          estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 5, triggerMode: 'instant' },
+      ] }],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p = makeParty('frozenRun');
+    const cred = await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: c, displayName: 'FZ' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    await creator.call('finalizeRun', { gameId: g, runId: r });
+    const ctx = { ownerUid, gameId: g, runId: r };
+    const refused = { codeIn: ['functions/failed-precondition'] };
+    await expectError('frozen: a hint is refused after the run finished', p.call('requestTaskHint', { ...ctx, taskId: 'fz-q' }), refused);
+    for (let i = 0; i < 2; i++) { try { await p.call('submitTaskAnswer', { ...ctx, taskId: 'fz-q', answer: `no${i}` }); } catch { /* refused */ } }
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    const path = `runs/${r}/teams/${cred.user.uid}/fz.jpg`;
+    try { await p.uploadBytesAt(path, jpeg, 'image/jpeg'); } catch { /* storage may refuse too */ }
+    await expectError('frozen: a photo is refused after the run finished',
+      p.call('submitStationPhoto', { ...ctx, teamId: cred.user.uid, taskId: 'fz-p',
+        photoUrl: `http://127.0.0.1:${EMU.storage}/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token` }),
+      refused);
+    const t = (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}/teams/${cred.user.uid}`).get()).data();
+    check('frozen: nothing was charged after the end', (t?.bonusPenalty ?? 0) === 0, String(t?.bonusPenalty));
+    check('frozen: no submission was queued after the end', !t?.taskSubmissions?.['fz-p'], JSON.stringify(t?.taskSubmissions ?? {}));
+  });
+
   // scoring-v2: every bonus is a PERCENTAGE of the mission points a team earned. The old flat +500
   // completion bonus outweighed every mission of a game whose missions are worth 10 points each, and
   // a lone finisher's speed was judged against the author's estimate even when that estimate was
