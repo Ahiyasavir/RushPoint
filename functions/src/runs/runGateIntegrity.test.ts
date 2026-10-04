@@ -8,7 +8,7 @@ import {
   type Game, type RunStageRecord, type RunTaskRecord,
 } from '@rushpoint/shared';
 import { applyStageCompletion } from './helpers';
-import { applyTaskClosure, applySkipStage, heldTaskIdOf, advanceTeamStateOnPoll, healStrandedStage } from './index';
+import { applyTaskClosure, applySkipStage, heldTaskIdOf, advanceTeamStateOnPoll, healStrandedStage, stampOperatorPause } from './index';
 
 const LAUNCH = '2026-01-01T10:00:00.000Z';
 const L = Date.parse(LAUNCH);
@@ -258,5 +258,39 @@ describe('a held mission whose attempt cap is used up', () => {
     Object.assign(g.stages[0].tasks[0], { type: 'quiz', smart: { attemptLimit: 2 } });
     const stages = [stage('s1', 'active', [rec('q', 'assigned')])];
     expect(healStrandedStage(stages, g, LAUNCH, at(5), { q: 1 }).changed).toBe(false);
+  });
+});
+
+describe('an organizer takes a clock-pausing mission the team is on', () => {
+  // A "lunch break" mission pauses the race clock. Closing or skipping it moves the team on — it
+  // must not also hand the whole break back to the clock. (A team that walks away from it itself
+  // still gets nothing excluded: only the operator paths stamp it.)
+  const g = game([{ id: 's1', tasks: [{ id: 'lunch', pausesTimer: true } as T, { id: 'b' }] }, { id: 's2', isFinal: true, tasks: [{ id: 'z' }] }]);
+
+  test('a closure stamps the time the team spent on it as excluded', () => {
+    const stages = [stage('s1', 'active', [rec('lunch', 'assigned', { startedAt: at(10) }), rec('b')]), stage('s2', 'locked', [rec('z')])];
+    applyTaskClosure(stages, g, 'lunch', LAUNCH, at(40));
+    expect(stages[0].tasks[0]).toMatchObject({ status: 'skipped', excludedMs: 30 * 60_000 });
+  });
+
+  test('a closure of a paused mission nobody started excludes nothing', () => {
+    const stages = [stage('s1', 'active', [rec('lunch'), rec('b', 'assigned', { startedAt: at(1) })]), stage('s2', 'locked', [rec('z')])];
+    applyTaskClosure(stages, g, 'lunch', LAUNCH, at(40));
+    expect(stages[0].tasks[0].excludedMs).toBeUndefined();
+  });
+
+  test('skipping the stage stamps it too', () => {
+    const stages = [stage('s1', 'active', [rec('lunch', 'assigned', { startedAt: at(10) }), rec('b')]), stage('s2', 'locked', [rec('z')])];
+    applySkipStage(stages, 0, g, LAUNCH, at(25), 'op');
+    expect(stages[0].tasks[0].excludedMs).toBe(15 * 60_000);
+  });
+
+  test('skipping just that mission stamps it (stampOperatorPause)', () => {
+    const r = rec('lunch', 'assigned', { startedAt: at(10) });
+    stampOperatorPause(r, { pausesTimer: true }, at(20));
+    expect(r.excludedMs).toBe(10 * 60_000);
+    const plain = rec('b', 'assigned', { startedAt: at(10) });
+    stampOperatorPause(plain, { pausesTimer: false }, at(20));
+    expect(plain.excludedMs).toBeUndefined();
   });
 });

@@ -335,6 +335,20 @@ export function heldTaskIdOf(stages: RunStageRecord[]): string | null {
 //
 // Mutates `stages` (a copy the caller owns). Returns whether anything changed, whether the team was
 // holding the mission, and the station slots to release after the commit.
+/**
+ * An ORGANIZER took a clock-pausing mission the team was on (a close, a skip of that mission, a
+ * stage skip): stamp the span it spent there as excluded, exactly as a completion would have. A
+ * "lunch break" mission skipped to move a team on must not hand the whole break back to the race
+ * clock. Only the operator paths call this: a team that walks away from a paused mission itself
+ * (expiry, time limit, check-out) still excludes nothing, per pausedClock.ts.
+ */
+export function stampOperatorPause(
+  rec: RunTaskRecord, gameTask: Pick<Task, 'pausesTimer'> | null | undefined, now: string,
+): void {
+  if (rec.status !== 'assigned' || !gameTask?.pausesTimer || !rec.startedAt) return;
+  rec.excludedMs = taskExcludedMs({ startedAt: rec.startedAt, completedAt: now }, true);
+}
+
 export function applyTaskClosure(
   stages: RunStageRecord[],
   game: Game,
@@ -362,6 +376,7 @@ export function applyTaskClosure(
   }, taskId);
   if (!plan.ok) return { changed: false, wasHolding: false, releaseIds: [] };
   const wasHolding = rec.status === 'assigned';
+  stampOperatorPause(rec, findGameTask(game, taskId), now);
   rec.status = 'skipped';
   rec.skipCause = 'operator';
   rec.closedByOrganizer = true;
@@ -1796,6 +1811,7 @@ export function applySkipStage(
     // Look the game task up by id, not by (activeIdx, taskIndex) (nightly hardening).
     const gameTask = findGameTask(game, taskRec.taskId);
     const award = gameTask ? skipAward(game.scoringPreset, gameTask) : 0;
+    stampOperatorPause(taskRec, gameTask, now);
     taskRec.status = 'skipped';
     taskRec.skipCause = 'operatorStage'; // skip-keeps-the-stage
     delete taskRec.gateOverride;
@@ -2064,6 +2080,7 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
 
     const rec = stageRec.tasks.find((t) => t.taskId === targetId)!;
     previousStatus = rec.status; // 'assigned' when the team was holding it, else 'unassigned'
+    stampOperatorPause(rec, findGameTask(game, targetId), now);
     rec.status = 'skipped';
     // skip-keeps-the-stage: an OPERATOR skip satisfies the gates of the missions behind it, so
     // applyStageCompletion below no longer retires them (production run 2026-09-22).
