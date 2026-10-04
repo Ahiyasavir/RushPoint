@@ -10,7 +10,7 @@
 // Bounded (latest SCORE_LEDGER_MAX) and total. Rewritten as a whole array, never a dotted update
 // into an array element (CLAUDE.md: that coerces the array to a map).
 
-export type ScoreLedgerKind = 'adjust' | 'hint' | 'skipAward' | 'reversal';
+export type ScoreLedgerKind = 'adjust' | 'hint' | 'skipAward' | 'reversal' | 'hintRefund';
 
 export interface ScoreLedgerEntry {
   at: string;
@@ -23,7 +23,7 @@ export interface ScoreLedgerEntry {
 }
 
 export const SCORE_LEDGER_MAX = 100;
-const KINDS = new Set<ScoreLedgerKind>(['adjust', 'hint', 'skipAward', 'reversal']);
+const KINDS = new Set<ScoreLedgerKind>(['adjust', 'hint', 'skipAward', 'reversal', 'hintRefund']);
 
 function clean(e: unknown): ScoreLedgerEntry | null {
   if (!e || typeof e !== 'object') return null;
@@ -49,4 +49,20 @@ export function appendScoreLedger(
   const added = (Array.isArray(entries) ? entries : []).map(clean).filter((x): x is ScoreLedgerEntry => !!x);
   const all = [...kept, ...added];
   return all.length > SCORE_LEDGER_MAX ? all.slice(all.length - SCORE_LEDGER_MAX) : all;
+}
+
+/**
+ * What a team is still owed back for the hint it bought on `taskId` (run-gate-integrity): the paid
+ * hint charges on that mission minus any refund already made. Read from the ledger the charge itself
+ * wrote, so a free (escalated) hint — which records nothing — refunds nothing, and a second refund
+ * pays 0. Called only when the ORGANIZER takes the mission away before the team finished it.
+ */
+export function hintRefundOwed(ledger: readonly unknown[] | null | undefined, taskId: string): number {
+  let owed = 0;
+  for (const e of (Array.isArray(ledger) ? ledger : []).map(clean)) {
+    if (!e || e.taskId !== taskId) continue;
+    if (e.kind === 'hint') owed -= e.delta;
+    else if (e.kind === 'hintRefund') owed -= e.delta;
+  }
+  return Math.max(0, owed);
 }

@@ -1635,6 +1635,10 @@ async function main() {
         id: 'h-2', title: 'The other riddle', type: 'self_report',
         coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3,
         hint: 'Look up.', hintPenalty: 40,
+      }, {
+        id: 'h-3', title: 'The third riddle', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3,
+        hint: 'Look down.', hintPenalty: 15,
       }],
       requiredTaskCount: 1,
     }],
@@ -1661,13 +1665,24 @@ async function main() {
   const afterAgain = await player3.call('getMyTeamState', { code: c3 });
   check('bonusPenalty unchanged after re-request', afterAgain?.team?.bonusPenalty === 30, String(afterAgain?.team?.bonusPenalty));
 
-  // A hint for a mission the team can no longer play (closed by the organizer) is not sold.
+  // A hint bought for a mission the ORGANIZER then closes is refunded: it can no longer be used.
+  const h2 = await player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-2' });
+  check('the second mission\'s hint is charged', h2?.penalty === 40, JSON.stringify(h2));
   await creator.call('setRunTaskStatus', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-2', status: 'closed' });
+  const afterRefund = await player3.call('getMyTeamState', { code: c3 });
+  check('closing that mission refunds its hint (70 → 30)', afterRefund?.team?.bonusPenalty === 30, String(afterRefund?.team?.bonusPenalty));
+  // A hint for a mission the team can no longer play is not sold at all.
+  await creator.call('setRunTaskStatus', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-3', status: 'closed' });
   await expectError('a hint for a CLOSED mission is refused (nothing to spend it on)',
-    player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-2' }),
+    player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-3' }),
     { codeIn: ['functions/failed-precondition'] });
   const afterClosed = await player3.call('getMyTeamState', { code: c3 });
   check('no charge for the refused hint', afterClosed?.team?.bonusPenalty === 30, String(afterClosed?.team?.bonusPenalty));
+  // Same for a staff skip of that one mission: the 30 paid for h-1's hint comes back.
+  const p3uid = afterClosed?.team?.id;
+  await creator.call('skipTaskForTeam', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, teamId: p3uid, taskId: 'h-1' });
+  const afterSkip = await player3.call('getMyTeamState', { code: c3 });
+  check('skipping the mission for the team refunds its hint (30 → 0)', afterSkip?.team?.bonusPenalty === 0, String(afterSkip?.team?.bonusPenalty));
 
   }); // scenario: paid hints
 

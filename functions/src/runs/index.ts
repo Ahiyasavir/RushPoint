@@ -113,7 +113,7 @@ import {
   gateSatisfiedTaskIds,
   // send-team-back: the pure rewind plan and the organizer-facing score ledger.
   planTeamRewind,
-  appendScoreLedger, contactsFor, answerOutcomesProblem, matchAnswerOutcome,
+  appendScoreLedger, hintRefundOwed, contactsFor, answerOutcomesProblem, matchAnswerOutcome,
   resolveExclusions,
   isHintFree,
   // Wrong-answer cost (change: wrong-answer-cost): escalating, capped, preset-aware.
@@ -457,8 +457,14 @@ export async function closeTaskForTeam(
     // Judged on the RECORDS before and after, never on a pointer that may already have been stale.
     const holding = outcome.wasHolding || (!!heldBefore && heldBefore !== stillHeld);
     const allDone = stages.every((st) => st.status === 'completed');
+    // A hint the team paid for on the closed mission is refunded: it can no longer be used.
+    const hintRefund = hintRefundOwed(team.scoreLedger, taskId);
     tx.update(ref, {
       stages,
+      ...(hintRefund > 0 ? {
+        bonusPenalty: (team.bonusPenalty ?? 0) - hintRefund,
+        scoreLedger: appendScoreLedger(team.scoreLedger, [{ at: now, delta: hintRefund, kind: 'hintRefund', taskId, by: 'organizer' }]),
+      } : {}),
       // The mission the team still holds (never a blind null: a stale pointer must not blank it).
       ...(holding ? { activeTaskId: stillHeld, closedTaskNotice: { taskId, title, at: now } } : {}),
       ...(allDone ? { status: 'finished', finishedAt: now } : {}),
@@ -2127,17 +2133,23 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
     // the task record was stamped with, the same way skipStage does
     // (change: live-ops-feedback-loop) — the two numbers must never disagree,
     // because the live board reads the team and the final ranking reads the records.
+    // A hint the team paid for on the mission the organizer just took away is refunded (it can no
+    // longer be used). Read from the ledger the charge wrote: a free hint refunds nothing.
+    const hintRefund = hintRefundOwed(team.scoreLedger, targetId);
+    const opBy = (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer';
+    const ledgerAdds = [
+      ...(skipConsolation > 0 ? [{
+        // team-dossier-and-search D2: the consolation, its mission and the reason given.
+        at: now, delta: skipConsolation, kind: 'skipAward', taskId: targetId,
+        reason: cleanReason || undefined, by: opBy,
+      }] : []),
+      ...(hintRefund > 0 ? [{ at: now, delta: hintRefund, kind: 'hintRefund', taskId: targetId, by: opBy }] : []),
+    ];
     tx.update(teamRef, {
       stages,
-      ...(skipConsolation > 0 ? {
-        score: (team.score ?? 0) + skipConsolation,
-        // team-dossier-and-search D2: the consolation, its mission and the reason given.
-        scoreLedger: appendScoreLedger(team.scoreLedger, [{
-          at: now, delta: skipConsolation, kind: 'skipAward', taskId: targetId,
-          reason: cleanReason || undefined,
-          by: (context.auth?.token as { staffName?: string } | undefined)?.staffName ?? 'organizer',
-        }]),
-      } : {}),
+      ...(skipConsolation > 0 ? { score: (team.score ?? 0) + skipConsolation } : {}),
+      ...(hintRefund > 0 ? { bonusPenalty: (team.bonusPenalty ?? 0) - hintRefund } : {}),
+      ...(ledgerAdds.length ? { scoreLedger: appendScoreLedger(team.scoreLedger, ledgerAdds) } : {}),
       ...(allDone ? { status: 'finished', finishedAt: now } : {}),
       // run-gate-integrity: the mission the team is STILL holding, not null. Skipping a mission the
       // team was not on (an unassigned one) used to blank this while the record stayed `assigned`,
