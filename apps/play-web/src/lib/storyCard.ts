@@ -3,6 +3,7 @@
 // a canvas at share time, so there are no static assets and no server round-trip.
 import { stampBrand } from './brandWatermark';
 import { routeShare, type ShareOutcome } from './shareLadder';
+import { drawIcon } from './canvasIcon';
 
 export interface StoryCardData {
   gameName: string;
@@ -64,8 +65,7 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   ctx.textAlign = 'center';
 
   // Trophy
-  ctx.font = '240px serif';
-  ctx.fillText('🏆', W / 2, 470);
+  drawIcon(ctx, 'trophy', W / 2, 390, 230, '#ffffff');
 
   // Banner headline (FINISHED! / WE'RE #1! / ON THE TRAIL …)
   ctx.fillStyle = '#ffffff';

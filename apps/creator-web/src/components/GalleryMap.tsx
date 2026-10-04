@@ -19,6 +19,8 @@ import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
+import { mapLocale } from '../lib/mapLocale';
+import { useT } from './LanguageContext';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -61,6 +63,7 @@ export default function GalleryMap({
   markerColor?: string;
   className?: string;
 }) {
+  const mapUi = useT().mapUi;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
@@ -72,6 +75,7 @@ export default function GalleryMap({
     if (!ref.current || map.current) return;
     map.current = new maplibregl.Map({
       container: ref.current,
+      locale: mapLocale(mapUi),
       style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
       center: [35, 31.5],
       zoom: 4,

@@ -55,7 +55,7 @@ export async function buildChallengeCard(opts: {
   ctx.textAlign = 'center';
   ctx.fillStyle = '#FB923C';
   ctx.font = '800 56px Outfit, Inter, sans-serif';
-  ctx.fillText('😏  Can you solve this?', W / 2, 150);
+  ctx.fillText('Can you solve this?', W / 2, 150);
 
   if (opts.gameName) {
     ctx.fillStyle = 'rgba(255,255,255,0.55)';

@@ -9,9 +9,38 @@ import type { TaskType, TriggerMode } from '@rushpoint/shared';
 export type BuilderIconName =
   | 'radius' | 'exact' | 'instant' | 'anywhere'
   | 'station' | 'photo' | 'quiz' | 'numeric' | 'field' | 'selfReport' | 'geofence' | 'sequence' | 'survey'
-  | 'tune';
+  | 'tune'
+  // Step 3 settings rows (change: mission-editor-value-rows), replacing stock emoji.
+  | 'star' | 'bars' | 'bulb' | 'unlock' | 'stopwatch';
 
 const PATHS: Record<BuilderIconName, ReactNode> = {
+  // ── Step 3 settings rows ──
+  // Points: a five-point star.
+  star: <path d="M12 3.2l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.6l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" />,
+  // Difficulty: three rising bars.
+  bars: <path d="M6 19v-4M12 19V10M18 19V5" />,
+  // Hint: a light bulb.
+  bulb: (
+    <>
+      <path d="M9 17.5h6M10 20.5h4" />
+      <path d="M12 3.5a5.5 5.5 0 0 0-3.2 10c.5.4.7.9.7 1.5v.3h5v-.3c0-.6.2-1.1.7-1.5A5.5 5.5 0 0 0 12 3.5z" />
+    </>
+  ),
+  // When it opens: an open padlock.
+  unlock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="10" rx="2" />
+      <path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 6.8-1.2" />
+      <path d="M12 14.5v2.5" />
+    </>
+  ),
+  // Countdown: a stopwatch.
+  stopwatch: (
+    <>
+      <circle cx="12" cy="13.5" r="7.5" />
+      <path d="M10 2.75h4M12 2.75v3.25M18.4 6.6l1.4-1.4M12 13.5V9.5" />
+    </>
+  ),
   // ── Trigger modes ──
   // Within radius: a pin standing inside a ground ring.
   radius: (

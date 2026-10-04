@@ -44,10 +44,10 @@ for (const [last, now] of [[NaN, 1000], [1000, NaN], [Infinity, 1000], [1000, In
 ok(withinQuietWindow(undefined as unknown as number, 1000) === false, 'undefined last cue → play');
 
 // ── Every cue maps to a synthesizable envelope + a haptic pattern ───────────
-const expectedCues: Cue[] = ['task', 'stage', 'alert', 'rankUp'];
+const expectedCues: Cue[] = ['task', 'stage', 'alert', 'rankUp', 'hurry', 'tick', 'timeUp'];
 ok(
   CUES.length === expectedCues.length && expectedCues.every((c) => CUES.includes(c)),
-  'CUES lists exactly task/stage/alert/rankUp',
+  'CUES lists exactly task/stage/alert/rankUp + the countdown cues hurry/tick/timeUp',
 );
 for (const cue of expectedCues) {
   const env = ENVELOPES[cue];

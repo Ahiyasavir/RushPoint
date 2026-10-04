@@ -4,8 +4,8 @@ import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls'
 import { useT } from '../i18nContext';
 import { Spinner } from '../components/Spinner';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
+import { Icon, medalFor } from '../components/Icon';
 
-const MEDALS = ['🥇', '🥈', '🥉'];
 const REFRESH_MS = 12_000; // ≤ 15s per spec
 
 /**
@@ -71,7 +71,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
   if (!published || rankings.length === 0) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center text-center gap-4 bg-app-bg p-8">
-        <div className="text-7xl">📺</div>
+        <div className="flex justify-center text-zinc-400"><Icon name="tv" className="w-20 h-20" /></div>
         <h1 className="font-brand text-4xl font-extrabold text-zinc-200">{data?.title ?? 'RushPoint'}</h1>
         <p className={`text-2xl ${loadError ? 'text-ink-fire font-semibold' : 'text-zinc-500'}`}>
           {loadError ? t.tv.loadError : t.tv.notAvailable}
@@ -99,7 +99,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
             <div key={r.teamId}
               className={`flex items-center gap-5 rounded-2xl border px-6 py-4 ${medalBg} ${isLeaderFlash ? 'animate-score-pop motion-reduce:animate-none ring-2 ring-rp-fire' : ''}`}>
               <span className="w-14 text-center text-3xl font-brand font-extrabold text-zinc-300">
-                {MEDALS[i] ?? r.rank}
+                {medalFor(i, 'w-12 h-12 mx-auto') ?? r.rank}
               </span>
               <div className="flex-1 min-w-0">
                 <div dir="auto" className="text-3xl font-bold text-zinc-100 truncate">{r.teamName}</div>
@@ -128,7 +128,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
                         }
                         style={{ color: accent }}
                       >
-                        {final ? '' : '⏱ '}{sec != null ? formatDuration(sec) : '—'}
+                        {final ? null : <Icon name="stopwatch" className="w-6 h-6 inline-block align-text-bottom me-1" />}{sec != null ? formatDuration(sec) : '—'}
                       </div>
                     );
                   }
@@ -141,7 +141,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
                           aria-label={final ? t.board.finalTime : t.board.elapsed}
                           className={final ? 'text-sm text-zinc-500 font-mono' : 'text-sm text-zinc-500 italic font-mono'}
                         >
-                          {final ? '' : '⏱ '}{formatDuration(sec)}
+                          {final ? null : <Icon name="stopwatch" className="w-6 h-6 inline-block align-text-bottom me-1" />}{formatDuration(sec)}
                         </div>
                       )}
                     </>

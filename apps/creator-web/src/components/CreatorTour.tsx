@@ -36,6 +36,7 @@ import {
   type TourAction, type TourRect, type TourState,
   nextReachableTourIndex,
 } from '../lib/creatorOnboarding';
+import { Icon } from './Icon';
 
 /** Event the header help button and the Settings card fire to replay the tour. */
 export const TOUR_RESTART_EVENT = 'rp-tour-restart';
@@ -373,7 +374,7 @@ export default function CreatorTour() {
 
         {awaitPrompt && (
           <p className="mt-3 flex items-start gap-1.5 text-xs font-semibold text-ink-fire text-start">
-            <span aria-hidden>👆</span>
+            <Icon name="pointer" className="w-5 h-5 shrink-0" />
             <span>{awaitPrompt}</span>
           </p>
         )}

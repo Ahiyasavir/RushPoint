@@ -28,9 +28,12 @@ import type { StreamUpload } from '../lib/streamUpload';
 import { createPendingUploads, type PendingUploads } from '../lib/pendingUpload';
 import { applyOrientationIntent } from '../lib/orientation';
 import type { BgKind } from '../lib/backgroundMedia';
-import { countdownLeftMs, countdownUrgent, formatCountdown } from '../lib/timeLimitCountdown';
+import {
+  countdownLeftMs, formatCountdown, countdownPhase, countdownFraction, countdownMilestone,
+  type CountdownPhase,
+} from '../lib/timeLimitCountdown';
 import { backgroundMedia } from '../services/backgroundMedia';
-import { compressImageWithReport } from '../lib/imageResize';
+import { compressImageWithReport, warnsSlowUpload } from '../lib/imageResize';
 import {
   canSwitchCamera, initialFacing, planCameraSwitch, readCameraChoice, shouldMirror, writeCameraChoice,
   type Facing,
@@ -67,6 +70,7 @@ import { estimateUploadEta, etaLabel, readUplinkSample, uplinkPrior, type EtaLab
 import { currentPrior, localStorageOrNull, useUploadEta } from '../hooks/useUploadEta';
 import { LoadingView } from './LoadingView';
 import { feedback } from '../lib/sound';
+import { StopwatchIcon, FlameIcon, BoltIcon, HourglassIcon } from './FuseIcons';
 import { resolveCardExit } from '../lib/cardExit';
 import {
   gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance, BLOCKED_HELP_KEY,
@@ -78,6 +82,7 @@ import {
   videoTypeFromName, pickedClipVerdict,
   recordedClipVerdict,
 } from '../lib/videoCapture';
+import { Icon, type IconName } from './Icon';
 
 // A media mission with nothing in flight on this device (change: submission-status-truth).
 const IDLE_MEDIA_STAGE = { taskId: null, stage: 'idle', failed: null } as const;
@@ -692,7 +697,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     if (stationBusy && !routingError) {
       return (
         <Card className="p-6 text-center space-y-2">
-          <div className="text-3xl">⏳</div>
+          <div className="flex justify-center text-ink-amber"><Icon name="hourglass" className="w-8 h-8" /></div>
           <p className="text-sm font-semibold text-zinc-200">{t.task.stationBusyTitle}</p>
           <p className="text-xs text-zinc-500">{t.task.stationBusyBody}</p>
         </Card>
@@ -721,15 +726,15 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       const guidance = blockedGuidance({ reason: blockInfo?.reason, metersOutside: blockInfo?.metersOutside });
       const blockedHelpSent = helpAlreadySent(helpSentFor, BLOCKED_HELP_KEY);
       const copy = guidance.kind === 'outside'
-        ? { icon: '⚠️', title: t.task.outOfBoundsTitle, body: t.task.outOfBoundsBody }
+        ? { icon: 'alert' as IconName, title: t.task.outOfBoundsTitle, body: t.task.outOfBoundsBody }
         : guidance.kind === 'unconfirmed'
-          ? { icon: '📡', title: t.task.locationUnsureTitle, body: t.task.locationUnsureBody }
+          ? { icon: 'antenna' as IconName, title: t.task.locationUnsureTitle, body: t.task.locationUnsureBody }
           : guidance.kind === 'released'
-            ? { icon: '✅', title: t.task.blockedClearTitle, body: t.task.blockedClearBody }
-            : { icon: '⏳', title: t.task.blockedCheckingTitle, body: t.task.blockedCheckingBody };
+            ? { icon: 'checkCircle' as IconName, title: t.task.blockedClearTitle, body: t.task.blockedClearBody }
+            : { icon: 'hourglass' as IconName, title: t.task.blockedCheckingTitle, body: t.task.blockedCheckingBody };
       return (
         <Card className="p-6 text-center space-y-2" data-testid="blocked-card" data-blocked-kind={guidance.kind}>
-          <div className="text-3xl">{copy.icon}</div>
+          <div className="flex justify-center text-zinc-300"><Icon name={copy.icon} className="w-8 h-8" /></div>
           <p role="status" aria-live="polite"
             className={`text-sm font-semibold ${guidance.kind === 'released' ? 'text-ink-fire' : guidance.kind === 'outside' ? 'text-ink-alert' : 'text-ink-amber'}`}>
             {copy.title}
@@ -770,7 +775,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     if (allRemainingLocked) {
       return (
         <Card className="p-6 text-center space-y-2">
-          <div className="text-3xl">🔒</div>
+          <div className="flex justify-center text-zinc-400"><Icon name="lock" className="w-8 h-8" /></div>
           <p className="text-sm font-semibold text-zinc-200">{t.task.lockedOnlyTitle}</p>
           <p className="text-xs text-zinc-500">{t.task.lockedOnlyBody}</p>
         </Card>
@@ -1312,7 +1317,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // its own line rather than squeezing the text again.
   const rehearseBar = session.isTestDrive ? (
     <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border border-rp-amber/40 bg-app-raised px-3 py-2">
-      <span aria-hidden="true" className="shrink-0">🧪</span>
+      <Icon name="flask" className="w-5 h-5 shrink-0 text-ink-amber" />
       {/* min-w keeps the text from collapsing into a one-word column; below it
           the button wraps instead. */}
       <span className="text-[13px] text-ink-warm flex-1 min-w-[7rem] leading-snug">{t.task.rehearseHelp}</span>
@@ -1350,7 +1355,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
             mission itself opens when the team gets there. A hidden mission keeps its clue card. */}
         {!task.locationHidden ? (
           <>
-            <h2 className="text-2xl font-bold mb-2">🚩 <span dir="auto">{task.title}</span></h2>
+            <h2 className="text-2xl font-bold mb-2 flex items-center gap-2"><Icon name="flag" className="w-6 h-6 shrink-0 text-ink-fire" /><span dir="auto">{task.title}</span></h2>
             <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1" data-testid="sealed-located">
               <p className="text-sm font-semibold text-zinc-200 mb-1">{t.task.walkToPoint}</p>
               <DistanceBadge task={task} />
@@ -1359,7 +1364,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           </>
         ) : (
           <>
-            <h2 className="text-2xl font-bold mb-2">🧭 {t.task.sealedTitle}</h2>
+            <h2 className="text-2xl font-bold mb-2 flex items-center gap-2"><Icon name="compass" className="w-6 h-6 shrink-0 text-ink-fire" />{t.task.sealedTitle}</h2>
             <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
               <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-warm mb-1">
                 {t.task.hiddenBadge}
@@ -1393,7 +1398,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
 
             Nothing is lost by dropping it: `pointer-events-none` still refuses the
             tap, `aria-disabled` still announces it, and the run already renders an
-            explicit "👀 {name} is playing" banner above the mission (PlayScreen),
+            explicit "{name} is playing" banner above the mission (PlayScreen),
             which says in words what the dimming only hinted at. */}
         {/* EVERY entry component below is keyed by `task.id`.
           (change: entry-state-must-not-outlive-its-mission)
@@ -1429,14 +1434,14 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
             <button onClick={revealHint} disabled={frozen}
               aria-label={hintButtonLabel(t, task)}
               className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-ink-warm hover:underline disabled:opacity-40">
-              💡 {hintButtonLabel(t, task)}
+              <Icon name="bulb" className="w-4 h-4 inline-block align-text-bottom" /> {hintButtonLabel(t, task)}
             </button>
           </div>
         )}
-        {hint && <p dir="auto" className="mt-3 text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>}
+        {hint && <p dir="auto" className="mt-3 text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2 flex items-start gap-1.5"><Icon name="bulb" className="w-4 h-4 shrink-0 mt-0.5 text-ink-amber" /><span>{hint}</span></p>}
         {msg && (
           <p role="status" aria-live="polite" dir="auto" className={taskMessageClass(msg.tone)}>
-            {msg.tone === 'error' ? `⚠ ${msg.text}` : msg.text}
+            {msg.text}
           </p>
         )}
       </Card>
@@ -1467,13 +1472,15 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           among SIBLINGS, so a per-component prefix keeps the remount and removes
           the collision. */}
       <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
-      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} onTimeUp={onChanged} />
+      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs}
+        totalMs={typeof task.timeLimitMinutes === 'number' && task.timeLimitMinutes > 0 ? task.timeLimitMinutes * 60_000 : null}
+        onTimeUp={onChanged} />
 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
         <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
           <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-warm mb-1">
-            🧭 {t.task.hiddenBadge}
+            <Icon name="compass" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {t.task.hiddenBadge}
           </div>
           {(task.locationClueHe || task.locationClue) && (
             <p dir="auto" className="text-sm text-zinc-200">{task.locationClueHe || task.locationClue}</p>
@@ -1688,13 +1695,13 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           which the server escalates precisely so a stuck team takes it. Only the
           PAID offer moves into the overflow below. */}
       {hint && (
-        <p dir="auto" className="mt-3 text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
+        <p dir="auto" className="mt-3 text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2 flex items-start gap-1.5"><Icon name="bulb" className="w-4 h-4 shrink-0 mt-0.5 text-ink-amber" /><span>{hint}</span></p>
       )}
       {task.hasHint && !hint && task.hintFreeNow && (
         <div className="mt-3">
           <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintFreeNow}
             className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-fire bg-accent/10 border border-accent/30 rounded-full px-4 py-2 hover:bg-accent/20 disabled:opacity-40">
-            🎁 {t.task.hintFreeNow}
+            <Icon name="gift" className="w-4 h-4 inline-block align-text-bottom" /> {t.task.hintFreeNow}
           </button>
         </div>
       )}
@@ -1726,7 +1733,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
 
       {msg && (
         <p role="status" aria-live="polite" dir="auto" className={taskMessageClass(msg.tone)}>
-          {msg.tone === 'error' ? `⚠ ${msg.text}` : msg.text}
+          {msg.text}
         </p>
       )}
     </Card>
@@ -1768,14 +1775,14 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
   const remaining = closesAt - now;
   if (remaining >= 10 * 60_000) return null; // countdown only inside the last 10 min
   if (remaining <= 0) {
-    return <p className="mt-2 text-sm text-ink-alert font-medium">⌛ {t.task.taskExpiredNotice}</p>;
+    return <p className="mt-2 text-sm text-ink-alert font-medium flex items-center gap-1.5"><Icon name="hourglass" className="w-4 h-4 shrink-0" />{t.task.taskExpiredNotice}</p>;
   }
   const totalS = Math.ceil(remaining / 1000);
   const mm = String(Math.floor(totalS / 60)).padStart(2, '0');
   const ss = String(totalS % 60).padStart(2, '0');
   return (
     <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-ink-alert tabular-nums">
-      ⏳ {t.task.expiresInLabel({ time: `${mm}:${ss}` })}
+      <Icon name="hourglass" className="w-3.5 h-3.5" /> {t.task.expiresInLabel({ time: `${mm}:${ss}` })}
     </div>
   );
 }
@@ -1783,7 +1790,47 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
 // mission-time-limit: this team's own countdown. The server sends the time LEFT; it is counted down
 // from when it arrived (lib/timeLimitCountdown.ts), and at zero the state is refreshed so the
 // server's sweep can move the team on.
-function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTimeUp: () => void }) {
+//
+// Drawn as a BURNING FUSE (change: mission-countdown-fuse; Ahiya: "live and cool, a frenzy of
+// action"): big digits, a phase line, and a bar that drains with a spark at its tip. Calm, then
+// amber at half time, then red with a heartbeat in the final stretch, then the digits pop every
+// second at the end. The moments (half time, final stretch, last seconds, time up) are marked ONCE
+// each with a cue + haptic (lib/sound, which obeys the mute) and a screen reader line; a refresh
+// that adds time back never re-marks one (`countdownMilestone`). Constant height, never an overlay:
+// it may not push the answer field or cover SOS. Reduced motion keeps only the colours (index.css).
+type FusePhase = Exclude<CountdownPhase, 'up'>;
+const FUSE_BOX: Record<FusePhase, string> = {
+  calm: 'mt-2 h-16 rounded-xl border border-glass-border bg-app-card px-3 flex flex-col justify-center gap-1.5',
+  hurry: 'mt-2 h-16 rounded-xl border border-rp-amber/60 bg-rp-amber/10 px-3 flex flex-col justify-center gap-1.5',
+  critical: 'mt-2 h-16 rounded-xl border border-rp-alert/60 bg-rp-alert/10 px-3 flex flex-col justify-center gap-1.5',
+  final: 'mt-2 h-16 rounded-xl border-2 border-rp-alert bg-rp-alert/15 shadow-[0_0_18px_rgba(239,68,68,0.45)] px-3 flex flex-col justify-center gap-1.5',
+};
+const FUSE_DIGITS: Record<FusePhase, string> = {
+  calm: 'text-2xl font-black tabular-nums leading-none text-zinc-100',
+  hurry: 'text-2xl font-black tabular-nums leading-none text-ink-amber',
+  critical: 'text-2xl font-black tabular-nums leading-none text-ink-alert rp-fuse-heartbeat',
+  final: 'text-3xl font-black tabular-nums leading-none text-ink-alert rp-fuse-pop',
+};
+const FUSE_LABEL: Record<FusePhase, string> = {
+  calm: 'text-sm font-semibold text-zinc-400',
+  hurry: 'text-sm font-bold text-ink-amber',
+  critical: 'text-sm font-bold text-ink-alert',
+  final: 'text-base font-black text-ink-alert',
+};
+const FUSE_FILL: Record<FusePhase, string> = {
+  calm: 'rp-fuse-fill absolute inset-y-0 rounded-full bg-rp-go',
+  hurry: 'rp-fuse-fill absolute inset-y-0 rounded-full bg-rp-amber',
+  critical: 'rp-fuse-fill absolute inset-y-0 rounded-full bg-rp-alert',
+  final: 'rp-fuse-fill absolute inset-y-0 rounded-full bg-rp-alert',
+};
+// Drawn icons, never emoji (Ahiya, 2026-10-02): components/FuseIcons.tsx.
+const FUSE_ICON: Record<FusePhase, (p: { className?: string }) => JSX.Element> = {
+  calm: StopwatchIcon, hurry: FlameIcon, critical: BoltIcon, final: FlameIcon,
+};
+
+function TimeLimitCountdown({ leftMs, totalMs, onTimeUp }: {
+  leftMs?: number | null; totalMs?: number | null; onTimeUp: () => void;
+}) {
   const { t } = useT();
   // Re-anchored every time a fresh value arrives (each poll), which keeps the display honest.
   // Derived state, adjusted during render (React's documented pattern for "reset on prop change").
@@ -1793,11 +1840,31 @@ function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTi
   const fired = useRef(false);
   const left = countdownLeftMs(anchor.leftMs, anchor.at, now);
   const running = left !== null && left > 0;
+  const phase: CountdownPhase = left === null ? 'calm' : countdownPhase(left, totalMs);
+  // The moments, once each. `prevLeft` is what the previous tick showed; a re-anchor upward is not a
+  // crossing. `lastSecond` drives the per-second tick inside the final phase.
+  const prevLeft = useRef<number | null>(null);
+  const lastSecond = useRef<number | null>(null);
+  const [announce, setAnnounce] = useState('');
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [running]);
+  useEffect(() => {
+    if (left === null) return;
+    const moment = countdownMilestone(prevLeft.current, left, totalMs);
+    prevLeft.current = left;
+    if (moment === 'hurry') { feedback('hurry'); setAnnounce(t.task.fuseAnnounceHurry); }
+    else if (moment === 'critical') { feedback('hurry'); setAnnounce(t.task.fuseAnnounceCritical({ time: formatCountdown(left) })); }
+    else if (moment === 'final') setAnnounce(t.task.fuseAnnounceFinal);
+    else if (moment === 'up') feedback('timeUp');
+    if (phase === 'final') {
+      const second = Math.ceil(left / 1000);
+      if (lastSecond.current !== second) { lastSecond.current = second; feedback('tick'); }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left]);
   useEffect(() => {
     if (left === 0 && !fired.current) {
       fired.current = true;
@@ -1807,14 +1874,33 @@ function TimeLimitCountdown({ leftMs, onTimeUp }: { leftMs?: number | null; onTi
     }
   }, [left, onTimeUp]);
   if (left === null) return null;
-  if (left <= 0) {
-    return <p className="mt-2 text-sm text-ink-alert font-medium" data-testid="time-limit-up">⌛ {t.task.timeLimitUpNotice}</p>;
+  if (phase === 'up') {
+    return (
+      <p className="mt-2 flex items-center gap-1.5 text-sm text-ink-alert font-bold rp-fuse-shake" data-testid="time-limit-up">
+        <HourglassIcon className="w-5 h-5 shrink-0" /> {t.task.timeLimitUpNotice}
+      </p>
+    );
   }
+  const time = formatCountdown(left);
+  const fraction = countdownFraction(left, totalMs);
+  const label = phase === 'calm' ? t.task.fuseCalm : phase === 'hurry' ? t.task.fuseHurry : phase === 'critical' ? t.task.fuseCritical : t.task.fuseFinal;
+  const Icon = FUSE_ICON[phase];
   return (
-    <div data-testid="time-limit-countdown" className={countdownUrgent(left)
-      ? 'mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-ink-alert tabular-nums'
-      : 'mt-2 inline-flex items-center gap-1.5 rounded-full bg-app-card border border-glass-border px-3 py-1 text-xs font-bold text-zinc-200 tabular-nums'}>
-      ⏱️ {t.task.timeLimitLeft({ time: formatCountdown(left) })}
+    <div role="timer" aria-label={t.task.timeLimitLeft({ time })} data-testid="time-limit-countdown" data-phase={phase} className={FUSE_BOX[phase]}>
+      <div className="flex items-center justify-between gap-2">
+        <span className={`flex items-center gap-1.5 ${FUSE_LABEL[phase]}`}>
+          <Icon className={phase === 'final' ? 'w-7 h-7 shrink-0' : 'w-5 h-5 shrink-0'} /> {label}
+        </span>
+        {/* Re-keyed every second in the final phase, so the pop replays on each number. */}
+        <span key={phase === 'final' ? time : 'steady'} dir="ltr" aria-hidden className={FUSE_DIGITS[phase]}>{time}</span>
+      </div>
+      {fraction !== null && (
+        <div aria-hidden className="relative h-2.5 rounded-full bg-zinc-800">
+          <div className={FUSE_FILL[phase]} style={{ insetInlineStart: 0, width: `${fraction * 100}%` }} />
+          {fraction > 0 && <span className="rp-fuse-spark" style={{ insetInlineStart: `${fraction * 100}%` }} />}
+        </div>
+      )}
+      <span className="sr-only" aria-live="polite">{announce}</span>
     </div>
   );
 }
@@ -1841,7 +1927,7 @@ function DistanceBadge({ task }: { task: SafeTask }) {
   if (dist == null) return null;
   return (
     <div className="text-base font-semibold text-zinc-100 tabular-nums">
-      📍 {dist < 1 ? t.task.metersAway({ m: Math.round(dist * 1000) }) : t.task.kmAway({ km: dist.toFixed(1) })}
+      <Icon name="pin" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {dist < 1 ? t.task.metersAway({ m: Math.round(dist * 1000) }) : t.task.kmAway({ km: dist.toFixed(1) })}
     </div>
   );
 }
@@ -1868,7 +1954,7 @@ function NavigateHereLink({ task }: { task: SafeTask }) {
         data-testid="task-navigate-maps"
         className="inline-flex items-center gap-1 min-h-[44px] px-2 py-2 rounded-lg text-xs font-semibold text-ink-fire hover:underline"
       >
-        🧭 {t.task.navigateHere}
+        <Icon name="compass" className="w-4 h-4 inline-block align-text-bottom" /> {t.task.navigateHere}
       </a>
       <a
         href={wazeUrl(target)}
@@ -1891,11 +1977,11 @@ function MissionNoticeLine({ notice }: { notice: MissionNotice | null }) {
   const { t } = useT();
   if (!notice) return null;
   const copy: Record<MissionNotice['kind'], string> = {
-    cooldown: `⏳ ${t.task.answerCooldown({ sec: notice.seconds ?? 0 })}`,
-    freeTries: `🙂 ${t.task.answerCostFreeTries({ n: notice.tries ?? 0 })}`,
-    cost: `⚠ ${t.task.answerCostNotice({ points: notice.points ?? 0, sec: notice.seconds ?? 0 })}`,
-    costTime: `⚠ ${t.task.answerCostNoticeTime({ sec: notice.seconds ?? 0 })}`,
-    paused: `⏸ ${t.task.clockPaused}`,
+    cooldown: `${t.task.answerCooldown({ sec: notice.seconds ?? 0 })}`,
+    freeTries: `${t.task.answerCostFreeTries({ n: notice.tries ?? 0 })}`,
+    cost: `${t.task.answerCostNotice({ points: notice.points ?? 0, sec: notice.seconds ?? 0 })}`,
+    costTime: `${t.task.answerCostNoticeTime({ sec: notice.seconds ?? 0 })}`,
+    paused: t.task.clockPaused,
   };
   // A warning must not read like a courtesy. Tone drives the tint, so the one
   // line the player does see is unambiguous at a glance, outdoors.
@@ -1950,7 +2036,7 @@ function CodeEntry({ busy, label, prefill, onSubmit }: {
         className="text-center font-mono tracking-widest" data-testid="task-code-input" />
       <Button disabled={busy || !code} loading={busy} onClick={() => onSubmit(code)} data-testid="task-code-submit">{t.task.verify}</Button>
       {canScan && (
-        <Button variant="ghost" disabled={busy} onClick={() => setScanning(true)}>📷 {t.task.scanQr}</Button>
+        <Button variant="ghost" disabled={busy} onClick={() => setScanning(true)}><span className="inline-flex items-center gap-1.5"><Icon name="camera" className="w-4 h-4 shrink-0" />{t.task.scanQr}</span></Button>
       )}
     </div>
   );
@@ -2037,7 +2123,7 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
               {worth !== null && (
                 <span className="ms-2 text-xs font-semibold opacity-80" data-testid="quiz-choice-points">{t.task.choicePoints({ n: worth })}</span>
               )}
-              {isAnswer && !isPicked && <span className="ms-2" aria-label={t.task.rehearseCorrect} title={t.task.rehearseCorrect}>✅</span>}
+              {isAnswer && !isPicked && <span className="ms-2" aria-label={t.task.rehearseCorrect} title={t.task.rehearseCorrect}><Icon name="checkCircle" className="w-4 h-4 inline-block align-text-bottom text-ink-fire" /></span>}
             </Button>
           );
         })}
@@ -2265,7 +2351,7 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
   if (gpsError) {
     return (
       <div className="text-center py-2 space-y-2" data-testid="geofence-status" data-gps-error="true" role="status" aria-live="polite">
-        <div className="text-3xl">📡</div>
+        <div className="flex justify-center text-zinc-300"><Icon name="antenna" className="w-8 h-8" /></div>
         <p className="text-sm text-ink-alert font-medium">{t.task.gpsUnavailable}</p>
         {/* Say that we are still trying — the watcher retries on a backoff, so a
             dead spot or a permission granted afterwards recovers on its own. */}
@@ -2284,7 +2370,7 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
   const stuckHelp = stuckTooLong && !(dist != null && dist <= radius);
   return (
     <div className="text-center py-2" data-testid="geofence-status" data-inside={dist != null && dist <= radius} role="status" aria-live="polite">
-      <div className="text-3xl mb-2">📡</div>
+      <div className="mb-2 flex justify-center text-zinc-300"><Icon name="antenna" className="w-8 h-8" /></div>
       {dist == null
         ? <p className="text-sm text-zinc-500">{t.task.findingLocation}</p>
         : dist <= radius
@@ -2447,7 +2533,7 @@ function ViewerCard({ senderName, onTakeOver }: { senderName?: string; onTakeOve
   return (
     <div className="mt-5 rounded-2xl border border-glass-border bg-app-raised p-4 text-center" data-testid="viewer-card">
       <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-accent/15 text-lg font-bold text-ink-fire" aria-hidden="true">
-        {name.trim().charAt(0).toUpperCase() || '📱'}
+        {name.trim().charAt(0).toUpperCase() || <Icon name="device" className="w-5 h-5" />}
       </div>
       <p dir="auto" className="text-sm font-semibold text-zinc-100">{t.devices.viewerSending({ name })}</p>
       <p className="mt-1 text-xs text-zinc-400">{t.devices.viewerHint}</p>
@@ -2474,7 +2560,7 @@ function SubmissionWaitingCard({ phase, mediaKind, canReplace, onReplace, onOpen
   if (phase.kind === 'approved') {
     return (
       <div role="status" className="rounded-xl border border-rp-go/40 bg-rp-go/10 px-3 py-3 text-sm font-semibold text-ink-go" data-testid="submission-approved">
-        ✅ {t.task.phase.approved}
+        <Icon name="checkCircle" className="w-4 h-4 inline-block align-text-bottom" /> {t.task.phase.approved}
       </div>
     );
   }
@@ -2486,7 +2572,7 @@ function SubmissionWaitingCard({ phase, mediaKind, canReplace, onReplace, onOpen
   return (
     <div className="space-y-3 rounded-xl border border-glass-border bg-app-raised px-3 py-3" data-testid="submission-waiting">
       <div role="status" aria-live="polite">
-        <p className="text-sm font-bold text-zinc-100">📨 {t.task.phase.waitingTitle}</p>
+        <p className="text-sm font-bold text-zinc-100 flex items-center gap-1.5"><Icon name="mail" className="w-4 h-4 shrink-0" />{t.task.phase.waitingTitle}</p>
         <p className="mt-1 text-[13px] text-zinc-400">{t.task.phase.waitingBody}</p>
         {sentAt && (
           <p className="mt-1 text-xs text-zinc-500">
@@ -2634,7 +2720,7 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
         setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) }));
         return;
       }
-      if (!report.compressed) setWarn(t.task.photoNotCompressed);
+      if (warnsSlowUpload(report)) setWarn(t.task.photoNotCompressed);
       const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
       setFile(compressed);
       // Hand it up BEFORE anything else can unmount this component. A NEW capture also
@@ -2655,15 +2741,39 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
   //
   // Reported: "on the second photo it does upload the picture but does not let me
   // send it, something very strange there." A greyed-out submit cannot say which of
-  // its three preconditions is missing, so the player is left guessing and so is
+  // its preconditions is missing, so the player is left guessing and so is
   // whoever reads the report - which is exactly the trap CLAUDE.md records for the
   // join screen: "a disabled primary button explains nothing, cannot fire, and
   // therefore cannot tell the user what it wants."
   //
   // It stays enabled and ANSWERS. The server re-validates everything anyway, so the
   // worst a press can do is produce a sentence naming what is missing.
-  const submitBlocker: '' | 'busy' | 'fileErr' | 'noFile' =
-    busy ? 'busy' : fileErr ? 'fileErr' : !file ? 'noFile' : '';
+  const submitBlocker: '' | 'busy' | 'fileErr' =
+    busy ? 'busy' : fileErr ? 'fileErr' : '';
+  // Take / retake. ONE place, rendered at the top while there is no photo (it IS
+  // the next action) and after send once there is one, so on a 375px phone the
+  // preview cannot push send below the fold under two retake buttons.
+  const captureControls = (
+    nativeOnly || !canUseInAppCamera() ? (
+      <>
+        <Button variant={file ? 'ghost' : 'primary'} disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
+          {file ? t.task.retakePhoto : t.task.takePhoto}
+        </Button>
+        {nativeOnly && <p className="text-xs text-zinc-400" data-testid="photo-native-note">{t.task.inAppCameraUnavailable}</p>}
+      </>
+    ) : (
+      <>
+        <Button variant={file ? 'ghost' : 'primary'} disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
+          {file ? t.task.retakePhoto : t.task.takePhoto}
+        </Button>
+        {/* The phone's own camera stays one tap away (camera-switch D1). */}
+        <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-native"
+          className={`${TAP_TARGET} w-full text-center text-[13px] font-medium text-zinc-400 underline underline-offset-2`}>
+          {t.task.usePhoneCamera}
+        </button>
+      </>
+    )
+  );
   return (
     <div className="space-y-3">
       {/* Visually hidden, NOT `display:none`: on Android a `display:none` capture
@@ -2672,25 +2782,7 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
       <input ref={inputRef} type="file" accept="image/*" capture={selfie ? 'user' : 'environment'} onChange={pickFile}
         data-testid="photo-file" tabIndex={-1} aria-hidden="true"
         className="absolute w-px h-px opacity-0 pointer-events-none -z-10" />
-      {nativeOnly || !canUseInAppCamera() ? (
-        <>
-          <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
-            {file ? t.task.retakePhoto : t.task.takePhoto}
-          </Button>
-          {nativeOnly && <p className="text-xs text-zinc-400" data-testid="photo-native-note">{t.task.inAppCameraUnavailable}</p>}
-        </>
-      ) : (
-        <>
-          <Button variant="ghost" disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
-            {file ? t.task.retakePhoto : t.task.takePhoto}
-          </Button>
-          {/* The phone's own camera stays one tap away (camera-switch D1). */}
-          <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-native"
-            className={`${TAP_TARGET} w-full text-center text-[13px] font-medium text-zinc-400 underline underline-offset-2`}>
-            {t.task.usePhoneCamera}
-          </button>
-        </>
-      )}
+      {!file && captureControls}
       {viewfinder && (
         <PhotoViewfinder selfie={selfie} runId={runId}
           onShot={(file) => { setViewfinder(false); void acceptPhoto(file); }}
@@ -2717,19 +2809,25 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
       )}
       {/* A slow upload must never look like a frozen app. */}
       <UploadProgress />
-      <Button
-        onClick={() => {
-          if (submitBlocker === '' && file) { onSubmit(file); return; }
-          // Name the obstacle instead of doing nothing. `fileErr` is already on
-          // screen above, so that case just re-points at it.
-          if (submitBlocker === 'noFile') setFileErr(t.task.photoTakeFirst);
-          else if (submitBlocker === 'busy') setWarn(t.task.photoStillWorking);
-          console.info('[rp:photo] submit blocked by', submitBlocker);
-        }}
-        data-testid="photo-submit"
-      >
-        {working ? t.task.working : t.task.submitPhoto}
-      </Button>
+      {/* ONE next action (found playing at 375px): with no photo yet the take
+          button above is the primary one and there is nothing to send, so no send
+          button exists. Once there is a photo, send is primary and still ANSWERS
+          rather than going dead if something is in the way. */}
+      {file && (
+        <Button
+          onClick={() => {
+            if (submitBlocker === '') { onSubmit(file); return; }
+            // Name the obstacle instead of doing nothing. `fileErr` is already on
+            // screen above, so that case just re-points at it.
+            if (submitBlocker === 'busy') setWarn(t.task.photoStillWorking);
+            console.info('[rp:photo] submit blocked by', submitBlocker);
+          }}
+          data-testid="photo-submit"
+        >
+          {working ? t.task.working : t.task.submitPhoto}
+        </Button>
+      )}
+      {file && captureControls}
     </div>
   );
 }
@@ -3599,7 +3697,7 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
               className="absolute start-6 bottom-[34px] flex h-12 w-12 items-center justify-center rounded-full
                 border-2 border-white/80 bg-black/45 backdrop-blur-sm text-xl text-white transition-transform active:scale-95 disabled:opacity-50"
             >
-              🔄
+              <Icon name="refresh" className="w-6 h-6" />
             </button>
           )}
           <button

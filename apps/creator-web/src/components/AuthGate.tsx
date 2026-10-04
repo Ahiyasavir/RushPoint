@@ -27,6 +27,7 @@ import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOr
 import { useT } from './LanguageContext';
 import { TAP_TEXT } from '../lib/interaction';
 import { resolvePublicCreatorRoute } from '../lib/publicCreatorPath';
+import { Icon, type IconName } from './Icon';
 
 const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
 // A game shared by link (change: game-share-link). Served WITHOUT an account for
@@ -41,6 +42,9 @@ const SharedGamePage = lazyWithRetry('sharedGame', () => import('../pages/Shared
 // — free, anonymous, staffless, playable from anywhere on earth, no organizer and
 // no access code. Seeded (gallery-published, allowInstantPlay:true) by
 // scripts/lib/spy-academy-game-def.mjs. Change: flagship-instant-demo.
+// Drawn icons for the landing page's lists, in the dictionary's list order (change: no-stock-emoji).
+const USE_CASE_ICON: IconName[] = ['party', 'tent', 'handshake', 'sparkle', 'cake', 'building'];
+const FEATURE_ICON: IconName[] = ['target', 'map', 'antenna', 'trophy'];
 const DEMO_GAME_ID = 'demo-instant-spy';
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
@@ -87,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!ref || ref === user.uid) { if (ref) { try { localStorage.removeItem(REF_KEY); } catch { /* */ } } return; }
     try { localStorage.removeItem(REF_KEY); } catch { /* */ }
     claimReferral({ referrerUid: ref })
-      .then((r) => { if (r.ok && !r.alreadyClaimed) void dialog.alert(`🎁 ${t.common.referralBonusApplied}`); })
+      .then((r) => { if (r.ok && !r.alreadyClaimed) void dialog.alert(t.common.referralBonusApplied); })
       .catch(() => { /* invalid or expired invite, silently ignore */ });
   }, [user, t]);
 
@@ -268,7 +272,7 @@ function LoginScreen() {
           <div
             className="w-12 h-12 rounded-2xl mx-auto mb-3.5 flex items-center justify-center text-2xl"
             style={{ background: 'linear-gradient(135deg,#FF5722,#FFB300)', boxShadow: '0 4px 16px rgba(255,87,34,0.35)' }}
-          >🏁</div>
+          ><Icon name="finish" className="w-6 h-6 text-white" /></div>
           <h2 className="font-brand text-xl font-extrabold text-[--ink-1] tracking-tight">
             {mode === 'in' ? t.auth.welcomeBack : t.auth.createAccount}
           </h2>
@@ -499,10 +503,10 @@ function Landing({ authCard }: { authCard: ReactNode }) {
             <div className="mt-8">
               <p className="text-[13px] uppercase tracking-widest text-[--ink-3] font-semibold mb-2.5">{l.useCasesTitle}</p>
               <div className="flex flex-wrap gap-2">
-                {l.useCases.map((u) => (
+                {l.useCases.map((u, i) => (
                   <span key={u.label}
                     className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] bg-[--surface-0]/60 px-3 py-1.5 text-xs font-medium text-[--ink-2]">
-                    <span>{u.emoji}</span> {u.label}
+                    <Icon name={USE_CASE_ICON[i] ?? 'sparkle'} className="w-4 h-4 text-ink-fire" /> {u.label}
                   </span>
                 ))}
               </div>
@@ -522,9 +526,9 @@ function Landing({ authCard }: { authCard: ReactNode }) {
 
         {/* Features */}
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-16">
-          {l.features.map((f) => (
+          {l.features.map((f, i) => (
             <Card key={f.title} className="p-5 hover:-translate-y-1 transition-transform duration-200">
-              <div className="text-2xl mb-3">{f.icon}</div>
+              <div className="mb-3 text-ink-fire"><Icon name={FEATURE_ICON[i] ?? 'sparkle'} className="w-7 h-7" /></div>
               <div className="font-brand font-bold text-[--ink-1]">{f.title}</div>
               <p className="text-sm text-[--ink-3] mt-1.5 leading-relaxed">{f.body}</p>
             </Card>
@@ -611,12 +615,12 @@ function PhoneMockup() {
             <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-[#3D4259]">240מ להמשך</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="m-4 mt-3 rounded-xl border border-orange-200 bg-white p-3">
-            <div className="text-[13px] font-semibold text-[#0A0C1A]">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[13px] font-semibold text-[#0A0C1A] flex items-center gap-1"><Icon name="camera" className="w-3.5 h-3.5" />תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
             <div className="text-[12px] text-[#3D4259] mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
             <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[12px] font-bold flex items-center justify-center">שלח תמונה</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="mx-4 mb-4 rounded-xl bg-white border border-orange-100 p-2.5">
-            <div className="text-[12px] font-semibold text-[#0A0C1A] mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[12px] font-semibold text-[#0A0C1A] mb-1.5 flex items-center gap-1"><Icon name="trophy" className="w-3.5 h-3.5" />לוח תוצאות</div> {/* i18n-ignore mockup sample */}
             {board.map((r) => (
               <div key={r.rank} className={`flex items-center justify-between text-[12px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-[#3D4259]'}`}>
                 <span className="truncate"><span className="font-mono me-1.5">{r.rank}</span>{r.name}</span>

@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // RushPoint — FLAGSHIP instant-play demo: "אקדמיית הסוכנים" (The Pocket Spy Academy)
 //
-// This is the FACE of the app. A first time visitor taps "נסה משחק לדוגמה" /
+// This is the FACE of the app. A first time visitor taps "נסו משחק לדוגמה" /
 // "Try a sample game" and lands straight inside this game: solo, free, anonymous,
 // from anywhere on earth, in seconds — no organizer, no staff, no GPS, no map, no
 // review queue, nothing that blocks on another human.

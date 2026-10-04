@@ -20,6 +20,7 @@ import AppFooter from './components/AppFooter';
 // nothing unless it is running, and is replayable from here and from Settings.
 import CreatorTour, { restartCreatorTour } from './components/CreatorTour';
 import { lazyWithRetry } from './lib/lazyWithRetry';
+import { Icon } from './components/Icon';
 
 // Every route goes through lazyWithRetry, never bare `lazy`: a rebuild or deploy
 // renames every hashed chunk, so an open tab's entry bundle asks for a filename
@@ -58,6 +59,8 @@ const AdminLiveApplicationsPage = lazyWithRetry('adminLiveApplications', () => i
 // a SIGNED-IN visitor; AuthGate serves the same page to a signed-out one, since
 // the whole point of a share link is that the recipient may not have an account.
 const SharedGamePage = lazyWithRetry('sharedGame', () => import('./pages/SharedGamePage'));
+// The printable host sheet (change: host-sheet).
+const HostSheetPage  = lazyWithRetry('hostSheet', () => import('./pages/HostSheetPage'));
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -93,6 +96,9 @@ export default function App() {
   // possible moment (change: run-console-density). It gets the Builder's width
   // while keeping the ordinary scrolling shell, header and footer.
   const isRunConsole = pathname.startsWith('/run/');
+  // The host sheet is a document to print (change: host-sheet): no floating
+  // run bar over it, and no footer inside the printed pages.
+  const isHostSheet = pathname.startsWith('/host-sheet/');
 
   // Coming back from a share link (change: game-share-link). A signed-out visitor
   // who pressed "make a copy" was sent to the login screen; landing them on an
@@ -154,7 +160,7 @@ export default function App() {
             aria-label={menuOpen ? t.common.closeMenu : t.common.openMenu}
             aria-expanded={menuOpen}
           >
-            {menuOpen ? '✕' : '☰'}
+            {menuOpen ? '✕' : <Icon name="menu" className="w-5 h-5" />}
           </button>
           <NavLink to="/" className="font-brand text-xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent tracking-tight">
             RushPoint
@@ -197,7 +203,7 @@ export default function App() {
             aria-label={dark ? t.common.lightMode : t.common.darkMode}
             title={dark ? t.common.lightMode : t.common.darkMode}
           >
-            {dark ? '☀️' : '🌙'}
+            <Icon name={dark ? 'sun' : 'moon'} className="w-5 h-5" />
           </button>
           <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-ink-alert transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
             {t.common.signOut}
@@ -254,6 +260,7 @@ export default function App() {
             <Route path="/admin/contact"       element={<AdminContactPage />} />
             <Route path="/admin/live-applications" element={<AdminLiveApplicationsPage />} />
             <Route path="/p/:token"            element={<SharedGamePage />} />
+            <Route path="/host-sheet/:gameId"  element={<HostSheetPage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />
           </Routes>
@@ -262,10 +269,10 @@ export default function App() {
 
       {/* Legal footer — skipped in the Builder for the same reason as the header:
           that route is a fixed-height workspace that must not grow a page scroll. */}
-      {!isBuilder && <AppFooter />}
+      {!isBuilder && !isHostSheet && <AppFooter />}
 
       {/* Sibling of the hosts (outside <main>) so it survives every route change. */}
-      <ActiveRunBar />
+      {!isHostSheet && <ActiveRunBar />}
       <CreatorTour />
       <DialogHost />
       <ToastHost />

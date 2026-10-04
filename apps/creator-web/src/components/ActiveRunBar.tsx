@@ -7,7 +7,7 @@ import { dialog } from './dialog';
 import { toast } from './toast';
 import { finalizeRun } from '../services/calls';
 import { useLiveRuns } from '../hooks/useLiveRuns';
-import { barMode, runConsolePath, selectFeaturedRun, shouldShowBar } from '../hooks/liveRunsPolling';
+import { barMode, recentLiveRuns, runConsolePath, selectFeaturedRun, shouldShowBar } from '../hooks/liveRunsPolling';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { TAP_INLINE } from '../lib/interaction';
 
@@ -30,7 +30,11 @@ export default function ActiveRunBar() {
   const [expanded, setExpanded] = useState(false);
   const isMobile = useIsMobile();
 
-  const featured = selectFeaturedRun(runs);
+  // Only runs being played NOW (change: active-run-bar-recent): a run nobody ended stays
+  // `live` forever, and kept a bar over every screen. Older open runs live in /live and the
+  // run history. Re-evaluated on every poll render, so `Date.now()` is current enough.
+  const recent = recentLiveRuns(runs, Date.now());
+  const featured = selectFeaturedRun(recent);
   const mode = barMode(pathname);
 
   // Leaving the Builder resets the collapsed pill back to its default state.
@@ -38,7 +42,7 @@ export default function ActiveRunBar() {
 
   if (!featured || !shouldShowBar({ authed: !!user, featured, pathname })) return null;
   const run = featured;
-  const extra = (runs?.length ?? 1) - 1;
+  const extra = recent.length - 1;
   const title = run.gameTitle || r.untitled;
 
   async function onEnd() {

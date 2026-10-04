@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { ReportAnswerRow, ReportPlayerRow, RunPlayerReport } from '@rushpoint/shared';
 import { Badge, Button, Card, EmptyState, Skeleton } from '../components/ui';
@@ -7,6 +7,7 @@ import { toast } from '../components/toast';
 import { useLanguage, useT } from '../components/LanguageContext';
 import { getRunPlayerReport } from '../services/calls';
 import { downloadReportWorkbook, type ReportExportLabels } from '../lib/runReportExport';
+import { Icon } from '../components/Icon';
 
 // The post-run analysis (change: post-run-player-report).
 //
@@ -108,7 +109,7 @@ export default function RunReportPage() {
       <div className="max-w-4xl mx-auto">
         <Card className="p-0">
           <EmptyState
-            icon="📊"
+            icon="chart"
             title={r.loadError}
             body=""
             action={<Button onClick={() => void load()}>{r.retry}</Button>}
@@ -151,7 +152,7 @@ export default function RunReportPage() {
       </div>
 
       {meta.rankingProvisional && (
-        <p className="text-xs text-ink-amber mb-3">⚠︎ {r.provisional}</p>
+        <p className="text-xs text-ink-amber mb-3 flex items-center gap-1"><Icon name="alert" className="w-3.5 h-3.5 shrink-0" />{r.provisional}</p>
       )}
 
       {/* Export. Given its own card rather than tucked into a toolbar: it is the
@@ -170,12 +171,12 @@ export default function RunReportPage() {
           keep this needs to know the answers disappear at 30 days BEFORE they
           decide not to download the file. */}
       <p className="text-xs text-[--ink-3] mb-6">
-        🔒 {r.retentionNotice({ days: meta.answerRetentionDays })}
+        <Icon name="lock" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {r.retentionNotice({ days: meta.answerRetentionDays })}
       </p>
 
       {players.length === 0 ? (
         <Card className="p-0">
-          <EmptyState icon="👥" title={r.standings} body={r.noMissions} />
+          <EmptyState icon="users" title={r.standings} body={r.noMissions} />
         </Card>
       ) : (
         <>
@@ -269,7 +270,7 @@ function PlayerCard({ player, rows, open, onToggle }: {
             <Badge color="red">{`${r.wrongAnswers}: ${player.wrongAnswers}`}</Badge>
           )}
           {player.hintsUsed > 0 && <Badge color="gold">{`${r.hints}: ${player.hintsUsed}`}</Badge>}
-          {player.mediaCount > 0 && <Badge color="cyan">{`📷 ${player.mediaCount}`}</Badge>}
+          {player.mediaCount > 0 && <Badge color="cyan"><span className="inline-flex items-center gap-1"><Icon name="camera" className="w-3.5 h-3.5" />{player.mediaCount}</span></Badge>}
         </span>
         <span className="text-xs text-[--ink-3] shrink-0">{open ? r.collapse : r.expand}</span>
       </button>
@@ -342,7 +343,7 @@ function MissionRow({ row }: { row: ReportAnswerRow }) {
           // The distinction this whole feature turns on: the answer is gone, which
           // is NOT the same as the player having answered nothing.
           <p className="text-xs text-[--ink-3] ps-3" title={r.notRecordedHelp}>
-            🕓 {r.notRecorded}
+            <Icon name="clock" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {r.notRecorded}
           </p>
         ) : (
           <p className="text-xs text-[--ink-3] ps-3">{r.notAnswered}</p>
@@ -361,7 +362,7 @@ function MissionRow({ row }: { row: ReportAnswerRow }) {
             rel="noreferrer"
             className="inline-block ps-3 mt-1 text-xs text-ink-plasma hover:underline"
           >
-            📷 {r.viewMedia}
+            <Icon name="camera" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {r.viewMedia}
           </a>
         )}
       </div>
@@ -379,10 +380,12 @@ function StatusChip({ status }: { status: string }) {
 
 // ── Formatting (locale-driven, so no date copy lives in the dictionaries) ────
 
-function medal(rank: number): string {
-  if (rank === 1) return '🥇';
-  if (rank === 2) return '🥈';
-  if (rank === 3) return '🥉';
+// A drawn medal in gold / silver / bronze for the podium; a plain number below it (change: no-stock-emoji).
+const MEDAL_TINT: Record<number, string> = { 1: 'text-[#C99400]', 2: 'text-[#8A8F98]', 3: 'text-[#B0662A]' };
+function medal(rank: number): ReactNode {
+  if (rank >= 1 && rank <= 3) {
+    return <span className={`inline-flex items-center gap-0.5 font-bold ${MEDAL_TINT[rank]}`}><Icon name="medal" className="w-4 h-4" />{rank}</span>;
+  }
   return rank > 0 ? String(rank) : '—';
 }
 

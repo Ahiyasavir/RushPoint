@@ -8,6 +8,8 @@ import {
   nextEncodeStep,
   PHOTO_MAX_EDGE,
   PHOTO_JPEG_QUALITY,
+  PHOTO_TARGET_BYTES,
+  warnsSlowUpload,
 } from '../apps/play-web/src/lib/imageResize';
 
 let failures = 0;
@@ -55,6 +57,16 @@ while (step && passes < 20) {
   prev = next; step = next; passes++;
 }
 check('encode plan terminates', passes > 0 && passes < 20, `passes=${passes}`);
+
+// "The upload may be slow" is a claim about the BYTES being sent (found playing,
+// 2026-10-03): a small photo that re-encoding could not shrink was told its upload
+// would be slow, which is false. Warn only when what is uploaded is actually big.
+const rep = (compressed: boolean, outputBytes: number) =>
+  ({ compressed, outputBytes, reason: compressed ? 'ok' : 'not-smaller' } as never);
+check('a small original that could not be shrunk does not warn', warnsSlowUpload(rep(false, 40_000)) === false);
+check('a big original sent uncompressed warns', warnsSlowUpload(rep(false, PHOTO_TARGET_BYTES * 3)) === true);
+check('a compressed photo does not warn', warnsSlowUpload(rep(true, 300_000)) === false);
+check('junk does not warn and does not throw', warnsSlowUpload(null as never) === false);
 
 console.log(`\n${failures === 0 ? 'ALL IMAGE-RESIZE TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

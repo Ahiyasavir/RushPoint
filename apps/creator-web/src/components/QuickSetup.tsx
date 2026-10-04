@@ -24,8 +24,9 @@ import type { TemplateWizardStep } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { Button } from './ui';
 import ConfettiBurst from './ConfettiBurst';
-import type { QuickSetupCopyKey } from '../lib/quickSetup';
+import { finishVerdict, isShortNote, type QuickSetupCopyKey } from '../lib/quickSetup';
 import { TAP_TARGET, TAP_TEXT } from '../lib/interaction';
+import { Icon } from './Icon';
 
 /** How long the ring stays on the target after we focus it. */
 const PULSE_MS = 2600;
@@ -171,7 +172,7 @@ export function QuickSetupWelcome({ remaining, onBegin, onSkip }: {
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={q.welcomeTitle}>
       <div className={`w-full max-w-md p-6 text-center ${GLASS_CARD}`}>
         <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-rp-fire to-rp-amber flex items-center justify-center text-2xl shadow-[0_4px_16px_rgba(255,87,34,0.35)]" aria-hidden>
-          ✨
+          <Icon name="sparkle" className="w-5 h-5" />
         </div>
         <p className="text-xs font-semibold text-ink-fire mt-4">{q.welcomeEyebrow}</p>
         <h2 className="text-xl font-bold text-[--ink-1] mt-1">{q.welcomeTitle}</h2>
@@ -337,8 +338,12 @@ export function QuickSetupBar({
             // the guided layout, which is `lg:flex-row` — so below `lg` this card is
             // still above the mission and the cap is load-bearing, and from `lg` up
             // it has its own column, competes with nothing, and must not scroll.
+            // Below `lg` the cap is a share of the SCREEN (`dvh`): this card's
+            // wrapper takes its height from its own content, so a percentage
+            // resolved against it came to 113px of a 242px card on a 375px phone
+            // and hid the step's buttons (scripts/test-quick-setup-flow.ts).
             beside
-              ? 'max-h-[45%] overflow-y-auto lg:max-h-none lg:overflow-visible'
+              ? 'max-h-[45dvh] overflow-y-auto lg:max-h-none lg:overflow-visible'
               : 'max-h-[45%] overflow-y-auto'}`
         : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] max-h-[60vh] overflow-y-auto px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
       // The logical insets only mean anything for the floating variant; in flow the
@@ -401,7 +406,14 @@ export function QuickSetupBar({
             able to have it without leaving the flow. The toggle names what is
             behind it rather than saying "more", so the choice can be made without
             opening it. */}
-        {step.instructionPrompt && step.instructionPrompt !== headline && (
+        {/* A one-line note is cheap: shown open. Only a paragraph hides behind
+            the disclosure below (change: composer-siting-by-station). */}
+        {step.instructionPrompt && step.instructionPrompt !== headline && isShortNote(step.instructionPrompt) && (
+          <p className="mt-1 text-xs text-[--ink-2] leading-snug ps-2 border-s-2 border-[--rp-border]" dir="auto">
+            {step.instructionPrompt}
+          </p>
+        )}
+        {step.instructionPrompt && step.instructionPrompt !== headline && !isShortNote(step.instructionPrompt) && (
           <div className="mt-1">
             <button
               type="button"
@@ -470,18 +482,27 @@ export function QuickSetupBar({
  * on a page load that happens to find an already-finished game (that would be a
  * congratulations for nothing the creator just did).
  */
-export function QuickSetupCelebration({ onClose }: { onClose: () => void }) {
+export function QuickSetupCelebration({ onClose, remaining = 0 }: { onClose: () => void; remaining?: number }) {
   const q = useT().quickSetup;
+  // Walking to the end is not the same as being ready (finishVerdict): with
+  // required steps still open, no confetti and no "ready to launch".
+  const verdict = finishVerdict(remaining);
+  const ready = verdict.kind === 'celebrate';
+  const title = ready ? q.celebrateTitle : q.finishedWithGapsTitle;
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={q.celebrateTitle}>
-      <ConfettiBurst />
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+      {ready && <ConfettiBurst />}
       <div className={`relative w-full max-w-md p-6 text-center ${GLASS_CARD}`}>
-        <div className="mx-auto w-16 h-16 rounded-full bg-rp-go/15 border-2 border-rp-go flex items-center justify-center text-3xl rp-qs-checkmark" aria-hidden>
-          ✓
-        </div>
-        <h2 className="text-xl font-bold text-[--ink-1] mt-4">{q.celebrateTitle}</h2>
-        <p className="text-sm text-[--ink-1] leading-relaxed mt-2">{q.celebrateBody}</p>
-        <Button onClick={onClose} className="w-full justify-center mt-5">{q.celebrateCta}</Button>
+        {ready && (
+          <div className="mx-auto w-16 h-16 rounded-full bg-rp-go/15 border-2 border-rp-go flex items-center justify-center text-3xl rp-qs-checkmark" aria-hidden>
+            ✓
+          </div>
+        )}
+        <h2 className="text-xl font-bold text-[--ink-1] mt-4">{title}</h2>
+        <p className="text-sm text-[--ink-1] leading-relaxed mt-2">
+          {verdict.kind === 'celebrate' ? q.celebrateBody : q.finishedWithGapsBody(verdict.count)}
+        </p>
+        <Button onClick={onClose} className="w-full justify-center mt-5">{ready ? q.celebrateCta : q.finishedWithGapsCta}</Button>
       </div>
     </div>
   );
@@ -515,7 +536,7 @@ export function QuickSetupPill({ remaining, total, onResume }: {
           ? 'border-rp-go/40 text-ink-go hover:bg-rp-go/10'
           : 'border-rp-fire/40 text-ink-fire hover:bg-rp-fire/10'}`}
     >
-      <span aria-hidden>{done ? '✓' : '⚡'}</span>
+      {done ? <span aria-hidden>✓</span> : <Icon name="bolt" className="w-4 h-4 shrink-0" />}
       {/* The pill carries the SHORT name; the full sentence stays in the tooltip
           and the accessible name, so the header strip cannot be pushed to a
           second row by a label that grows with the step count. */}

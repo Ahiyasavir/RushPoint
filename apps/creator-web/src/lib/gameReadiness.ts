@@ -117,6 +117,43 @@ export function computeGameReadiness(game: ReadableGame): ReadinessIssue[] {
   return issues;
 }
 
+/** One kind of readiness problem, with every place it occurs. */
+export interface ReadinessGroup {
+  code: ReadinessCode;
+  count: number;
+  /** The first offender — where activating the grouped row navigates. */
+  first: ReadinessIssue;
+  issues: ReadinessIssue[];
+}
+
+/**
+ * Collapse identical problems into one row each (change: quick-setup-reachable).
+ *
+ * A composed game at prep level 2+ showed SIX identical rows "this mission has no
+ * spot on the map". This is DISPLAY only: `computeGameReadiness`, `canLaunchGame`
+ * and the launch refusal still see every issue. Order is first appearance, so
+ * the list keeps the order the creator would meet the problems in. Total: junk
+ * input or a malformed row yields fewer groups, never a throw.
+ */
+export function groupReadinessIssues(issues: readonly ReadinessIssue[] | null | undefined): ReadinessGroup[] {
+  if (!Array.isArray(issues)) return [];
+  const groups: ReadinessGroup[] = [];
+  const byCode = new Map<string, ReadinessGroup>();
+  for (const issue of issues) {
+    if (typeof issue !== 'object' || issue === null || typeof (issue as ReadinessIssue).code !== 'string') continue;
+    const existing = byCode.get(issue.code);
+    if (existing) {
+      existing.count += 1;
+      existing.issues.push(issue);
+    } else {
+      const g: ReadinessGroup = { code: issue.code, count: 1, first: issue, issues: [issue] };
+      byCode.set(issue.code, g);
+      groups.push(g);
+    }
+  }
+  return groups;
+}
+
 /** Launch proceeds if and only if the readiness surface is empty. */
 export function canLaunchGame(game: ReadableGame): boolean {
   return computeGameReadiness(game).length === 0;

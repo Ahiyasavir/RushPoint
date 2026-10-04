@@ -72,6 +72,7 @@ export function ChoiceCardRow<T extends string>({ label, options, value, onChang
               type="button"
               role="radio"
               aria-checked={on}
+              aria-label={render(o)}
               onClick={() => onChange(o)}
               className={cardClass(on)}
             >
@@ -113,6 +114,7 @@ export function MultiChoiceCardRow<T extends string>({ label, options, values, o
               key={String(o)}
               type="button"
               aria-pressed={on}
+              aria-label={render(o)}
               onClick={() => onToggle(o)}
               className={cardClass(on)}
             >

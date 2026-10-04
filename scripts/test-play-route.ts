@@ -105,9 +105,10 @@ const sess = (code: string): SessionRef => ({ code });
   ok(r.route.kind === 'staff', 'a ?staff= PARAM still beats a code, even with a stored staff session');
 }
 {
-  // No code → a stored staff session still boots to staff (the non-join case is unchanged).
-  const r = resolvePlayRoute({ search: '?tv=T', session: null, hasStaffSession: true });
-  ok(r.route.kind === 'staff', 'without a code link, a stored staff session still outranks other params');
+  // No code and no public link → a stored staff session still boots to staff. (This
+  // used ?tv=T; a public link now wins over a stored session, see below.)
+  const r = resolvePlayRoute({ search: '?utm_source=whatsapp', session: null, hasStaffSession: true });
+  ok(r.route.kind === 'staff', 'without a code or public link, a stored staff session still outranks other params');
 }
 
 // ── stripStaffParams — the exit path that used to land on the promo ──────────
@@ -230,6 +231,22 @@ const sess = (code: string): SessionRef => ({ code });
 // Staff outranks everything even with a live session in play.
 ok(resolvePlayRoute({ search: '?staff=o.g.r&tv=T&board=B&game=G&code=C', session: sess('C') }).route.kind === 'staff',
   'staff outranks every other param and an active session');
+
+// A public link in the URL beats a merely STORED staff session, exactly like `?code=`
+// (found 2026-10-03: a marshal tapping the shared leaderboard link on their own phone
+// got the staff console). `?game=` is NOT one of them: a legacy staff link carries it.
+ok(resolvePlayRoute({ search: '?board=PLAY01', session: null, hasStaffSession: true }).route.kind === 'board',
+  'a stored staff session yields to ?board=');
+ok(resolvePlayRoute({ search: '?tv=PLAY01', session: null, hasStaffSession: true }).route.kind === 'tv',
+  'a stored staff session yields to ?tv=');
+ok(resolvePlayRoute({ search: '?recap=PLAY01', session: null, hasStaffSession: true }).route.kind === 'recap',
+  'a stored staff session yields to ?recap=');
+ok(resolvePlayRoute({ search: '?game=G', session: null, hasStaffSession: true }).route.kind === 'promo',
+  'a stored staff session yields to a bare ?game= (a game page link)');
+ok(resolvePlayRoute({ search: '?owner=o&game=g&run=r', session: null, hasStaffSession: true }).route.kind === 'staff',
+  'a legacy staff link (owner + game + run) still lands in staff');
+ok(resolvePlayRoute({ search: '?staff=o.g.r&board=B', session: null, hasStaffSession: true }).route.kind === 'staff',
+  'a ?staff= param still beats ?board=');
 
 console.log(failed === 0
   ? `\n✅ ALL PLAY-ROUTE TESTS PASSED (${passed})`

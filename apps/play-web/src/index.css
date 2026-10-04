@@ -237,3 +237,60 @@ body {
   /* The information is the point; the movement is not. */
   .rp-reject-stamp, .rp-reject-card { animation: none; }
 }
+
+/* The mission countdown as a burning fuse (change: mission-countdown-fuse).
+   The spark flickers at the fuse's tip; the digits beat in the final stretch and pop once per
+   second in the last seconds; time up shakes once. Pressure is the fun here, but the information is
+   still the point: under reduced motion only the colour changes. */
+@keyframes rp-spark {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%      { transform: scale(1.5); opacity: 0.7; }
+}
+.rp-fuse-spark {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  /* Centred on the fuse's tip with LOGICAL margins, not a transform: the flicker animates the
+     transform, and a transform-based centre would be overridden by it (and is direction-blind). */
+  margin-top: -6px;
+  margin-inline-start: -6px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, #fff 0%, #FFD54F 40%, rgba(255, 87, 34, 0.85) 70%, transparent 100%);
+  box-shadow: 0 0 10px 3px rgba(255, 179, 0, 0.75);
+  animation: rp-spark 0.35s ease-in-out infinite;
+}
+@keyframes rp-heartbeat {
+  0%, 100% { transform: scale(1); }
+  15%      { transform: scale(1.12); }
+  30%      { transform: scale(1); }
+  45%      { transform: scale(1.08); }
+}
+.rp-fuse-heartbeat { display: inline-block; animation: rp-heartbeat 1s ease-in-out infinite; }
+@keyframes rp-pop {
+  0%   { transform: scale(1.45); opacity: 0.4; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+.rp-fuse-pop { display: inline-block; animation: rp-pop 0.35s cubic-bezier(.2,.8,.3,1) both; }
+@keyframes rp-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+.rp-fuse-shake { animation: rp-shake 0.45s ease-in-out 1; }
+.rp-fuse-fill { transition: width 1s linear; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-fuse-spark, .rp-fuse-heartbeat, .rp-fuse-pop, .rp-fuse-shake { animation: none; }
+  .rp-fuse-fill { transition: none; }
+}
+/* The countdown's drawn flame sways and breathes (components/FuseIcons.tsx). */
+@keyframes rp-flame {
+  0%, 100% { transform: rotate(-3deg) scaleY(1); }
+  50%      { transform: rotate(3deg) scaleY(1.08); }
+}
+.rp-flame { transform-origin: 50% 90%; animation: rp-flame 0.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-flame { animation: none; }
+}

@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { summaryChips, SECONDARY_SECTIONS, type GroupSummary, type SectionId } from '../lib/runConsoleLayout';
+import { Icon, type IconName } from './Icon';
 
 // The Run Console's primary navigation (change: run-console-tabs-up-front).
 //
@@ -18,13 +19,13 @@ export interface ConsoleTab {
   summary: GroupSummary;
 }
 
-export const SECTION_ICON: Record<SectionId, string> = {
+export const SECTION_ICON: Record<SectionId, IconName> = {
   // run-console-simplify: Now / Teams / Game, then setup and reports.
-  teamsAndScores: '👥',
-  moderation: '⚡',
-  gameMechanics: '🎮',
-  shareAndScreens: '🔗',
-  afterTheRun: '📊',
+  teamsAndScores: 'users',
+  moderation: 'bolt',
+  gameMechanics: 'gamepad',
+  shareAndScreens: 'link',
+  afterTheRun: 'chart',
 };
 
 /** The one number worth a phone badge: the first chip that asks for action. */
@@ -84,7 +85,7 @@ export default function ConsoleTabs({
                 className={`relative shrink-0 min-h-[44px] rounded-xl border px-3 py-2 text-[13px] font-medium transition-colors ${
                   i === tabs.findIndex((x) => SECONDARY_SECTIONS.includes(x.id)) ? 'ms-auto' : ''} ${
                   on ? 'border-rp-fire bg-rp-fire/10 text-[--ink-1]' : 'border-transparent text-[--ink-3] hover:bg-[--surface-2]'}`}>
-                <span aria-hidden="true">{SECTION_ICON[tab.id]}</span> {longName(tab.id)}
+                <span className="inline-flex items-center gap-1.5"><Icon name={SECTION_ICON[tab.id]} className="w-4 h-4" /> {longName(tab.id)}</span>
               </button>
             );
           }
@@ -95,7 +96,7 @@ export default function ConsoleTabs({
               className={`relative flex-1 min-w-0 min-h-[44px] rounded-xl border px-3 py-2 text-start transition-colors ${
                 on ? 'border-rp-fire bg-rp-fire/10' : 'border-[--rp-border] hover:bg-[--surface-2]'}`}>
               <span className="flex items-center gap-2 text-sm font-semibold text-[--ink-1]">
-                <span aria-hidden="true">{SECTION_ICON[tab.id]}</span>
+                <Icon name={SECTION_ICON[tab.id]} className="w-4 h-4 shrink-0" />
                 <span className="truncate">{longName(tab.id)}</span>
                 {!on && hasNew(tab.id) && (
                   <span className="ms-auto h-2.5 w-2.5 shrink-0 rounded-full bg-rp-fire" role="img" aria-label={newLabel} />
@@ -124,8 +125,8 @@ export default function ConsoleTabs({
                 className={`relative ${SECONDARY_SECTIONS.includes(tab.id) ? 'flex-[0.7] opacity-80' : 'flex-1'} min-w-0 min-h-[56px] flex flex-col items-center justify-center gap-0.5 px-0.5 ${
                   on ? 'text-ink-fire' : 'text-[--ink-2]'}`}>
                 {on && <span aria-hidden="true" className="absolute top-0 inset-x-3 h-0.5 rounded-full bg-rp-fire" />}
-                <span aria-hidden="true" className="relative text-lg leading-none">
-                  {SECTION_ICON[tab.id]}
+                <span aria-hidden="true" className="relative leading-none">
+                  <Icon name={SECTION_ICON[tab.id]} className="w-6 h-6" />
                   {count !== null && (
                     <span className="absolute -top-1.5 -end-3 min-w-[18px] h-[18px] px-1 rounded-full bg-rp-fire text-white text-[11px] font-bold leading-[18px] text-center">
                       {count > 99 ? '99+' : count}

@@ -5,10 +5,10 @@
 import { computePodiumLayout, type PodiumEntry } from '@rushpoint/shared';
 import { stampBrand } from './brandWatermark';
 import { routeShare, type ShareOutcome } from './shareLadder';
+import { drawMedal } from './canvasIcon';
 
 const W = 1080;
 const H = 1080;
-const MEDALS: Record<1 | 2 | 3, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
 function fit(ctx: CanvasRenderingContext2D, text: string, max: number, start: number): number {
   let size = start;
@@ -37,7 +37,7 @@ export async function buildPodiumCard(podium: PodiumEntry[], opts: { gameName: s
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 64px Outfit, Inter, sans-serif';
-  ctx.fillText(opts.title ?? '🏆 Podium', W / 2, 110);
+  ctx.fillText(opts.title ?? 'Podium', W / 2, 110);
   const gnSize = fit(ctx, opts.gameName, W - 160, 44);
   ctx.font = `600 ${gnSize}px Inter, sans-serif`;
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
@@ -51,8 +51,7 @@ export async function buildPodiumCard(podium: PodiumEntry[], opts: { gameName: s
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
     ctx.fillStyle = '#ffffff';
-    ctx.font = '90px serif';
-    ctx.fillText(MEDALS[b.place], b.x + b.w / 2, b.y - 96);
+    drawMedal(ctx, b.place, b.x + b.w / 2, b.y - 128, 96);
     const nameSize = fit(ctx, entry.teamName, b.w - 16, 34);
     ctx.font = `700 ${nameSize}px Inter, sans-serif`;
     ctx.fillText(entry.teamName, b.x + b.w / 2, b.y - 30);

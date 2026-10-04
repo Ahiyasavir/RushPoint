@@ -32,7 +32,7 @@
 - [x] 5.2 `listAdminTemplates`: include hidden templates and add the state to the returned projection.
 - [x] 5.3 `setGameTemplateFlag`: accept `templateHidden`, validate it is a boolean or absent, reject anything else with `invalid-argument`, and write it only when explicitly present.
 - [x] 5.4 `createGameFromTemplate`: after loading the template document and before any write, refuse a hidden one with `failed-precondition` and a message that names the situation, not the field.
-- [ ] 5.5 Run `npm run e2e` — the whole `template-visibility` scenario green, and the callable coverage guard still green.
+- [x] 5.5 Run `npm run e2e` — the whole `template-visibility` scenario green, and the callable coverage guard still green.
 
 ## 6. RED then GREEN — the admin page
 
@@ -50,11 +50,11 @@
 
 - [x] 8.1 typecheck (6/6 workspaces), lint (0 errors, pre-existing warnings only), and `npm test` all green. Confirmed in the output: `✓ 255/271  test-template-visibility.ts (5735 ms)` and `✓ All 271 pure-logic unit file(s) passed.` — the gate really ran it, not merely a pass with nothing checked.
 - [x] 8.2 `npm run i18n:check:strict` green: PART A dictionaries parity-matched, PART B source scan clean — the two new HE/EN string pairs (`hiddenBadge`/`hideCta`/`unhideCta`/`hideFailed`) are pure Hebrew and pure English respectively, and nothing in the new JSX bypasses `t.*`.
-- [ ] 8.3 `npm run creator:build` · `npm run play:build` · `npm run bundle:budget` · `npm run base:check` · `npm run origin:check` — i.e. `npm run verify` as a whole.
-- [ ] 8.4 `npm run e2e` on its own after the full build, and read the exit code from a file rather than through a pager (CLAUDE.md's tail/exit-status note).
+- [x] 8.3 `npm run creator:build` · `npm run play:build` · `npm run bundle:budget` · `npm run base:check` · `npm run origin:check` — i.e. `npm run verify` as a whole.
+- [x] 8.4 `npm run e2e` on its own after the full build, and read the exit code from a file rather than through a pager (CLAUDE.md's tail/exit-status note).
 
 ## 9. Close out
 
-- [ ] 9.1 Re-read design.md's Open Questions and confirm both are answered in the file, not just in a commit message.
+- [x] 9.1 Re-read design.md's Open Questions and confirm both are answered in the file, not just in a commit message.
 - [x] 9.2 Decide, and record, whether the three deferred site templates (`bar-mitzva`, `hatuna`, `tnuat-noar` — already built) plus any future work-in-progress should be seeded hidden by default in `scripts/seed-site-templates.ts`.
-- [ ] 9.3 `/opsx:archive` once every gate above is green.
+- [x] 9.3 `/opsx:archive` once every gate above is green.

@@ -152,22 +152,21 @@ export function isTaskInteractionValid(task: Task): boolean {
 }
 
 export interface TaskTypeMeta {
-  emoji: string;
   label: string;
   description: string;
 }
 
 // Friendly, plain-English card content for the visual type picker in step 3.
 export const TASK_TYPE_META: Record<TaskType, TaskTypeMeta> = {
-  smart_station: { emoji: '🔑', label: 'Station',    description: 'Players find and enter a secret code on site.' },
-  photo:         { emoji: '📸', label: 'Photo',      description: 'Teams submit a photo, auto or staff approved.' },
-  quiz:          { emoji: '❓', label: 'Quiz',       description: 'Multiple choice or a typed answer.' },
-  numeric:       { emoji: '🔢', label: 'Numeric',    description: 'Submit a number within a tolerance.' },
-  field:         { emoji: '✅', label: 'Check in',   description: 'Tap to confirm arrival at the spot.' },
-  self_report:   { emoji: '🙋', label: 'Self report', description: 'Finish a challenge and rate yourselves.' },
-  geofence:      { emoji: '📡', label: 'Geofence',   description: 'Auto check in by GPS within a radius.' },
-  sequence:      { emoji: '📋', label: 'Sequence',   description: 'Several ordered steps at one stop.' },
-  survey:        { emoji: '🗳️', label: 'Survey',     description: 'Ask a question with no right answer.' },
+  smart_station: { label: 'Station',    description: 'Players find and enter a secret code on site.' },
+  photo:         { label: 'Photo',      description: 'Teams submit a photo, auto or staff approved.' },
+  quiz:          { label: 'Quiz',       description: 'Multiple choice or a typed answer.' },
+  numeric:       { label: 'Numeric',    description: 'Submit a number within a tolerance.' },
+  field:         { label: 'Check in',   description: 'Tap to confirm arrival at the spot.' },
+  self_report:   { label: 'Self report', description: 'Finish a challenge and rate yourselves.' },
+  geofence:      { label: 'Geofence',   description: 'Auto check in by GPS within a radius.' },
+  sequence:      { label: 'Sequence',   description: 'Several ordered steps at one stop.' },
+  survey:        { label: 'Survey',     description: 'Ask a question with no right answer.' },
 };
 
 // Order the picker grid presents types (most common first).

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useT } from '../i18nContext';
 import { planMissionActions, type MissionActionId } from '../lib/missionActions';
+import { Icon } from './Icon';
 
 // The mission card's recovery kit, in one place (change: play-card-simplification).
 //
@@ -79,7 +80,7 @@ export default function MissionExtras(props: MissionExtrasProps) {
           onClick={() => { setOpen(false); props.onHint?.(); }}
           data-testid="mission-extra-hint"
           className="w-full text-start inline-flex items-center min-h-[44px] px-3 rounded-lg text-xs text-ink-warm hover:bg-app-raised disabled:opacity-40">
-          💡 {props.hintLabel}
+          <Icon name="bulb" className="w-4 h-4 inline-block align-text-bottom" /> {props.hintLabel}
         </button>
       );
     }
@@ -88,7 +89,7 @@ export default function MissionExtras(props: MissionExtrasProps) {
         onClick={() => { setOpen(false); props.onHelp?.(); }}
         data-testid="mission-extra-help"
         className="w-full text-start inline-flex items-center min-h-[44px] px-3 rounded-lg text-xs font-semibold text-ink-alert hover:bg-rp-alert/10 disabled:opacity-40">
-        🆘 {t.task.requestHelp}
+        <Icon name="sos" className="w-4 h-4 inline-block align-text-bottom" /> {t.task.requestHelp}
       </button>
     );
   };

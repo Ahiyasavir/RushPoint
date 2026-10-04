@@ -1,6 +1,7 @@
 import React from 'react';
 import { reportError } from '../services/telemetry';
 import { translations, type Lang } from '../i18n';
+import { Icon } from './Icon';
 
 const LANG_KEY = 'rp-lang';
 
@@ -48,14 +49,14 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       return (
         <div className="min-h-screen flex items-center justify-center bg-app-bg p-6" dir={translations[lang].dir}>
           <div className="max-w-md w-full bg-app-surface/80 backdrop-blur-xl border border-glass-border rounded-2xl p-8 text-center">
-            <div className="text-4xl mb-3">⚠️</div>
+            <div className="mb-3 flex justify-center text-ink-amber"><Icon name="alert" className="w-10 h-10" /></div>
             <h1 className="font-brand text-xl font-bold text-zinc-100 mb-2">
               {c.errorTitle}
             </h1>
             <p className="text-zinc-400 text-sm mb-6">
               {c.errorBody}
             </p>
-            <pre className="text-start text-xs text-red-300/70 bg-black/30 rounded-lg p-3 mb-6 overflow-auto max-h-32">
+            <pre className="text-start text-xs text-ink-alert bg-black/30 rounded-lg p-3 mb-6 overflow-auto max-h-32">
               {this.state.error.message}
             </pre>
             <div className="flex gap-2 justify-center">

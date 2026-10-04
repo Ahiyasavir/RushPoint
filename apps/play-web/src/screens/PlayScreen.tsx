@@ -58,6 +58,7 @@ import { missionProgress, type MissionProgress } from '../lib/missionProgress';
 import { crossedMilestone, type Milestone } from '../lib/milestones';
 import { creatorUrl } from '../lib/creatorUrl';
 import { closedNoticeKey, shouldShowClosedNotice, type ClosedTaskNotice } from '../lib/closedTaskNotice';
+import { Icon } from '../components/Icon';
 
 
 
@@ -563,7 +564,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
-          <div className="text-4xl">⚠️</div>
+          <div className="flex justify-center text-ink-amber"><Icon name="alert" className="w-10 h-10" /></div>
           <p className="text-danger text-sm">{err === 'game-gone' ? t.play.gameGone : t.play.syncFailed}</p>
           <div className="flex gap-2 mt-1">
             <Button variant="ghost" onClick={() => { firstLoadFails.current = 0; setErr(''); setReconnecting(true); void refresh(); }}>{t.common.tryAgain}</Button>
@@ -621,7 +622,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         <Header game={game} score={team.score} accent={accent} onLeave={leave}
           timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3" data-testid="team-removed">
-          <div className="text-5xl" aria-hidden>🚫</div>
+          <div className="flex justify-center text-ink-alert" aria-hidden><Icon name="lock" className="w-12 h-12" /></div>
           <h2 className="text-xl font-bold">{t.play.removedTitle}</h2>
           {team.removedReason?.trim() && (
             <p dir="auto" className="text-base text-zinc-300 max-w-sm">{team.removedReason}</p>
@@ -633,7 +634,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           return href ? (
             <a key={c.id} href={href}
               className="flex items-center justify-center gap-2 min-h-[48px] rounded-xl border border-glass-border bg-app-card text-sm font-semibold text-zinc-200 mb-2">
-              📞 <span dir="auto">{t.play.callContact({ label: c.label })}</span>
+              <Icon name="phone" className="w-4 h-4 inline-block align-text-bottom" /> <span dir="auto">{t.play.callContact({ label: c.label })}</span>
             </a>
           ) : null;
         })}
@@ -668,7 +669,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
         <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={game.testMode !== true} activeTaskId={team.activeTaskId ?? null} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
-          <div className="text-5xl">{hold.held ? '🙋' : '⏳'}</div>
+          <div className="flex justify-center text-ink-amber"><Icon name={hold.held ? 'pause' : 'hourglass'} className="w-12 h-12" /></div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
           {hold.held ? (
             <div className="w-full max-w-sm rounded-xl bg-app-raised border border-rp-amber/40 px-4 py-3 text-start space-y-1.5">
@@ -698,7 +699,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           return href ? (
             <a key={c.id} href={href} data-testid="call-contact-waiting"
               className="flex items-center justify-center gap-2 min-h-[48px] rounded-xl border border-glass-border bg-app-card text-sm font-semibold text-zinc-200 mb-2">
-              📞 <span dir="auto">{t.play.callContact({ label: c.label })}</span>
+              <Icon name="phone" className="w-4 h-4 inline-block align-text-bottom" /> <span dir="auto">{t.play.callContact({ label: c.label })}</span>
             </a>
           ) : null;
         })}
@@ -896,7 +897,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
               sentence gave the player nothing to do. Same recovery shape as the
               load-failure state above. */
           <div className="flex flex-col items-center text-center gap-2 mt-10">
-            <div className="text-4xl">⏳</div>
+            <div className="flex justify-center text-ink-amber"><Icon name="hourglass" className="w-10 h-10" /></div>
             <p className="text-sm font-semibold text-zinc-200">{t.play.noActiveStageTitle}</p>
             <p className="text-xs text-zinc-500">{t.play.noActiveStageBody}</p>
             <Button variant="ghost" className="mt-1" onClick={() => void refresh()}>{t.common.tryAgain}</Button>
@@ -1133,7 +1134,7 @@ function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructio
         data-testid="how-to-play"
         className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base text-zinc-400 hover:text-zinc-200"
       >
-        📖
+        <Icon name="book" className="w-5 h-5" />
       </button>
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
@@ -1338,7 +1339,7 @@ function TrackablesPanel({ ctx, items, myTeamId, isController, onChanged }: {
   if (!items || items.length === 0) return null;
   return (
     <div className="rounded-xl bg-app-card border border-glass-border p-3">
-      <div className="text-sm font-bold text-zinc-100 mb-2">🎒 {t.trackables.title}</div>
+      <div className="text-sm font-bold text-zinc-100 mb-2 flex items-center gap-1.5"><Icon name="backpack" className="w-4 h-4 shrink-0" />{t.trackables.title}</div>
       <div className="space-y-2">
         {items.map((tr) => {
           const mine = tr.currentHolderTeamId === myTeamId;
@@ -1363,7 +1364,7 @@ function TrackablesPanel({ ctx, items, myTeamId, isController, onChanged }: {
               ))}
             </div>
             {errors[tr.id] && (
-              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-ink-alert">⚠ {errors[tr.id]}</p>
+              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-ink-alert">{errors[tr.id]}</p>
             )}
             </div>
           );
@@ -1397,7 +1398,7 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
   if (!zones || zones.length === 0) return null;
   return (
     <div className="rounded-xl bg-app-card border border-glass-border p-3">
-      <div className="text-sm font-bold text-zinc-100 mb-2">🚩 {t.zones.title}</div>
+      <div className="text-sm font-bold text-zinc-100 mb-2 flex items-center gap-1.5"><Icon name="flag" className="w-4 h-4 shrink-0" />{t.zones.title}</div>
       <div className="space-y-2">
         {zones.map((z) => {
           const mine = z.ownerTeamId === myTeamId;
@@ -1419,7 +1420,7 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
               )}
             </div>
             {errors[z.id] && (
-              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-ink-alert">⚠ {errors[z.id]}</p>
+              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-ink-alert">{errors[z.id]}</p>
             )}
             </div>
           );
@@ -1463,7 +1464,7 @@ function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTea
         return (
           <div key={c!.id} dir="auto" className="rounded-lg bg-app-raised border border-glass-border px-3 py-2">
             <div className="flex items-center gap-2 text-sm text-zinc-300">
-              <span aria-hidden>🔒</span>
+              <Icon name="lock" className="w-4 h-4" />
               <span className="font-medium truncate">{c!.title}</span>
               <span className="ms-auto text-[12px] uppercase tracking-wide text-zinc-500 shrink-0">{t.play.lockedTaskLabel}</span>
             </div>
@@ -1508,7 +1509,7 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
 
   return (
     <div dir="auto" className="mt-8 mx-auto max-w-xs text-center rounded-2xl bg-app-card border border-glass-border px-6 py-8 shadow-task-card">
-      <div className="text-4xl mb-3">⏳</div>
+      <div className="mb-3 flex justify-center text-ink-amber"><Icon name="hourglass" className="w-10 h-10" /></div>
       <p className="text-sm text-zinc-400 mb-2">{t.play.nextDropTitle}</p>
       <p className="text-3xl font-bold tabular-nums text-ink-fire">{clock}</p>
       <p className="mt-3 text-xs text-zinc-500">{t.play.nextDropHint}</p>
@@ -1589,7 +1590,7 @@ function Header({
             {sealed
               ? <span data-testid="test-mode-chip">{t.play.testModeChip}</span>
               : timeOnly
-                ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
+                ? <span aria-label={t.board.elapsed} className="inline-flex items-center gap-1"><Icon name="stopwatch" className="w-4 h-4" /><ElapsedClock startedAt={startedAt} /></span>
                 : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
             {!sealed && streak >= 2 && (
               <span
@@ -1608,7 +1609,7 @@ function Header({
             {isTestDrive && (
               <span data-testid="test-run-chip"
                 className="inline-flex items-center rounded-full bg-app-raised border border-rp-amber/40 px-2 py-0.5 text-[13px] font-bold text-ink-amber">
-                🧪 {t.play.testRunBanner}
+                <Icon name="flask" className="w-4 h-4 inline-block align-text-bottom" /> {t.play.testRunBanner}
               </span>
             )}
           </div>
@@ -1618,7 +1619,7 @@ function Header({
             <button type="button" onClick={phones.onOpen} data-testid="phones-chip"
               aria-label={t.devices.phonesChipAria({ n: phones.count })} title={t.devices.panelTitle}
               className="inline-flex items-center justify-center gap-0.5 min-h-[44px] min-w-[44px] px-1 rounded-lg text-sm font-bold text-zinc-300">
-              📱<span className="font-mono">{phones.count}</span>
+              <Icon name="device" className="w-4 h-4" /><span className="font-mono">{phones.count}</span>
             </button>
           )}
           {howToPlay}
@@ -1627,14 +1628,14 @@ function Header({
               aria-label={t.play.shareProgress} title={t.play.shareProgress}
               data-testid="share-progress"
               className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base text-ink-fire disabled:opacity-50">
-              {sharing ? '…' : '📸'}
+              {sharing ? '…' : <Icon name="camera" className="w-5 h-5" />}
             </button>
           )}
           {callContact && toTelHref(callContact.phone) && (
             <a href={toTelHref(callContact.phone)!} data-testid="call-contact"
               aria-label={t.play.callContact({ label: callContact.label })} title={t.play.callContact({ label: callContact.label })}
               className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base">
-              📞
+              <Icon name="phone" className="w-5 h-5" />
             </a>
           )}
           {onSos && (

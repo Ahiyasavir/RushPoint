@@ -13,6 +13,7 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 import { classifyBillingError } from '../lib/callErrors';
 import { formatTxDate } from '../lib/formatTxDate';
 import { useT } from '../components/LanguageContext';
+import { Icon } from '../components/Icon';
 
 const PACKAGE_ORDER: EventPackageId[] = ['starter', 'standard', 'pro_pack'];
 
@@ -118,7 +119,7 @@ export default function WalletPage() {
     return (
       <div className="max-w-2xl mx-auto animate-fade-up">
         <Card className="p-8 text-center">
-          <div className="text-3xl mb-3">⚠️</div>
+          <div className="mb-3 flex justify-center text-ink-amber"><Icon name="alert" className="w-8 h-8" /></div>
           <p className="text-sm text-[--ink-2] mb-4">{w.statusFailed}</p>
           <Button onClick={() => void loadStatus()}>{w.retry}</Button>
         </Card>
@@ -271,10 +272,10 @@ function txLabel(tx: WalletTransaction, w: ReturnType<typeof useT>['wallet']): s
 }
 
 function txAmount(tx: WalletTransaction): string {
-  if (tx.type === 'topup_credits' && tx.credits) return `+${tx.credits} 🎟️`;
-  if (tx.type === 'charge_event') return `−${tx.creditCost ?? 1} 🎟️`;
-  if (tx.type === 'free_run_consumed') return '🆓';
-  if (tx.type === 'referral') return '+🆓';
+  if (tx.type === 'topup_credits' && tx.credits) return `+${tx.credits}`;
+  if (tx.type === 'charge_event') return `−${tx.creditCost ?? 1}`;
+  if (tx.type === 'free_run_consumed') return '0';
+  if (tx.type === 'referral') return '+1';
   if (tx.priceILS != null) return `₪${tx.priceILS}`;
   if (tx.amountILS != null) return `₪${tx.amountILS}`;
   return '';

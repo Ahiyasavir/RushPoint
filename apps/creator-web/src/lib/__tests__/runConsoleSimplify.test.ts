@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PANEL_GROUP, SECTION_ORDER, defaultSection, ALL_PANEL_IDS, PRIMARY_SECTIONS, SECONDARY_SECTIONS } from '../runConsoleLayout';
-import { buildInbox, consoleClockMs, inboxRowAction } from '../runConsoleInbox';
+import { buildInbox, consoleClockMs, inboxRowAction, prioritizeFollowed } from '../runConsoleInbox';
 import { teamPageActionGroups } from '../runConsoleActions';
 
 // run-console-simplify (field report 2026-09-27: "so complicated it is exhausting"). The console
@@ -128,5 +128,28 @@ describe('inboxRowAction: where each row takes the organizer (overnight 2026-09-
   });
   it('the staff channel goes to its panel', () => {
     expect(inboxRowAction('staffMessage')).toEqual({ panel: 'staffChannel' });
+  });
+});
+
+describe('prioritizeFollowed: my teams first in "now", safety never demoted (followed-teams)', () => {
+  const NOW = Date.parse('2026-09-30T10:00:00.000Z');
+  const ago = (s: number) => new Date(NOW - s * 1000).toISOString();
+  const items = buildInbox({
+    nowMs: NOW,
+    alerts: [{ id: 'a1', teamId: 'other', teamName: 'Other', createdAt: ago(5), kind: 'sos' }],
+    pending: [
+      { teamId: 'other', displayName: 'Other', taskId: 'm1', submittedAt: ago(10) },
+      { teamId: 'mine', displayName: 'Mine', taskId: 'm2', submittedAt: ago(5) },
+    ],
+    waiting: [{ teamId: 'other2', teamName: 'Other2', joinedAt: ago(60) }],
+  });
+  it('safety stays on top, then my teams, then the rest in their own order', () => {
+    expect(prioritizeFollowed(items, ['mine'], false).map((i) => i.key)).toEqual(['alert:a1', 'review:mine:m2', 'waiting:other2', 'review:other:m1']);
+  });
+  it('"mine only" keeps every safety item and drops the rest of the other teams', () => {
+    expect(prioritizeFollowed(items, ['mine'], true).map((i) => i.key)).toEqual(['alert:a1', 'review:mine:m2']);
+  });
+  it('following nobody changes nothing', () => {
+    expect(prioritizeFollowed(items, [], false)).toEqual(items);
   });
 });

@@ -28,6 +28,7 @@ import { formatTxDate } from '../lib/formatTxDate';
 import { EmptyState, Skeleton, Badge, Button, Input, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { useT } from '../components/LanguageContext';
+import { Icon } from '../components/Icon';
 
 type GateState = 'checking' | 'denied' | 'allowed';
 
@@ -126,7 +127,7 @@ export default function AdminUsersPage() {
       </div>
     );
   }
-  if (gate === 'denied') return <EmptyState icon="🔒" title={ta.deniedTitle} body={ta.deniedBody} />;
+  if (gate === 'denied') return <EmptyState icon="lock" title={ta.deniedTitle} body={ta.deniedBody} />;
   if (!users) {
     return (
       <div className="animate-fade-up space-y-4">
@@ -228,7 +229,7 @@ export default function AdminUsersPage() {
       <p className="text-xs text-[--ink-3]">{ta.engagementNote}</p>
 
       {visible.length === 0 ? (
-        <EmptyState icon="👤" title={query ? ta.noMatches : ta.noUsers} />
+        <EmptyState icon="user" title={query ? ta.noMatches : ta.noUsers} />
       ) : (
         <>
           {/* ── PHONE: one card per creator ── */}
@@ -246,8 +247,8 @@ export default function AdminUsersPage() {
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <Badge color={STAGE_COLOR[stage]}>{ta.stage[stage]}</Badge>
                       {/* So an annotated creator is identifiable without opening each card. */}
-                      {u.note && <span className="text-[13px] text-[--ink-3]" title={u.note}>📝 {ta.hasNote}</span>}
-                      {u.emailed && <span className="text-[13px] text-[--ink-3]">✉️ {ta.emailedShort}</span>}
+                      {u.note && <span className="text-[13px] text-[--ink-3] inline-flex items-center gap-1" title={u.note}><Icon name="note" className="w-3.5 h-3.5" />{ta.hasNote}</span>}
+                      {u.emailed && <span className="text-[13px] text-[--ink-3] inline-flex items-center gap-1"><Icon name="mail" className="w-3.5 h-3.5" />{ta.emailedShort}</span>}
                     </div>
                   </div>
                   <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-[--ink-3]">

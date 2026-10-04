@@ -21,25 +21,52 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useT } from '../i18nContext';
 import { locationAge, type MissionSpot } from '../lib/staffMap';
+import { Icon, iconSvgMarkup } from './Icon';
+import { mapLocale } from '../lib/mapLocale';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
-// A few distinct hues so adjacent teams are separable at a glance.
-const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ec4899', '#eab308', '#14b8a6', '#ef4444'];
+// Calm hues only, one shared palette (never red/amber, which mean alarm, nor the followed purple):
+// packages/shared/src/teamMarkerColor.ts.
+const colorForTeam = teamMarkerColor;
 
-/** Stable colour per team, derived from the id rather than the snapshot index, so a
- *  team keeps its hue as others join and reorder the docs. */
-function colorForTeam(teamId: string): string {
-  let h = 0;
-  for (let i = 0; i < teamId.length; i++) h = (h * 31 + teamId.charCodeAt(i)) | 0;
-  return COLORS[Math.abs(h) % COLORS.length];
+/**
+ * followed-teams: how one team's dot and label look. A followed team is a bigger purple dot with a star
+ * and a bold name, drawn above the rest; with "mine only" every other team is dimmed, never hidden.
+ * Opacity lives on the dot and label, never the marker element (MapLibre owns that one's opacity).
+ */
+function applyTeamLook(el: HTMLDivElement, teamId: string, stale: boolean, followed: readonly string[], mineOnly: boolean) {
+  const look = teamMarkerLook(teamId, followed, mineOnly);
+  const dot = el.firstElementChild as HTMLDivElement | null;
+  const label = el.querySelector('span');
+  const opacity = look.dimmed ? '0.3' : stale ? '0.45' : '1';
+  if (dot) {
+    const size = look.followed ? 24 : 18;
+    dot.style.width = `${size}px`;
+    dot.style.height = `${size}px`;
+    dot.style.background = look.followed ? FOLLOWED_MARKER_COLOR : colorForTeam(teamId);
+    dot.style.display = 'flex';
+    dot.style.alignItems = 'center';
+    dot.style.justifyContent = 'center';
+    dot.style.font = '700 13px system-ui';
+    dot.style.color = '#fff';
+    dot.innerHTML = look.followed ? iconSvgMarkup('star', 14, '#ffffff', true) : '';
+    dot.style.opacity = opacity;
+  }
+  if (label) {
+    label.style.border = look.followed ? `2px solid ${FOLLOWED_MARKER_COLOR}` : 'none';
+    label.style.fontWeight = look.followed ? '800' : '600';
+    label.style.opacity = opacity;
+  }
+  el.style.zIndex = String(look.zIndex);
+  el.dataset.followed = look.followed ? '1' : '0';
 }
 
 interface TeamLoc {
@@ -50,12 +77,16 @@ interface TeamLoc {
 }
 
 export default function StaffTeamMap({
-  ctx, teams, spots = [],
+  ctx, teams, spots = [], followed = [], mineOnly = false,
 }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: { id: string; displayName: string }[];
   /** staff-event-map: where the missions are (getRunOutline `spot`), drawn under the teams. */
   spots?: MissionSpot[];
+  /** followed-teams: this person's teams, drawn in purple with a star. */
+  followed?: readonly string[];
+  /** followed-teams: dim everyone else. */
+  mineOnly?: boolean;
 }) {
   const { t } = useT();
   const ref = useRef<HTMLDivElement>(null);
@@ -72,6 +103,9 @@ export default function StaffTeamMap({
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
   }, []);
+
+  // The restyle effect keys on the list's CONTENT, not the array identity (a new array every render).
+  const followedKey = followed.join(',');
 
   const nameOf = useMemo(() => {
     const m = new Map(teams.map((tm) => [tm.id, tm.displayName]));
@@ -100,6 +134,7 @@ export default function StaffTeamMap({
     if (!ref.current || map.current) return;
     map.current = new maplibregl.Map({
       container: ref.current,
+      locale: mapLocale(t.mapUi),
       style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
       center: [35.2137, 31.7683],
       zoom: 12,
@@ -161,11 +196,10 @@ export default function StaffTeamMap({
       if (existing) {
         existing.marker.setLngLat([loc.lng, loc.lat]);
         existing.popup.setHTML(html);
-        // On the dot and label, never the marker element: MapLibre owns that element's opacity.
-        for (const child of Array.from(existing.el.children) as HTMLElement[]) child.style.opacity = age.stale ? '0.45' : '1';
         existing.el.dataset.stale = age.stale ? '1' : '0';
         const label = existing.el.querySelector('span');
         if (label) label.textContent = name;
+        applyTeamLook(existing.el, loc.teamId, age.stale, followed, mineOnly);
         continue;
       }
       const el = document.createElement('div');
@@ -178,8 +212,7 @@ export default function StaffTeamMap({
       label.setAttribute('dir', 'auto');
       label.style.cssText = 'font:600 11px system-ui;color:#111;background:rgba(255,255,255,.9);border-radius:6px;padding:1px 5px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.25)';
       el.append(dot, label);
-      // On the dot and label, never the marker element: MapLibre owns that element's opacity.
-      for (const child of [dot, label]) child.style.opacity = age.stale ? '0.45' : '1';
+      applyTeamLook(el, loc.teamId, age.stale, followed, mineOnly);
       el.setAttribute('aria-label', name);
       const popup = new maplibregl.Popup({ offset: 14, closeButton: false }).setHTML(html);
       const marker = new maplibregl.Marker({ element: el, anchor: 'left', offset: [-9, 0] }).setLngLat([loc.lng, loc.lat]).setPopup(popup).addTo(m);
@@ -205,7 +238,7 @@ export default function StaffTeamMap({
         m.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 400 });
       }
     }
-  }, [locs, nameOf, now, spotsKey, t]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [locs, nameOf, now, spotsKey, t, followedKey, mineOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showTeam = (loc: TeamLoc) => {
     const entry = markersById.current.get(loc.teamId);
@@ -214,7 +247,9 @@ export default function StaffTeamMap({
   };
   const reported = new Set(locs.map((l) => l.teamId));
   const noFix = teams.filter((tm) => !reported.has(tm.id)).length;
-  const rows = [...locs].sort((a, b) => nameOf(a.teamId).localeCompare(nameOf(b.teamId)));
+  // followed-teams: my teams first in the list under the map, then everyone by name.
+  const rows = [...locs].sort((a, b) =>
+    Number(followed.includes(b.teamId)) - Number(followed.includes(a.teamId)) || nameOf(a.teamId).localeCompare(nameOf(b.teamId)));
 
   return (
     <div>
@@ -229,7 +264,8 @@ export default function StaffTeamMap({
               <li key={loc.teamId}>
                 <button type="button" onClick={() => showTeam(loc)} aria-label={t.staff.teamMapShowTeam({ name: nameOf(loc.teamId) })}
                   className={`w-full min-h-[44px] flex items-center gap-2 px-3 text-start ${age.stale ? 'opacity-60' : ''}`}>
-                  <span aria-hidden className="w-3 h-3 rounded-full shrink-0 border border-white" style={{ background: colorForTeam(loc.teamId) }} />
+                  <span aria-hidden className="w-3 h-3 rounded-full shrink-0 border border-white" style={{ background: followed.includes(loc.teamId) ? FOLLOWED_MARKER_COLOR : colorForTeam(loc.teamId) }} />
+                  {followed.includes(loc.teamId) && <Icon name="star" className="w-4 h-4 shrink-0 fill-current" style={{ color: FOLLOWED_MARKER_COLOR }} />}
                   <span dir="auto" className="flex-1 truncate text-sm text-zinc-100">{nameOf(loc.teamId)}</span>
                   <span dir="auto" className="text-xs text-zinc-500 shrink-0">{t.staff.teamMapUpdated({ min: age.minutes })}</span>
                 </button>

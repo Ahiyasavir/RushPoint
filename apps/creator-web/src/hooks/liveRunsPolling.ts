@@ -2,6 +2,7 @@
 // Deliberately dependency-free (no React, no Firebase) so it runs in the node-env
 // vitest lane — see docs/wave-a/active-run-bar.md.
 import type { LiveRunSummary } from '@rushpoint/shared';
+import { isPlayingNow } from '../lib/runHistoryBadge';
 
 /** How often the shared `listLiveRuns` loop fires while the tab is visible. */
 export const LIVE_RUNS_POLL_MS = 10_000;
@@ -21,6 +22,15 @@ export function pollDelayFor({ hidden, subscribers }: { hidden: boolean; subscri
  * `launchedAt === null` sorts last; ties break on runId so the bar never flickers
  * between two runs across polls.
  */
+/**
+ * The live runs being played NOW (change: active-run-bar-recent). A run nobody ended stays
+ * `live` forever; the floating bar features and counts only these, by the same rule as the
+ * run history badge (`isPlayingNow`). Total: junk is no runs.
+ */
+export function recentLiveRuns(runs: LiveRunSummary[] | null | undefined, now: number): LiveRunSummary[] {
+  return Array.isArray(runs) ? runs.filter((r) => isPlayingNow(r, now)) : [];
+}
+
 export function selectFeaturedRun(runs: LiveRunSummary[] | null | undefined): LiveRunSummary | null {
   if (!runs || runs.length === 0) return null;
   let best: LiveRunSummary | null = null;

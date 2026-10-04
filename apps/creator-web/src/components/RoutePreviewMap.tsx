@@ -7,6 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
+import { mapLocale } from '../lib/mapLocale';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -28,6 +29,7 @@ export interface RouteStage {
 }
 
 export default function RoutePreviewMap({ stages, className = '' }: { stages: RouteStage[]; className?: string }) {
+  const mapUi = useT().mapUi;
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -71,6 +73,7 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: Ro
     if (!ref.current || map.current) return;
     map.current = new maplibregl.Map({
       container: ref.current,
+      locale: mapLocale(mapUi),
       style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
       center: [35.21, 31.77], zoom: 8,
       attributionControl: { compact: true },

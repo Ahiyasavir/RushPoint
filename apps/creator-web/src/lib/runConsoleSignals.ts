@@ -23,7 +23,7 @@ import { panelPriority, type PanelId, type RunStatus } from './runConsoleLayout'
 export type SignalId =
   | 'sos' | 'outOfBounds' | 'photoOverdue' | 'teamsStuck' | 'heldForConsent'
   | 'photoPending' | 'unreadChat' | 'tasksPaused' | 'nobodyJoined' | 'notStarted'
-  | 'lateJoinerStranded' | 'membersOffline' | 'arrivalsUnverified';
+  | 'lateJoinerStranded' | 'membersOffline' | 'arrivalsUnverified' | 'flashPending';
 
 export type SignalSeverity = 'critical' | 'warn' | 'info';
 
@@ -88,12 +88,14 @@ export type RunSignalInput = {
   teamsWithMembersOffline: number;
   /** Check-ins accepted on a fix that could not prove the team was there. */
   unverifiedArrivalCount: number;
+  /** Flash mission claims sent and waiting for the organizer's approval. Optional: absent is zero. */
+  pendingFlashCount?: number;
 };
 
 /** Declaration order, and the final tie break so the output is a total order. */
 export const SIGNAL_ORDER: SignalId[] = [
   'sos', 'outOfBounds', 'photoOverdue',
-  'teamsStuck', 'heldForConsent', 'photoPending', 'unreadChat',
+  'teamsStuck', 'heldForConsent', 'photoPending', 'flashPending', 'unreadChat',
   'lateJoinerStranded', 'tasksPaused', 'membersOffline', 'arrivalsUnverified',
   'nobodyJoined', 'notStarted',
 ];
@@ -108,6 +110,8 @@ export const SIGNAL_SEVERITY: Record<SignalId, SignalSeverity> = {
   teamsStuck: 'warn',
   heldForConsent: 'warn',
   photoPending: 'warn',
+  // A team sent a flash mission and its bonus waits on a person, like a photo does.
+  flashPending: 'warn',
   unreadChat: 'warn',
   // States the organizer chose, or the ordinary shape of a run about to start.
   tasksPaused: 'info',
@@ -126,6 +130,7 @@ export const SIGNAL_PANEL: Record<SignalId, PanelId> = {
   teamsStuck: 'teams',
   heldForConsent: 'teams',
   photoPending: 'photoReview',
+  flashPending: 'flashMission',
   unreadChat: 'chat',
   tasksPaused: 'taskAvailability',
   lateJoinerStranded: 'startTeams',
@@ -174,6 +179,7 @@ export function buildRunSignals(input: RunSignalInput): RunSignal[] {
   const stranded = count(input.strandedLateJoinerCount);
   const membersOffline = count(input.teamsWithMembersOffline);
   const unverifiedArrivals = count(input.unverifiedArrivalCount);
+  const pendingFlash = count(input.pendingFlashCount);
 
   const out: RunSignal[] = [];
   if (alerts > 0) out.push(signal('sos', alerts));
@@ -184,6 +190,7 @@ export function buildRunSignals(input: RunSignalInput): RunSignal[] {
   // One queue, one chip: an overdue queue already says everything the pending
   // count would, and louder.
   if (pendingPhotos > 0 && overduePhotos === 0) out.push(signal('photoPending', pendingPhotos));
+  if (pendingFlash > 0) out.push(signal('flashPending', pendingFlash));
   if (unreadChats > 0) out.push(signal('unreadChat', unreadChats));
   if (pausedTasks > 0) out.push(signal('tasksPaused', pausedTasks));
   // Deliberately `info`, not a warning: a team choosing to share a phone is a legitimate

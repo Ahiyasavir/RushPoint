@@ -118,7 +118,7 @@ function LanguageCard({ lang, setLang, s }: { lang: 'he' | 'en'; setLang: (l: 'h
                 : 'border-[--rp-border] text-[--ink-2] hover:border-rp-fire/40 hover:bg-rp-fire/4'
             }`}
           >
-            <div className="text-2xl mb-1.5">{l === 'he' ? '🇮🇱' : '🇺🇸'}</div>
+            <div className="mb-1.5 inline-flex items-center justify-center w-9 h-9 rounded-full bg-[--surface-2] text-[13px] font-black text-[--ink-1]" aria-hidden="true">{l === 'he' ? 'עב' : 'EN'}</div>
             <div className="font-semibold text-sm">{l === 'he' ? s.languageHe : s.languageEn}</div>
             {lang === l && (
               <div className="absolute top-2 end-2 w-5 h-5 rounded-full bg-rp-fire text-white text-[12px] flex items-center justify-center font-bold">✓</div>

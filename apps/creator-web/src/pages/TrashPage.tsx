@@ -105,13 +105,13 @@ export default function TrashPage() {
 
       {loadFailed && games.length === 0 ? (
         <EmptyState
-          icon="⚠️"
+          icon="alert"
           title={tr.loadFailed}
           body={tr.loadFailedBody}
           action={<Button onClick={() => { void load(); }}>{tr.loadFailedRetry}</Button>}
         />
       ) : games.length === 0 ? (
-        <EmptyState icon="🗑️" title={tr.emptyTitle} body={tr.emptyBody} />
+        <EmptyState icon="trash" title={tr.emptyTitle} body={tr.emptyBody} />
       ) : (
         <div className="space-y-3">
           {games.map((g) => {
@@ -185,7 +185,7 @@ function PurgeDialog({ game, busy, onCancel, onConfirm }: {
   const untitled = (game.title ?? '').trim() === '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
+    <div role="alertdialog" aria-modal="true" aria-label={tr.purgeDialogTitle} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative bg-[--surface-0] dark:bg-[--surface-1] border border-rp-alert/30 rounded-2xl w-full max-w-md p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"

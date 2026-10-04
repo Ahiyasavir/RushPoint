@@ -1,4 +1,5 @@
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { Icon, type IconName } from './Icon';
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 export function Card({ children, className = '', glow = false, dataPanel }: {
@@ -266,11 +267,16 @@ export function Skeleton({ className = '' }: { className?: string }) {
 // ── EmptyState ────────────────────────────────────────────────────────────────
 // Reusable "nothing here yet" block: icon + title + optional body + optional CTA.
 export function EmptyState({ icon, title, body, action }: {
-  icon?: ReactNode; title: string; body?: string; action?: ReactNode;
+  /** A drawn icon's name (components/Icon.tsx), or any node. Never an emoji (change: no-stock-emoji). */
+  icon?: IconName | ReactNode; title: string; body?: string; action?: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center justify-center text-center gap-3 py-16 px-6">
-      {icon && <div aria-hidden="true" className="text-4xl">{icon}</div>}
+      {icon && (
+        <div aria-hidden="true" className="text-[--ink-3]">
+          {typeof icon === 'string' ? <Icon name={icon as IconName} className="w-10 h-10" /> : icon}
+        </div>
+      )}
       <h3 className="text-lg font-semibold text-[--ink-1]">{title}</h3>
       {body && <p className="text-sm text-[--ink-3] max-w-sm">{body}</p>}
       {action && <div className="mt-1">{action}</div>}

@@ -9,6 +9,7 @@ import { useT } from '../i18nContext';
 import { shareChallenge } from '../lib/challengeCard';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
 import { creatorUrl } from '../lib/creatorUrl';
+import { Icon } from '../components/Icon';
 
 
 const COUNTDOWN = 30;
@@ -110,7 +111,7 @@ export default function ChallengeTeaser({
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
-          <div className="text-5xl">🧭</div>
+          <div className="flex justify-center text-ink-fire"><Icon name="compass" className="w-12 h-12" /></div>
           <p className="text-zinc-500 text-sm">{t.challenge.notFound}</p>
           <Button className="mt-2" onClick={onJoin}>{t.challenge.ctaJoin}</Button>
         </div>

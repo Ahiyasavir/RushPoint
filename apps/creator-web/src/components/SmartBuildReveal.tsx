@@ -40,6 +40,13 @@ export interface SmartBuildRevealProps {
   gameTitle: string;
   stages: readonly RevealStage[];
   onContinue: () => void;
+  /**
+   * What is still needed before this game can launch, one line per kind
+   * (change: quick-setup-reachable). Empty or absent ⇒ no section at all. Said
+   * HERE because this is the one screen the creator reads before the Builder,
+   * and "your game is ready" with six pins still owed was not honest.
+   */
+  leftBeforeLaunch?: readonly string[];
   /** Rendered beside Continue when the caller has something to share. */
   shareSlot?: React.ReactNode;
   labels: {
@@ -49,6 +56,8 @@ export interface SmartBuildRevealProps {
     stage: (n: number) => string;
     missions: (n: number) => string;
     continue: string;
+    /** Heading above `leftBeforeLaunch`. */
+    leftTitle?: string;
     /** Accessible name for the revealed game as a whole. */
     aria: string;
   };
@@ -69,7 +78,7 @@ function prefersReducedMotion(): boolean {
 const STEP_MS = 260;
 
 export default function SmartBuildReveal({
-  gameTitle, stages, onContinue, shareSlot, labels,
+  gameTitle, stages, onContinue, shareSlot, labels, leftBeforeLaunch,
 }: SmartBuildRevealProps) {
   const list = useMemo(() => (Array.isArray(stages) ? stages : []), [stages]);
   const reduced = useRef(prefersReducedMotion()).current;
@@ -160,6 +169,19 @@ export default function SmartBuildReveal({
           })}
         </ol>
       </div>
+
+      {Array.isArray(leftBeforeLaunch) && leftBeforeLaunch.length > 0 && (
+        <div className="rounded-xl border border-rp-amber/50 bg-rp-amber/10 px-3 py-2.5">
+          {labels.leftTitle && (
+            <p className="text-[12px] font-semibold text-ink-amber">{labels.leftTitle}</p>
+          )}
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {leftBeforeLaunch.map((line, i) => (
+              <li key={i} className="text-[13px] text-[--ink-1]">{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Live from the first frame — see the header. */}
       <div className="flex gap-2">

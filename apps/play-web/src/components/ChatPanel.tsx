@@ -9,6 +9,7 @@ import { db, uid } from '../services/firebase';
 import { sendTeamChatMessage } from '../services/calls';
 import { saveChatSeen } from '../store';
 import { useT } from '../i18nContext';
+import { Icon } from './Icon';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
@@ -126,7 +127,7 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
       </div>
       {sendFailed && (
         <p role="status" aria-live="polite" className="text-xs font-medium text-ink-alert">
-          ⚠ {t.chat.sendFailedRetry}
+          <Icon name="alert" className="w-4 h-4 inline-block align-text-bottom" /> {t.chat.sendFailedRetry}
         </p>
       )}
       <div className="flex items-center gap-2">

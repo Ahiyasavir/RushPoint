@@ -93,6 +93,17 @@ export interface CompressionReport {
   passes: number;
 }
 
+/**
+ * Should the player be told the upload may be slow? Only when the bytes being
+ * sent are actually big. A small photo that re-encoding could not shrink
+ * ('not-smaller') is sent as is, and it is small, so the warning would be false.
+ * Total: junk is never a warning.
+ */
+export function warnsSlowUpload(report: Pick<CompressionReport, 'compressed' | 'outputBytes'> | null | undefined): boolean {
+  if (!report || report.compressed === true) return false;
+  return typeof report.outputBytes === 'number' && report.outputBytes > PHOTO_TARGET_BYTES;
+}
+
 function encode(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
   return new Promise((res) => canvas.toBlob((b) => res(b), 'image/jpeg', quality));
 }

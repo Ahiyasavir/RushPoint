@@ -5,6 +5,7 @@ import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button } from './ui';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { Icon, type IconName } from './Icon';
 
 // Post-game feedback (change: post-game-feedback): a playful, tap-only survey on
 // the finish screen. One question per screen, auto-advancing, every step
@@ -12,7 +13,8 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 // server enforces one-response-per-player and rejects a repeat gracefully.
 
 type Answers = Record<string, number>;
-const SCALE5 = ['😖', '😕', '😐', '🙂', '🤩'];
+// Drawn faces for the 1 to 5 scale (change: no-stock-emoji).
+const SCALE5: IconName[] = ['face1', 'face2', 'face3', 'face4', 'face5'];
 const STORE_PREFIX = 'rushpoint.feedback.';
 
 function storeKey(runId: string) { return STORE_PREFIX + runId; }
@@ -109,7 +111,7 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
     <div className="rounded-2xl bg-app-card border border-glass-border px-5 pt-4 pb-5 my-4 animate-fade-up">
       {/* header: title + progress + dismiss */}
       <div className="flex items-center justify-between mb-1">
-        <span className="text-sm font-bold text-zinc-200">📝 {t.survey.cardTitle}</span>
+        <span className="text-sm font-bold text-zinc-200 inline-flex items-center gap-1.5"><Icon name="note" className="w-4 h-4 shrink-0" />{t.survey.cardTitle}</span>
         {/* Was a bare ~16px line of text: the only way out of this card. */}
         <button onClick={dismiss} className="inline-flex items-center justify-center min-h-[44px] px-3 -me-3 text-xs text-zinc-500 hover:text-zinc-400">{t.survey.dismiss}</button>
       </div>
@@ -220,7 +222,7 @@ function Scale5({ prompt, low, high, selected, onPick }: {
     <div>
       <p dir="auto" className="text-base font-semibold text-zinc-100 mb-4 text-center">{prompt}</p>
       <div className="flex justify-between gap-1 mb-2">
-        {SCALE5.map((emoji, i) => {
+        {SCALE5.map((face, i) => {
           const value = i + 1;
           return (
             <button
@@ -231,7 +233,7 @@ function Scale5({ prompt, low, high, selected, onPick }: {
                 ? 'bg-accent/15 border-2 border-accent scale-105'
                 : 'bg-app-raised border border-glass-border'}`}
             >
-              {emoji}
+              <Icon name={face} className="w-8 h-8 mx-auto" />
             </button>
           );
         })}

@@ -5,9 +5,9 @@ import { LoadingView } from '../components/LoadingView';
 import { useT } from '../i18nContext';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 import { creatorUrl } from '../lib/creatorUrl';
+import { Icon, medalFor } from '../components/Icon';
 
 
-const MEDALS = ['🥇', '🥈', '🥉'];
 
 const MEDAL_BG = [
   'bg-gradient-to-r from-yellow-400/15 to-amber-300/5 border-yellow-400/25',
@@ -77,7 +77,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
-          <div className="text-5xl">🏁</div>
+          <div className="flex justify-center text-ink-fire"><Icon name="finish" className="w-12 h-12" /></div>
           <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
             {t.board.unavailable}
           </h1>
@@ -134,7 +134,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
       <div className="flex-1">
         {!data.published ? (
           <Card className="p-8 text-center">
-            <div className="text-4xl mb-3">⏳</div>
+            <div className="mb-3 flex justify-center text-ink-amber"><Icon name="hourglass" className="w-10 h-10" /></div>
             <p className="font-medium text-zinc-300">{t.board.notPublished}</p>
             <p className="text-zinc-500 text-sm mt-1">{t.board.revealsDuring}</p>
           </Card>
@@ -153,7 +153,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                 style={{ animationDelay: `${i * 50}ms` }}
               >
                 <span className="w-8 text-center text-xl">
-                  {MEDALS[i] ?? <span className="text-zinc-500 text-sm font-mono">#{r.rank}</span>}
+                  {medalFor(i, 'w-7 h-7') ?? <span className="text-zinc-500 text-sm font-mono">#{r.rank}</span>}
                 </span>
                 <div className="flex-1 min-w-0">
                   <div dir="auto" className="truncate font-semibold text-zinc-100">{r.teamName}</div>
@@ -181,7 +181,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                           }
                           style={{ color: accent }}
                         >
-                          {final ? '' : '⏱ '}{sec != null ? formatDuration(sec) : '—'}
+                          {final ? null : <Icon name="stopwatch" className="w-4 h-4 inline-block align-text-bottom me-1" />}{sec != null ? formatDuration(sec) : '—'}
                         </span>
                       );
                     }
@@ -198,7 +198,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                                 : 'text-[13px] text-zinc-500 italic font-mono tabular-nums opacity-80'
                             }
                           >
-                            {final ? '' : '⏱ '}{formatDuration(sec)}
+                            {final ? null : <Icon name="stopwatch" className="w-4 h-4 inline-block align-text-bottom me-1" />}{formatDuration(sec)}
                           </span>
                         )}
                       </>

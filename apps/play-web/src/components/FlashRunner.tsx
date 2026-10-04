@@ -11,6 +11,7 @@ import { submitFlashMission, releaseFlashMission } from '../services/calls';
 import { useT } from '../i18nContext';
 import { Button, Card } from './ui';
 import type { FlashMissionDoc } from '@rushpoint/shared';
+import { Icon } from './Icon';
 
 type Ctx = { ownerUid: string; gameId: string; runId: string };
 
@@ -27,6 +28,13 @@ export default function FlashRunner({ ctx, flashId, lang, onChanged, readOnly }:
   const [flash, setFlash] = useState<(FlashMissionDoc & { title?: string; titleHe?: string; description?: string; descriptionHe?: string }) | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // The countdown lives here now, not in the live strip above (which skips the flash
+  // this team is on, so the screen says it once). Ticks once a second while mounted.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => onSnapshot(
     doc(db, `users/${ctx.ownerUid}/games/${ctx.gameId}/runs/${ctx.runId}/flashMissions/${flashId}`),
@@ -67,7 +75,17 @@ export default function FlashRunner({ ctx, flashId, lang, onChanged, readOnly }:
 
   return (
     <Card className="p-5 border-2 border-purple-400/60" data-testid="flash-runner">
-      <div className="text-xs font-bold uppercase tracking-widest text-purple-300 mb-1">⚡ {f.badge}</div>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-xs font-bold uppercase tracking-widest text-purple-700 inline-flex items-center gap-1"><Icon name="bolt" className="w-3.5 h-3.5" />{f.badge}</div>
+        {flash?.expiresAt && (() => {
+          const secs = Math.max(0, Math.round((new Date(flash.expiresAt).getTime() - now) / 1000));
+          return (
+            <span className="text-xs font-mono text-purple-700 shrink-0" data-testid="flash-runner-countdown" dir="ltr">
+              {String(Math.floor(secs / 60)).padStart(2, '0')}:{String(secs % 60).padStart(2, '0')}
+            </span>
+          );
+        })()}
+      </div>
       <h2 dir="auto" className="text-2xl font-bold mb-2">{title}</h2>
       {desc && <p dir="auto" className="text-base text-zinc-300 leading-relaxed mb-2">{desc}</p>}
       {(flash?.bonusPoints ?? 0) > 0 && <p className="text-sm font-semibold text-ink-fire mb-3">+{flash?.bonusPoints} {f.points}</p>}
@@ -83,7 +101,7 @@ export default function FlashRunner({ ctx, flashId, lang, onChanged, readOnly }:
             <label className="block">
               <span className="sr-only">{flash.doneBy === 'photo' ? f.takePhoto : f.takeVideo}</span>
               <span className="inline-flex w-full items-center justify-center min-h-[48px] rounded-xl bg-gradient-to-r from-rp-fire to-rp-amber text-white font-bold cursor-pointer">
-                {busy ? f.sending : flash.doneBy === 'photo' ? `📸 ${f.takePhoto}` : `🎥 ${f.takeVideo}`}
+                {busy ? f.sending : flash.doneBy === 'photo' ? f.takePhoto : f.takeVideo}
               </span>
               <input type="file" className="hidden" disabled={busy}
                 accept={flash.doneBy === 'photo' ? 'image/*' : 'video/*'} capture="environment"

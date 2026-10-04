@@ -16,6 +16,7 @@ import { joinReadiness, MEMBER_NAME_FIELD_ID } from '../lib/joinReadiness';
 import { creatorUrl } from '../lib/creatorUrl';
 import { LoadingView } from '../components/LoadingView';
 import { planTestDriveAutoJoin } from '../lib/testDriveAutoJoin';
+import { Icon, type IconName } from '../components/Icon';
 
 // The legal footer moved to components/LegalFooter so the Final screen can show
 // the same links (a player who finishes without ever re-reading Join still needs
@@ -354,7 +355,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
                 sound ? 'border-accent text-ink-fire' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              {sound ? '🔊' : '🔇'}
+              <Icon name={sound ? 'speaker' : 'speakerOff'} className="w-5 h-5" />
             </button>
             <button
               onClick={() => setColorblind(!colorblind)}
@@ -366,7 +367,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
                 colorblind ? 'text-zinc-300' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              ◐
+              <Icon name="contrast" className="w-5 h-5" aria-hidden />
             </button>
             <button
               onClick={toggleLang}
@@ -386,7 +387,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
                 boxShadow: '0 8px 32px rgba(255,87,34,0.45), 0 2px 8px rgba(255,87,34,0.3)',
               }}
             >
-              🏁
+              <Icon name="finish" className="w-9 h-9 text-white" />
             </div>
 
             <h1 className="font-brand text-4xl font-extrabold tracking-tight leading-none mb-1.5"
@@ -477,7 +478,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
                 onClick={onDemo}
                 className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-2xl border border-glass-border bg-white/70 text-sm font-bold text-ink-fire hover:bg-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
               >
-                <span aria-hidden="true">🎭</span> {t.join.tryDemo}
+                <Icon name="play" className="w-4 h-4 inline-block align-text-bottom" /> {t.join.tryDemo}
               </button>
               <p className="text-[13px] text-zinc-500 mt-2 leading-snug px-4">{t.join.tryDemoSub}</p>
             </div>
@@ -490,7 +491,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
               together with no separator. Now: one hairline rule marks "this is the
               other-audience shelf", both entries are the same quiet weight, and
               the more common need (build a game) comes before the rarest (staff).
-              The 🔑 emoji is gone: it also marks the "join" how-to card, and these
+              The key icon is gone: it also marks the "join" how-to card, and these
               are precisely the two things players already confuse. */}
           <div className="mt-5 pt-3 border-t border-glass-border text-center space-y-1.5">
               <p className="text-[13px] text-zinc-500">
@@ -525,23 +526,23 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
           <div className="mt-6">
             <div className="grid grid-cols-3 gap-2.5">
               {[
-                { icon: '🔑', label: t.join.how1Label, sub: t.join.how1Sub },
-                { icon: '🧭', label: t.join.how2Label, sub: t.join.how2Sub },
-                { icon: '🏆', label: t.join.how3Label, sub: t.join.how3Sub },
+                { icon: 'key' as IconName, label: t.join.how1Label, sub: t.join.how1Sub },
+                { icon: 'compass' as IconName, label: t.join.how2Label, sub: t.join.how2Sub },
+                { icon: 'trophy' as IconName, label: t.join.how3Label, sub: t.join.how3Sub },
               ].map((s, i) => (
                 <div
                   key={s.label}
                   className="rounded-2xl bg-white/70 border border-glass-border px-2 py-2 text-center shadow-[0_1px_4px_rgba(26,10,0,0.05)] animate-fade-up"
                   style={{ animationDelay: `${i * 80}ms` }}
                 >
-                  <div className="text-xl mb-1">{s.icon}</div>
+                  <div className="mb-1 flex justify-center text-ink-fire"><Icon name={s.icon} className="w-6 h-6" /></div>
                   <div className="text-[13px] font-bold text-zinc-200">{s.label}</div>
                   <div className="text-[12px] text-zinc-500 mt-0.5 leading-tight">{s.sub}</div>
                 </div>
               ))}
             </div>
             <p className="text-center text-[13px] text-zinc-500 mt-2 flex items-center justify-center gap-1.5">
-              <span className="text-ink-go">●</span> {t.join.noAccountNeeded}
+              <span aria-hidden className="inline-block w-2 h-2 rounded-full bg-rp-go" /> {t.join.noAccountNeeded}
             </p>
             <LegalFooter />
           </div>
@@ -647,7 +648,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
         {!isSolo && !teamFields.some((f) => f.id === 'teamName') && (
           <Card className="p-5">
             <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
-              <span>🏷️</span>
+              <Icon name="tag" className="w-4 h-4" />
               {t.join.teamName} *
             </div>
             <Input
@@ -667,7 +668,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
 
         <Card className="p-5">
           <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
-            <span>{isSolo ? '👤' : '👥'}</span>
+            <Icon name={isSolo ? 'user' : 'users'} className="w-4 h-4" />
             {isSolo ? t.join.yourName : t.join.teamMembers} *
           </div>
           {isSolo ? (
@@ -726,7 +727,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       </Button>
       {/* flash-missions-v2 (field report 2026-09-27): surprises arrive with a sound. iOS silences web
           audio on the ringer switch, so the hint names both the volume and silent mode. */}
-      <p className="mt-3 text-center text-[13px] text-zinc-500" data-testid="volume-hint">🔊 {t.join.volumeHint}</p>
+      <p className="mt-3 text-center text-[13px] text-zinc-500" data-testid="volume-hint"><Icon name="speaker" className="w-4 h-4 inline-block align-text-bottom" /> {t.join.volumeHint}</p>
       {!isSolo && (
         <button
           type="button"

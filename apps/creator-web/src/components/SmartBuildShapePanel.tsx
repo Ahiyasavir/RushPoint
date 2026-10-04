@@ -22,6 +22,7 @@
 // cannot leak an untranslated word.
 import { useEffect, useRef } from 'react';
 import type { ShapeStage } from '../lib/composeGame';
+import { Icon } from './Icon';
 
 export interface SmartBuildShapePanelProps {
   stages: readonly ShapeStage[];
@@ -74,7 +75,7 @@ export default function SmartBuildShapePanel({ stages, possible, labels }: Smart
     <>
       {hasShape && (
         <div className="flex lg:hidden items-center gap-1.5 w-fit rounded-full border border-[--rp-border] bg-[--surface-1] px-3 py-1 text-[13px] text-[--ink-2]" aria-live="polite">
-          <span aria-hidden="true">🧩</span>
+          <Icon name="puzzle" className="w-4 h-4 shrink-0" />
           <span>{labels.slots(totalSlots)}</span>
         </div>
       )}

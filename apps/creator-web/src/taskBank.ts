@@ -2563,9 +2563,27 @@ export interface TaskBankEntry {
    * own `UNLIMITED_CAPACITY_THRESHOLD` convention treats it as "no queue here".
    */
   exclusiveStation?: boolean;
+  /**
+   * Does a PLACE help this mission (change: composer-siting-by-station)?
+   * `never`: its substance is talk, a riddle, an agreement or a chore, and a pin
+   * adds nothing. `possible`: it can be played anywhere, and a good spot makes it
+   * better. `must`: it is tied to a place by nature. Absent is derived from the
+   * tags by `bankSiting` (composeGame.ts), which reproduces the old rule exactly,
+   * so an annotation can only take a pin AWAY.
+   */
+  siting?: BankSiting;
+  /** When a place helps: what kind of spot to look for. Shown to the creator. */
+  spot?: SpotKind;
   /** Which template this content came from. Traceability only — nothing reads it. */
   sourceTemplateKey: string;
 }
+
+/** See `TaskBankEntry.siting`. */
+export type BankSiting = 'never' | 'possible' | 'must';
+
+/** Generic spots a creator can find anywhere (the printable-kit lesson: match, do not invent). */
+export const SPOT_KINDS = ['bench', 'bigTree', 'sign', 'openGrass', 'entrance', 'anyCorner'] as const;
+export type SpotKind = typeof SPOT_KINDS[number];
 
 /**
  * The capacity a located mission declares when there is genuinely no shared
@@ -2728,6 +2746,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'youth-great-escape',
+    spot: 'entrance',
     sourceTemplateKey: 'youth-missions',
     // `freeze-frame` dissolved: its other half, `frozen-genre`, was deleted in the
     // owner's curation pass. Rule 82 — shown the pair he removed the weaker one
@@ -2745,6 +2764,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'youth-human-pyramid',
+    spot: 'openGrass',
     sourceTemplateKey: 'youth-missions',
     // It used to carry `start`, on the grounds — written here — that it was "the
     // bank's only opener that needs no venue". There are seven placeless openers
@@ -2820,11 +2840,12 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'youth-breaking-news',
+    spot: 'bench',
     sourceTemplateKey: 'youth-missions',
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'park'],
     difficulty: 5,
     build: () => anywhere({
-      title: 'כתבת חדשות דחופה 📰',
+      title: 'כתבת חדשות דחופה',
       description: 'אחד מכם כתב טלוויזיה שמדווח בשידור חי על אירוע מוזר שקרה כאן. השאר משחקים ניצבים, עוברי אורח או גיבורי האירוע. סרטון של 40 שניות, עם פתיחה וסיום. הכתב חייב לומר איפה הוא עומד ומה קרה כאן. אם תצליחו לשכנע עובר אורח אמיתי להתראיין, זה מה שיהפוך את הסרטון לאמיתי.',
       type: 'photo',
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
@@ -3026,6 +3047,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // composer would have picked this AS the honest best fit for an adult
     // opener, not despite one. Narrowed to the audience it actually suits.
     key: 'open-team-name',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'easy'],
     difficulty: 2,
@@ -3056,6 +3078,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     // The adults/corporate placeless opener open-team-name can no longer cover.
     key: 'open-team-motto',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'adults', 'corporate',
@@ -3077,6 +3100,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'open-everyone-airborne',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: [
       'start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids',
@@ -3095,6 +3119,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'finish-podium',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
         tags: [
           'finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed',
@@ -3121,6 +3146,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Play from anywhere: the gap that capped no-venue games ────────────────
   {
     key: 'rock-cairn',
+    spot: 'anyCorner',
     sourceTemplateKey: 'authored',
     // A stone cairn needs actual stones, so it prefers outdoor natural terrain —
     // a soft area preference, not a hard filter, so it still plays anywhere
@@ -3141,6 +3167,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'human-letter',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
         tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'mixed',
       'youth', 'kids', 'corporate', 'medium', 'forest', 'beach', 'park', 'neighborhood',
@@ -3165,6 +3192,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // real team-communication exercise actually takes. Fully self-contained: no
     // creator prep, so no `needsSetup`.
     key: 'silent-briefing',
+    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['camera', 'teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home',
       'mixed', 'youth', 'adults', 'corporate', 'medium', 'forest', 'beach', 'park',
@@ -3394,6 +3422,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Strangers: the missions people remember a week later ──────────────────
   {
     key: 'thirty-second-interview',
+    spot: 'bench',
     sourceTemplateKey: 'authored',
     tags: [
       'action', 'camera', 'creative', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall',
@@ -3412,6 +3441,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'honest-compliment',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'action', 'camera', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'beach',
@@ -3564,6 +3594,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'elevator-pitch',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'creative', 'thinking', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'mall',
@@ -3621,6 +3652,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'silliest-walk',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: [
       'action', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'park', 'school',
@@ -3664,6 +3696,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'two-truths-one-lie',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'office',
@@ -3735,6 +3768,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // seconds of typing into an actual small social task, and it is what makes
     // the mission belong in a FIELD game rather than a pub quiz.
     key: 'trivia-bones',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'trivia-fact',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
@@ -3756,6 +3790,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'trivia-longest-river',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'trivia-fact',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
@@ -3807,6 +3842,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Indoor depth: a mall and a school are not just "not outdoors" ─────────
   {
     key: 'window-story',
+    spot: 'sign',
     sourceTemplateKey: 'authored',
     // Rule 12/48: the same mechanic as `the-broken-sign` — find a thing, point a
     // camera at it, and invent the human story behind it in 30 seconds. They
@@ -3861,6 +3897,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── A few more to keep repeat generations apart ───────────────────────────
   {
     key: 'forced-perspective',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
       'park', 'school', 'office', 'beach', 'mall', 'cityCenter',
@@ -3878,6 +3915,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'everyone-hidden',
+    spot: 'bigTree',
     sourceTemplateKey: 'authored',
     tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
       'park', 'forest', 'beach', 'neighborhood', 'school',
@@ -4000,6 +4038,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'team-decision-drill',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['teamwork', 'thinking', 'needsSetup', 'fromAnywhere', 'home', 'indoor',
       'office', 'mall', 'park', 'school',
@@ -4026,6 +4065,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'the-hard-riddle',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
       'office', 'school', 'mall', 'park', 'cityCenter',
@@ -4109,6 +4149,7 @@ export const TASK_BANK: TaskBankEntry[] = [
 
   {
     key: 'the-broken-sign',
+    spot: 'sign',
     sourceTemplateKey: 'authored',
     // Paired with `window-story` — see the family note there.
     family: 'invent-a-backstory',
@@ -4133,6 +4174,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'escape-route',
+    spot: 'entrance',
     sourceTemplateKey: 'authored',
     tags: ['camera', 'thinking', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'indoor',
       'mall', 'office', 'school',
@@ -4167,6 +4209,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // from literally any stage of any game, which is exactly why the bank
     // could not skip it any longer.
     key: 'best-moment-so-far',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth',
       'adults', 'corporate', 'easy', 'forest', 'beach', 'park', 'neighborhood',
@@ -4216,6 +4259,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // undisputed chronological order, same "ask around, no Googling" rule the
     // other trivia missions use so it stays a field-game beat, not a quiz app.
     key: 'invention-order',
+    siting: 'never',
     // NOT tagged family: 'trivia-fact' — that family groups the pick-an-answer
     // quizzes (trivia-bones, trivia-longest-river), which really are one
     // mechanic with different questions. Dragging five items into
@@ -4317,6 +4361,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── A real named practice, not a generic "build something" (rule 3) ───────
   {
     key: 'paper-airplane-trial',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: ['action', 'creative', 'camera', 'needsSetup', 'fromAnywhere',
       'home', 'park', 'kids', 'youth', 'adults', 'mixed', 'easy'],
@@ -4343,6 +4388,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // how-many-steps. And per rule 3: a real, named practice, not "carry a
     // thing" — the waiter's race is a genuine restaurant tradition.
     key: 'waiters-race',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: ['camera', 'action', 'needsSetup', 'fromAnywhere',
       'home', 'park', 'kids', 'youth', 'adults', 'mixed', 'easy'],
@@ -4473,6 +4519,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── A ranking, not a fake timeline — rule 21 ────────────────────────────────
   {
     key: 'celebrants-favorites-ranking',
+    siting: 'never',
     // The whole mission is the celebrant's own preferences.
     occasions: ['birthday', 'mitzvah'],
     // Same real mechanic as invention-order (orderItems), different content and
@@ -4525,6 +4572,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Same rule 28 principle as backwards-name: no bracket, no setup step — the
     // celebrant's identity is ambient knowledge, not data the platform needs.
     key: 'birthday-wish',
+    siting: 'never',
     // A wish TO the celebrant, and it is a `finish` mission: without this lock a
     // team-building game could end on it.
     occasions: ['birthday', 'mitzvah'],
@@ -4569,6 +4617,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // they are the only ones guaranteed to be there.
   {
     key: 'height-line-up',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: ['start', 'teamwork', 'action', 'camera', 'noPrep', 'fromAnywhere',
       'park', 'school', 'beach', 'neighborhood', 'home',
@@ -4594,6 +4643,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // prep, and the optional step lets a creator swap in a statue that actually
     // stands where they are playing.
     key: 'statue-remake',
+    spot: 'anyCorner',
     sourceTemplateKey: 'authored',
     family: 'recreate-famous-image',
     tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
@@ -4621,6 +4671,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // difference is the constraints: one sentence each, no repeated topic, and
     // everyone has to be in the frame, so it ends somewhere definite.
     key: 'story-round',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere',
       'park', 'school', 'home', 'beach', 'neighborhood',
@@ -4643,6 +4694,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // a spoiler of the answer.
   {
     key: 'anagram-easy',
+    siting: 'never',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'youth', 'mixed', 'easy',
@@ -4663,6 +4715,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'anagram-medium',
+    siting: 'never',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'mixed',
@@ -4683,6 +4736,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'anagram-hard',
+    siting: 'never',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'adults', 'corporate', 'mixed',
@@ -4742,6 +4796,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Identical-kit-per-team, same precedent as challenge-shampoo-pitch — no
     // hunting, no scarcity, every team assembles their own copy.
     key: 'puzzle-code',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'home', 'adults', 'corporate', 'hard'],
     difficulty: 7,
@@ -4764,6 +4819,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'mystery-gift',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
     difficulty: 3,
@@ -4789,6 +4845,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Rule 19: every balloon of the ONE chosen color carries the same code, so
     // there is never a "which one is correct" ambiguity for the team.
     key: 'balloon-message',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'medium'],
     difficulty: 4,
@@ -4873,6 +4930,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // one thing in the room that can genuinely answer back — teams that read it
     // aloud usually hear it before they solve it.
     key: 'echo-riddle',
+    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate',
       'mixed', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall',
@@ -4896,6 +4954,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // in a week) are true for every reader, so nothing here can come out
     // ambiguous the way a venue-dependent count could (rule 8/31).
     key: 'vault-combination-riddle',
+    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate',
       'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall',
@@ -4928,6 +4987,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // difficulty is re-priced from 5 to 3 (rule 75): what is left is doing three
     // things in the right order.
     key: 'disarm-the-device',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults',
       'corporate', 'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood',
@@ -4952,6 +5012,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // played (rule 31): every home, office and school bathroom holds one. The
     // youngest-friendly entry of the three, and the only one carrying `home`.
     key: 'household-riddle-comb',
+    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'forest',
       'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor',
@@ -4976,6 +5037,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // uses only furniture and soft goods already standing in the room — the
     // same reasoning `human-letter`/`open-everyone-airborne` use for bodies.
     key: 'blanket-fort',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
     difficulty: 3,
@@ -5036,6 +5098,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // so nobody can be delegated to. Rule 17: the restart is what makes the bar
     // cost something instead of decorating the copy.
     key: 'finish-all-or-nothing',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: ['finish', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home',
       'park', 'beach', 'school', 'neighborhood',
@@ -5060,6 +5123,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // talks most. Familied with `finish-one-word-each`, which is the same
     // go-around-the-circle mechanic with a shorter unit (rule 12).
     key: 'finish-what-we-didnt-know',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     // `closing-round` dissolved: its other half, `finish-one-word-each`, was deleted
     // in the owner's curation pass (rule 82).
@@ -5086,6 +5150,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // alone. The "something you give up" clause is rule 17: without it every
     // team writes three rules it was going to follow anyway.
     key: 'open-team-pact',
+    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['start', 'teamwork', 'thinking', 'creative', 'camera', 'noPrep', 'fromAnywhere',
       'home', 'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'forest', 'beach',
@@ -5107,6 +5172,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // with a fixed per-member unit, so five players produce a visibly different
     // result from four.
     key: 'open-one-take-intro',
+    spot: 'openGrass',
     sourceTemplateKey: 'authored',
     tags: ['start', 'action', 'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home',
       'park', 'school', 'neighborhood', 'beach', 'cityCenter',
@@ -5236,6 +5302,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Rule 15: the puzzle is authored, with a real checkable answer, not a
     // mechanic label.
     key: 'thinking-room',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'park',
@@ -5296,6 +5363,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // every living room certainly has. Rule 22: the byproduct is furniture out
     // of place, so putting it back is in the copy the players read.
     key: 'living-room-obstacle',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'action', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
@@ -5323,6 +5391,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // labour rather than an honour rule. Deliberately NOT `needsSetup`: the
     // object is chosen from whatever is in the room.
     key: 'blind-describe',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'thinking', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
@@ -5398,6 +5467,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The flagship, and deliberately the simplest. Any surface, any age, and the
     // same-angle rule is what turns tidying up into something with a finish line.
     key: 'chore-before-after',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'chore-reset',
     tags: ['chores', 'camera', 'action', 'noPrep', 'fromAnywhere', 'home', 'indoor',
@@ -5420,6 +5490,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // honest: no family has a fully matched sock drawer, and pretending otherwise
     // would make the mission unfinishable (rule 5).
     key: 'chore-sock-pairs',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['chores', 'camera', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'kids', 'mixed', 'easy'],
@@ -5439,6 +5510,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Rule 33 by arithmetic: the target is PER MEMBER, so a team of four moves
     // forty things and a member who sat it out is visible in the count.
     key: 'chore-ten-things',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'chore-reset',
     tags: ['chores', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
@@ -5459,6 +5531,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Nobody is forgotten IS the mission: it makes the team count the people in
     // the house, which is the part a child actually has to think about.
     key: 'chore-table-set',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['chores', 'camera', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'kids', 'mixed', 'easy'],
@@ -5478,6 +5551,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Floor 8: the first mission here with a JUDGEMENT in it. Deciding whether
     // something is past its date is the step a younger child cannot take alone.
     key: 'chore-fridge-audit',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['chores', 'thinking', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'youth', 'mixed', 'adults', 'medium'],
@@ -5497,6 +5571,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Splitting the piles rather than assigning one each: a team of two has to
     // work as well as a team of four (rule 50 forbids a headcount rule).
     key: 'chore-laundry-sort',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['chores', 'teamwork', 'thinking', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'youth', 'kids', 'mixed', 'easy'],
@@ -5516,6 +5591,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The counter being EMPTY is the unambiguous finish (rule 5). Without it,
     // putting the dishes away ends whenever the team decides it does.
     key: 'chore-clear-the-counter',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['chores', 'action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'youth', 'kids', 'mixed', 'adults', 'medium'],
@@ -5535,6 +5611,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // A round trip through the whole house, which is what makes it feel like a
     // mission rather than a single errand.
     key: 'chore-bin-round',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['chores', 'action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'kids', 'youth', 'mixed', 'easy'],
@@ -5555,6 +5632,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // and what goes is the actual work here, and it needs an age where agreeing
     // means something (rule 33 — consensus as the gate).
     key: 'chore-the-drawer',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['chores', 'thinking', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
       'youth', 'adults', 'mixed', 'medium'],
@@ -5574,6 +5652,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The big one, for the oldest band: a whole room against a clock. The guest
     // test is the criterion, because tidy is not one.
     key: 'chore-room-reset',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'chore-reset',
     tags: ['chores', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',

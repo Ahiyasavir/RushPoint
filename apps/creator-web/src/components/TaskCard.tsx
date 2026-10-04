@@ -12,6 +12,7 @@ import { OverflowMenu } from './OverflowMenu';
 import { GROUP_STYLES } from '../lib/groupStyles';
 import { useT } from './LanguageContext';
 import { BuilderIcon, TRIGGER_ICON_NAME } from './builderIcons';
+import { Icon } from './Icon';
 
 // The exclusive-group palette now lives in a pure, React-free lib so it can be
 // unit-tested directly. Re-exported here so existing importers (BuilderPage,
@@ -239,8 +240,8 @@ export default function TaskCard({
       <div className="flex items-center gap-3 min-w-0 text-xs text-[--ink-3]">
         <span className="truncate flex-1" dir="auto">{taskPreviewLine(task, previewLabels)}</span>
         <DifficultyDots difficulty={task.difficulty} />
-        <span className="shrink-0 tabular-nums" title={b.estimatedMinutesTitle}>⏱ {task.estimatedMinutes}m</span>
-        <span className="shrink-0 tabular-nums" title={b.pointsTitle}>★ {task.pointValue}</span>
+        <span className="shrink-0 tabular-nums inline-flex items-center gap-0.5" title={b.estimatedMinutesTitle}><Icon name="stopwatch" className="w-3.5 h-3.5" />{task.estimatedMinutes}m</span>
+        <span className="shrink-0 tabular-nums inline-flex items-center gap-0.5" title={b.pointsTitle}><Icon name="star" className="w-3.5 h-3.5" />{task.pointValue}</span>
       </div>
     </div>
   );

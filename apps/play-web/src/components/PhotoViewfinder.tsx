@@ -6,6 +6,7 @@ import {
   writeCameraChoice, type Facing,
 } from '../lib/cameraChoice';
 import { CAMERA_OPEN_DEADLINE_MS, withCameraDeadline } from '../lib/videoCapture';
+import { Icon } from './Icon';
 
 // The in-app photo camera (change: camera-switch 2.4, design D1-D4). The same viewfinder shape as
 // video: open on the player's own choice, then the mission's selfie default, then the rear camera;
@@ -153,7 +154,7 @@ export default function PhotoViewfinder({ selfie, runId, onShot, onClose, onFall
           <button type="button" onClick={() => void switchCamera()} disabled={switching}
             aria-label={t.task.switchCamera} title={t.task.switchCamera} data-testid="photo-camera-switch"
             className="absolute start-6 bottom-[34px] flex h-12 w-12 items-center justify-center rounded-full border-2 border-white/80 bg-black/45 backdrop-blur-sm text-xl text-white transition-transform active:scale-95 disabled:opacity-50">
-            🔄
+            <Icon name="refresh" className="w-6 h-6" />
           </button>
         )}
         <button type="button" onClick={shoot} disabled={!ready} aria-label={t.task.shutter} data-testid="photo-shutter"

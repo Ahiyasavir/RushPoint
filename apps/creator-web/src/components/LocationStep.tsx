@@ -12,6 +12,7 @@ import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { LatLng } from '../lib/mapAnchor';
 import { Input, Label } from './ui';
 import { useT } from './LanguageContext';
+import { Icon } from './Icon';
 
 /**
  * ONE field for the pair, not two boxes side by side (change: builder-ux-round-2).
@@ -69,7 +70,7 @@ const LocationPicker = lazyWithRetry('locationPicker', () => import('./LocationP
 function MapSkeleton({ label, className }: { label: string; className: string }) {
   return (
     <div className={`${className} rounded-lg border border-[--rp-border] bg-[--surface-2] animate-pulse flex items-center justify-center gap-2 text-xs text-[--ink-3]`}>
-      <span>🗺</span> {label}
+      <Icon name="map" className="w-4 h-4" /> {label}
     </div>
   );
 }

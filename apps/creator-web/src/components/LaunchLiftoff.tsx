@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { liftoffStepIndex } from '../lib/launchLiftoff';
+import { Icon } from './Icon';
 
 // A branded "your run is lifting off" overlay for the launchRun wait
 // (change: creator-launch-liftoff) — the creator's most anxious wait used to
@@ -57,7 +58,7 @@ export function LaunchLiftoff({ open, title, messages, intervalMs = 1800 }: Laun
       aria-live="polite"
     >
       <div className="w-full max-w-sm rounded-2xl border border-[--rp-border] bg-[--surface-1] p-8 text-center shadow-soft space-y-5">
-        <div className="text-4xl" aria-hidden="true">🚀</div>
+        <div className="text-ink-fire" aria-hidden="true"><Icon name="rocket" className="w-10 h-10" /></div>
         <h2 dir="auto" className="text-lg font-bold text-[--ink-1]">{title}</h2>
         <p
           dir="auto"

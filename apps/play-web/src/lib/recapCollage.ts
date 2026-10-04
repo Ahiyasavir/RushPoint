@@ -36,7 +36,7 @@ export async function buildRecapCollage(
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 56px Outfit, Inter, sans-serif';
-  ctx.fillText('🏁 ' + opts.title, W / 2, 80);
+  ctx.fillText(opts.title, W / 2, 80);
 
   const top = 120;
   const montageH = H * 0.74 - top + 120;

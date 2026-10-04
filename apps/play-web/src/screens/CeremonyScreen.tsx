@@ -8,8 +8,8 @@ import { ceremonyStart, ceremonyNext, type CeremonyPhase } from '@rushpoint/shar
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { useT } from '../i18nContext';
 import { Spinner } from '../components/Spinner';
+import { Icon, medalFor } from '../components/Icon';
 
-const MEDALS = ['🥇', '🥈', '🥉'];
 const POLL_MS = 12_000;     // re-poll while unpublished — comes alive on publish
 const SLIDE_MS = 4_000;     // per slideshow photo
 const PODIUM_MS = 5_000;    // per podium reveal step
@@ -110,7 +110,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
   if (!published || phase == null) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center text-center gap-4 bg-app-bg p-8">
-        <div className="text-7xl">🏆</div>
+        <div className="flex justify-center text-ink-amber"><Icon name="trophy" className="w-20 h-20" /></div>
         <h1 dir="auto" className="font-brand text-4xl font-extrabold text-zinc-200">{data?.title ?? 'RushPoint'}</h1>
         <p className={`text-2xl ${loadError ? 'text-ink-fire font-semibold' : 'text-zinc-500'}`}>
           {loadError ? t.ceremony.loadError : t.ceremony.ceremonyWaiting}
@@ -160,7 +160,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
                 {feed[slide].teamName} · {feed[slide].taskTitle}
               </p>
               {feed[slide].totalReactions > 0 && (
-                <p className="text-sm text-zinc-300">🔥 {feed[slide].totalReactions}</p>
+                <p className="text-sm text-zinc-300 inline-flex items-center gap-1"><Icon name="flame" className="w-4 h-4" />{feed[slide].totalReactions}</p>
               )}
             </div>
           </div>
@@ -190,7 +190,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
                     : 'border-glass-border bg-app-card'
                 }`}>
                 <span className="w-14 text-center text-3xl font-brand font-extrabold text-zinc-300">
-                  {MEDALS[i] ?? r.rank}
+                  {medalFor(i, 'w-10 h-10 mx-auto') ?? r.rank}
                 </span>
                 <div dir="auto" className="flex-1 min-w-0 text-3xl font-bold text-zinc-100 truncate">{r.teamName}</div>
                 <div className="text-end">
@@ -229,7 +229,7 @@ function Podium({ rankings, phase, accent, championLabel, timeOnly }: {
     <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-3xl w-full mx-auto">
       {phase === 'podium1' && rankings[0] && (
         <div className="rp-podium-rise text-center mb-2">
-          <div className="text-6xl mb-2">👑</div>
+          <div className="mb-2 flex justify-center text-ink-amber"><Icon name="crown" className="w-16 h-16" /></div>
           <div className="text-sm uppercase tracking-[0.3em] text-zinc-500">{championLabel}</div>
         </div>
       )}
@@ -246,7 +246,7 @@ function Podium({ rankings, phase, accent, championLabel, timeOnly }: {
                   : 'py-4 border-glass-border bg-app-card'
               }`}>
               <span className={`text-center font-brand font-extrabold ${isChampion ? 'w-16 text-5xl' : 'w-14 text-4xl'}`}>
-                {MEDALS[place - 1]}
+                {medalFor(place - 1, isChampion ? 'w-14 h-14 mx-auto' : 'w-11 h-11 mx-auto')}
               </span>
               <div dir="auto" className={`flex-1 min-w-0 font-bold text-zinc-100 truncate ${isChampion ? 'text-4xl' : 'text-3xl'}`}>
                 {r.teamName}

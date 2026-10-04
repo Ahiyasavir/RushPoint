@@ -43,6 +43,6 @@ export function shareCardLabels(d: ShareCardDict, isTimeOnly: boolean): ShareCar
     timeLabel: d.cardTime,
     stagesLabel: d.cardStages,
     ctaText: d.cardCta,
-    podiumTitle: `🏆 ${d.cardPodium}`,
+    podiumTitle: d.cardPodium,
   };
 }

@@ -8,6 +8,7 @@ import { toTelHref, toWhatsAppHref } from '@rushpoint/shared';
 import ClipTile from './ClipTile';
 import TeamChatThread from './TeamChatThread';
 import type { ChatMessage } from '@rushpoint/shared';
+import { Icon } from './Icon';
 
 // The team page (change: team-dossier-and-search, D3/D5).
 //
@@ -21,8 +22,10 @@ import type { ChatMessage } from '@rushpoint/shared';
 // open team lives in the URL (`?team=`), so the browser's back button closes it too.
 
 export default function TeamPage({
-  dossier, onClose, onAdjust, onSkip, onSendBack, onReview, reviewBusy, chat, lifecycleActions = [],
+  dossier, onClose, onAdjust, onSkip, onSendBack, onReview, reviewBusy, chat, lifecycleActions = [], follow,
 }: {
+  /** followed-teams: follow this team, and move between followed teams without closing the page. */
+  follow?: { on: boolean; toggle: () => void; prev?: () => void; next?: () => void };
   dossier: TeamDossier;
   onClose: () => void;
   onAdjust: () => void;
@@ -76,6 +79,24 @@ export default function TeamPage({
               {statusLabel}{' · '}{tp.score({ score: d.score })}{d.rank !== null ? ` · ${tp.rank({ rank: d.rank })}` : ''}
             </p>
           </div>
+          {follow?.prev && (
+            <button type="button" onClick={follow.prev} aria-label={t.runConsole.follow.prev} title={t.runConsole.follow.prev}
+              data-testid="follow-prev"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-[--surface-2] text-xl text-[--ink-2]"><span aria-hidden="true" className="inline-block rtl:-scale-x-100">‹</span></button>
+          )}
+          {follow?.next && (
+            <button type="button" onClick={follow.next} aria-label={t.runConsole.follow.next} title={t.runConsole.follow.next}
+              data-testid="follow-next"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-[--surface-2] text-xl text-[--ink-2]"><span aria-hidden="true" className="inline-block rtl:-scale-x-100">›</span></button>
+          )}
+          {follow && (
+            <button type="button" onClick={follow.toggle} aria-pressed={follow.on} data-testid="follow-toggle"
+              aria-label={follow.on ? t.runConsole.follow.unfollowAria({ team: d.name }) : t.runConsole.follow.followAria({ team: d.name })}
+              title={follow.on ? t.runConsole.follow.unfollowAria({ team: d.name }) : t.runConsole.follow.followAria({ team: d.name })}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-[--surface-2] text-2xl ${follow.on ? 'text-[#4f46e5]' : 'text-[--ink-3]'}`}>
+              <Icon name="star" className={follow.on ? 'w-6 h-6 fill-current' : 'w-6 h-6'} />
+            </button>
+          )}
         </div>
 
         <div className="p-4 space-y-5">
@@ -128,8 +149,8 @@ export default function TeamPage({
                 {d.callTargets.map((c, i) => (
                   <div key={i} className="flex flex-wrap items-center gap-2">
                     <span dir="auto" className="text-sm text-[--ink-2] flex-1 min-w-0 truncate">{c.label}: <span dir="ltr">{c.phone}</span></span>
-                    <a href={toTelHref(c.phone)!} className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire">📞 {tp.call}</a>
-                    <a href={toWhatsAppHref(c.phone)!} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire">💬 {tp.whatsapp}</a>
+                    <a href={toTelHref(c.phone)!} className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire gap-1.5"><Icon name="phone" className="w-4 h-4" />{tp.call}</a>
+                    <a href={toWhatsAppHref(c.phone)!} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire gap-1.5"><Icon name="chat" className="w-4 h-4" />{tp.whatsapp}</a>
                   </div>
                 ))}
               </div>
@@ -150,7 +171,7 @@ export default function TeamPage({
                 </span>
                 <a href={d.location.mapsUrl} target="_blank" rel="noreferrer" data-testid="team-page-map"
                   className="inline-flex items-center min-h-[44px] px-3 rounded-lg border border-[--rp-border] text-sm font-semibold text-ink-fire">
-                  🗺️ {tp.openMap}
+                  <Icon name="map" className="w-4 h-4" /> {tp.openMap}
                 </a>
               </div>
             </section>
@@ -172,7 +193,7 @@ export default function TeamPage({
                 <ul className="mt-2 space-y-1">
                   {d.phones.map((p) => (
                     <li key={p.uid} className="flex items-center gap-2 text-sm text-[--ink-2]">
-                      <span aria-hidden="true">📱</span>
+                      <Icon name="device" className="w-4 h-4 shrink-0" />
                       <span dir="auto">{p.name || tp.phoneFallback}</span>
                       {p.sending && <Badge color="green">{tp.sending}</Badge>}
                     </li>

@@ -73,8 +73,9 @@ for (const isTimeOnly of [true, false]) {
     ok(labels.timeLabel === d.cardTime, `${lang} (timeOnly=${isTimeOnly}): timeLabel === cardTime`);
     ok(labels.stagesLabel === d.cardStages, `${lang} (timeOnly=${isTimeOnly}): stagesLabel === cardStages`);
     ok(labels.ctaText === d.cardCta, `${lang} (timeOnly=${isTimeOnly}): ctaText === cardCta`);
-    ok(labels.podiumTitle === `🏆 ${d.cardPodium}`, `${lang} (timeOnly=${isTimeOnly}): podiumTitle is "🏆 " + cardPodium`);
-    ok(labels.podiumTitle.startsWith('🏆 '), `${lang} (timeOnly=${isTimeOnly}): podiumTitle starts with the trophy`);
+    // change: no-stock-emoji: the podium card draws its own trophy; the title is plain words.
+    ok(labels.podiumTitle === d.cardPodium, `${lang} (timeOnly=${isTimeOnly}): podiumTitle is cardPodium`);
+    ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(labels.podiumTitle), `${lang} (timeOnly=${isTimeOnly}): podiumTitle carries no stock emoji`);
   }
 }
 
@@ -84,7 +85,7 @@ section('HE returns Hebrew tokens, EN returns English tokens');
   const heL = shareCardLabels(he, false);
   ok(HEBREW.test(heL.headline), 'he: headline is Hebrew');
   ok(HEBREW.test(heL.ctaText), 'he: cta is Hebrew');
-  ok(HEBREW.test(heL.podiumTitle), 'he: podiumTitle contains Hebrew (after the trophy)');
+  ok(HEBREW.test(heL.podiumTitle), 'he: podiumTitle contains Hebrew');
 
   const enL = shareCardLabels(en, false);
   ok(LATIN.test(enL.headline) && !HEBREW.test(enL.headline), 'en: headline is English');

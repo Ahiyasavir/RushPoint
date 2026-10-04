@@ -25,7 +25,8 @@ import {
   TASK_SAMPLES, applySample, samplesForType, sampleWouldOverwrite,
 } from '../taskTemplates';
 import { computeGameReadiness, canLaunchGame, firstLaunchBlocker, splitTestDriveReadiness } from '../gameReadiness';
-import { defaultActiveGroups, groupSummary } from '../taskOptInGroups';
+import { defaultActiveGroups } from '../taskOptInGroups';
+import { rowSummary } from '../missionSettingsRows';
 
 function task(p: Partial<Task> = {}): Task {
   return { ...blankTask('t1'), ...p };
@@ -653,57 +654,41 @@ describe('canLaunchGame is identical to the four legacy launch guards', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Honest opt-in badge (D6, carried over to the chip model by
-//    task-editor-progressive-disclosure — the "advanced section" this block used
-//    to describe was replaced by the timer/points opt-in group)
+// 5. Honest settings rows (change: mission-editor-value-rows). The chips' count
+//    badge became the row's own value: what a mission carries is SAID on the row
+//    that holds it, and every row still opens closed.
 // ─────────────────────────────────────────────────────────────────────────────
-describe('the timer/points group reports what a task actually carries', () => {
+describe('the settings rows report what a task actually carries', () => {
   const fresh = blankTask('t1');
+  const ctx = { preset: 'fixed_points_speed', titleOf: () => '' };
 
-  it('counts an expiry on the badge, but still opens collapsed', () => {
+  it('names an expiry under "more", but still opens closed', () => {
     const t = { ...fresh, expiresAfterMinutes: 30 };
-    expect(groupSummary('timerPoints', t)).toBe(1);
-    // (change: builder-nondestructive-disclosure) Expansion is no longer derived
-    // from content — the badge above is what advertises it while folded.
-    expect(defaultActiveGroups(t).timerPoints).toBe(false);
+    expect(rowSummary('more', t, ctx)).toEqual({ key: 'moreList', items: [{ key: 'closes' }] });
+    expect(defaultActiveGroups(t).more).toBe(false);
   });
 
-  it('counts an expiry plus a scheduled release as two', () => {
-    const t = { ...fresh, expiresAfterMinutes: 30, releaseAt: '2026-01-01T10:00:00.000Z' };
-    expect(groupSummary('timerPoints', t)).toBe(2);
+  it('a scheduled release shows on the "opens" row', () => {
+    expect(rowSummary('opens', { ...fresh, releaseAt: '2026-01-01T10:00:00.000Z' }, ctx).key).toBe('opensAtTime');
+    expect(rowSummary('opens', { ...fresh, releaseAfterMinutes: 15 }, ctx)).toEqual({ key: 'opensAfterStart', params: { n: 15 } });
   });
 
-  it('counts a delayed release', () => {
-    expect(groupSummary('timerPoints', { ...fresh, releaseAfterMinutes: 15 })).toBe(1);
+  it('a fresh task says nothing is set', () => {
+    expect(rowSummary('more', fresh, ctx)).toEqual({ key: 'moreNone' });
+    expect(rowSummary('opens', fresh, ctx)).toEqual({ key: 'opensStart' });
+    expect(defaultActiveGroups(fresh).more).toBe(false);
   });
 
-  it('shows no badge for a fresh task and leaves the group as a chip', () => {
-    expect(groupSummary('timerPoints', fresh)).toBe(0);
-    expect(defaultActiveGroups(fresh).timerPoints).toBe(false);
+  it('does not name the derived estimate every task ships with', () => {
+    expect(rowSummary('more', { ...fresh, estimatedMinutes: 40 }, ctx)).toEqual({ key: 'moreNone' });
   });
 
-  it('does not count the derived estimate every task ships with', () => {
-    // `estimatedMinutes` is seeded on every task, so it can never signal
-    // authorship — counting it would mount the group for every task ever made.
-    expect(groupSummary('timerPoints', { ...fresh, estimatedMinutes: 40 })).toBe(0);
+  it('shows a point value the creator chose, on the scoring row itself', () => {
+    expect(rowSummary('scoring', { ...fresh, pointValue: 250 }, ctx)).toEqual({ key: 'points', params: { n: 250 } });
+    expect(defaultActiveGroups({ ...fresh, pointValue: 250 }).scoring).toBe(false);
   });
 
-  it('DOES count a point value the creator actually chose', () => {
-    // A deliberate change from the old advanced badge, which ignored points: a
-    // creator who set 250 must see that where they set it. Since
-    // builder-nondestructive-disclosure that surfacing is the CHIP BADGE rather
-    // than an auto-opened section.
-    expect(groupSummary('timerPoints', { ...fresh, pointValue: 250 })).toBe(1);
-    expect(defaultActiveGroups({ ...fresh, pointValue: 250 }).timerPoints).toBe(false);
-  });
-
-  it('opens collapsed whatever the count says', () => {
-    // The mounted flag USED to be derived from the count. It no longer is
-    // (change: builder-nondestructive-disclosure): coupling them meant a
-    // template-seeded game unfolded three sections on every task, because the
-    // template seeder and blankTask disagree on the field defaults. The count
-    // still drives the badge — asserted alongside, so a regression that silences
-    // the badge can't hide behind this.
+  it('opens closed whatever the task holds', () => {
     const table: Task[] = [
       fresh,
       { ...fresh, expiresAfterMinutes: 30 },
@@ -712,11 +697,8 @@ describe('the timer/points group reports what a task actually carries', () => {
       { ...fresh, pointValue: 500 },
     ];
     for (const t of table) {
-      expect(defaultActiveGroups(t).timerPoints).toBe(false);
-    }
-    // …and everything except the untouched `fresh` task still advertises itself.
-    for (const t of table.slice(1)) {
-      expect(groupSummary('timerPoints', t)).toBeGreaterThan(0);
+      const a = defaultActiveGroups(t);
+      expect(Object.values(a).some(Boolean)).toBe(false);
     }
   });
 });

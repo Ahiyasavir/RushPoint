@@ -778,6 +778,13 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   The plugin is served from our OWN bundle via Vite `?url`, never MapLibre's docs' unpkg URL: a map
   must not need a third-party CDN, and it is registered `lazy` so a Latin-only map never fetches the
   ~200 KB asm.js. Adding a new map ⇒ add the call; `scripts/test-geocode.ts` enforces it.
+- **MapLibre also draws its OWN words, in English, outside `t.*`.** The two-finger hint on a phone
+  ("Use two fingers to move the map"), the zoom buttons' labels, the attribution toggle and the
+  canvas's accessible name all came from MapLibre's built-in English, so the i18n gate could not
+  see them and a Hebrew mission editor led with an English sentence. Every map passes
+  `locale: mapLocale(t.mapUi)` (`apps/*/src/lib/mapLocale.ts`, duplicated like `mapRtl.ts`).
+  Adding a new map ⇒ pass it; `scripts/test-map-locale.ts` enforces it and that the locale covers
+  every key the controls we use display.
 - **The tile key must not choose the GEOCODER.** Both used to hang off "is `VITE_MAPTILER_KEY`
   set?", so configuring the key for satellite tiles silently moved place search off OSM Nominatim
   and onto MapTiler's geocoder — whose Israeli/Hebrew address coverage is much weaker. A creator
@@ -1269,6 +1276,34 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   and covered the SOS button. Invisible on the desktop preview and at "half", which is where every
   check had looked. `boxSnapHeights` measures the container (ResizeObserver). Anything drawn above
   the header's safety controls (SOS, the menu) is a safety defect, not a layout nit.
+- **No stock emoji anywhere in either app's UI; icons are drawn** (Ahiya, 2026-10-02; change:
+  no-stock-emoji took 561 to 0). The drawings live ONCE in `packages/shared/src/iconPaths.ts` (plain path
+  data, 24x24, `currentColor`) and render through each app's `components/Icon.tsx` (`<Icon name=… />`,
+  `iconSvgMarkup` for MapLibre markers, play-web `lib/canvasIcon.ts` for share images, `Medal` for podium
+  places). `EmptyState`/`SettingRow` take an icon NAME. Stored reaction keys (`FEED_EMOJIS`,
+  `REACTION_EMOJI`) stay emoji because they are DATA; only their rendering is drawn (`reactionIcon`).
+  `scripts/test-no-stock-emoji.ts` fails on any new one (★ ☆ included); new icon ⇒ add it to
+  `iconPaths.ts`, `scripts/test-icon-paths.ts` checks it. Out of scope: e-mail HTML and webhook payloads.
+
+- **Both apps are LIGHT, and only the zinc scale is reversed, so every other dark-theme shade is
+  now pale text.** A flash mission's title on a player's phone was `text-purple-200` (#e9d5ff) on a
+  near-white card, about 1.2:1; creator-web had `text-amber-400` hints at about 1.7:1. Nothing was
+  loud: the class names are valid and the a11y scan cannot know a stock shade sits on a light card.
+  Use the `ink-*` tokens (creator) or a 700+ shade; `scripts/test-pale-text.ts` fails on a 50 to 300
+  shade in play-web and a 50 to 400 base shade in creator-web, with declared on-dark exceptions.
+- **React Router state lives in `history.state`, which a reload KEEPS.** A one-navigation stamp
+  (`JUST_CREATED_NAV_STATE`) read as "this mount came from the wizard" deferred Quick Setup on every
+  refresh too, while the code comment promised a reload was "arriving fresh". Consume such a stamp
+  with a `replace` navigation once read. Same family: "fires on the transition into X" is false when
+  X is restored from storage AFTER the first render (`idle → done` on every page load); decide on
+  the transition that actually means the event (`reachedFinishLine`, `running → done`).
+
+- **Hebrew sentences speak in the plural; short labels keep their form** (Ahiya, 2026-10-04;
+  change: hebrew-one-voice). A Hebrew string of four words or more addresses the reader as
+  "אתם" ("הקלידו", "שלכם", "בדקו") or impersonally, never one man ("הקלד", "שלך", "שמחקת"); a short
+  button verb ("שמור", "מחק") is ordinary Hebrew UI and stays. `scripts/test-hebrew-voice.ts`
+  renders both dictionaries and fails on a new one; words that only look like address
+  ("כתוב" = "is written", "שמור" = "saved") are declared with a reason.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

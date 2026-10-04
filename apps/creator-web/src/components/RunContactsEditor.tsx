@@ -4,6 +4,7 @@ import { useT } from './LanguageContext';
 import { Button } from './ui';
 import { setRunContacts } from '../services/calls';
 import { toast } from './toast';
+import { Icon } from './Icon';
 
 // Tonight's phone numbers (change: quick-dial-and-actions, D2). Players see the ones marked
 // "players" as a "call" button next to SOS; staff see theirs in the staff app. The server
@@ -61,7 +62,7 @@ export default function RunContactsEditor({ ctx, contacts }: {
 
   return (
     <div className="mt-4 rounded-xl border border-[--rp-border] p-3">
-      <h3 className="text-sm font-semibold text-[--ink-1]">📞 {rc.title}</h3>
+      <h3 className="text-sm font-semibold text-[--ink-1] flex items-center gap-1.5"><Icon name="phone" className="w-4 h-4" />{rc.title}</h3>
       <p className="text-[13px] text-[--ink-3] mt-0.5 mb-2">{rc.help}</p>
       <div className="space-y-3">
         {rows.map((r, i) => (

@@ -10,6 +10,8 @@ import MapModeToggle from './MapModeToggle';
 import { useT } from '../i18nContext';
 import type { MapSearchArea } from '../lib/searchAreas';
 import { recenterVerdict } from '../lib/recenter';
+import { Icon, iconSvgMarkup, type IconName } from './Icon';
+import { mapLocale } from '../lib/mapLocale';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -46,11 +48,11 @@ function ensurePulseStyle() {
 }
 
 // Other missions of the game (decision 2026-09-28: locked ones too), small and quiet under the flag.
-const PIN_STYLE: Record<MissionPin['state'], { bg: string; glyph: string }> = {
-  done: { bg: '#16A34A', glyph: '✓' },
+const PIN_STYLE: Record<MissionPin['state'], { bg: string; glyph: IconName | '' }> = {
+  done: { bg: '#16A34A', glyph: 'check' },
   current: { bg: '#F97316', glyph: '' },
   open: { bg: '#64748B', glyph: '' },
-  locked: { bg: '#94A3B8', glyph: '🔒' },
+  locked: { bg: '#94A3B8', glyph: 'lock' },
 };
 
 
@@ -252,6 +254,7 @@ export default function NavMap({
     const first = valid[0] ?? overlayPts[0] ?? (hasMe && me ? { lat: me.lat, lng: me.lng } : undefined);
     map.current = new maplibregl.Map({
       container: ref.current,
+      locale: mapLocale(t.mapUi),
       // Honor the current mode so a map RE-created after its targets briefly
       // emptied (which tears the map down) comes back in the tile style the user
       // last chose, instead of silently reverting to topo while the toggle still
@@ -336,8 +339,8 @@ export default function NavMap({
         ring.className = 'rp-pulse-ring';
         ring.style.cssText = `position:absolute;bottom:-6px;width:28px;height:28px;border-radius:50%;background:${accent};animation:rpPulse 1.6s ease-out infinite;`;
         const flag = document.createElement('div');
-        flag.textContent = '🚩';
-        flag.style.cssText = 'font-size:30px;line-height:1;filter:drop-shadow(0 2px 2px rgba(0,0,0,.4));position:relative;';
+        flag.innerHTML = iconSvgMarkup('flag', 32, accent);
+        flag.style.cssText = 'line-height:0;filter:drop-shadow(0 1px 1px #fff) drop-shadow(0 2px 2px rgba(0,0,0,.4));position:relative;';
         const label = document.createElement('div');
         label.textContent = t.title;
         label.dir = 'auto';
@@ -363,7 +366,7 @@ export default function NavMap({
     pinMarkers.current = (pins ?? []).filter((p) => !drawn.has(p.id) && isValidCoord(p.lat, p.lng)).map((p) => {
       const style = PIN_STYLE[p.state];
       const el = document.createElement('div');
-      el.textContent = style.glyph;
+      if (style.glyph) el.innerHTML = iconSvgMarkup(style.glyph, 11, '#ffffff');
       el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${style.bg};border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;opacity:${p.state === 'locked' ? 0.75 : 0.95};cursor:pointer;`;
       const stateText = { done: t.play.pinDone, current: t.play.pinCurrent, open: t.play.pinOpen, locked: t.play.pinLocked }[p.state];
       return new maplibregl.Marker({ element: el })
@@ -399,9 +402,9 @@ export default function NavMap({
     if (!r) { arrowMarker.current?.remove(); return; }
     if (!arrowMarker.current) {
       const el = document.createElement('div');
-      el.textContent = '➤';
+      el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22"><path d="M4 4.5 20.5 12 4 19.5 7.5 12z" fill="currentColor" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>';
       el.setAttribute('aria-hidden', 'true');
-      el.style.cssText = `font-size:22px;color:${accent};text-shadow:0 0 3px #fff,0 0 3px #fff;line-height:1;`;
+      el.style.cssText = `color:${accent};line-height:0;filter:drop-shadow(0 0 2px #fff);`;
       arrowMarker.current = new maplibregl.Marker({ element: el, rotationAlignment: 'map' });
     }
     // Midway along the line, pointing at the mission. The glyph points EAST, so bearing - 90.
@@ -499,7 +502,7 @@ export default function NavMap({
       {activeTarget && (
         <div className="absolute top-2 inset-x-0 z-10 flex justify-center pointer-events-none" data-testid="walk-chip">
           <span dir="auto" className="inline-flex items-center gap-1.5 rounded-full bg-app-card/95 backdrop-blur border border-glass-border px-3 py-1 text-[13px] font-semibold text-zinc-100 shadow-soft">
-            🚩 {meValid
+            <Icon name="flag" className="w-4 h-4 shrink-0 text-ink-fire" /> {meValid
               ? t.play.walkChip({ meters: Math.round(haversineKm({ lat: me!.lat, lng: me!.lng }, { lat: activeTarget.lat, lng: activeTarget.lng }) * 1000) })
               : t.play.walkChipNoFix}
           </span>

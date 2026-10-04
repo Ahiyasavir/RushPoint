@@ -16,10 +16,12 @@
 //
 // Pure: no React, no i18n, no Firebase.
 import type { PanelId } from './runConsoleLayout';
+import { Icon, type IconName } from '../components/Icon';
 
 export type PanelCopy = {
   /** Rendered decoratively beside the title, never inside the translated text. */
-  icon: string;
+  /** A drawn icon (packages/shared/src/iconPaths.ts), never an emoji (change: no-stock-emoji). */
+  icon: IconName;
   /** Every panel has an explanation. There is no opt out, on purpose. */
   hasHelp: true;
   /** Does this panel have a state where it legitimately holds nothing? */
@@ -28,45 +30,45 @@ export type PanelCopy = {
 
 export const PANEL_COPY: Record<PanelId, PanelCopy> = {
   // ── Always on screen ──
-  joinShare: { icon: '🔑', hasHelp: true, hasEmpty: false },
-  startTeams: { icon: '🚦', hasHelp: true, hasEmpty: false },
-  alerts: { icon: '🆘', hasHelp: true, hasEmpty: false },
-  broadcast: { icon: '📢', hasHelp: true, hasEmpty: false },
-  liveMap: { icon: '📍', hasHelp: true, hasEmpty: false },
+  joinShare: { icon: 'key', hasHelp: true, hasEmpty: false },
+  startTeams: { icon: 'play', hasHelp: true, hasEmpty: false },
+  alerts: { icon: 'sos', hasHelp: true, hasEmpty: false },
+  broadcast: { icon: 'megaphone', hasHelp: true, hasEmpty: false },
+  liveMap: { icon: 'map', hasHelp: true, hasEmpty: false },
 
   // ── Teams and standings ──
-  teams: { icon: '👥', hasHelp: true, hasEmpty: true },
-  liveStandings: { icon: '📊', hasHelp: true, hasEmpty: false },
-  finalStandings: { icon: '🏁', hasHelp: true, hasEmpty: false },
+  teams: { icon: 'users', hasHelp: true, hasEmpty: true },
+  liveStandings: { icon: 'chart', hasHelp: true, hasEmpty: false },
+  finalStandings: { icon: 'finish', hasHelp: true, hasEmpty: false },
 
   // ── Game systems ──
-  hotZone: { icon: '🔥', hasHelp: true, hasEmpty: false },
-  flashMission: { icon: '⚡', hasHelp: true, hasEmpty: false },
-  trackables: { icon: '🎒', hasHelp: true, hasEmpty: true },
-  zones: { icon: '🚩', hasHelp: true, hasEmpty: true },
-  taskAvailability: { icon: '⏸️', hasHelp: true, hasEmpty: true },
+  hotZone: { icon: 'flame', hasHelp: true, hasEmpty: false },
+  flashMission: { icon: 'bolt', hasHelp: true, hasEmpty: false },
+  trackables: { icon: 'backpack', hasHelp: true, hasEmpty: true },
+  zones: { icon: 'flag', hasHelp: true, hasEmpty: true },
+  taskAvailability: { icon: 'pause', hasHelp: true, hasEmpty: true },
 
   // ── From the field ──
   // run-console-simplify: "עכשיו", everything waiting for the organizer in one list.
-  inbox: { icon: '⚡', hasHelp: true, hasEmpty: true },
-  photoReview: { icon: '📷', hasHelp: true, hasEmpty: true },
-  feed: { icon: '📸', hasHelp: true, hasEmpty: true },
-  mediaGallery: { icon: '🖼️', hasHelp: true, hasEmpty: true },
-  chat: { icon: '💬', hasHelp: true, hasEmpty: true },
+  inbox: { icon: 'bolt', hasHelp: true, hasEmpty: true },
+  photoReview: { icon: 'camera', hasHelp: true, hasEmpty: true },
+  feed: { icon: 'image', hasHelp: true, hasEmpty: true },
+  mediaGallery: { icon: 'image', hasHelp: true, hasEmpty: true },
+  chat: { icon: 'chat', hasHelp: true, hasEmpty: true },
   // The organizer's end of the staff↔admin channel (staff-console-field-ops).
-  staffChannel: { icon: '📻', hasHelp: true, hasEmpty: true },
+  staffChannel: { icon: 'radio', hasHelp: true, hasEmpty: true },
 
   // ── Share and screens ──
-  shareScreens: { icon: '🔗', hasHelp: true, hasEmpty: false },
-  stationQr: { icon: '🖨️', hasHelp: true, hasEmpty: false },
-  staffInvite: { icon: '🧑‍✈️', hasHelp: true, hasEmpty: false },
+  shareScreens: { icon: 'link', hasHelp: true, hasEmpty: false },
+  stationQr: { icon: 'printer', hasHelp: true, hasEmpty: false },
+  staffInvite: { icon: 'badge', hasHelp: true, hasEmpty: false },
 
   // ── Reports ──
-  runSummary: { icon: '🧾', hasHelp: true, hasEmpty: true },
-  analytics: { icon: '📈', hasHelp: true, hasEmpty: true },
-  heatmap: { icon: '🗺️', hasHelp: true, hasEmpty: true },
-  feedback: { icon: '⭐', hasHelp: true, hasEmpty: true },
-  survey: { icon: '🗳️', hasHelp: true, hasEmpty: true },
+  runSummary: { icon: 'receipt', hasHelp: true, hasEmpty: true },
+  analytics: { icon: 'trend', hasHelp: true, hasEmpty: true },
+  heatmap: { icon: 'map', hasHelp: true, hasEmpty: true },
+  feedback: { icon: 'star', hasHelp: true, hasEmpty: true },
+  survey: { icon: 'ballot', hasHelp: true, hasEmpty: true },
 };
 
 export function panelCopy(id: PanelId): PanelCopy {

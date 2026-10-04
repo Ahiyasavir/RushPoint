@@ -17,6 +17,7 @@ import { shareOutcomeFeedback, type ShareOutcome } from '../lib/shareFeedback';
 import { loadChunk } from '../lib/loadChunk';
 import LegalFooter from '../components/LegalFooter';
 import { LoadingView } from '../components/LoadingView';
+import { Icon, medalFor, type IconName } from '../components/Icon';
 
 function fmtDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
@@ -25,7 +26,6 @@ function fmtDuration(sec: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
 }
 
-const MEDAL = ['🥇', '🥈', '🥉'];
 const MEDAL_BG = [
   'bg-gradient-to-r from-yellow-400/20 to-amber-300/10 border-yellow-400/30',
   'bg-gradient-to-r from-gray-300/20 to-gray-200/10 border-gray-300/30',
@@ -224,7 +224,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
               className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mx-auto mb-3"
               style={{ background: `radial-gradient(circle at 40% 35%, ${accent}30, ${accent}08)`, boxShadow: `0 0 40px ${accent}40` }}
             >
-              ✅
+              <Icon name="checkCircle" className="w-12 h-12" />
             </div>
             <h1 className="font-brand text-4xl font-extrabold" style={{ color: accent }}>{t.play.testModeDoneTitle}</h1>
             <p dir="auto" className="text-zinc-400 mt-1">{t.final.subtitle({ name: team.displayName })}</p>
@@ -248,7 +248,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
             className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mx-auto mb-3"
             style={{ background: `radial-gradient(circle at 40% 35%, ${accent}30, ${accent}08)`, boxShadow: `0 0 40px ${accent}40` }}
           >
-            🏆
+            <Icon name="trophy" className="w-12 h-12" />
           </div>
           <h1 className="font-brand text-4xl font-extrabold" style={{ color: accent }}>{runEnded ? t.final.titleRunEnded : t.final.title}</h1>
           <p dir="auto" className="text-zinc-400 mt-1">{runEnded ? t.final.subtitleRunEnded({ name: team.displayName }) : t.final.subtitle({ name: team.displayName })}</p>
@@ -267,7 +267,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
           </div>
           {myRank && (
             <div className="flex items-center justify-center gap-2">
-              <span className="text-lg">{MEDAL[myRank - 1] ?? '🏅'}</span>
+              {medalFor(myRank - 1, 'w-6 h-6') ?? <Icon name="medal" className="w-6 h-6" />}
               <span className="text-sm font-medium text-zinc-300">{t.final.rankLabel({ rank: myRank })}</span>
             </div>
           )}
@@ -275,7 +275,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
 
         {/* Race recap */}
         <Card className="p-4 w-full">
-          <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🗂️ {t.final.recapTitle}</div>
+          <div className="text-sm font-semibold text-zinc-300 mb-3 text-start flex items-center gap-1.5"><Icon name="image" className="w-4 h-4 shrink-0" />{t.final.recapTitle}</div>
           <div className="grid grid-cols-2 gap-2.5">
             <Stat label={t.final.statTotalTime} value={totalSec != null ? fmtDuration(totalSec) : '?'} accent={accent} />
             <Stat label={t.final.statStages} value={`${completedStages.length}/${team.stages.length}`} accent={accent} />
@@ -328,7 +328,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
                   <div key={place}
                     className="flex-1 flex flex-col items-center justify-end animate-fade-up motion-reduce:animate-none"
                     style={{ animationDelay: `${place * 80}ms` }}>
-                    <div className="text-2xl leading-none">{MEDAL[place - 1]}</div>
+                    <div className="leading-none">{medalFor(place - 1, 'w-8 h-8')}</div>
                     <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-ink-fire' : 'text-zinc-200'}`}>{e.teamName}</div>
                     <div className="text-[13px] text-zinc-400 mb-1">
                       {isTimeOnly
@@ -346,7 +346,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
         {/* Leaderboard */}
         {board && board.rankings.length > 0 && (
           <Card className="p-4 w-full">
-            <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🏅 {t.final.leaderboardTitle}</div>
+            <div className="text-sm font-semibold text-zinc-300 mb-3 text-start flex items-center gap-1.5"><Icon name="trophy" className="w-4 h-4 shrink-0" />{t.final.leaderboardTitle}</div>
             <div className="space-y-1.5">
               {board.rankings.slice(0, 10).map((r, i) => {
                 const isMe = r.teamId === team.id;
@@ -362,7 +362,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
                     style={{ animationDelay: `${i * 60}ms` }}
                   >
                     <span className="w-6 flex items-center justify-center">
-                      {MEDAL[i] ?? (
+                      {medalFor(i, 'w-6 h-6') ?? (
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/10 text-zinc-400 text-xs font-mono font-semibold">{r.rank}</span>
                       )}
                     </span>
@@ -381,7 +381,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
             of showing a blank space where the board would be. */}
         {boardWithheld && (
           <Card className="p-6 w-full text-center">
-            <div className="text-4xl mb-2">🤫</div>
+            <div className="mb-2 flex justify-center text-zinc-400"><Icon name="eyeOff" className="w-10 h-10" /></div>
             <div className="text-sm font-semibold text-zinc-300">{t.final.notRevealedTitle}</div>
             <p className="text-zinc-500 text-sm mt-1">{t.final.notRevealedBody}</p>
           </Card>
@@ -404,7 +404,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
         <a href={PAYMENTS_ENABLED ? `${creatorUrl()}/?ref=${team.ownerUid}` : creatorUrl()} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
           <div className="flex items-center justify-center gap-1.5 text-[13px] text-zinc-500 mb-0.5">
-            <span>⚡</span> {t.final.poweredBy}
+            <Icon name="bolt" className="w-4 h-4" /> {t.final.poweredBy}
           </div>
           <div className="text-sm font-semibold" style={{ color: accent }}>
             {t.final.buildOwn}
@@ -432,8 +432,8 @@ function Stat({ label, value, accent }: { label: string; value: string; accent: 
 // Cross-run badges (change: player-profile-badges): the player's earned badges,
 // with any newly-unlocked this game highlighted. Reads the server-written profile
 // (recorded on finish); newness is tracked locally so it only celebrates once.
-const BADGE_EMOJI: Record<string, string> = {
-  first_finish: '🏁', explorer: '🧭', pathfinder: '🗺️', veteran: '🎖️', high_scorer: '💯', legend: '👑',
+const BADGE_ICON: Record<string, IconName> = {
+  first_finish: 'finish', explorer: 'compass', pathfinder: 'map', veteran: 'medal', high_scorer: 'hundred', legend: 'crown',
 };
 
 // Badges are written by the async onRunFinalized trigger AFTER finalize completes, so
@@ -503,7 +503,7 @@ function BadgesCard({ finalized }: { finalized: boolean }) {
                 : 'border-glass-border text-zinc-300'
             }`}
           >
-            <span aria-hidden>{BADGE_EMOJI[b] ?? '🏅'}</span>
+            <Icon name={BADGE_ICON[b] ?? 'medal'} className="w-4 h-4 shrink-0" />
             <span dir="auto">{label(b)}</span>
             {fresh.has(b) && <span className="text-[12px] font-bold uppercase">{t.badges.new}</span>}
           </div>

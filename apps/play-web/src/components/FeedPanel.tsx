@@ -24,6 +24,8 @@ import { db } from '../services/firebase';
 import { reactToFeedItem, hideFeedItem, reportFeedItem } from '../services/calls';
 import { useT } from '../i18nContext';
 import { dialog } from './dialog';
+import { Icon } from './Icon';
+import { reactionIcon } from '@rushpoint/shared';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
@@ -362,7 +364,7 @@ export default function FeedPanel({
                     <button
                       key={emoji}
                       onClick={() => void react(item, emoji)}
-                      aria-label={t.feed.feedReactAria({ emoji })}
+                      aria-label={t.feed.feedReactAria({ emoji: t.feed.reactionName[reactionIcon(emoji)] ?? '' })}
                       aria-pressed={selected}
                       className={`inline-flex items-center justify-center gap-1 rounded-full border px-3 min-h-[44px] min-w-[44px] text-sm transition-colors ${
                         selected
@@ -370,7 +372,7 @@ export default function FeedPanel({
                           : 'bg-app-raised border-glass-border text-zinc-400'
                       }`}
                     >
-                      <span aria-hidden>{emoji}</span>
+                      <Icon name={reactionIcon(emoji)} className="w-5 h-5" />
                       {count > 0 && <span className="font-mono text-xs">{count}</span>}
                     </button>
                   );

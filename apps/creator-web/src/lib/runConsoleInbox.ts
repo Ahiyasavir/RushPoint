@@ -107,3 +107,20 @@ export function inboxRowAction(kind: InboxKind): InboxRowAction {
     default: return { teamPage: true };
   }
 }
+
+/**
+ * "הקבוצות שלי" in the "now" list (change: followed-teams): items of followed teams come right after
+ * the safety items, and "mine only" drops other teams' items. Safety (SOS, out of bounds) is never
+ * demoted and never hidden, whoever the team is: a followed team's photo must not bury another
+ * team's SOS. Stable within each group.
+ */
+export function prioritizeFollowed(items: readonly InboxItem[], followed: readonly string[], mineOnly: boolean): InboxItem[] {
+  if (!Array.isArray(items)) return [];
+  const mine = new Set(Array.isArray(followed) ? followed : []);
+  if (mine.size === 0 && !mineOnly) return [...items];
+  const safety = items.filter((i) => i.kind === 'sos' || i.kind === 'outOfBounds');
+  const rest = items.filter((i) => i.kind !== 'sos' && i.kind !== 'outOfBounds');
+  const followedItems = rest.filter((i) => i.teamId && mine.has(i.teamId));
+  const others = mineOnly ? [] : rest.filter((i) => !(i.teamId && mine.has(i.teamId)));
+  return [...safety, ...followedItems, ...others];
+}

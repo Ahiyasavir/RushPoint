@@ -23,6 +23,7 @@ import { LoadingState } from '../components/LoadingState';
 import { useT } from '../components/LanguageContext';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
+import { Icon } from '../components/Icon';
 
 type GateState = 'checking' | 'denied' | 'allowed';
 
@@ -40,8 +41,7 @@ export default function AdminTemplatesPage() {
   // debugging session once already.
   const [failed, setFailed] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [editingMeta, setEditingMeta] = useState<string | null>(null); // gameId of the open emoji/order editor
-  const [emojiDraft, setEmojiDraft] = useState('');
+  const [editingMeta, setEditingMeta] = useState<string | null>(null); // gameId of the open order/genre editor
   const [orderDraft, setOrderDraft] = useState('');
   // What KIND of game this template is (change: guided-new-game-wizard). The
   // new-game wizard asks "a story, or missions?" and resolves the answer through
@@ -129,7 +129,7 @@ export default function AdminTemplatesPage() {
     try {
       const { gameId } = await importGameFile({ file: doc as GameFile });
       importedGameId = gameId;
-      await setGameTemplateFlag({ gameId, isTemplate: true, templateEmoji: '✨', templateOrder: nextTemplateOrder() });
+      await setGameTemplateFlag({ gameId, isTemplate: true, templateOrder: nextTemplateOrder() });
       nav(`/build/${gameId}`);
     } catch (e) {
       console.error('[adminTemplates] import failed:', e);
@@ -148,7 +148,7 @@ export default function AdminTemplatesPage() {
     try {
       const { gameId } = await createGame({ title: at.newTemplateTitle, mode: 'team', tags: [] });
       createdGameId = gameId;
-      await setGameTemplateFlag({ gameId, isTemplate: true, templateEmoji: '✨', templateOrder: nextTemplateOrder() });
+      await setGameTemplateFlag({ gameId, isTemplate: true, templateOrder: nextTemplateOrder() });
       nav(`/build/${gameId}`);
     } catch (e) {
       console.error('[adminTemplates] create failed:', e);
@@ -163,7 +163,6 @@ export default function AdminTemplatesPage() {
 
   function openMetaEditor(g: Game) {
     setEditingMeta(g.id);
-    setEmojiDraft(g.templateEmoji ?? '');
     setOrderDraft(String(g.templateOrder ?? ''));
     setGenreDraft(g.templateGenre ?? '');
   }
@@ -174,7 +173,6 @@ export default function AdminTemplatesPage() {
       const order = orderDraft.trim() === '' ? undefined : Number(orderDraft);
       await setGameTemplateFlag({
         gameId: g.id, isTemplate: true,
-        templateEmoji: emojiDraft.trim() || undefined,
         templateOrder: Number.isFinite(order) ? order : undefined,
         templateGenre: genreDraft || undefined,
       });
@@ -278,7 +276,7 @@ export default function AdminTemplatesPage() {
       </div>
     );
   }
-  if (gate === 'denied') return <EmptyState icon="🔒" title={at.deniedTitle} body={at.deniedBody} />;
+  if (gate === 'denied') return <EmptyState icon="lock" title={at.deniedTitle} body={at.deniedBody} />;
   if (!games) {
     return (
       <div className="animate-fade-up space-y-4">
@@ -348,7 +346,7 @@ export default function AdminTemplatesPage() {
       )}
 
       {games.length === 0 ? (
-        <EmptyState icon="🧩" title={at.emptyTitle} body={at.emptyBody} />
+        <EmptyState icon="puzzle" title={at.emptyTitle} body={at.emptyBody} />
       ) : (
         <ul className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {games.map((g) => {
@@ -357,7 +355,7 @@ export default function AdminTemplatesPage() {
             return (
               <li key={g.id} className="rounded-xl border border-[--rp-border] bg-[--surface-1] p-3 space-y-2">
                 <div className="flex items-start gap-2">
-                  <div className="text-2xl leading-none shrink-0">{g.templateEmoji || '🧩'}</div>
+                  <Icon name="puzzle" className="w-6 h-6 shrink-0 text-ink-fire" />
                   <div className="min-w-0">
                     <div className="font-medium text-[--ink-1] truncate" dir="auto">{g.title}</div>
                     {/* An admin scanning this list is asking "can people see
@@ -374,7 +372,6 @@ export default function AdminTemplatesPage() {
 
                 {editingMeta === g.id ? (
                   <div className="space-y-1.5 pt-1 border-t border-[--rp-border]">
-                    <Input dense value={emojiDraft} onChange={(e) => setEmojiDraft(e.target.value)} placeholder={at.emojiLabel} aria-label={at.emojiLabel} />
                     <Input dense value={orderDraft} onChange={(e) => setOrderDraft(e.target.value)} placeholder={at.orderLabel} aria-label={at.orderLabel} inputMode="numeric" />
                     {/* Which wizard answer this template answers. Left blank, the
                         template simply is not offered as a wizard choice. */}

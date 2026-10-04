@@ -220,7 +220,13 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
   // 1. Staff — highest precedence, and it CONSUMES owner/game/run so no later
   //    branch can re-read `game` as a promo id. A staff link never touches the
   //    player session: a marshal borrowing a player's phone must not wipe it.
-  if (p.has(STAFF_ROUTE_PARAM) || (input.hasStaffSession && !linkCode)) {
+  //    A STORED session yields to any explicit public link, for the same reason it
+  //    yields to `?code=`: a marshal who taps the shared leaderboard on their own
+  //    phone wants the leaderboard. A `game=` counts only ALONE: a legacy staff link
+  //    carries `game=` together with `owner=` and `run=`, and must still land in staff.
+  const promoLink = !!value(p, 'game') && !value(p, 'owner') && !value(p, 'run');
+  const publicLink = !!(value(p, 'board') || value(p, 'tv') || value(p, 'recap')) || promoLink;
+  if (p.has(STAFF_ROUTE_PARAM) || (input.hasStaffSession && !linkCode && !publicLink)) {
     const ctx =
       parseStaffParam(value(p, STAFF_ROUTE_PARAM)) ??
       (() => {

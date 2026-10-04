@@ -41,10 +41,13 @@ import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../compo
 // send-team-back: the "where to?" picker and what it may offer.
 import SendBackPicker, { type SendBackChoice } from '../components/SendBackPicker';
 import RoutePicker from '../components/RoutePicker';
-import { buildInbox, consoleClockMs, inboxRowAction } from '../lib/runConsoleInbox';
+import { buildInbox, consoleClockMs, inboxRowAction, prioritizeFollowed, type InboxKind } from '../lib/runConsoleInbox';
+import FollowedStrip, { type FollowedCard } from '../components/FollowedStrip';
+import { useFollowedTeams } from '../lib/useFollowedTeams';
 import { buildRoutePicker } from '../lib/routePicker';
 import type { WaivableKind, FlashDoneBy, FlashClaimMode, FlashMissionDoc } from '@rushpoint/shared';
 import { flashMissionState, flashClaimsByFlash, type FlashClaim } from '@rushpoint/shared';
+import { followedTeamStatus, followedTeamAction, neighbourFollowed, sortFollowedFirst } from '@rushpoint/shared';
 import ConsoleTabs from '../components/ConsoleTabs';
 import { searchTeams, type TeamFilter, type TeamSort } from '../lib/teamSearch';
 import { buildTeamDossier } from '../lib/teamDossier';
@@ -108,7 +111,10 @@ import LiveTeamMap from '../components/LiveTeamMap';
 import HeatmapMap from '../components/HeatmapMap';
 import LocationStep from '../components/LocationStep';
 import { isPlacedCoord, type LatLng } from '../lib/mapAnchor';
+import { inboxAge } from '../lib/inboxAge';
+import { flashWinners, splitFlashes } from '../lib/flashConsoleList';
 import { isValidCoord } from '@rushpoint/shared';
+import { Icon, type IconName } from '../components/Icon';
 
 // Where the participant app lives (for the shareable join link/QR).
 const PLAY_URL = import.meta.env.DEV
@@ -188,6 +194,8 @@ export default function RunConsolePage() {
   // degrades the board must SAY so instead of freezing at last-known state.
   const [teamsStale, setTeamsStale] = useState(false);
   const [lastTeamsSyncAt, setLastTeamsSyncAt] = useState<number | null>(null);
+  // followed-teams: "הקבוצות שלי", per run and per person on this device (Ahiya, 2026-09-30).
+  const follow = useFollowedTeams(runId, ownerUid, lastTeamsSyncAt == null ? null : teams.map((tm) => tm.id));
   const [alertsStreamError, setAlertsStreamError] = useState(false);
   // A single low-frequency wall-clock ticker for time-derived render (the
   // "reconnecting · updated Xs ago" staleness age). On the 2nd+ consecutive
@@ -989,7 +997,7 @@ export default function RunConsolePage() {
       return (
         <div className="max-w-2xl mx-auto animate-fade-up">
           <Card className="p-8 text-center">
-            <div className="text-3xl mb-3">⚠️</div>
+            <div className="mb-3 flex justify-center text-ink-amber"><Icon name="alert" className="w-8 h-8" /></div>
             <p className="text-sm text-[--ink-2] mb-4">{t.runConsole.runNotFound}</p>
             <Button onClick={() => nav('/live')}>{t.runConsole.backToRuns}</Button>
           </Card>
@@ -1025,6 +1033,60 @@ export default function RunConsolePage() {
   const attentionCount = teams.reduce(
     (n, tm) => n + (attentionById.get(tm.id)?.level !== 'ok' ? 1 : 0), 0,
   );
+
+  // ── followed-teams ("הקבוצות שלי") ─────────────────────────────────────────
+  function toggleFollow(teamId: string) {
+    if (follow.toggle(teamId) === 'full') void dialog.alert(rc.follow.full);
+  }
+  /** The mission this team holds but has not opened by arriving (arrival-gated runs only). */
+  function sealedTaskOf(teamId: string): string | null {
+    if ((run as { arrivalGate?: boolean } | null)?.arrivalGate !== true) return null;
+    const rec = ((teamStages.get(teamId) as { tasks?: { taskId: string; status?: string; arrivedAt?: string }[] }[] | undefined) ?? [])
+      .flatMap((st) => st.tasks ?? []).find((r) => r.status === 'assigned' && !r.arrivedAt);
+    return rec?.taskId ?? null;
+  }
+  function buildFollowedCards(nowMsCards: number): FollowedCard[] {
+    const sosTeamIds = alerts.filter((a) => !/bounds/i.test(a.type)).map((a) => a.teamId);
+    const f = rc.follow;
+    const fmt = (ms: number) => { const sec = Math.floor(ms / 1000); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
+    return follow.list.flatMap((id) => {
+      const row = teams.find((tm) => tm.id === id);
+      if (!row) return [];
+      const doc = (teamFullDocs.get(id) ?? {}) as Record<string, unknown>;
+      const status = followedTeamStatus({
+        team: {
+          ...doc, id, launched: row.launched, held: row.held, removed: row.removed, outOfBounds: row.outOfBounds,
+          status: row.finished ? 'finished' : doc.status,
+        } as never,
+        nowMs: nowMsCards,
+        sosTeamIds,
+        stuck: attentionById.get(id)?.level === 'stuck',
+      });
+      const act = followedTeamAction(status, { review: true, route: true, hold: true, start: true, safety: true }, { sealedTaskId: sealedTaskOf(id) });
+      let action: FollowedCard['action'] = null;
+      if (act?.kind === 'approve') {
+        const item = act.item;
+        action = {
+          label: f.action.approve,
+          run: () => {
+            if (item.kind === 'task') void reviewFromTeamPage(id, item.id, true);
+            else void reviewFlashMission({ ...ctx, flashId: item.id, teamId: id, action: 'approve' })
+              .then(() => toast.success(rc.flashV2.approved)).catch(() => void dialog.alert(rc.flashV2.actionFailed));
+          },
+        };
+      } else if (act?.kind === 'openAlert') action = { label: f.action.openAlert, run: () => goToPanel('alerts') };
+      else if (act?.kind === 'resume') action = { label: f.action.resume, run: () => void resumeOneTeam(row) };
+      else if (act?.kind === 'start') action = { label: f.action.start, run: () => void startOneTeam(row) };
+      else if (act?.kind === 'letIn') { const taskId = act.taskId; action = { label: f.action.letIn, run: () => void letTeamIn(row, taskId) }; }
+      const activeTaskId = typeof doc.activeTaskId === 'string' ? doc.activeTaskId : null;
+      const line = status.kind === 'waitingReview' && status.waiting
+        ? `${f.status.waitingReview} · ${fmt(status.waiting.ageMs)}`
+        : status.kind === 'playing'
+          ? (activeTaskId && taskTitles.get(activeTaskId)) || f.status.playing
+          : f.status[status.kind];
+      return [{ id, name: row.displayName, status, line, action }];
+    });
+  }
   // Alert types are STORED enum values. A new one must never reach a human as
   // its raw string (change: run-console-clarity).
   const ALERT_TYPE_LABELS: Record<string, string> = {
@@ -1119,6 +1181,7 @@ export default function RunConsolePage() {
     outOfBoundsCount: teams.filter((tm) => tm.outOfBounds).length,
     overduePhotoCount: overduePhotoCount,
     pendingPhotoCount: photoQueues.pendingCount,
+    pendingFlashCount,
     stuckTeamCount: teams.filter((tm) => attentionById.get(tm.id)?.level === 'stuck').length,
     heldForConsentCount: teams.filter((tm) => tm.heldForConsent).length,
     unreadChatThreads,
@@ -1484,7 +1547,7 @@ export default function RunConsolePage() {
           {!finished && <RunContactsEditor ctx={ctx} contacts={activeRun.contacts} />}
         </>
       );
-      case 'stationQr': return <StationQrPrint gameId={gameId!} />;
+      case 'stationQr': return <StationQrPrint gameId={gameId!} runId={runId!} />;
       case 'broadcast': return <AnnouncementCard ctx={ctx} teams={teams} />;
 
       // Live SOS / alerts — the organizer sees these the moment a team raises one.
@@ -1563,7 +1626,8 @@ export default function RunConsolePage() {
       case 'liveMap':
         return (
           <PanelShell panel="liveMap">
-            <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" onTeamClick={openTeamPage} />
+            <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" onTeamClick={openTeamPage}
+              followed={follow.list} mineOnly={follow.mineOnly} />
           </PanelShell>
         );
 
@@ -1647,13 +1711,17 @@ export default function RunConsolePage() {
                 rankOf: (id) => rankIndex.get(id) ?? null,
                 locale: lang,
               });
-              if (shownTeams.length === 0) {
+              // followed-teams: my teams first; "mine only" shows just them.
+              const shownTeamsRaw = shownTeams;
+              const shownTeamsMine = sortFollowedFirst(
+                follow.mineOnly ? shownTeamsRaw.filter((tm) => follow.isFollowed(tm.id)) : shownTeamsRaw, follow.list);
+              if (shownTeamsMine.length === 0) {
                 return (
                   <>
                     <p role="status" className="text-sm text-[--ink-3] px-1">
                       {rc.teamSearchNoMatch}{' '}
                       <button type="button" className="underline text-ink-fire min-h-[44px]"
-                        onClick={() => { setTeamQuery(''); setTeamFilter('all'); }}>{rc.teamSearchClear}</button>
+                        onClick={() => { setTeamQuery(''); setTeamFilter('all'); follow.setMineOnly(false); }}>{rc.teamSearchClear}</button>
                     </p>
                     {removedToggle}
                   </>
@@ -1661,11 +1729,24 @@ export default function RunConsolePage() {
               }
               return (
               <div className="space-y-2">
-                {shownTeams.length !== listedTeams.length && (
-                  <p className="text-[13px] text-[--ink-3] px-1">{rc.teamSearchCount({ shown: shownTeams.length, total: listedTeams.length })}</p>
+                {follow.mineOnly && (
+                  <p role="status" className="text-[13px] text-[--ink-2] px-1" data-testid="follow-mine-note">
+                    <Icon name="star" className="w-3.5 h-3.5 inline-block align-text-bottom fill-current text-[#4f46e5]" /> {rc.follow.mineOnlyOn}{' '}
+                    <button type="button" className="underline text-ink-fire min-h-[44px]" onClick={() => follow.setMineOnly(false)}>{rc.follow.showAll}</button>
+                  </p>
                 )}
-                {shownTeams.map((team) => (
+                {shownTeamsMine.length !== listedTeams.length && (
+                  <p className="text-[13px] text-[--ink-3] px-1">{rc.teamSearchCount({ shown: shownTeamsMine.length, total: listedTeams.length })}</p>
+                )}
+                {shownTeamsMine.map((team) => (
                   <div key={team.id} className="flex flex-wrap items-center gap-3 p-2 rounded-lg bg-[--surface-2]">
+                    <button type="button" onClick={() => toggleFollow(team.id)} aria-pressed={follow.isFollowed(team.id)}
+                      data-testid="follow-star"
+                      aria-label={follow.isFollowed(team.id) ? rc.follow.unfollowAria({ team: team.displayName }) : rc.follow.followAria({ team: team.displayName })}
+                      title={follow.isFollowed(team.id) ? rc.follow.unfollowAria({ team: team.displayName }) : rc.follow.followAria({ team: team.displayName })}
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-[--surface-1] text-2xl ${follow.isFollowed(team.id) ? 'text-[#4f46e5]' : 'text-[--ink-3]'}`}>
+                      <Icon name="star" className={follow.isFollowed(team.id) ? 'w-6 h-6 fill-current' : 'w-6 h-6'} />
+                    </button>
                     <div className="flex-1 min-w-[10rem]">
                       {/* team-dossier-and-search: the name opens everything about the team. */}
                       <button type="button" onClick={() => openTeamPage(team.id)}
@@ -1944,18 +2025,20 @@ export default function RunConsolePage() {
           waiting: teams.filter((tm) => tm.launched === false && tm.removed !== true)
             .map((tm) => ({ teamId: tm.id, teamName: tm.displayName, joinedAt: tm.joinedAt ?? undefined })),
         });
+        const shownItems = prioritizeFollowed(items, follow.list, follow.mineOnly);
         const ib = rc.inbox;
         const fmtAge = (ms: number) => {
-          const s = Math.floor(ms / 1000);
-          return s < 3600 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : ib.hours({ n: Math.floor(s / 3600) });
+          const age = inboxAge(ms);
+          return age.kind === 'clock' ? age.text : age.kind === 'hours' ? ib.hours({ n: age.n }) : ib.days({ n: age.n });
         };
         return (
           <PanelShell panel="inbox">
-            {items.length === 0 ? (
+            <FollowedStrip cards={buildFollowedCards(reviewNow)} mineOnly={follow.mineOnly} onMineOnly={follow.setMineOnly} onOpen={openTeamPage} />
+            {shownItems.length === 0 ? (
               <p className="text-sm text-[--ink-3]" role="status" data-testid="inbox-empty">{rc.panel.inbox.empty}</p>
             ) : (
               <ul className="space-y-2" data-testid="inbox-list">
-                {items.map((it) => {
+                {shownItems.map((it) => {
                   const row = teams.find((tm) => tm.id === it.teamId);
                   // Where the row goes is pure (inboxRowAction): an SOS to the alerts panel, not to a
                   // team page that cannot acknowledge it.
@@ -1968,11 +2051,11 @@ export default function RunConsolePage() {
                   return (
                     <li key={it.key} className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${
                       it.severity === 'urgent' ? 'border-rp-alert bg-rp-alert/5' : 'border-[--rp-border] bg-[--surface-2]'}`}>
-                      <span className="text-lg" aria-hidden>{ib.icon[it.kind]}</span>
+                      <Icon name={INBOX_ICON[it.kind]} className={`w-5 h-5 shrink-0 ${it.severity === 'urgent' ? 'text-ink-alert' : 'text-[--ink-3]'}`} />
                       <span dir="auto" className="flex-1 min-w-[10rem] text-sm text-[--ink-1]">
                         <span className="font-semibold">{it.teamName ?? ''}</span>{it.teamName ? ' · ' : ''}{ib.kind[it.kind]}
                         {it.taskId ? <span className="text-[--ink-3]"> · {taskTitles.get(it.taskId) ?? it.taskId}</span> : null}
-                        {it.flashTitle ? <span className="text-[--ink-3]"> · ⚡ {it.flashTitle}</span> : null}
+                        {it.flashTitle ? <span className="text-[--ink-3]"> · {it.flashTitle}</span> : null}
                       </span>
                       <span className={`text-[13px] font-mono ${it.severity === 'urgent' ? 'text-ink-alert font-bold' : 'text-[--ink-3]'}`}>{fmtAge(it.ageMs)}</span>
                       {action && (
@@ -2198,7 +2281,7 @@ export default function RunConsolePage() {
         return (
           <div role="alert" data-testid="review-alarm"
             className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border-2 border-rp-alert bg-rp-alert/10 px-4 py-2 animate-pulse">
-            <span className="text-lg" aria-hidden>⏳</span>
+            <Icon name="hourglass" className="w-5 h-5 shrink-0" />
             <span dir="auto" className="flex-1 min-w-[12rem] text-sm font-bold text-ink-alert">
               {t.runConsole.reviewAlarm({ team: alarmTeam, task: taskTitles.get(alarmTaskId) ?? alarmTaskId, time: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, n: reviewAlarm.overCount })}
             </span>
@@ -2333,6 +2416,12 @@ export default function RunConsolePage() {
             })()}
             onReview={(taskId, approved) => void reviewFromTeamPage(row.id, taskId, approved)}
             reviewBusy={(taskId) => teamPageReviewBusy.has(`${row.id}:${taskId}`)}
+            follow={{
+              on: follow.isFollowed(row.id),
+              toggle: () => toggleFollow(row.id),
+              prev: neighbourFollowed(follow.list, row.id, -1) ? () => openTeamPage(neighbourFollowed(follow.list, row.id, -1)!) : undefined,
+              next: neighbourFollowed(follow.list, row.id, 1) ? () => openTeamPage(neighbourFollowed(follow.list, row.id, 1)!) : undefined,
+            }}
             chat={{
               messages: chatThreads.find((th) => th.teamId === row.id)?.messages ?? [],
               onSend: async (text) => {
@@ -2457,7 +2546,7 @@ function PanelShell({ panel, badge, actions, tone, children }: {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className={`text-sm font-medium flex flex-wrap items-center gap-1.5 ${tone === 'alert' ? 'text-ink-alert' : 'text-[--ink-1]'}`}>
-            <span aria-hidden="true">{meta.icon}</span>
+            <Icon name={meta.icon} className="w-4 h-4 shrink-0" />
             <span>{copy.title}</span>
             {badge}
           </div>
@@ -2508,7 +2597,7 @@ function JoinShare({ accessCode }: { accessCode: string }) {
           itself automatically once the cap is raised to Infinity (removed). */}
       {isRunDeviceCapActive() && (
         <p dir="auto" className="mt-3 pt-3 border-t border-[--rp-border] text-[13px] leading-relaxed text-ink-amber flex items-start gap-1.5">
-          <span aria-hidden="true">⚠️</span>
+          <Icon name="alert" className="w-4 h-4 shrink-0" />
           <span>{t.runConsole.deviceCapNote({ max: MAX_RUN_DEVICES })}</span>
         </p>
       )}
@@ -2561,7 +2650,8 @@ function StaffInviteCard({ ctx, children }: { ctx: { ownerUid: string; gameId: s
 // window listing every smart_station: title + QR (RP1: payload the play-web
 // scanner decodes) + the human-readable code beneath as a manual fallback. No
 // new callable, no sanitizer change — the QR only carries the existing code.
-function StationQrPrint({ gameId }: { gameId: string }) {
+function StationQrPrint({ gameId, runId }: { gameId: string; runId: string }) {
+  const navigate = useNavigate();
   const t = useT();
   const [busy, setBusy] = useState(false);
 
@@ -2630,9 +2720,15 @@ function StationQrPrint({ gameId }: { gameId: string }) {
 
   return (
     <PanelShell panel="stationQr">
-      <Button variant={runActionVariant('printStationQr')} onClick={print} loading={busy}>
-        {t.runConsole.printQr}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant={runActionVariant('printStationQr')} onClick={print} loading={busy}>
+          {t.runConsole.printQr}
+        </Button>
+        {/* The whole briefing for this run, answers and staff codes included (change: host-sheet). */}
+        <Button variant="ghost" onClick={() => navigate(`/host-sheet/${gameId}?run=${runId}`)}>
+          {t.hostSheet.menuItem}
+        </Button>
+      </div>
     </PanelShell>
   );
 }
@@ -2739,6 +2835,8 @@ function FlashMissionCard({ ctx, teams, claimsByFlash }: {
   }
 
   const DONE_BY: FlashDoneBy[] = ['announce', 'button', 'photo', 'video'];
+  // Current flashes in full, settled ones folded (change: flash-console-history).
+  const { current, past } = splitFlashes(live, claimsByFlash, now);
   return (
     <PanelShell panel="flashMission" actions={<RichTooltip concept="flashMission" />}>
       <div className="space-y-2">
@@ -2771,9 +2869,9 @@ function FlashMissionCard({ ctx, teams, claimsByFlash }: {
           </Button>
         </div>
 
-        {live.length > 0 && (
+        {current.length > 0 && (
           <ul className="mt-3 space-y-2" data-testid="flash-live">
-            {live.map((f) => {
+            {current.map((f) => {
               const state = flashMissionState(f, now);
               const left = f.expiresAt ? Math.max(0, Math.round((Date.parse(f.expiresAt) - now) / 60000)) : 0;
               const claims = Object.entries(claimsByFlash[f.id] ?? {});
@@ -2781,7 +2879,7 @@ function FlashMissionCard({ ctx, teams, claimsByFlash }: {
               return (
                 <li key={f.id} className="rounded-xl border border-[--rp-border] p-3 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span dir="auto" className="flex-1 min-w-[10rem] text-sm font-semibold text-[--ink-1]">⚡ {f.title}</span>
+                    <span dir="auto" className="flex-1 min-w-[10rem] text-sm font-semibold text-[--ink-1] inline-flex items-center gap-1.5"><Icon name="bolt" className="w-4 h-4 shrink-0" />{f.title}</span>
                     <span className="text-[13px] text-[--ink-3]">{fm.state[state]}{active ? ` · ${fm.minutesLeft({ n: left })}` : ''}</span>
                     {active && (
                       <Button variant="ghost" className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
@@ -2828,6 +2926,28 @@ function FlashMissionCard({ ctx, teams, claimsByFlash }: {
               );
             })}
           </ul>
+        )}
+        {past.length > 0 && (
+          <details className="mt-3 rounded-xl border border-[--rp-border] px-3 py-2" data-testid="flash-past">
+            <summary className="cursor-pointer min-h-[44px] flex items-center text-[13px] font-medium text-[--ink-2]">
+              {fm.pastSummary({ n: past.length })}
+            </summary>
+            <p className="text-[13px] text-[--ink-3] mb-2">{fm.pastHint}</p>
+            <ul className="space-y-1.5">
+              {past.map((f) => {
+                const winners = flashWinners(claimsByFlash[f.id]);
+                return (
+                  <li key={f.id} className="flex flex-wrap items-center gap-2 text-[13px]">
+                    <Icon name="bolt" className="w-3.5 h-3.5 shrink-0 text-[--ink-3]" />
+                    <span dir="auto" className="font-medium text-[--ink-1]">{f.title}</span>
+                    <span className="text-[--ink-3]">
+                      {winners.length > 0 ? fm.pastWonBy({ teams: winners.map(nameOf).join(', ') }) : fm.pastNobody}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
         )}
       </div>
     </PanelShell>
@@ -2993,9 +3113,15 @@ function ShareScreens({ accessCode, ctx, status, published, hasStaffPin, onShare
 
 
 // ── Post-run per-task analytics (run-analytics-heatmap) ───────────────────────
-const TYPE_EMOJI: Record<string, string> = {
-  smart_station: '🔑', photo: '📸', quiz: '❓', numeric: '🔢',
-  field: '✅', self_report: '🙋', geofence: '📡', sequence: '📋', survey: '🗳️',
+// Drawn icons per "now" row kind (change: no-stock-emoji).
+const INBOX_ICON: Record<InboxKind, IconName> = {
+  sos: 'sos', outOfBounds: 'zone', review: 'camera', flashReview: 'bolt', staffMessage: 'badge',
+  teamMessage: 'chat', stuckTeam: 'pause', waitingToStart: 'hourglass',
+};
+
+const TYPE_ICON: Record<string, IconName> = {
+  smart_station: 'key', photo: 'camera', quiz: 'info', numeric: 'hundred',
+  field: 'pin', self_report: 'checkCircle', geofence: 'antenna', sequence: 'clipboard', survey: 'ballot',
 };
 function fmtMs(ms: number): string {
   if (!ms) return '—';
@@ -3619,7 +3745,7 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
               <div className="flex items-center justify-between mt-1">
                 <span className="text-[13px] text-[--ink-3] font-mono">
                   {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) || ''}
-                  {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) > 0 ? ' ❤' : ''}
+                  {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) > 0 ? <Icon name="heart" className="w-3.5 h-3.5 inline-block align-text-bottom ms-1 fill-current" /> : null}
                 </span>
                 {/* Hiding a player's photo is cautionary, so it is classified
                     like every other console control rather than styled ad hoc. */}
@@ -4014,7 +4140,7 @@ function RunSummaryPanel({ accessCode, reportHref }: { accessCode: string; repor
         href={reportHref}
         className="inline-flex items-center gap-1.5 mb-3 text-sm font-medium text-ink-fire hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
       >
-        📊 {t.runConsole.summaryOpenReport}
+        <Icon name="chart" className="w-4 h-4" /> {t.runConsole.summaryOpenReport}
       </a>
       {/* A failed load and an empty report are different things and used to be
           the same grey line (change: run-console-clarity). */}
@@ -4163,7 +4289,7 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
                   {data.tasks.map((task) => (
                     <tr key={task.taskId} className="border-t border-[--rp-border]">
                       <td className="py-1.5">
-                        {TYPE_EMOJI[task.type] ?? '•'}{' '}
+                        <Icon name={TYPE_ICON[task.type] ?? 'puzzle'} className="w-4 h-4 inline-block align-text-bottom" />{' '}
                         {resolveEnumLabel(task.type, TYPE_LABEL, (id) => t.runConsole.unknownTaskType({ id }))}
                       </td>
                       <td className="py-1.5">{task.completions}/{task.attempts}</td>
@@ -4317,7 +4443,7 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
       )}
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setOpen(null)}>
+        <div role="dialog" aria-modal="true" aria-label={t.runConsole.feedbackResponseTitle} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setOpen(null)}>
           <div className="max-w-md w-full" onClick={(e) => e.stopPropagation()}>
           <Card className="p-5 space-y-3">
             <div className="flex items-center justify-between">

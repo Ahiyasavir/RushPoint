@@ -8,6 +8,7 @@ import { Spinner } from '../components/Spinner';
 import { Button, Card, Screen, Skeleton, TagChips } from '../components/ui';
 import { useT } from '../i18nContext';
 import { creatorUrl } from '../lib/creatorUrl';
+import { Icon, type IconName } from '../components/Icon';
 
 
 export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gameId: string; onPlay: () => void; onInstantPlay: (s: Session) => void }) {
@@ -64,7 +65,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
-          <div className="text-5xl">⚠️</div>
+          <div className="flex justify-center text-ink-amber"><Icon name="alert" className="w-12 h-12" /></div>
           <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
             {t.promo.loadError}
           </h1>
@@ -91,7 +92,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
-          <div className="text-5xl">🧭</div>
+          <div className="flex justify-center text-ink-fire"><Icon name="compass" className="w-12 h-12" /></div>
           <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
             {t.promo.notFound}
           </h1>
@@ -123,7 +124,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             </div>
           ) : (
             <div className="w-full h-44 rounded-2xl bg-gradient-to-br from-rp-fire/20 to-rp-amber/10 flex items-center justify-center">
-              <span className="text-6xl">🗺️</span>
+              <Icon name="map" className="w-16 h-16 text-ink-fire" />
             </div>
           )}
           {/* Badge */}
@@ -174,12 +175,12 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
         {/* Stats */}
         <div className="grid grid-cols-3 gap-2.5 mb-5">
           {[
-            { label: t.promo.stages, value: String(game.stageCount), emoji: '📋' },
-            { label: t.promo.tasks, value: String(game.taskCount), emoji: '✅' },
-            { label: t.promo.time, value: mins ? t.promo.minutesShort({ n: mins }) : '?', emoji: '⏱️' },
+            { label: t.promo.stages, value: String(game.stageCount), icon: 'clipboard' as IconName },
+            { label: t.promo.tasks, value: String(game.taskCount), icon: 'checkCircle' as IconName },
+            { label: t.promo.time, value: mins ? t.promo.minutesShort({ n: mins }) : '?', icon: 'stopwatch' as IconName },
           ].map((s) => (
             <div key={s.label} className="bg-app-card border border-glass-border rounded-xl px-2 py-3 text-center shadow-task-card">
-              <div className="text-base mb-0.5">{s.emoji}</div>
+              <div className="mb-0.5 flex justify-center text-ink-fire"><Icon name={s.icon} className="w-5 h-5" /></div>
               <div className="text-lg font-brand font-bold text-ink-fire">{s.value}</div>
               <div className="text-[12px] text-zinc-500 uppercase tracking-wide">{s.label}</div>
             </div>
@@ -187,7 +188,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
         </div>
 
         {game.approxLocation?.label && (
-          <Card className="p-3 text-center text-sm text-zinc-400 mb-5">📍 {game.approxLocation.label}</Card>
+          <Card className="p-3 text-center text-sm text-zinc-400 mb-5"><Icon name="pin" className="w-4 h-4 inline-block align-text-bottom" /> {game.approxLocation.label}</Card>
         )}
 
         {/* CTA */}
@@ -196,7 +197,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             className="w-10 h-10 rounded-xl flex items-center justify-center text-xl mx-auto mb-3"
             style={{ background: `${accent}15` }}
           >
-            🏁
+            <Icon name="finish" className="w-6 h-6" />
           </div>
           <div className="text-sm font-semibold text-zinc-200 mb-1">{t.promo.playingTitle}</div>
           <p className="text-xs text-zinc-500 mb-4">{t.promo.playingSub}</p>
@@ -207,7 +208,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           )}
           {startErr && (
             <p role="status" aria-live="polite" className="mb-2 text-xs font-medium text-ink-alert">
-              ⚠ {t.promo.startFailed}
+              <Icon name="alert" className="w-4 h-4 inline-block align-text-bottom" /> {t.promo.startFailed}
             </p>
           )}
           <Button variant={game.allowInstantPlay ? 'ghost' : 'primary'} onClick={onPlay}>{t.promo.haveCode}</Button>
@@ -216,7 +217,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             onClick={shareGame}
             className="mt-2 w-full inline-flex items-center justify-center min-h-[44px] text-xs font-medium text-zinc-500 hover:text-ink-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded"
           >
-            {copied ? t.promo.linkCopied : `🔗 ${t.promo.shareGame}`}
+            {copied ? t.promo.linkCopied : t.promo.shareGame}
           </button>
         </Card>
       </div>

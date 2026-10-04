@@ -6,25 +6,52 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
+import { iconSvgMarkup } from './Icon';
+import { mapLocale } from '../lib/mapLocale';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
-// A few distinct hues so adjacent teams are visually separable.
-const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ec4899', '#eab308', '#14b8a6', '#ef4444'];
+// Calm hues only, one shared palette (never red/amber, which mean alarm, nor the followed purple):
+// packages/shared/src/teamMarkerColor.ts.
+const colorForTeam = teamMarkerColor;
 
-// Stable color per team: derived from the teamId (not the snapshot array index),
-// so a team keeps the same hue even as other teams join and reorder the docs.
-function colorForTeam(teamId: string): string {
-  let h = 0;
-  for (let i = 0; i < teamId.length; i++) h = (h * 31 + teamId.charCodeAt(i)) | 0;
-  return COLORS[Math.abs(h) % COLORS.length];
+// followed-teams (Ahiya, 2026-09-30: "see them on the map in a different colour"): a followed team is
+// a bigger star marker in one fixed indigo with its name, drawn above the rest; "mine only" dims the
+// others (never hides them: where the other teams are still matters). Restyled in place, so a marker
+// keeps its position and its click handler when the followed set changes.
+function styleMarker(el: HTMLElement, teamId: string, name: string, followed: readonly string[], mineOnly: boolean) {
+  const look = teamMarkerLook(teamId, followed, mineOnly);
+  const pin = el.firstElementChild as HTMLElement | null;
+  const label = el.querySelector('[data-follow-label]') as HTMLElement | null;
+  if (pin) {
+    if (look.followed) {
+      pin.style.cssText =
+        `width:28px;height:28px;border-radius:50%;background:${FOLLOWED_MARKER_COLOR};border:3px solid #fff;` +
+        `box-shadow:0 0 0 3px ${FOLLOWED_MARKER_COLOR}66;display:flex;align-items:center;justify-content:center;` +
+        `color:#fff;font-size:15px;line-height:1;cursor:pointer;`;
+      pin.innerHTML = iconSvgMarkup('star', 15, '#ffffff', true);
+    } else {
+      const color = colorForTeam(teamId);
+      pin.style.cssText =
+        `width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
+        `background:${color};border:2px solid #fff;cursor:pointer;box-shadow:0 0 0 2px ${color}55;`;
+      pin.textContent = '';
+    }
+  }
+  if (label) {
+    label.textContent = look.followed ? name : '';
+    label.style.display = look.followed ? 'block' : 'none';
+  }
+  el.style.opacity = look.dimmed ? '0.3' : '1';
+  el.style.zIndex = String(look.zIndex);
+  el.dataset.followed = look.followed ? 'true' : 'false';
 }
 
 interface TeamLoc {
@@ -34,8 +61,11 @@ interface TeamLoc {
 }
 
 export default function LiveTeamMap({
-  ownerUid, gameId, runId, teams, className = '', onTeamClick,
+  ownerUid, gameId, runId, teams, className = '', onTeamClick, followed = [], mineOnly = false,
 }: {
+  /** followed-teams: ids this person follows, and whether "mine only" is on. */
+  followed?: readonly string[];
+  mineOnly?: boolean;
   ownerUid: string;
   gameId: string;
   runId: string;
@@ -44,6 +74,7 @@ export default function LiveTeamMap({
   /** team-lifecycle-controls: a click on a team opens its page (field report 2026-09-27). */
   onTeamClick?: (teamId: string) => void;
 }) {
+  const mapUi = useT().mapUi;
   const rc = useT().runConsole;
   // Markers are created once and moved in place, so they must read the CURRENT handler.
   const onTeamClickRef = useRef(onTeamClick);
@@ -57,6 +88,11 @@ export default function LiveTeamMap({
   const framedKey = useRef<string>('');
   const [mode, setMode] = useState<MapMode>(DEFAULT_MAP_MODE);
   const [locs, setLocs] = useState<TeamLoc[]>([]);
+  // Read by marker creation, which runs in an effect keyed on positions only.
+  const followedRef = useRef(followed);
+  followedRef.current = followed;
+  const mineOnlyRef = useRef(mineOnly);
+  mineOnlyRef.current = mineOnly;
 
   // Resolve a team id → display name for popups.
   const nameOf = useMemo(() => {
@@ -81,6 +117,7 @@ export default function LiveTeamMap({
     if (!ref.current || map.current) return;
     map.current = new maplibregl.Map({
       container: ref.current,
+      locale: mapLocale(mapUi),
       style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
       center: [35.21, 31.77],
       zoom: 7,
@@ -114,12 +151,22 @@ export default function LiveTeamMap({
       if (existing) {
         existing.setLngLat([l.lng, l.lat]);
       } else {
-        const color = colorForTeam(l.teamId);
+        // A wrapper (moved by MapLibre) holding the pin and a name label, restyled by styleMarker.
         const el = document.createElement('div');
-        el.style.cssText =
-          `width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
-          `background:${color};border:2px solid #fff;cursor:pointer;box-shadow:0 0 0 2px ${color}55;`;
+        // The label is positioned OUTSIDE the wrapper's box, so the wrapper stays exactly the pin's
+        // size and MapLibre's centre anchor still sits on the team's position.
+        el.style.cssText = 'position:relative;';
+        el.appendChild(document.createElement('div'));
+        const label = document.createElement('div');
+        label.setAttribute('data-follow-label', '');
+        label.setAttribute('dir', 'auto');
+        label.style.cssText =
+          `background:${FOLLOWED_MARKER_COLOR};color:#fff;font:600 12px/1.2 system-ui,sans-serif;` +
+          'padding:2px 6px;border-radius:9999px;white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis;display:none;' +
+          'position:absolute;top:calc(100% + 3px);left:50%;transform:translateX(-50%);pointer-events:none;';
+        el.appendChild(label);
         el.title = nameOf(l.teamId);
+        styleMarker(el, l.teamId, nameOf(l.teamId), followedRef.current, mineOnlyRef.current);
         const marker = new maplibregl.Marker({ element: el }).setLngLat([l.lng, l.lat]);
         if (onTeamClickRef.current) {
           // Clicking a team opens its page, instead of a popup that only repeated its name.
@@ -159,6 +206,15 @@ export default function LiveTeamMap({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(locs.map((l) => [l.teamId, l.lat, l.lng]))]);
+
+  // Restyle every marker when the followed set or "mine only" changes (and after new markers appear).
+  const followedKey = followed.join(',');
+  useEffect(() => {
+    for (const [teamId, marker] of markersById.current) {
+      styleMarker(marker.getElement(), teamId, nameOf(teamId), followed, mineOnly);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followedKey, mineOnly, nameOf, locs.length]);
 
   return (
     <div className="relative">

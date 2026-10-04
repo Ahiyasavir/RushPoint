@@ -1,7 +1,7 @@
 // Pure-logic invariants for the FLAGSHIP instant-play demo game
 // (change: flagship-instant-demo).
 //
-// This is the game a first-time visitor taps "נסה משחק לדוגמה" / "Try a sample
+// This is the game a first-time visitor taps "נסו משחק לדוגמה" / "Try a sample
 // game" and plays instantly, solo, from anywhere on earth — no organizer, no
 // staff approval, no GPS. These assertions pin the contract that makes that
 // possible, so a later edit to the game definition can never quietly reintroduce

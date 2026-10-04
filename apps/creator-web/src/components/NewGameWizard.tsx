@@ -26,6 +26,7 @@ import {
 } from '../lib/newGameWizard';
 import { blendGameDescription, derivedGameTags, type NewGameDescriptionCopy } from '../lib/describeNewGame';
 import type { ComposerAnswers } from '../lib/composeGame';
+import { Icon, type IconName } from './Icon';
 
 /** What the wizard needs to know about each available template. */
 export interface WizardTemplate extends WizardTemplateOption {
@@ -126,10 +127,10 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
   // shipped panel — change: smart-build-delight follow-up).
   // The three ways in, as data: one shape, one render, so a card can never drift
   // from its siblings the way the two accented ones did before.
-  const PATH_CARDS: readonly { path: WizardPath; icon: string; title: string; body: string; recommended?: boolean }[] = [
-    { path: 'smart_build', icon: '🧠', title: w.smartTitle, body: w.smartBody, recommended: true },
-    { path: 'guided', icon: '📖', title: w.guidedTitle, body: w.guidedBody },
-    { path: 'scratch', icon: '📄', title: w.scratchTitle, body: w.scratchBody },
+  const PATH_CARDS: readonly { path: WizardPath; icon: IconName; title: string; body: string; recommended?: boolean }[] = [
+    { path: 'smart_build', icon: 'sparkle', title: w.smartTitle, body: w.smartBody, recommended: true },
+    { path: 'guided', icon: 'book', title: w.guidedTitle, body: w.guidedBody },
+    { path: 'scratch', icon: 'doc', title: w.scratchTitle, body: w.scratchBody },
   ];
 
   // ── The NAME step ─────────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
     return (
       <div className="flex flex-col gap-3 mx-auto w-full max-w-sm">
         <div className="text-center">
-          <div className="text-3xl leading-none mb-1.5" aria-hidden="true">🎲</div>
+          <div className="mb-1.5 flex justify-center text-ink-fire" aria-hidden="true"><Icon name="dice" className="w-8 h-8" /></div>
           <h3 className="font-brand font-bold text-[--ink-1] text-lg">{w.nameTitle}</h3>
           <p className="text-[--ink-3] text-[13px] mt-0.5">{w.nameSub}</p>
         </div>
@@ -189,7 +190,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
           className="self-start max-w-full flex items-center gap-1.5 rounded-lg border border-[--rp-border] bg-[--surface-2]/60 px-2.5 py-1 text-[13px] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
         >
           <span className="truncate" dir="auto">{state.name.trim() || d.untitledGame}</span>
-          <span aria-hidden className="shrink-0 text-[--ink-3]">✎</span>
+          <Icon name="pencil" className="w-4 h-4 shrink-0 text-[--ink-3]" />
         </button>
         {/* NOTHING here is truncated, on purpose (change:
             smart-build-wizard-no-scroll). The titles used to `truncate` and the
@@ -230,7 +231,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
                     : 'border-[--rp-border] bg-[--surface-1] hover:border-rp-fire/50 hover:bg-[--surface-2]'}`}
               >
                 <div className="flex items-start gap-1.5">
-                  <span className="text-lg leading-none shrink-0">{icon}</span>
+                  <Icon name={icon} aria-hidden className="h-5 w-5 shrink-0 text-ink-fire" />
                   <span className="font-brand font-semibold text-[--ink-1] text-sm break-words">{title}</span>
                   {recommended && !on && (
                     <span className="ms-auto shrink-0 rounded-full bg-rp-fire/15 text-ink-fire text-[12px] font-medium px-1.5 py-0.5">
@@ -340,7 +341,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
         <div className="rounded-xl border border-[--rp-border] bg-[--surface-1] p-3">
           <div className="text-[13px] text-[--ink-3]">{w.previewTitle}</div>
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-xl leading-none">{template.templateEmoji || '🧩'}</span>
+            <Icon name="puzzle" className="w-6 h-6 text-ink-fire shrink-0" />
             <span className="font-brand font-semibold text-[--ink-1] text-sm min-w-0 truncate" dir="auto">
               {template.title}
             </span>

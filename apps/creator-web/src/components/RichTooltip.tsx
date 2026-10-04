@@ -12,6 +12,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { createPortal } from 'react-dom';
 import { useT } from './LanguageContext';
 import { FLASH_MISSION_TTL_MINUTES } from '../lib/runConsoleActions';
+import { ICON_PATHS } from '@rushpoint/shared';
 
 // Builder concepts read their copy from t.builder.*; the Run Console concepts
 // (change: run-console-progressive-disclosure) read theirs from t.runConsole.*.
@@ -41,9 +42,9 @@ function buildSvgs(easyLabel: string, hardLabel: string): Partial<Record<Tooltip
       ),
     hint: (
         <svg viewBox="0 0 120 60" className="w-full h-14">
-          <text x="20" y="38" fontSize="22">💡</text>
+          <g transform="translate(17 17) scale(1.1)" fill="none" stroke="#FFB300" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">{ICON_PATHS.bulb.map((p, i) => <path key={i} d={p.d} />)}</g>
           <text x="56" y="36" fontSize="14" fill="#D85A30">−25</text>
-          <text x="92" y="36" fontSize="14">★</text>
+          <path d={ICON_PATHS.star[0].d} transform="translate(90 23) scale(0.625)" fill="currentColor" stroke="none" />
         </svg>
       ),
     concurrent: (

@@ -186,5 +186,17 @@ if (clickable.length < CLICKABLE_BASELINE) {
   console.log(`NOTE  baseline can be tightened to ${clickable.length} in scripts/test-creator-a11y-scan.ts`);
 }
 
+// ── The blocking dialog says it is one ───────────────────────────────────────
+// Found 2026-10-04: every confirm in creator-web (end the run, delete, start all teams)
+// rendered as a plain div, with no role, no aria-modal and no accessible name, so a screen
+// reader announced nothing when it opened, and Escape did not cancel it.
+{
+  const dlg = readFileSync('apps/creator-web/src/components/dialog.tsx', 'utf8');
+  check('the blocking dialog has an alertdialog role', /role="alertdialog"/.test(dlg));
+  check('the blocking dialog is aria-modal', /aria-modal="true"/.test(dlg));
+  check('the blocking dialog is named by its title or message', /aria-labelledby=/.test(dlg) && /aria-describedby=/.test(dlg));
+  check('Escape cancels the blocking dialog', /'Escape'[\s\S]{0,80}onCancel/.test(dlg) && /addEventListener\('keydown'/.test(dlg));
+}
+
 console.log(`\n${failures === 0 ? 'ALL CREATOR A11Y TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

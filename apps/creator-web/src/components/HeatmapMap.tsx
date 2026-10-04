@@ -6,6 +6,8 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, type HeatmapCell } from '@rushpoint/shared';
+import { mapLocale } from '../lib/mapLocale';
+import { useT } from './LanguageContext';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -24,6 +26,7 @@ function toGeoJSON(cells: HeatmapCell[]) {
 }
 
 export default function HeatmapMap({ cells, className = '' }: { cells: HeatmapCell[]; className?: string }) {
+  const mapUi = useT().mapUi;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
 
@@ -31,6 +34,7 @@ export default function HeatmapMap({ cells, className = '' }: { cells: HeatmapCe
     if (!ref.current || map.current) return;
     const m = new maplibregl.Map({
       container: ref.current,
+      locale: mapLocale(mapUi),
       style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
       center: [35.21, 31.77],
       zoom: 6,

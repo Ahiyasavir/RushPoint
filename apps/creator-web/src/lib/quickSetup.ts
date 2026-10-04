@@ -28,10 +28,12 @@ import {
   type WizardTarget,
   orderQuickSetupSteps,
   isWizardStepConfigured,
+  resolveWizardTarget,
 } from '@rushpoint/shared';
+import { fieldIgnoredByPreset, type SettingsRowKey } from './missionSettingsRows';
 
 /** Just enough of a game to drive the flow, so tests and callers stay light. */
-type QuickSetupGame = Pick<Game, 'stages'> & Partial<Pick<Game, 'title' | 'description' | 'instructions' | 'wizardSteps'>>;
+type QuickSetupGame = Pick<Game, 'stages'> & Partial<Pick<Game, 'title' | 'description' | 'instructions' | 'wizardSteps' | 'scoringPreset'>>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Derived work
@@ -72,7 +74,13 @@ const SYNTHETIC_GAME_TITLE_STEP: TemplateWizardStep = {
  */
 export function quickSetupSteps(game: QuickSetupGame | null | undefined): TemplateWizardStep[] {
   if (!game) return [];
-  const authored = Array.isArray(game.wizardSteps) ? game.wizardSteps : [];
+  // mission-editor-value-rows: a step aimed at a mission field this game's scoring ignores
+  // (difficulty in a points game, points in a speed race) is left out. The editor no longer shows
+  // that control, so the step would land on nothing, and it must not hold the launch either.
+  const authored = (Array.isArray(game.wizardSteps) ? game.wizardSteps : []).filter((s) => {
+    const target = resolveWizardTarget(game, s);
+    return !(target && target.scope === 'task' && fieldIgnoredByPreset(target.fieldPath, game.scoringPreset));
+  });
   // DOES THIS GAME PARTICIPATE AT ALL? Asked of the AUTHORED steps alone, and
   // before anything is synthesized: a game with no template notes has no Quick
   // Setup, and it must not acquire one just because it has missions without pins
@@ -453,9 +461,10 @@ export function shouldAutoOpenQuickSetup(input: {
  * creator opened this game".
  *
  * It is deliberately router state and not a query param or a stored flag: it
- * describes ONE navigation, it must not survive a reload (a reload is the
- * creator arriving fresh, which is exactly when the invitation is welcome), and
- * it must leave no trace to clean up.
+ * describes ONE navigation and must not outlive it (a reload is the creator
+ * arriving fresh, which is exactly when the invitation is welcome). Router state
+ * lives in history.state, which a reload KEEPS, so the Builder consumes the stamp
+ * with a replace navigation as soon as it has read it.
  */
 export const JUST_CREATED_NAV_STATE = { rpJustCreated: true } as const;
 
@@ -532,6 +541,71 @@ export function readQuickSetupRecord(raw: string | null | undefined): QuickSetup
   }
 }
 
+/**
+ * Does this state (or stored record) record something the creator DID?
+ *
+ * An untouched `idle` state — nothing deferred, no progress — is not a decision,
+ * and must never be stored or read back as one (change: quick-setup-reachable).
+ * The landing from the new-game wizard defers the invitation and writes nothing;
+ * persisting the untouched state on that same mount used to make every later
+ * visit read "the creator already decided", which on a phone (no pill) left
+ * Quick Setup unreachable for good. Reading through this same predicate is also
+ * what heals a creator who already carries such a stale record.
+ *
+ * Total: anything that is not a recognisable state is not a decision.
+ */
+/**
+ * What the finish line may say. `done` only means the creator walked to the end:
+ * "next" moves past a required step that was never filled, so arriving at the end
+ * is not the same as being ready. Found at 375px: "your game is ready to launch"
+ * while launch still listed three missing points. Junk counts as nothing left.
+ */
+export function finishVerdict(outstanding: number): { kind: 'celebrate' } | { kind: 'remaining'; count: number } {
+  const n = Number.isFinite(outstanding) && outstanding > 0 ? Math.floor(outstanding) : 0;
+  return n > 0 ? { kind: 'remaining', count: n } : { kind: 'celebrate' };
+}
+
+/**
+ * Did the creator just FINISH the flow? Only `running → done` is finishing. A page
+ * load restores a stored `done` after the first render (`idle → done`), and
+ * treating that as a transition reopened the finish dialog on every visit.
+ */
+export function reachedFinishLine(prev: QuickSetupStatus, next: QuickSetupStatus): boolean {
+  return prev === 'running' && next === 'done';
+}
+
+/** A note this short is shown open; a longer one hides behind a disclosure. */
+export const SHORT_NOTE_MAX_CHARS = 140;
+
+/**
+ * Is a step's note short enough to show open (change: composer-siting-by-station)?
+ * The disclosure exists because template notes are often a paragraph that took
+ * most of the card. A single short line costs nothing, and hiding it hid the
+ * composer's station line ("this is the stage's station; open grass works")
+ * right where it mattered. Total: junk and blank are not short.
+ */
+export function isShortNote(text: unknown): boolean {
+  if (typeof text !== 'string') return false;
+  const t = text.trim();
+  return t !== '' && !/[\r\n]/.test(t) && t.length <= SHORT_NOTE_MAX_CHARS;
+}
+
+export function isQuickSetupDecision(
+  state: { status?: unknown; index?: unknown; deferred?: unknown } | null | undefined,
+): boolean {
+  if (typeof state !== 'object' || state === null) return false;
+  const status = state.status;
+  if (status !== 'idle' && status !== 'running' && status !== 'closed' && status !== 'done' && status !== 'welcome') {
+    return false;
+  }
+  if (status !== 'idle') return true;
+  const deferred = Array.isArray(state.deferred)
+    ? state.deferred.filter((v) => typeof v === 'string' && v.trim() !== '')
+    : [];
+  const index = typeof state.index === 'number' && Number.isFinite(state.index) ? state.index : 0;
+  return deferred.length > 0 || index > 0;
+}
+
 export function writeQuickSetupRecord(state: QuickSetupState): string {
   return JSON.stringify({
     version: QUICK_SETUP_VERSION,
@@ -557,7 +631,7 @@ export type TaskEditorTab = 'location' | 'details' | 'execution';
  * `geofenceRadiusMeters` or `locationHidden` is otherwise navigated to a tab with
  * nothing visibly there to focus (change: quick-setup-mobile-visibility).
  */
-export type TaskOptInGroup = 'hint' | 'timerPoints' | 'rules' | 'locationAdvanced';
+export type TaskOptInGroup = SettingsRowKey | 'locationAdvanced';
 
 /**
  * The copy slots the flow speaks in.
@@ -639,7 +713,7 @@ export const QUICK_SETUP_FIELDS: Record<string, QuickSetupFieldEntry> = {
   // `media` is deliberately NOT behind a chip: a picture is part of describing a
   // mission, so it sits beside the description (see lib/taskOptInGroups).
   'media': { anchor: 'media', scope: 'task', wizardStep: 'details', optInGroup: null, copy: 'media' },
-  'tags': { anchor: 'tags', scope: 'task', wizardStep: 'execution', optInGroup: 'rules', copy: 'tags' },
+  'tags': { anchor: 'tags', scope: 'task', wizardStep: 'execution', optInGroup: 'more', copy: 'tags' },
 
   // ── tab 3: how it is completed ──
   'answers': { anchor: 'answers', scope: 'task', wizardStep: 'execution', optInGroup: null, copy: 'answers' },
@@ -654,14 +728,14 @@ export const QUICK_SETUP_FIELDS: Record<string, QuickSetupFieldEntry> = {
   'smart.autoApprove': { anchor: 'smart.autoApprove', scope: 'task', wizardStep: 'execution', optInGroup: null, copy: 'autoApprove' },
   'smart.captureKind': { anchor: 'smart.captureKind', scope: 'task', wizardStep: 'execution', optInGroup: null, copy: 'captureKind' },
 
-  // ── tab 3, behind a chip ──
+  // ── tab 3, inside a settings row (change: mission-editor-value-rows) ──
   'hint': { anchor: 'hint', scope: 'task', wizardStep: 'execution', optInGroup: 'hint', copy: 'hint' },
   'hintPenalty': { anchor: 'hintPenalty', scope: 'task', wizardStep: 'execution', optInGroup: 'hint', copy: 'hint' },
-  'pointValue': { anchor: 'pointValue', scope: 'task', wizardStep: 'execution', optInGroup: 'timerPoints', copy: 'points' },
-  'expectedDurationMinutes': { anchor: 'expectedDurationMinutes', scope: 'task', wizardStep: 'execution', optInGroup: 'timerPoints', copy: 'duration' },
-  'difficulty': { anchor: 'difficulty', scope: 'task', wizardStep: 'execution', optInGroup: 'timerPoints', copy: 'difficulty' },
-  'maxConcurrentTeams': { anchor: 'maxConcurrentTeams', scope: 'task', wizardStep: 'execution', optInGroup: 'rules', copy: 'capacity' },
-  'unlockAfterTaskIds': { anchor: 'unlockAfterTaskIds', scope: 'task', wizardStep: 'execution', optInGroup: 'rules', copy: 'unlock' },
+  'pointValue': { anchor: 'pointValue', scope: 'task', wizardStep: 'execution', optInGroup: 'scoring', copy: 'points' },
+  'expectedDurationMinutes': { anchor: 'expectedDurationMinutes', scope: 'task', wizardStep: 'execution', optInGroup: 'more', copy: 'duration' },
+  'difficulty': { anchor: 'difficulty', scope: 'task', wizardStep: 'execution', optInGroup: 'scoring', copy: 'difficulty' },
+  'maxConcurrentTeams': { anchor: 'maxConcurrentTeams', scope: 'task', wizardStep: 'execution', optInGroup: 'more', copy: 'capacity' },
+  'unlockAfterTaskIds': { anchor: 'unlockAfterTaskIds', scope: 'task', wizardStep: 'execution', optInGroup: 'opens', copy: 'unlock' },
 };
 
 /**

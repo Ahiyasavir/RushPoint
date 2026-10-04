@@ -10,6 +10,7 @@ import { backgroundMedia, restoreBackgroundMedia } from '../services/backgroundM
 import type { BgSnapshot } from '../lib/backgroundMedia';
 import { useT } from '../i18nContext';
 import { TAP_TARGET } from '../lib/interaction';
+import { Icon } from './Icon';
 
 export default function BackgroundUploads() {
   const { t } = useT();
@@ -34,14 +35,14 @@ export default function BackgroundUploads() {
       {snap.failed > 0 ? (
         <div className="flex items-center gap-2 rounded-2xl bg-app-card border border-glass-border text-zinc-100 text-xs ps-3 pe-1 py-1 shadow max-w-[92vw]"
           role="alert" data-testid="bg-upload-failed">
-          <span dir="auto">⚠️ {t.task.bgFailed}</span>
+          <span dir="auto" className="inline-flex items-center gap-1.5"><Icon name="alert" className="w-4 h-4 shrink-0" />{t.task.bgFailed}</span>
           <button type="button" onClick={() => backgroundMedia.dismissFailed()} className={`${TAP_TARGET} inline-flex items-center justify-center shrink-0 text-zinc-400`} aria-label={t.task.bgDismiss}>✕</button>
         </div>
       ) : (
         <div className="flex items-center gap-2 rounded-full bg-zinc-800/90 text-zinc-100 text-xs px-3 py-1.5 shadow max-w-[92vw]"
           role="status" aria-live="polite" data-testid="bg-uploading">
           <span className="w-3 h-3 shrink-0 rounded-full border-2 border-zinc-400/40 border-t-zinc-100 animate-spin" />
-          <span dir="auto">📤 {t.task.bgUploading({ count: snap.pending })}</span>
+          <span dir="auto" className="inline-flex items-center gap-1.5"><Icon name="upload" className="w-4 h-4 shrink-0" />{t.task.bgUploading({ count: snap.pending })}</span>
         </div>
       )}
     </TopOverlay>

@@ -34,7 +34,7 @@ import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import ShareLinkDialog from '../components/ShareLinkDialog';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
-import { firstLaunchBlocker, splitTestDriveReadiness, type ReadinessIssue } from '../lib/gameReadiness';
+import { firstLaunchBlocker, splitTestDriveReadiness, computeGameReadiness, groupReadinessIssues, type ReadinessIssue } from '../lib/gameReadiness';
 import { describeCallFailure } from '../lib/callFeedback';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
@@ -49,6 +49,7 @@ import {
   skeletonCardCount, consumeStartIntent,
   type OnboardingStepId,
 } from '../lib/creatorOnboarding';
+import { Icon, type IconName } from '../components/Icon';
 
 // "Blank" stays a hardcoded, always-first, client-side special case — NOT a real
 // admin-editable template (design decision, admin-manage-game-templates). One
@@ -197,9 +198,9 @@ function OnboardingChecklist({ checklist, onDismiss, onStep }: {
   );
 }
 
-const TASK_TYPE_EMOJI: Record<string, string> = {
-  field: '📍', self_report: '✅', smart_station: '🔢',
-  photo: '📷', quiz: '❓', numeric: '#️⃣', geofence: '📡', sequence: '🧩', survey: '🗳️',
+const TASK_TYPE_ICON: Record<string, IconName> = {
+  field: 'pin', self_report: 'checkCircle', smart_station: 'key',
+  photo: 'camera', quiz: 'info', numeric: 'hundred', geofence: 'antenna', sequence: 'clipboard', survey: 'ballot',
 };
 
 export default function DashboardPage() {
@@ -226,7 +227,7 @@ export default function DashboardPage() {
   // it is never a source of truth for anything — the game is already on the
   // server by the time this is set.
   const [reveal, setReveal] = useState<
-    { gameId: string; title: string; stages: RevealStage[] } | null
+    { gameId: string; title: string; stages: RevealStage[]; left: string[] } | null
   >(null);
   // The template the creator selected but has not confirmed yet — the moment the
   // play mode and scoring style are DISCLOSED instead of silently assigned.
@@ -471,6 +472,8 @@ export default function DashboardPage() {
     occasionStageNames: (occasion, role) => d.wizard.occasionStageNames[occasion]?.[role] ?? [],
     // Asked only for a mission the composer just pinned — see siteableInPlacedGame.
     placeMissionPrompt: () => d.wizard.placeMissionPrompt,
+    // The station's spot kind, appended to the prompt (change: composer-siting-by-station).
+    placeSpotHint: (spot) => d.wizard.placeSpotHint[spot] ?? '',
   };
 
   /**
@@ -604,6 +607,10 @@ export default function DashboardPage() {
             missions: (s.tasks ?? []).map((task) => task.title ?? ''),
             plannedSlots: planned.stages[i]?.slots ?? (s.tasks ?? []).length,
           })),
+          // Honest about what is left (change: quick-setup-reachable): the same
+          // readiness the Builder will show, grouped into one line per kind.
+          left: groupReadinessIssues(computeGameReadiness({ stages: result.stages } as never))
+            .map((g) => d.wizard.revealLeft[g.code](g.count)),
         });
       } catch (e) {
         // Same rule as every other path here: the wizard already closed, so a
@@ -914,9 +921,9 @@ export default function DashboardPage() {
                 The other two tiles stay inert — they summarise what is already on
                 this page, so there is nowhere for them to lead. */}
             {[
-              { label: d.statGamesBuilt, value: games.length, icon: '🗺️', tint: 'from-rp-fire/12 to-rp-amber/5', ring: 'group-hover:border-rp-fire/30', to: null as string | null },
-              { label: d.statPublished, value: games.filter(g => g.visibility === 'public').length, icon: '🌐', tint: 'from-rp-plasma/12 to-rp-plasma/5', ring: 'group-hover:border-rp-plasma/30', to: null as string | null },
-              { label: d.statTotalPlays, value: games.reduce((s, g) => s + (g.playCount ?? 0), 0), icon: '🏁', tint: 'from-rp-signal/12 to-rp-signal/5', ring: 'group-hover:border-rp-signal/30', to: '/history' as string | null },
+              { label: d.statGamesBuilt, value: games.length, icon: 'map' as IconName, tint: 'from-rp-fire/12 to-rp-amber/5', ring: 'group-hover:border-rp-fire/30', to: null as string | null },
+              { label: d.statPublished, value: games.filter(g => g.visibility === 'public').length, icon: 'globe' as IconName, tint: 'from-rp-plasma/12 to-rp-plasma/5', ring: 'group-hover:border-rp-plasma/30', to: null as string | null },
+              { label: d.statTotalPlays, value: games.reduce((s, g) => s + (g.playCount ?? 0), 0), icon: 'finish' as IconName, tint: 'from-rp-signal/12 to-rp-signal/5', ring: 'group-hover:border-rp-signal/30', to: '/history' as string | null },
             ].map((s) => {
               const inner = (
                 <>
@@ -925,7 +932,7 @@ export default function DashboardPage() {
                     {/* The icon square is the first thing to go on a phone: at three
                        across, 36px of decoration would leave the number and its label
                        about 60px to share. It returns from `sm` up. */}
-                    <div className="hidden sm:flex w-9 h-9 rounded-xl items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
+                    <div className="hidden sm:flex w-9 h-9 rounded-xl items-center justify-center bg-[--surface-2] shrink-0 text-ink-fire"><Icon name={s.icon} className="w-5 h-5" /></div>
                     <div className="min-w-0 text-start">
                       <div className="font-brand text-xl sm:text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
                       <div className="text-[11px] sm:text-[13px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
@@ -990,7 +997,7 @@ export default function DashboardPage() {
           empty state now means what it says: this account really has no games. */}
       {loadFailed && games.length === 0 ? (
         <EmptyState
-          icon="⚠️"
+          icon="alert"
           title={d.loadGamesFailed}
           body={d.loadFailedBody}
           action={
@@ -1001,7 +1008,7 @@ export default function DashboardPage() {
         />
       ) : games.length === 0 ? (
         <EmptyState
-          icon="🗺️"
+          icon="map"
           title={d.emptyTitle}
           body={d.emptyBody}
           action={
@@ -1041,7 +1048,7 @@ export default function DashboardPage() {
                       <div className="flex gap-1.5 flex-wrap">
                         {allTaskTypes.map(type => (
                           <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[12px] font-medium">
-                            {TASK_TYPE_EMOJI[type] ?? '●'} {TASK_TYPE_LABEL[type] ?? type}
+                            <Icon name={TASK_TYPE_ICON[type] ?? 'puzzle'} className="w-3.5 h-3.5 inline-block align-text-bottom" /> {TASK_TYPE_LABEL[type] ?? type}
                           </span>
                         ))}
                       </div>
@@ -1192,12 +1199,13 @@ export default function DashboardPage() {
           creator back on the dashboard would look exactly like the build having
           failed. The one way out is the button, and it is live immediately. */}
       {reveal && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" aria-label={d.wizard.revealTitle} className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up">
             <SmartBuildReveal
               gameTitle={reveal.title}
               stages={reveal.stages}
+              leftBeforeLaunch={reveal.left}
               onContinue={() => {
                 const { gameId } = reveal;
                 setReveal(null);
@@ -1209,6 +1217,7 @@ export default function DashboardPage() {
                 stage: (n) => d.wizard.shapeStage(n),
                 missions: (n) => d.wizard.revealMissions(n),
                 continue: d.wizard.revealContinue,
+                leftTitle: d.wizard.revealLeftTitle,
                 aria: d.wizard.revealAria,
               }}
             />
@@ -1219,7 +1228,7 @@ export default function DashboardPage() {
 
       {/* ── Template picker modal ─────────────────────────────────────────── */}
       {picking && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setPicking(false); setChosen(null); }}>
+        <div role="dialog" aria-modal="true" aria-label={d.modalTitle} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setPicking(false); setChosen(null); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
             // 92vh is a safety net for very short viewports, not the fix: the
@@ -1315,7 +1324,7 @@ function DeleteGameDialog({ game, busy, onCancel, onConfirm }: {
   const confirmed = matchesGameDeleteConfirmation(typed, game.title);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
+    <div role="alertdialog" aria-modal="true" aria-label={d.deleteDialogTitle} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative bg-[--surface-0] dark:bg-[--surface-1] border border-rp-alert/30 rounded-2xl w-full max-w-md p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"

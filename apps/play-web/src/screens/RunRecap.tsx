@@ -6,9 +6,9 @@ import { shareRecap } from '../lib/recapCollage';
 import { LoadingView } from '../components/LoadingView';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
 import { creatorUrl } from '../lib/creatorUrl';
+import { Icon, medalFor } from '../components/Icon';
 
 
-const MEDALS = ['🥇', '🥈', '🥉'];
 
 function fmtTime(sec?: number): string {
   if (sec == null) return '';
@@ -73,7 +73,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
-          <div className="text-5xl">🏁</div>
+          <div className="flex justify-center text-ink-fire"><Icon name="finish" className="w-12 h-12" /></div>
           <p className="text-zinc-500 text-sm">{t.recap.notAvailable}</p>
           <Button className="mt-2" onClick={onJoin}>{t.recap.enterCode}</Button>
         </div>
@@ -87,7 +87,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
     <Screen>
       <div className="flex-1 flex flex-col animate-race-in gap-4">
         <div className="text-center">
-          <div className="text-5xl mb-1">🏁</div>
+          <div className="mb-1 flex justify-center text-ink-fire"><Icon name="finish" className="w-12 h-12" /></div>
           <h1 dir="auto" className="font-brand text-3xl font-extrabold" style={{ color: accent }}>{data.title}</h1>
           <p className="text-zinc-500 text-sm mt-1">
             {t.recap.summary({ teams: data.stats.teamCount, photos: data.stats.photoCount })}
@@ -111,11 +111,11 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
 
         {/* Standings */}
         <Card className="p-4">
-          <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🏅 {t.recap.standings}</div>
+          <div className="text-sm font-semibold text-zinc-300 mb-3 text-start flex items-center gap-1.5"><Icon name="trophy" className="w-4 h-4 shrink-0" />{t.recap.standings}</div>
           <div className="space-y-1.5">
             {data.standings.slice(0, 12).map((s, i) => (
               <div key={s.teamId} className="flex items-center gap-3 text-sm px-2 py-1.5 rounded-lg">
-                <span className="w-6 text-center">{MEDALS[i] ?? <span className="text-zinc-500 text-xs">{s.rank}</span>}</span>
+                <span className="w-6 text-center">{medalFor(i, 'w-6 h-6') ?? <span className="text-zinc-500 text-xs">{s.rank}</span>}</span>
                 <span dir="auto" className="flex-1 text-start font-medium text-zinc-200">{s.teamName}</span>
                 {s.totalSeconds != null && <span className="text-xs text-zinc-500 font-mono">{fmtTime(s.totalSeconds)}</span>}
                 <span className="font-mono text-xs font-semibold" style={{ color: accent }}>{s.score}</span>

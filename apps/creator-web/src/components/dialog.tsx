@@ -7,7 +7,7 @@
 //   const name = await dialog.prompt('Staff name?')   // string | null
 //
 // Mount <DialogHost/> once at the app root.
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button, Card, Input } from './ui';
 import { useT } from './LanguageContext';
 
@@ -90,13 +90,33 @@ export function DialogHost() {
     listener = (r) => { setReq(r); setValue(r?.defaultValue ?? ''); };
     return () => { listener = null; };
   }, []);
+  const titleId = useId();
+  const messageId = useId();
+
+  const close = (result: boolean | string | null) => { req?.resolve(result); setReq(null); };
+  const onConfirm = () =>
+    close(req?.kind === 'prompt' ? value : req?.kind === 'confirm' ? true : undefined!);
+  const onCancel = () => close((req?.kind === 'prompt' || req?.kind === 'choose') ? null : false);
+
+  // Escape answers the dialog the way its quiet button would: cancel, or OK on an
+  // alert (which has nothing else). Keyed on the request, so it is live only while
+  // a dialog is up. Declared before the early return: hooks run on every render.
+  const onCancelRef = useRef(onCancel);
+  const onConfirmRef = useRef(onConfirm);
+  onCancelRef.current = onCancel;
+  onConfirmRef.current = onConfirm;
+  useEffect(() => {
+    if (!req) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      if (req.kind === 'alert') onConfirmRef.current(); else onCancelRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [req]);
 
   if (!req) return null;
-
-  const close = (result: boolean | string | null) => { req.resolve(result); setReq(null); };
-  const onConfirm = () =>
-    close(req.kind === 'prompt' ? value : req.kind === 'confirm' ? true : undefined!);
-  const onCancel = () => close((req.kind === 'prompt' || req.kind === 'choose') ? null : false);
 
   return (
     <div
@@ -113,14 +133,20 @@ export function DialogHost() {
       // definition, so it outranks progress overlays rather than the other way
       // round. Keep this the highest z-index in creator-web; the ordering is
       // asserted by scripts/test-creator-a11y-scan.ts.
+      // A dialog that says it is one: announced on open, named by its title (or its
+      // message when it has none), described by its message.
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby={req.title ? titleId : messageId}
+      aria-describedby={messageId}
       className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget && req.kind === 'alert') onConfirm(); }}
     >
       <Card className="w-full max-w-sm p-6 space-y-4">
         {req.title && (
-          <h2 className="text-base font-bold text-[--ink-1]">{req.title}</h2>
+          <h2 id={titleId} className="text-base font-bold text-[--ink-1]">{req.title}</h2>
         )}
-        <p className="text-sm text-[--ink-1] whitespace-pre-line">{req.message}</p>
+        <p id={messageId} className="text-sm text-[--ink-1] whitespace-pre-line">{req.message}</p>
 
         {req.kind === 'choose' && (
           // A column, not a row: these are sentences in Hebrew or English, and a

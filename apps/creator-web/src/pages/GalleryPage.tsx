@@ -17,6 +17,7 @@ import { useT, useLanguage } from '../components/LanguageContext';
 // step with it automatically (change: mission-bank-in-library).
 import { loadMissionBank } from '../lib/missionBank';
 import { bankRowsFor, mergeLibraryRows, filterBankRowsByFacets, type LibraryRow } from '../lib/libraryBankRows';
+import { Icon } from '../components/Icon';
 
 // Fetch limits mirror the server HARD_CAPs in functions/src/gallery/index.ts
 // (searchTaskLibrary: 100, searchGallery: 50) so the map/list cover as many
@@ -386,7 +387,7 @@ export default function GalleryPage() {
       {tab === 'games' && ((!games || searching) ? (
         <><LoadingState messages={gl.loadingGames} /><CardSkeletonGrid /></>
       ) : games.length === 0 ? (
-        <EmptyState icon="🔭" title={gl.emptyTitle} body={gl.emptyText}
+        <EmptyState icon="search" title={gl.emptyTitle} body={gl.emptyText}
           action={q ? <Button variant="ghost" onClick={() => setQ('')}>{gl.clearSearch}</Button> : undefined} />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -427,7 +428,7 @@ export default function GalleryPage() {
                     the gallery existed; nothing had ever rendered them. */}
                 <TagChips tags={pg.tags} more={gl.moreTags} />
                 <div><LikeButton {...likeProps('game', pg.id)} /></div>
-                {pg.approxLocation?.label && <span className="text-[13px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
+                {pg.approxLocation?.label && <span className="text-[13px] text-[--ink-3] inline-flex items-center gap-1"><Icon name="pin" className="w-3.5 h-3.5" />{pg.approxLocation.label}</span>}
                 {/* stopPropagation so a Copy tap duplicates the game WITHOUT also
                     opening the detail behind it. */}
                 <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-auto !py-2 !text-xs !font-semibold" onClick={(e) => { e.stopPropagation(); void copyAction.run(pg); }}>{gl.copyBtn}</Button>
@@ -440,7 +441,7 @@ export default function GalleryPage() {
       {tab === 'tasks' && ((!tasks || searching) ? (
         <><LoadingState messages={gl.loadingTasks} /><CardSkeletonGrid /></>
       ) : tasks.length === 0 ? (
-        <EmptyState icon="🔭" title={gl.emptyTasksTitle} body={gl.emptyTasksText}
+        <EmptyState icon="search" title={gl.emptyTasksTitle} body={gl.emptyTasksText}
           action={q ? <Button variant="ghost" onClick={() => setQ('')}>{gl.clearSearch}</Button> : undefined} />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -551,7 +552,7 @@ function LikeButton({ view, busy, gl, onToggle }: {
       className={`inline-flex items-center gap-1 rounded-full border border-[--rp-border] px-2 py-0.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
         view.liked ? 'bg-rp-fire/12 text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}
     >
-      <span aria-hidden="true">{view.liked ? '♥' : '♡'}</span>
+      <Icon name="heart" className={view.liked ? 'w-4 h-4 fill-current' : 'w-4 h-4'} />
       <span>{gl.likes(view.likeCount)}</span>
     </button>
   );

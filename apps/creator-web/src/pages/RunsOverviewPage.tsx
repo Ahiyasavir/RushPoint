@@ -4,6 +4,7 @@ import { LoadingState } from '../components/LoadingState';
 import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
 import { useLiveRuns } from '../hooks/useLiveRuns';
+import { Icon } from '../components/Icon';
 
 // Multi-run GM overview (change: multi-run-gm-panel): every LIVE run across all of
 // the owner's games in one place, with a participant count + unacknowledged-alert
@@ -50,7 +51,7 @@ export default function RunsOverviewPage() {
       {runs && runs.length === 0 ? (
         <Card className="p-0">
           <EmptyState
-            icon="🏁"
+            icon="finish"
             title={r.emptyTitle}
             body={r.empty}
             action={<Button onClick={() => nav('/')}>{r.emptyCta}</Button>}
@@ -73,13 +74,13 @@ export default function RunsOverviewPage() {
                       title={r.copyCode}
                       className="inline-flex items-center gap-1 font-mono text-[--ink-2] hover:text-ink-fire rounded px-1 -mx-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
                     >
-                      {run.accessCode}<span aria-hidden="true" className="text-[12px] opacity-70">📋</span>
+                      {run.accessCode}<Icon name="clipboard" className="w-3.5 h-3.5 opacity-70" />
                     </button>
                   </span>
-                  <span>👥 {r.participants({ n: run.participantCount })}</span>
+                  <span className="inline-flex items-center gap-1"><Icon name="users" className="w-3.5 h-3.5" />{r.participants({ n: run.participantCount })}</span>
                   {run.unackedAlerts > 0 && (
                     <span className="inline-flex items-center rounded-full bg-rp-alert/15 border border-rp-alert/40 text-ink-alert px-2 py-0.5 font-bold">
-                      🆘 {r.alerts({ n: run.unackedAlerts })}
+                      <Icon name="sos" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {r.alerts({ n: run.unackedAlerts })}
                     </span>
                   )}
                 </div>

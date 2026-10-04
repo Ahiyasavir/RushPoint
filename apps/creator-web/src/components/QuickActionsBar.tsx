@@ -8,6 +8,7 @@ import { useT } from './LanguageContext';
 import { Button } from './ui';
 import { TAP_CLUSTER } from '../lib/interaction';
 import { searchTeams, type TeamSearchRow } from '../lib/teamSearch';
+import { Icon, type IconName } from './Icon';
 
 // The Run Console's quick-actions bar (change: quick-dial-and-actions, D4/D5).
 //
@@ -23,6 +24,12 @@ export interface QuickActionHandlers {
   /** Whether an action can do anything right now (e.g. "call" needs a published number). */
   available: (id: QuickActionId) => boolean;
 }
+
+// Drawn icons per quick action (change: no-stock-emoji).
+const QUICK_ACTION_ICON: Record<QuickActionId, IconName> = {
+  broadcast: 'megaphone', startTeams: 'play', refreshStandings: 'refresh', photoQueue: 'camera',
+  adjustScore: 'plus', findTeam: 'search', callContact: 'phone',
+};
 
 export default function QuickActionsBar({ uid, teams, handlers }: {
   uid: string | null;
@@ -67,13 +74,13 @@ export default function QuickActionsBar({ uid, teams, handlers }: {
         {visible.map((id) => (
           <button key={id} type="button" onClick={() => trigger(id)}
             className="shrink-0 inline-flex items-center gap-1.5 min-h-[40px] rounded-full border border-[--rp-border] bg-[--surface-0] px-3 text-[13px] font-semibold text-[--ink-1] hover:bg-[--surface-2]">
-            <span aria-hidden="true">{qa.icon[id]}</span>{qa.label[id]}
+            <Icon name={QUICK_ACTION_ICON[id]} className="w-4 h-4" />{qa.label[id]}
           </button>
         ))}
       </div>
       <button type="button" onClick={() => setCustomising(true)} aria-label={qa.customise} title={qa.customise}
         className="shrink-0 inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-full border border-dashed border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]">
-        ⚙️
+        <Icon name="gear" className="w-5 h-5" />
       </button>
 
       {customising && (
@@ -92,7 +99,7 @@ export default function QuickActionsBar({ uid, teams, handlers }: {
                     <label className={`flex flex-1 items-center gap-3 min-h-[44px] rounded-lg px-2 ${full ? 'opacity-50' : 'hover:bg-[--surface-2]'}`}>
                       <input type="checkbox" checked={on} disabled={full}
                         onChange={() => void save(on ? chosen.filter((x) => x !== id) : [...chosen, id])} />
-                      <span aria-hidden="true">{qa.icon[id]}</span>
+                      <Icon name={QUICK_ACTION_ICON[id]} className="w-4 h-4 shrink-0" />
                       <span className="text-sm text-[--ink-1]">{qa.label[id]}</span>
                     </label>
                     {on && (

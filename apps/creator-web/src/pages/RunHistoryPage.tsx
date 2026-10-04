@@ -4,6 +4,8 @@ import { Badge, Button, Card, EmptyState, Skeleton } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { useT } from '../components/LanguageContext';
 import { listMyRuns, type MyRunRow } from '../services/calls';
+import { Icon } from '../components/Icon';
+import { runHistoryBadge } from '../lib/runHistoryBadge';
 
 // Run history (change: post-run-player-report).
 //
@@ -99,7 +101,7 @@ export default function RunHistoryPage() {
       {runs && runs.length === 0 && !errored ? (
         <Card className="p-0">
           <EmptyState
-            icon="🏁"
+            icon="finish"
             title={r.emptyTitle}
             body={r.empty}
             action={<Button onClick={() => nav('/')}>{r.emptyCta}</Button>}
@@ -114,17 +116,24 @@ export default function RunHistoryPage() {
                   <span className="font-semibold text-[--ink-1] truncate" dir="auto">
                     {run.gameTitle || r.untitled}
                   </span>
-                  {isLive(run) && <Badge color="green">{r.statusLive}</Badge>}
-                  {run.status === 'finished' && <Badge color="zinc">{r.statusFinished}</Badge>}
-                  {run.status === 'draft' && <Badge color="zinc">{r.statusDraft}</Badge>}
+                  {/* "Playing now" only within a day of launch; an older live run was simply
+                      never ended (lib/runHistoryBadge.ts). */}
+                  {(() => {
+                    const badge = runHistoryBadge(run, Date.now());
+                    if (badge === 'live') return <Badge color="green">{r.statusLive}</Badge>;
+                    if (badge === 'open') return <Badge color="gold">{r.statusOpen}</Badge>;
+                    if (badge === 'finished') return <Badge color="zinc">{r.statusFinished}</Badge>;
+                    if (badge === 'draft') return <Badge color="zinc">{r.statusDraft}</Badge>;
+                    return null;
+                  })()}
                   {run.isTestDrive && <Badge color="purple">{r.testDrive}</Badge>}
                 </div>
                 <div className="text-xs text-[--ink-3] mt-1 flex items-center gap-3 flex-wrap">
                   <span>{formatWhen(run)}</span>
-                  <span>👥 {r.participants({ n: run.participantCount })}</span>
+                  <span className="inline-flex items-center gap-1"><Icon name="users" className="w-3.5 h-3.5" />{r.participants({ n: run.participantCount })}</span>
                   {run.accessCode && <span className="font-mono text-[--ink-2]">{run.accessCode}</span>}
                   {run.topTeamName && (
-                    <span className="truncate max-w-[16rem]" dir="auto">🏅 {r.winner(run.topTeamName)}</span>
+                    <span className="truncate max-w-[16rem] inline-flex items-center gap-1" dir="auto"><Icon name="trophy" className="w-3.5 h-3.5 shrink-0" />{r.winner(run.topTeamName)}</span>
                   )}
                 </div>
               </div>

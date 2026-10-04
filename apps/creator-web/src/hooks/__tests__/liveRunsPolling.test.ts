@@ -4,6 +4,7 @@ import {
   LIVE_RUNS_POLL_MS,
   barMode,
   pollDelayFor,
+  recentLiveRuns,
   selectFeaturedRun,
   shouldShowBar,
 } from '../liveRunsPolling';
@@ -110,5 +111,28 @@ describe('liveRunsPolling — layout mode', () => {
     expect(barMode('/')).toBe('full');
     expect(barMode('/gallery')).toBe('full');
     expect(barMode('/settings')).toBe('full');
+  });
+});
+
+// change: active-run-bar-recent. A run nobody ended stays `live` forever; the floating bar
+// is about runs being played NOW (the same rule the run history badge uses).
+describe('liveRunsPolling — recentLiveRuns', () => {
+  const NOW = Date.parse('2026-10-04T08:00:00Z');
+  const hourAgo = new Date(NOW - 3600_000).toISOString();
+  it('keeps a run launched an hour ago and drops one from last month', () => {
+    const fresh = run({ runId: 'fresh', launchedAt: hourAgo });
+    const old = run({ runId: 'old', launchedAt: '2026-08-18T10:00:00Z' });
+    expect(recentLiveRuns([old, fresh], NOW).map((r) => r.runId)).toEqual(['fresh']);
+  });
+  it('keeps a run with no launch time (a missing field never hides a real event)', () => {
+    expect(recentLiveRuns([run({ runId: 'x', launchedAt: null })], NOW).map((r) => r.runId)).toEqual(['x']);
+  });
+  it('only old runs open ⇒ nothing to feature', () => {
+    const featured = selectFeaturedRun(recentLiveRuns([run({ runId: 'old', launchedAt: '2026-08-18T10:00:00Z' })], NOW));
+    expect(featured).toBeNull();
+  });
+  it('is total on junk', () => {
+    expect(recentLiveRuns(null, NOW)).toEqual([]);
+    expect(recentLiveRuns(undefined, NOW)).toEqual([]);
   });
 });

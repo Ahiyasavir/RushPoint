@@ -9,6 +9,7 @@ import { useT } from '../i18nContext';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { buildDeviceJoinLink } from '../lib/deviceJoinLink';
 import { routeShare } from '../lib/shareLadder';
+import { Icon } from './Icon';
 
 // Shared team devices (change: shared-team-devices): every attached phone sees
 // the team's device join code (to invite the rest of the team), who is attached,
@@ -100,7 +101,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged, defaultO
         aria-expanded={open}
         className="w-full flex items-center justify-between px-4 py-2.5 min-h-[44px] text-sm font-semibold text-zinc-300"
       >
-        <span className="flex items-center gap-2">📱 {t.devices.panelTitle}</span>
+        <span className="flex items-center gap-2"><Icon name="device" className="w-4 h-4 shrink-0" />{t.devices.panelTitle}</span>
         <span className="text-xs text-zinc-500">{devices.length} {open ? '▴' : '▾'}</span>
       </button>
 
@@ -155,7 +156,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged, defaultO
                 </span>
                 {d.uid === controllerUid ? (
                   <span className="shrink-0 text-[13px] font-bold text-ink-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
-                    ✏️ {t.devices.controllerBadge}
+                    <Icon name="pencil" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {t.devices.controllerBadge}
                   </span>
                 ) : isController ? (
                   <button
@@ -176,7 +177,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged, defaultO
               onClick={() => void takeControlAction.run()}
               className="w-full min-h-[44px] text-sm font-semibold text-ink-fire border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
             >
-              ✏️ {t.devices.takeControl}
+              <Icon name="pencil" className="w-4 h-4 inline-block align-text-bottom" /> {t.devices.takeControl}
             </button>
           )}
 

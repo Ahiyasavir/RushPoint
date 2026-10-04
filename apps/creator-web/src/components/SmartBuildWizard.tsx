@@ -39,7 +39,7 @@ import {
   smartBuildAnswers,
   smartBuildReducer,
 } from '../lib/smartBuildWizard';
-import { previewComposition, previewShape, type ComposerAnswers } from '../lib/composeGame';
+import { previewComposition, previewPrepCost, previewShape, type ComposerAnswers } from '../lib/composeGame';
 import type { TaskBankEntry } from '../taskBank';
 // The bank with the admin's edits applied (change: admin-editable-mission-bank).
 // `missionBankNow()` is whatever the last successful load produced — the
@@ -104,6 +104,13 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
   // is where missions first appear.
   const shape = useMemo(
     () => previewShape(bank, smartBuildAnswers(state), state.seed, recent),
+    [state, recent, bank],
+  );
+
+  // What the prep answer costs in map points, said beside the answer
+  // (change: composer-siting-by-station): the 1 to 5 scale stops being abstract.
+  const prepCost = useMemo(
+    () => previewPrepCost(bank, smartBuildAnswers(state), state.seed, recent),
     [state, recent, bank],
   );
 
@@ -219,14 +226,19 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
       title: w.prepTitle,
       subtitle: w.prepSub,
       render: () => (
-        <RatingRow
-          label={w.prepLabel}
-          options={SMART_BUILD_PREP_LEVELS}
-          value={a.prepEffort}
-          onChange={(v) => dispatch({ type: 'setAnswer', key: 'prepEffort', value: v })}
-          render={(v) => prepLabel(v)}
-          hint={prepHint(a.prepEffort)}
-        />
+        <>
+          <RatingRow
+            label={w.prepLabel}
+            options={SMART_BUILD_PREP_LEVELS}
+            value={a.prepEffort}
+            onChange={(v) => dispatch({ type: 'setAnswer', key: 'prepEffort', value: v })}
+            render={(v) => prepLabel(v)}
+            hint={prepHint(a.prepEffort)}
+          />
+          {prepCost.pins > 0 && (
+            <p className="mt-2 text-[13px] text-[--ink-2]" aria-live="polite">{w.prepCost(prepCost.pins, prepCost.minutes)}</p>
+          )}
+        </>
       ),
     },
     {

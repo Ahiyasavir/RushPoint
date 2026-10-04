@@ -23,6 +23,7 @@ import { effectiveExclusiveGroups, maxAttainableCompletions } from '@rushpoint/s
 import { useT } from './LanguageContext';
 import { GROUP_STYLES } from './TaskCard';
 import { TAP_INLINE, TAP_TARGET } from '../lib/interaction';
+import { Icon } from './Icon';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -196,12 +197,12 @@ export default function ExclusiveGroupsModal({ stage, onAssign, onRemoveGroup, o
               >✕</button>
             </div>
           ))}
-          {atMax && <p className="text-amber-400">{b.exclusiveMaxGroups}</p>}
+          {atMax && <p className="text-ink-amber">{b.exclusiveMaxGroups}</p>}
           <p>{b.exclusiveCeiling(ceiling, stage.tasks.length)}</p>
           {/* Same warning as the stage header, echoed here so the consequence is
               visible while editing rather than only after the modal closes. */}
           {typeof stage.requiredTaskCount === 'number' && stage.requiredTaskCount > ceiling && (
-            <p className="text-amber-400">⚠ {b.exclusiveUnwinnableWarn}</p>
+            <p className="text-ink-amber flex items-start gap-1.5"><Icon name="alert" className="w-4 h-4 shrink-0 mt-0.5" />{b.exclusiveUnwinnableWarn}</p>
           )}
           <div className="flex justify-end pt-1">
             <button

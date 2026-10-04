@@ -8,33 +8,19 @@
 // gate, placement is last and never blocks. Validation messages are withheld
 // until the creator dirties the field group they concern or presses the finish
 // control, so a brand new task is never greeted by its own errors.
-import { isoToLocalInput, localInputToIso } from '../lib/timeWindowInput';
 import { useEffect, useRef, useState, type ReactNode, type ChangeEvent, type DragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Task, TaskStep, TaskType, TaskMedia } from '@rushpoint/shared';
 import {
   normalizeTriggerMode, parseYouTubeId, youTubeEmbedUrl, isTaskMediaValid,
-  validateUnlockGraph, validateAvailabilityWindow,
   validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
   locationLeakWarnings,
-  // task-duration-defaults: the per-interaction derived estimate the editor suggests.
-  defaultExpectedDurationMinutes, TASK_DURATION_MAX_MINUTES,
-  // The most devices one team may ever hold, so a contributor requirement cannot be
-  // authored above what any team could satisfy (change: every-member-plays).
-  TEAM_DEVICE_HARD_CAP,
-  // visible-time-estimates: the WALK INCLUSIVE estimate the scoring sigmoid reads.
-  defaultEstimatedMinutes, TASK_ESTIMATE_MAX_MINUTES,
-  normalizeTags,
   // video-submission-task: the SAME range verdict the server's save guard reads.
   VIDEO_DURATION_LIMITS, videoDurationProblem,
-  // mission-time-limit: the per team countdown's ceiling, the same one the server checks.
-  TIME_LIMIT_MAX_MINUTES,
 } from '@rushpoint/shared';
-import { Button, Input, Label, TagChips, Textarea } from './ui';
-import { parseTagsInput } from '../lib/tags';
+import { Button, Input, Label, Textarea } from './ui';
 import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
-import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { uploadTaskMedia, ingestTaskMediaFromUrl } from '../services/firebase';
@@ -49,12 +35,9 @@ import {
   type WizardStep, type WizardStepKey, WIZARD_STEP_ORDER, TYPE_PICKER_ORDER,
   stepKeyAt, stepIndexOf, canGoNext, canGoBack, taskPlacementState, isTaskInteractionValid,
 } from '../lib/wizardLogic';
-// The modular opt-in groups that replaced the five collapsible sections
-// (change: task-editor-progressive-disclosure).
-import {
-  type OptInGroupKey, OPT_IN_GROUP_KEYS,
-  defaultActiveGroups, groupApplies, groupSummary, foldGroupAway,
-} from '../lib/taskOptInGroups';
+// Step 3's settings rows and which one is open (change: mission-editor-value-rows).
+import { type OptInGroupKey, defaultActiveGroups, openOnly } from '../lib/taskOptInGroups';
+import MissionSettingsRows from './MissionSettingsRows';
 import {
   type RevealState, type ValidationField,
   initialRevealState, markTouched, shouldReveal, nextFinishAction, taskRevealBlockers,
@@ -75,35 +58,17 @@ import {
 import {
   guidedEditorView, guidedLocationView, GUIDED_BODY_CLASS, GUIDED_KEEP_CLASS,
 } from '../lib/guidedEditor';
+import { Icon } from './Icon';
+import { ICON_PATHS } from '@rushpoint/shared';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
-// Inline (beside-control / tooltip-trigger) variant of the ui-kit block <Label>.
-function InlineLabel({ children }: { children: ReactNode }) {
-  return <span className="text-xs font-semibold text-[--ink-3] uppercase tracking-wider">{children}</span>;
-}
-
-// A lightweight subheading that breaks the Advanced mega-section into labelled
-// groups (change: advanced-subheadings). Reuses InlineLabel; the hairline + spacing
-// are the only added markup, so it separates without inventing a new visual style.
-function AdvGroup({ children }: { children: ReactNode }) {
-  return (
-    <div className="mt-3 mb-1 pt-2 border-t border-[--rp-border] first:mt-0 first:pt-0 first:border-0">
-      <InlineLabel>{children}</InlineLabel>
-    </div>
-  );
-}
-
-const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[] = [
-  { key: 'easy', value: 2, test: (d) => d <= 3 },
-  { key: 'mid', value: 5, test: (d) => d >= 4 && d <= 6 },
-  { key: 'hard', value: 8, test: (d) => d >= 7 },
-];
-
 export default function TaskWizard({
   task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings, revealAll,
-  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors, onRegenerate,
+  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors, onRegenerate, scoringPreset,
 }: {
+  /** The game's scoring preset: decides which scoring control step 3 shows (change: mission-editor-value-rows). */
+  scoringPreset?: unknown;
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
   /**
    * Swap this mission for the closest one in the bank (change: mission-regenerate).
@@ -172,14 +137,10 @@ export default function TaskWizard({
   // populated one advertises itself through its chip's count badge rather than by
   // unfolding — see lib/taskOptInGroups.
   const [active, setActive] = useState<Record<OptInGroupKey, boolean>>(() => defaultActiveGroups(task));
-  const openGroup = (k: OptInGroupKey) => setActive((a) => ({ ...a, [k]: true }));
-  // Hide folds the group back to a chip and writes NOTHING to the task. The
-  // decision lives in lib/taskOptInGroups so "hiding never edits" is unit-tested
-  // rather than reviewed by eye; this used to clear the group's fields first,
-  // which turned "hide this section" into silent data loss via the autosave.
-  const hideGroup = (k: OptInGroupKey) =>
-    setActive((a) => foldGroupAway(task, a, k).active);
-  const groups = { active, openGroup, hideGroup };
+  // At most one settings row open at a time (lib/taskOptInGroups `openOnly`); toggling writes
+  // nothing to the task (change: mission-editor-value-rows).
+  const toggle = (k: OptInGroupKey) => setActive((a) => openOnly(a, k));
+  const groups = { active, toggle };
 
   // The Location step's own collapsed panel (radius / skip-GPS / hide-location +
   // its clue) — lifted up from LocationStepBody so Quick Setup can open it the
@@ -200,7 +161,7 @@ export default function TaskWizard({
     // later step no longer needs it, since nothing else in this flow ever closes
     // it again once opened.
     setLocAdvOpen(focusGroup === 'locationAdvanced');
-    if (focusGroup && focusGroup !== 'locationAdvanced') setActive((a) => ({ ...a, [focusGroup]: true }));
+    if (focusGroup && focusGroup !== 'locationAdvanced') setActive({ ...defaultActiveGroups(task), [focusGroup]: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
 
@@ -443,7 +404,7 @@ export default function TaskWizard({
         {/* `data-qs-body` marks the LIST guided isolation subtracts within — the
             direct children of these wrappers are the sections a step can keep. */}
         {stepKey === 'details' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} showTypePicker={view.showTypePicker} /></div>}
-        {stepKey === 'execution' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} /></div>}
+        {stepKey === 'execution' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} preset={scoringPreset} /></div>}
       </div>
 
       {/* Footer. The "this task cannot be completed" line is a response to an
@@ -495,8 +456,7 @@ type B = ReturnType<typeof useT>['builder'];
 // Opt-in group state, owned by the wizard and shared with step 3.
 type Groups = {
   active: Record<OptInGroupKey, boolean>;
-  openGroup: (k: OptInGroupKey) => void;
-  hideGroup: (k: OptInGroupKey) => void;
+  toggle: (k: OptInGroupKey) => void;
 };
 
 // ── The modular opt-in primitive (change: task-editor-progressive-disclosure) ──
@@ -828,7 +788,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
           it, which is all this moment needs. */}
       {choice === 'specific' && taskPlacementState(task) === 'unplaced' && (
         <div className="shrink-0 flex items-center gap-2 rounded-lg bg-[--surface-2] px-2.5 py-1.5">
-          <span aria-hidden className="text-xs leading-none">📍</span>
+          <Icon name="pin" className="w-3.5 h-3.5" />
           <p className="text-[13px] text-[--ink-2] min-w-0 flex-1 truncate">{b.notPlacedTitle}</p>
           <Button variant="ghost" className="text-[13px] shrink-0 px-2 py-0.5" onClick={() => setExpanded(true)}>{b.notPlacedAction}</Button>
         </div>
@@ -874,7 +834,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
               <button type="button" onClick={() => setExpanded(true)}
                 title={b.enlargeMap}
                 className="min-h-[44px] px-3 flex items-center gap-1.5 rounded-xl border border-[--rp-border] bg-[--surface-1] text-[13px] font-medium text-[--ink-1] hover:bg-[--surface-2] shadow-soft">
-                <span aria-hidden className="text-sm leading-none">⛶</span>
+                <Icon name="expand" className="w-4 h-4" />
                 <span>{b.enlargeMap}</span>
               </button>
             )} />
@@ -888,7 +848,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
       {/* Rendered via a portal to document.body: an ancestor's `transform`
           (the sliding panel) would otherwise trap this `position: fixed` modal. */}
       {expanded && choice === 'specific' && createPortal(
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 sm:p-8" onClick={() => setExpanded(false)}>
+        <div role="dialog" aria-modal="true" aria-label={b.mapModalTitle} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 sm:p-8" onClick={() => setExpanded(false)}>
           <div className="bg-[--surface-1] rounded-2xl border border-[--rp-border] shadow-soft w-[92vw] h-[86vh] max-w-5xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-[--rp-border]">
               <span className="font-medium text-sm text-[--ink-1]">{b.mapModalTitle}</span>
@@ -1199,7 +1159,7 @@ function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true 
             the active type below.
             TWO columns on a phone (change: builder-mobile-simplification). At
             three, a tile inside the mission sheet is ~110px wide and `pe-12`
-            already reserves 48px of that for the ✨ and the tooltip, leaving
+            already reserves 48px of that for the sparkle and the tooltip, leaving
             ~35px of text — every label rendered as "…מ" and the creator was being
             asked to choose between nine options they could not read. Two columns
             cost about 70px of height and buy back the whole label. Same lesson the
@@ -1229,7 +1189,7 @@ function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true 
                     aria-label={b.loadSampleFor(TYPE_META[ty].label)} title={b.loadSampleFor(TYPE_META[ty].label)}
                     aria-expanded={samplePickerFor === ty}
                     className="w-6 h-6 rounded-full bg-[--surface-2] text-[--ink-3] text-[13px] leading-none flex items-center justify-center hover:text-ink-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
-                    ✨
+                    <Icon name="sparkle" className="w-4 h-4" />
                   </button>
                   <RichTooltip title={TYPE_META[ty].label} body={TYPE_META[ty].desc} svg={TYPE_ANIM[ty]} />
                 </span>
@@ -1259,60 +1219,6 @@ function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true 
   );
 }
 
-// ── Unlockable tasks (change: unlockable-tasks) — prerequisite multi-select ──
-// A collapsible "Unlocks only after…" section (like the hint toggle) with a
-// checkbox per sibling task of the SAME stage. Only sibling ids are offered
-// (self excluded), so self-reference / cross-stage / unknown ids can't be
-// authored; an option whose checking would create a dependency CYCLE is
-// disabled with an explanation — validateUnlockGraph is the single source of
-// truth, so the Builder can never produce a graph the server would reject.
-function UnlockSection({ task, siblings, set, b }: {
-  task: Task; siblings: Task[]; set: (p: Partial<Task>) => void; b: B;
-}) {
-  const selected = task.unlockAfterTaskIds ?? [];
-  const others = siblings.filter((s) => s.id !== task.id);
-
-  // Would checking `id` make the stage graph invalid (i.e. create a cycle)?
-  const wouldBreak = (id: string): boolean => {
-    const hypothetical = siblings.map((s) =>
-      s.id === task.id ? { ...task, unlockAfterTaskIds: [...selected, id] } : s,
-    );
-    return validateUnlockGraph({ tasks: hypothetical }).errors.length > 0;
-  };
-
-  const toggle = (id: string, on: boolean) => {
-    const next = on ? [...selected, id] : selected.filter((x) => x !== id);
-    set({ unlockAfterTaskIds: next.length > 0 ? next : undefined });
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <p className="text-[13px] text-[--ink-3] leading-snug">{b.unlockAfterHint}</p>
-      {others.length === 0 ? (
-        <p className="text-[13px] text-[--ink-3]">{b.unlockAfterNone}</p>
-      ) : (
-        <div className="space-y-1">
-          {others.map((s) => {
-            const checked = selected.includes(s.id);
-            const blocked = !checked && wouldBreak(s.id);
-            return (
-              <label key={s.id}
-                className={`flex items-start gap-2 text-sm ${blocked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer text-[--ink-1]'}`}
-                title={blocked ? b.unlockCycleError : undefined}>
-                <input type="checkbox" className="mt-0.5" checked={checked} disabled={blocked}
-                  onChange={(e) => toggle(s.id, e.target.checked)} />
-                <span dir="auto" className="min-w-0 truncate">
-                  <span className="text-[--ink-3] me-1">{siblings.indexOf(s) + 1}.</span>
-                  {s.title || b.untitledTask}
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Task media (images / videos / YouTube) — change: task-media-attachments ──
 // Upload image/video files from the computer (→ Firebase Storage) or paste a
@@ -1586,9 +1492,9 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
       <circle cx="60" cy="35" r="4" fill="#7F77DD">
         <animate attributeName="opacity" values="1;0.2;1" dur="2s" repeatCount="indefinite" />
       </circle>
-      <text x="80" y="25" fontSize="10" fill="#FFD700" opacity="0">✦
+      <path d={ICON_PATHS.star[0].d} transform="translate(79 16) scale(0.458)" fill="#FFD700" stroke="none" opacity="0">
         <animate attributeName="opacity" values="0;1;0" dur="2s" begin="0.4s" repeatCount="indefinite" />
-      </text>
+      </path>
     </svg>
   ),
   quiz: (
@@ -1635,15 +1541,15 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
   ),
   self_report: (
     <svg viewBox="0 0 120 60" className="w-full h-14">
-      <text x="5" y="42" fontSize="20" fill="#FFD700">★</text>
-      <text x="25" y="42" fontSize="20" fill="#FFD700">★</text>
-      <text x="45" y="42" fontSize="20" fill="#FFD700">★</text>
-      <text x="65" y="42" fontSize="20" fill="#888888">★
+      <path d={ICON_PATHS.star[0].d} transform="translate(4 25) scale(0.833)" fill="#FFD700" stroke="none" />
+      <path d={ICON_PATHS.star[0].d} transform="translate(24 25) scale(0.833)" fill="#FFD700" stroke="none" />
+      <path d={ICON_PATHS.star[0].d} transform="translate(44 25) scale(0.833)" fill="#FFD700" stroke="none" />
+      <path d={ICON_PATHS.star[0].d} transform="translate(64 25) scale(0.833)" fill="#888888" stroke="none">
         <animate attributeName="fill" values="#888888;#888888;#FFD700;#FFD700" keyTimes="0;0.45;0.6;1" dur="2s" repeatCount="indefinite" />
-      </text>
-      <text x="85" y="42" fontSize="20" fill="#888888">★
+      </path>
+      <path d={ICON_PATHS.star[0].d} transform="translate(84 25) scale(0.833)" fill="#888888" stroke="none">
         <animate attributeName="fill" values="#888888;#888888;#888888;#FFD700;#FFD700" keyTimes="0;0.6;0.75;0.85;1" dur="2s" repeatCount="indefinite" />
-      </text>
+      </path>
     </svg>
   ),
   geofence: (
@@ -1702,7 +1608,7 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
 // so putting either behind a chip would let a creator save something unplayable.
 // Everything optional follows as a row of opt-in chips (change:
 // task-editor-progressive-disclosure).
-function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, touch, siblings }: {
+function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, touch, siblings, preset }: {
   task: Task; set: (p: Partial<Task>) => void; setSmart: (p: Record<string, unknown>) => void;
   // visible-time-estimates: the other tasks of the SAME stage. Only used to measure
   // the median walking leg behind the suggested estimate.
@@ -1711,28 +1617,12 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
   replace: (t: Task) => void;
   b: B; groups: Groups;
   revealed: (f: ValidationField) => boolean; touch: (f: ValidationField) => void;
+  /** The game's scoring preset (change: mission-editor-value-rows). */
+  preset?: unknown;
 }) {
   const located = (() => { const m = normalizeTriggerMode(task); return m === 'radius' || m === 'exact'; })();
-  const isAnswerTask = task.type === 'quiz' || task.type === 'numeric' || task.type === 'survey';
   const TYPE_META = typeMetaOf(b);
-  const siblingCount = siblings?.length ?? 1;
-  const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
 
-  const GROUP_TITLE: Record<OptInGroupKey, string> = {
-    hint: b.hintField, timerPoints: b.groupTimerPoints, rules: b.groupRules,
-  };
-  const CHIP_LABEL: Record<OptInGroupKey, string> = {
-    hint: b.chipAddHint, timerPoints: b.chipSetTimerPoints, rules: b.chipRules,
-  };
-  // A group is shown ONLY when the creator opted in (change:
-  // builder-nondestructive-disclosure). This used to also open whenever the task
-  // already carried data for the group — the render-time twin of the mount-time
-  // rule `defaultActiveGroups` fixes, and the one that actually decides what
-  // renders each pass. Content is still discoverable while folded: its chip
-  // carries a count badge (`groupSummary`, via `OptInChip` below), same guarantee,
-  // one click away instead of forced open.
-  const shown = (k: OptInGroupKey) => groups.active[k];
-  const chips = OPT_IN_GROUP_KEYS.filter((k) => groupApplies(k, task, siblingCount) && !shown(k));
 
   return (
     <>
@@ -1770,9 +1660,9 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               <div className="flex gap-2">
                 {(['photo', 'audio', 'video'] as const).map((k) => {
                   const active = (task.smart?.captureKind ?? 'photo') === k;
-                  const label = k === 'photo' ? `📷 ${b.captureKindPhoto}`
-                    : k === 'audio' ? `🎙️ ${b.captureKindAudio}`
-                    : `🎥 ${b.captureKindVideo}`;
+                  const label = k === 'photo' ? b.captureKindPhoto
+                    : k === 'audio' ? b.captureKindAudio
+                    : b.captureKindVideo;
                   return (
                     <button key={k} type="button"
                       onClick={() => setSmart({ verificationType: 'photo_upload', captureKind: k })}
@@ -1914,374 +1804,16 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
         )}
       </div>
 
-      {/* ── The modular opt-in groups ──────────────────────────────────────
-          Each optional field group is either a chip or its real fields with a
-          Remove control. A group whose data already exists renders expanded
-          regardless of what the creator has clicked, so nothing authored is ever
-          hidden. */}
-
-      {shown('hint') && (
-        <OptInGroup title={GROUP_TITLE.hint} hideLabel={b.hideSection} onHide={() => groups.hideGroup('hint')}>
-          <div className="flex items-center gap-2">
-            <RichTooltip concept="hint" />
-          </div>
-          <Textarea dense data-qs-field="hint" value={task.hint ?? ''} onChange={(e) => set({ hint: e.target.value })} placeholder={b.hintPlaceholder} rows={2} dir="auto" />
-          <div className="flex items-center gap-2">
-            <InlineLabel>{b.hintCost}</InlineLabel>
-            <Input dense type="number" min={0} className="w-20" value={task.hintPenalty ?? 25}
-              onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
-          </div>
-          {/* Hint auto escalation (change: hint-auto-escalation): optional free
-              thresholds — the hint stops costing points once the team has held
-              the task N minutes OR burned N wrong attempts. 0/empty = off. The
-              long explanation is demoted to a tooltip on the row. */}
-          <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5" title={b.hintEscalationLead}>
-            <div className="flex items-center gap-1.5">
-              <Input dense type="number" min={0} step="0.5" className="w-16" value={task.hintAutoRevealMinutes ?? ''}
-                aria-label={b.hintFreeAfterMinutes}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  set({ hintAutoRevealMinutes: Number.isFinite(v) && v > 0 ? v : undefined });
-                }} />
-              <InlineLabel>{b.hintFreeAfterMinutes}</InlineLabel>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Input dense type="number" min={0} className="w-16" value={task.hintAutoRevealAttempts ?? ''}
-                aria-label={b.hintFreeAfterAttempts}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value);
-                  set({ hintAutoRevealAttempts: Number.isInteger(v) && v > 0 ? v : undefined });
-                }} />
-              <InlineLabel>{b.hintFreeAfterAttempts}</InlineLabel>
-            </div>
-          </div>
-        </OptInGroup>
-      )}
-
-      {/* Media moved to the DETAILS step, beside the description it illustrates
-          (change: task-media-durability) — it is no longer an opt-in group here. */}
-      {shown('rules') && (
-        <OptInGroup title={GROUP_TITLE.rules} hideLabel={b.hideSection} onHide={() => groups.hideGroup('rules')}>
-          {/* How many teammates must each do their part (change: every-member-plays).
-              Lives HERE and not under time-and-scoring: it is a LIMIT on when the
-              mission may be completed, not a duration or a point value. Absent or 0
-              means none, which is every mission that exists today. The server reduces
-              it to the devices a team actually has, so authoring 4 for a team of two is
-              never unwinnable, and the help text says so rather than letting a creator
-              believe they have locked something they have not. */}
-          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
-            <InlineLabel>{b.requiredContributorsLabel}</InlineLabel>
-            <Input dense type="number" min={0} max={TEAM_DEVICE_HARD_CAP} className="w-20"
-              data-qs-field="requiredContributors"
-              value={task.requiredContributors ?? ''}
-              placeholder="0" aria-label={b.requiredContributorsLabel}
-              onChange={(e) => {
-                const n = parseInt(e.target.value, 10);
-                set({
-                  requiredContributors: Number.isFinite(n) && n > 1
-                    ? Math.min(TEAM_DEVICE_HARD_CAP, n)
-                    : undefined,
-                });
-              }} />
-          </div>
-          <p className="text-[13px] text-[--ink-3] mb-2" dir="auto">{b.requiredContributorsHelp}</p>
-          {/* Prerequisites need siblings to point at, so a one-task stage is
-              offered the rest of the group without them. */}
-          {siblingCount > 1 && (
-            <div>
-              <InlineLabel>{b.unlockAfterLead}</InlineLabel>
-              <div data-qs-field="unlockAfterTaskIds">
-                <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
-              </div>
-            </div>
-          )}
-          {isAnswerTask && (
-            <label className="flex items-start gap-2 cursor-pointer">
-              <input type="checkbox" className="mt-0.5" checked={!!task.requirePresence}
-                onChange={(e) => set({ requirePresence: e.target.checked || undefined })} />
-              <span>
-                <span className="text-[13px] font-medium text-[--ink-1]">{b.requirePresence}</span>
-                <span className="block text-[13px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
-              </span>
-            </label>
-          )}
-          <div>
-            <div className="flex items-center gap-1 mb-0.5">
-              <InlineLabel>{b.maxTeams}</InlineLabel>
-              <RichTooltip concept="concurrent" />
-            </div>
-            <Input dense data-qs-field="maxConcurrentTeams" type="number" min={1} value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: Math.max(1, parseInt(e.target.value) || 1) })} />
-          </div>
-          {/* Task tags (change: game-task-tags). `Task.tags` existed and was already
-              denormalized into publicTasks and returned by searchTaskLibrary — but the
-              ONLY code path that ever wrote it was copying a task OUT of the library,
-              so a creator could never tag their own mission. */}
-          <div>
-            <InlineLabel>{b.advGroupTags}</InlineLabel>
-            <div data-qs-field="tags">
-              <TaskTagsField task={task} set={set} b={b} />
-            </div>
-          </div>
-          {/* "Hide location" used to live here. It moved into the Location step's
-              Advanced panel (change: task-location-mode-consolidation), beside the
-              radius and skip-GPS controls it belongs with. */}
-        </OptInGroup>
-      )}
-
-      {shown('timerPoints') && (
-        <OptInGroup title={GROUP_TITLE.timerPoints} hideLabel={b.hideSection} onHide={() => groups.hideGroup('timerPoints')}>
-        {/* Difficulty on ONE line: the label sits beside its chips instead of above
-            them, the same compact strip idiom the stage settings row uses. It lives
-            here rather than on the details step because it only means anything next
-            to the point value it scales. */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 shrink-0">
-            <InlineLabel>{b.difficulty}</InlineLabel>
-            <RichTooltip concept="difficulty" />
-          </div>
-          <div className="flex gap-1.5 flex-1 min-w-0">
-            {DIFF_BANDS.map((d) => {
-              const active = d.test(task.difficulty);
-              return (
-                <button key={d.key} onClick={() => set({ difficulty: d.value })}
-                  className={`flex-1 min-w-0 rounded-lg border py-1 text-[13px] transition-colors ${
-                    active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
-                  {DIFF_LABEL[d.key]}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div>
-          <Label dense>{b.points}</Label>
-          <Input dense data-qs-field="pointValue" type="number" min={0} value={task.pointValue} onChange={(e) => set({ pointValue: Math.max(0, parseInt(e.target.value) || 0) })} />
-        </div>
-
-        <AdvGroup>{b.advGroupTiming}</AdvGroup>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <Label dense>{b.estMin}</Label>
-            {/* visible-time-estimates: this is the OVERRIDE for the derived estimate
-                shown just below. Kept where it has always been so the creator is not
-                asked to learn a new place for the same number. */}
-            <Input dense type="number" min={1} max={TASK_ESTIMATE_MAX_MINUTES}
-              value={task.estimatedMinutes}
-              onChange={(e) => set({
-                estimatedMinutes: Math.min(
-                  TASK_ESTIMATE_MAX_MINUTES,
-                  Math.max(1, parseInt(e.target.value) || 1),
-                ),
-              })} />
-          </div>
-        </div>
-        {/* The VISIBLE, SCORED estimate (change: visible-time-estimates). Distinct from
-            the per-interaction duration below: the server stamps a task's clock at
-            ASSIGNMENT, so this number is measured against WALK + interaction. It is
-            derived as the interaction default plus a transit allowance taken from the
-            median leg to this task's placed stage siblings. Suggestion only — nothing is
-            written until the creator taps apply, so no stored game and no run in flight
-            moves by a point. */}
-        {(() => {
-          const suggestedEstimate = defaultEstimatedMinutes(task, siblings ?? []);
-          return (
-            <div className="mt-2 space-y-1">
-              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
-                <span dir="auto">🚶 {b.estimateSuggested(String(suggestedEstimate))}</span>
-                {task.estimatedMinutes !== suggestedEstimate && (
-                  <button type="button" className="underline text-[--ink-2]"
-                    onClick={() => set({ estimatedMinutes: suggestedEstimate })}>
-                    {b.estimateUseSuggested}
-                  </button>
-                )}
-              </div>
-              <p className="text-[13px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
-            </div>
-          );
-        })()}
-
-        {/* Per-interaction duration (change: task-duration-defaults). Nothing in the
-            product ever set `expectedDurationMinutes`, so a 20 second photo snap and a
-            10 minute puzzle were estimated identically. Show what THIS interaction
-            typically takes at the stop, offer it with one tap, and let the creator
-            override it. Nothing is written on its own: only a creator action persists
-            a number, so no stored game and no run in flight moves by a point. */}
-        {(() => {
-          const suggested = defaultExpectedDurationMinutes(task);
-          const fmt = (n: number) => String(Number(n.toFixed(2)));
-          return (
-            <div className="mt-2 space-y-1">
-              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
-                <span dir="auto">⏱ {b.durationSuggested(fmt(suggested))}</span>
-                {task.expectedDurationMinutes !== suggested && (
-                  <button type="button" className="underline text-[--ink-2]"
-                    onClick={() => set({ expectedDurationMinutes: suggested })}>
-                    {b.durationUseSuggested}
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
-                <InlineLabel>{b.durationOverride}</InlineLabel>
-                <Input dense type="number" min={0} max={TASK_DURATION_MAX_MINUTES} className="w-20"
-                  data-qs-field="expectedDurationMinutes"
-                  value={task.expectedDurationMinutes ?? ''}
-                  placeholder={fmt(suggested)} aria-label={b.durationOverride}
-                  title={b.durationOverridePlaceholder(fmt(suggested))}
-                  onChange={(e) => {
-                    const n = parseFloat(e.target.value);
-                    set({
-                      expectedDurationMinutes: Number.isFinite(n) && n > 0
-                        ? Math.min(TASK_DURATION_MAX_MINUTES, n)
-                        : undefined,
-                    });
-                  }} />
-              </div>
-              <p className="text-[13px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
-
-            </div>
-          );
-        })()}
-
-        {/* Task expiry (change: task-expiry): the task closes N minutes after the
-            run starts — dropped from routing, refused on completion, auto-skipped
-            when in flight. Empty/0 = never expires. */}
-        <div>
-          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
-            <InlineLabel>⏳ {b.expiryLead}</InlineLabel>
-            <Input dense type="number" min={0} className="w-20" value={task.expiresAfterMinutes ?? ''}
-              placeholder="0" aria-label={b.expiryLead}
-              onChange={(e) => {
-                const n = parseFloat(e.target.value);
-                set({ expiresAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined });
-              }} />
-            <span>{b.expiryAfterUnit}</span>
-          </div>
-          {validateAvailabilityWindow(task) !== null && (
-            <p className="text-[13px] text-ink-fire mt-1">{b.expiryWindowError}</p>
-          )}
-          {/* mission-time-limit: a clock window for everyone. `releaseAt` had no editor before
-              (it was only disclosed); `expiresAt` is new. Clearing an input stores ABSENT. */}
-          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3] mt-2">
-            <InlineLabel>🕒 {b.windowOpensAt}</InlineLabel>
-            <Input dense type="datetime-local" className="w-auto" value={isoToLocalInput(task.releaseAt)}
-              aria-label={b.windowOpensAt} data-testid="task-opens-at"
-              onChange={(e) => set({ releaseAt: localInputToIso(e.target.value) })} />
-            <InlineLabel>{b.windowClosesAt}</InlineLabel>
-            <Input dense type="datetime-local" className="w-auto" value={isoToLocalInput(task.expiresAt)}
-              aria-label={b.windowClosesAt} data-testid="task-closes-at"
-              onChange={(e) => set({ expiresAt: localInputToIso(e.target.value) })} />
-          </div>
-          {/* mission-time-limit: a countdown PER TEAM from the moment it gets the mission. */}
-          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3] mt-2">
-            <InlineLabel>⏱️ {b.timeLimitLead}</InlineLabel>
-            <Input dense type="number" min={0} max={TIME_LIMIT_MAX_MINUTES} step="0.5" className="w-20" value={task.timeLimitMinutes ?? ''}
-              placeholder="0" aria-label={b.timeLimitLead} data-testid="task-time-limit"
-              onChange={(e) => {
-                const n = parseFloat(e.target.value);
-                set({ timeLimitMinutes: Number.isFinite(n) && n > 0 ? Math.min(TIME_LIMIT_MAX_MINUTES, n) : undefined });
-              }} />
-            <span>{b.timeLimitUnit}</span>
-          </div>
-          {typeof task.timeLimitMinutes === 'number' && task.timeLimitMinutes > 0 && (
-            <p className="text-[13px] text-[--ink-3] mt-1" dir="auto">{b.timeLimitHelp}</p>
-          )}
-          {typeof task.releaseAfterMinutes === 'number' && task.releaseAfterMinutes > 0 && (
-            <p className="text-[13px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>
-          )}
-        </div>
-
-        {/* The pause-clock toggle belongs with the timing it changes (change:
-            pause-clock-tasks): offered on EVERY task type, off by default. Written
-            as `true` / `undefined` and never `false`, so a game that never touched
-            this control stays byte identical. On a located task the excluded span
-            also covers the walk to the spot, so say so instead of hiding it. */}
-        <div>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input type="checkbox" className="mt-0.5" checked={!!task.pausesTimer}
-              onChange={(e) => set({ pausesTimer: e.target.checked || undefined })} />
-            <span>
-              <span className="text-[13px] font-medium text-[--ink-1]">{b.pauseClock}</span>
-              {/* Small "advanced" marker (change: builder-simplification-round-2):
-                  the control already sits below the AdvGroup "Advanced timing"
-                  divider, but a scrolled/short group can hide that divider from
-                  view, so the control also self-identifies. Reuses InlineLabel's
-                  muted/uppercase styling at a smaller size — not a new component. */}
-              <span className="ms-1.5 align-middle text-[9px] font-semibold text-[--ink-3] uppercase tracking-wider">
-                {b.advancedTag}
-              </span>
-              <span className="block text-[13px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
-            </span>
-          </label>
-          {task.pausesTimer && located && (
-            <p className="text-[13px] text-ink-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
-          )}
-        </div>
-        </OptInGroup>
-      )}
-
-      {/* The chip row: one chip per group the creator has NOT opted into and that
-          holds no data. An empty row means everything is already on screen. */}
-      {chips.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {chips.map((k) => (
-            <OptInChip key={k} label={CHIP_LABEL[k]} count={groupSummary(k, task)} b={b}
-              onClick={() => groups.openGroup(k)} />
-          ))}
-        </div>
-      )}
+      {/* ── Optional settings as value rows (change: mission-editor-value-rows) ──
+          One line each, saying its value; opening one closes the others and
+          writes nothing. Each row is its own section, so Quick Setup's guided
+          isolation keeps exactly the row that holds its target. */}
+      <MissionSettingsRows task={task} set={set} siblings={siblings ?? []} preset={preset}
+        open={groups.active} onToggle={groups.toggle} located={located} />
     </>
   );
 }
 
-// A mission's library tags (change: game-task-tags). Same raw-string-in-state
-// pattern as the game-level TagsField in BuilderPage: the visible input keeps
-// exactly what the creator typed so a comma and the space after it survive
-// mid-typing, while `Task.tags` is the parsed array. The chips below are the
-// feedback that makes the comma rule visible — the reported bug was not a missing
-// label, it was that nothing ever showed the tags back.
-function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
-  const [raw, setRaw] = useState((task.tags ?? []).join(', '));
-  // Popular gallery tags for one-tap "quick add" (change: recommended-tags-quick-add).
-  // Shares the memoized fetch with the game-tags field; failure resolves to [].
-  const [popular, setPopular] = useState<string[]>([]);
-  useEffect(() => { let live = true; void loadPopularTags().then((t) => { if (live) setPopular(t); }); return () => { live = false; }; }, []);
-  // Resync only when the persisted tags diverge from what the raw string would
-  // produce (task switch / undo), never on the creator's own keystrokes.
-  useEffect(() => {
-    const derived = parseTagsInput(raw);
-    if (JSON.stringify(derived) !== JSON.stringify(task.tags ?? [])) setRaw((task.tags ?? []).join(', '));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id, task.tags]);
-  const current = task.tags ?? [];
-  const have = new Set(current.map((t) => t.toLowerCase()));
-  const suggestions = popular.filter((t) => !have.has(t.toLowerCase())).slice(0, 12);
-  return (
-    <div>
-      <Label dense>{b.taskTagsLabel}</Label>
-      <Input dense value={raw} placeholder={b.taskTagsPlaceholder} dir="auto"
-        onChange={(e) => { setRaw(e.target.value); set({ tags: parseTagsInput(e.target.value) }); }} />
-      <TagChips tags={task.tags} className="mt-1.5" more={b.moreTags} max={20} />
-      {suggestions.length > 0 && (
-        <div className="mt-2">
-          <p className="text-[13px] text-[--ink-3] mb-1">{b.popularTags}</p>
-          <div className="flex flex-wrap items-center gap-1">
-            {suggestions.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                dir="auto"
-                onClick={() => set({ tags: normalizeTags([...current, tag]) })}
-                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[13px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-ink-fire hover:bg-rp-fire/10"
-              >
-                + {tag}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      <p className="text-[13px] text-[--ink-3] mt-1">{b.tagsHelp}</p>
-    </div>
-  );
-}
 
 function StepsEditor({ steps, onChange, b }: { steps: TaskStep[]; onChange: (s: TaskStep[]) => void; b: B }) {
   const update = (i: number, p: Partial<TaskStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...p } : s)));

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { hotZoneMultiplier, type HotZone } from '@rushpoint/shared';
 import { useT } from '../i18nContext';
 import { haptic } from '../lib/haptics';
+import { Icon } from './Icon';
 
 // Live in-run banners (deferred UI for hot-zone-bonus + safe-zone-boundary):
 //   • 🔥 Hot Zone — active multiplier + countdown to expiry
@@ -66,7 +67,7 @@ export default function InRunAlerts({
           aria-live="polite"
           className="flex items-start gap-2 rounded-xl border border-rp-fire/50 bg-rp-fire/15 px-3 py-2.5 text-sm font-semibold text-ink-fire"
         >
-          <span className="text-base leading-none">⏸</span>
+          <Icon name="pause" className="w-4 h-4 shrink-0" />
           <span className="flex-1">
             {t.play.teamHeld}
             {/* The marshal's own words when they gave any — a stated cause is the
@@ -79,14 +80,14 @@ export default function InRunAlerts({
       )}
       {active && hotZone && (
         <div className="flex items-center gap-2 rounded-xl border border-rp-fire/40 bg-rp-fire/15 px-3 py-2 text-sm font-semibold text-ink-fire animate-fade-up motion-reduce:animate-none">
-          <span className="text-base leading-none">🔥</span>
+          <Icon name="flame" className="w-4 h-4 shrink-0" />
           <span className="flex-1">{t.play.hotZoneActive({ mult: hotZone.multiplier })}</span>
           <span className="font-mono tabular-nums">{fmtCountdown(remainMs)}</span>
         </div>
       )}
       {outOfBounds && (
         <div className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-ink-amber">
-          <span className="text-base leading-none">⚠️</span>
+          <Icon name="alert" className="w-4 h-4 shrink-0" />
           <span className="flex-1">{t.play.outOfBounds}</span>
         </div>
       )}

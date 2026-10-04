@@ -11,6 +11,8 @@ import { geocodePlaces, type GeoResult } from '../lib/geocode';
 import MapModeToggle from './MapModeToggle';
 import { Input } from './ui';
 import { useT } from './LanguageContext';
+import { Icon } from './Icon';
+import { mapLocale } from '../lib/mapLocale';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -69,6 +71,7 @@ export default function LocationPicker({
    */
   cooperativeGestures?: boolean;
 }) {
+  const mapUi = useT().mapUi;
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -106,6 +109,7 @@ export default function LocationPicker({
     });
     map.current = new maplibregl.Map({
       container: ref.current,
+      locale: mapLocale(mapUi),
       style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
       ...(view.kind === 'point'
         ? { center: view.center, zoom: view.zoom }
@@ -113,10 +117,13 @@ export default function LocationPicker({
             bounds: view.bounds as maplibregl.LngLatBoundsLike,
             fitBoundsOptions: { maxZoom: view.maxZoom, padding: view.padding },
           }),
-      attributionControl: { compact: true },
+      // Added below, top-left: the bottom edge holds our map/satellite switch and the
+      // expand button, and the default bottom-right credits line ran under both.
+      attributionControl: false,
       cooperativeGestures,
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    map.current.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-left');
 
     const place = (lngLat: maplibregl.LngLat) => {
       setMarker(lngLat.lat, lngLat.lng);
@@ -240,7 +247,7 @@ export default function LocationPicker({
                   dir="auto"
                   className={`w-full text-start px-3 py-2.5 min-h-[44px] border-b border-[--rp-border] last:border-b-0 transition-colors ${i === activeIndex ? 'bg-rp-fire/10' : 'hover:bg-[--surface-2]'}`}
                 >
-                  <span className="block text-sm text-[--ink-1] font-medium">📍 {r.label}</span>
+                  <span className="flex items-start gap-1.5 text-sm text-[--ink-1] font-medium"><Icon name="pin" className="w-4 h-4 shrink-0 mt-0.5 text-[--ink-3]" />{r.label}</span>
                   {r.detail && <span className="block text-[13px] text-[--ink-3] mt-0.5">{r.detail}</span>}
                 </button>
               </li>

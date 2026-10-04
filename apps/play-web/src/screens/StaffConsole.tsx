@@ -47,6 +47,9 @@ import { filterTeamsByName } from '../lib/staffTeamFilter';
 import { staffFlashLists } from '../lib/staffFlash';
 import { TAP_TARGET } from '../lib/interaction';
 import StaffQuickBar from '../components/StaffQuickBar';
+import StaffFollowedStrip, { type StaffFollowedCard } from '../components/StaffFollowedStrip';
+import { useFollowedTeams } from '../lib/useFollowedTeams';
+import { followedTeamStatus, followedTeamAction, sortFollowedFirst } from '@rushpoint/shared';
 import StaffRoutePanel from '../components/StaffRoutePanel';
 import { staffLetInTarget } from '../lib/staffRouteList';
 import type { StaffCtx } from '../lib/playRoute';
@@ -66,7 +69,9 @@ import { feedback } from '../lib/sound';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { classifyStaffError, announcementPayload, type StaffFailure } from '../lib/failureCopy';
 import { missionSpots, type MissionSpot } from '../lib/staffMap';
+import { hasMoreActions, staffTeamActions } from '../lib/staffTeamActions';
 import { dialog } from '../components/dialog';
+import { Icon } from '../components/Icon';
 
 // ── A flattened pending photo submission row (one per team×task) ──
 interface PendingSubmission {
@@ -111,6 +116,10 @@ interface TeamRow {
   registrationData?: unknown;
   /** This team's flash-mission claims (flash-missions-v2 design D6: they live on the team). */
   flashClaims?: Record<string, { status?: unknown; at?: unknown; submittedAt?: unknown; mediaUrl?: unknown } | null | undefined> | null;
+  /** followed-teams: started / finished / removed, for the one status a followed card shows. */
+  launched?: boolean;
+  status?: string;
+  removed?: boolean;
 }
 
 /** Stage and mission names for the run (getRunOutline), since staff cannot read the game. */
@@ -300,7 +309,10 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // already waiting (change: live-ops-feedback-loop). Same shape as seenAlertIds.
   const seenPendingKeys = useRef<Set<string> | null>(null);
   const [teams, setTeams] = useState<TeamRow[]>([]);
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  // followed-teams: "הקבוצות שלי", per run and per person on this phone (Ahiya, 2026-09-30).
+  const follow = useFollowedTeams(runId, uid() ?? undefined, teamsLoaded ? teams.map((tm) => tm.id) : null);
   // Volunteers read this, so it is a CLASSIFICATION, never the server's English
   // text (change: play-no-silent-failures). `sessionExpired` also unlocks the way
   // back to the PIN screen, which an expired token otherwise had no path to.
@@ -339,6 +351,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           stages?: { status?: string; tasks?: { taskId?: string; status?: string }[] }[];
           registrationData?: unknown;
           flashClaims?: TeamRow['flashClaims'];
+          launched?: boolean;
+          status?: string;
+          removed?: boolean;
           taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' | 'video'; submittedBy?: { uid?: unknown; name?: unknown } | null }>;
         };
         // Which missions force-assign may offer: the still-unassigned ones in the
@@ -364,6 +379,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           stages: td.stages,
           registrationData: td.registrationData,
           flashClaims: td.flashClaims ?? null,
+          launched: td.launched === true,
+          status: typeof td.status === 'string' ? td.status : undefined,
+          removed: td.removed === true,
         });
         const subs = td.taskSubmissions ?? {};
         for (const [taskId, sub] of Object.entries(subs)) {
@@ -398,6 +416,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       teamRows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       setPending(rows);
       setTeams(teamRows);
+      setTeamsLoaded(true);
     }, (e) => setReadErr(classifyStaffError(e)));
   }, [ownerUid, gameId, runId]);
 
@@ -578,6 +597,59 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // Filtered in one place so the empty-search and no-match states stay distinct:
   // "no teams yet" and "no team by that name" are different problems for a marshal.
   const visibleTeams = useMemo(() => filterTeamsByName(teams, teamQuery), [teams, teamQuery]);
+  // followed-teams: my teams first; "mine only" shows just them.
+  const listedTeams = sortFollowedFirst(follow.mineOnly ? visibleTeams.filter((tm) => follow.isFollowed(tm.id)) : visibleTeams, follow.list);
+
+  async function approveFlash(teamId: string, flashId: string) {
+    try {
+      await reviewFlashMission({ ...ctx, flashId, teamId, action: 'approve' });
+      setAdjustAck((a) => ({ ...a, [teamId]: t.flash.staffApproved }));
+    } catch (e) { setReadErr(classifyStaffError(e)); }
+  }
+  const followFlashAction = useAsyncAction<[string, string], void>(approveFlash, (teamId) => teamId);
+
+  function toggleFollow(teamId: string) {
+    if (follow.toggle(teamId) === 'full') void dialog.alert(t.staff.follow.full);
+  }
+  /** Bring a followed team's row into view (clearing a search that hides it). */
+  function openFollowed(teamId: string) {
+    setTeamQuery('');
+    window.setTimeout(() => document.getElementById(`staff-team-${teamId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 0);
+  }
+  const followedCards: StaffFollowedCard[] = follow.list.flatMap((id) => {
+    const tm = teams.find((x) => x.id === id);
+    if (!tm) return [];
+    const f = t.staff.follow;
+    const taskSubmissions = Object.fromEntries(pending.filter((p) => p.teamId === id)
+      .map((p) => [p.taskId, { status: 'pending', submittedAt: p.submittedAt }]));
+    const status = followedTeamStatus({
+      team: { id, held: tm.held, outOfBounds: tm.outOfBounds, flashClaims: tm.flashClaims, taskSubmissions, launched: tm.launched, status: tm.status, removed: tm.removed },
+      nowMs: reviewNow,
+      sosTeamIds: alerts.filter((a) => !/bounds/i.test(a.type)).map((a) => a.teamId),
+    });
+    const act = followedTeamAction(status,
+      { review: can('review'), route: can('route'), hold: can('hold'), safety: can('safety'), start: false },
+      { sealedTaskId: can('route') ? staffLetInTarget(outline, tm) : null });
+    let action: StaffFollowedCard['action'] = null;
+    if (act?.kind === 'approve') {
+      const item = act.item;
+      const sub = item.kind === 'task' ? pending.find((p) => p.teamId === id && p.taskId === item.id) : undefined;
+      if (sub) action = { label: f.action.approve, run: () => void reviewAction.run(sub, true), busy: reviewAction.isBusy(`${id}:${item.id}`) };
+      else if (item.kind === 'flash') action = { label: f.action.approve, run: () => void followFlashAction.run(id, item.id), busy: followFlashAction.isBusy(id) };
+    } else if (act?.kind === 'openAlert') {
+      action = { label: f.action.openAlert, run: () => document.getElementById('staff-alerts')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) };
+    } else if (act?.kind === 'resume') {
+      action = { label: f.action.resume, run: () => void opsAction.run(tm, { kind: 'hold', held: false }), busy: opsAction.isBusy(id) };
+    } else if (act?.kind === 'letIn') {
+      const taskId = act.taskId;
+      action = { label: f.action.letIn, run: () => void opsAction.run(tm, { kind: 'letIn', taskId }), busy: opsAction.isBusy(id) };
+    }
+    const fmt = (ms: number) => { const sec = Math.floor(ms / 1000); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
+    const line = status.kind === 'waitingReview' && status.waiting
+      ? `${f.status.waitingReview} · ${fmt(status.waiting.ageMs)}`
+      : status.kind === 'playing' && tm.activeTaskId ? titleOf(tm.activeTaskId) : f.status[status.kind];
+    return [{ id, name: tm.displayName, status, line, action }];
+  });
 
   return (
     <div className="min-h-screen max-w-md mx-auto w-full px-5 pb-6 rp-safe-t flex flex-col">
@@ -594,7 +666,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 
       {readErr && (
         <div role="status" aria-live="polite" className="mb-3">
-          <p className="text-danger text-xs">⚠ {t.staff[readErr.key]}</p>
+          <p className="text-danger text-xs">{t.staff[readErr.key]}</p>
           {readErr.sessionExpired && (
             <button className="inline-flex items-center justify-center min-h-[44px] px-2 -ms-2 text-xs font-semibold text-ink-fire underline" onClick={onSignOut}>
               {t.staff.backToSignIn}
@@ -611,18 +683,20 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           overdueReviews: reviewAlarm.overCount,
         })} />
 
+      <StaffFollowedStrip cards={followedCards} mineOnly={follow.mineOnly} onMineOnly={follow.setMineOnly} onOpen={openFollowed} />
+
       {contacts.length > 0 && (
         <section className="mb-6" data-testid="staff-contacts" aria-label={t.staff.contactsTitle}>
-          <h2 className="text-sm font-semibold text-zinc-300 mb-2">📞 {t.staff.contactsTitle}</h2>
+          <h2 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="phone" className="w-4 h-4 shrink-0" />{t.staff.contactsTitle}</h2>
           <div className="space-y-1.5">
             {contacts.map((c) => (
               <div key={c.id} className="flex flex-wrap items-center gap-2">
                 <span dir="auto" className="text-sm text-zinc-200 flex-1 min-w-0 truncate">{c.label}</span>
                 <a href={toTelHref(c.phone) ?? undefined} className={`${TAP_TARGET} inline-flex items-center gap-1 px-2 rounded-lg border border-glass-border text-sm font-semibold text-ink-fire`}>
-                  📞 <span dir="ltr">{c.phone}</span>
+                  <Icon name="phone" className="w-4 h-4" /> <span dir="ltr">{c.phone}</span>
                 </a>
                 <a href={toWhatsAppHref(c.phone) ?? undefined} target="_blank" rel="noreferrer" aria-label={t.staff.whatsappContact({ label: c.label })}
-                  className={`${TAP_TARGET} inline-flex items-center justify-center rounded-lg border border-glass-border text-sm text-ink-fire`}>💬</a>
+                  className={`${TAP_TARGET} inline-flex items-center justify-center rounded-lg border border-glass-border text-sm text-ink-fire`}><Icon name="chat" className="w-5 h-5" /></a>
               </div>
             ))}
           </div>
@@ -631,7 +705,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 
       {can('safety') && <section className="mb-6 scroll-mt-4" id="staff-alerts">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          🆘 {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
+          <Icon name="sos" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
         </h2>
         {alerts.length === 0
           ? <p className="text-zinc-500 text-sm">{t.staff.noAlerts}</p>
@@ -677,7 +751,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       {/* ── Photo review ── */}
       {can('review') && <section className="mb-6 flex-1 scroll-mt-4" id="staff-review">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          📷 {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
+          <Icon name="camera" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
         </h2>
         {reviewAlarm.level === 'alarm' && reviewAlarm.oldest && (
           <div role="alert" data-testid="staff-review-alarm"
@@ -721,7 +795,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   ? <video controls src={s.photoUrl} className="w-full rounded-lg mb-2 max-h-64" aria-label={t.staff.videoSubmission} />
                   : hasUrl && isImage
                   ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-contain" />
-                  : <div className="text-xs text-zinc-500 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
+                  : <div className="text-xs text-zinc-500 italic mb-2 break-all"><Icon name="paperclip" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {s.photoUrl || t.staff.noPhoto}</div>}
                 <div className="flex gap-2">
                   <button
                     className="flex-1 min-h-[44px] py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
@@ -750,7 +824,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           finding one by thumb is the slowest part of the job. */}
       <section className="mb-6 scroll-mt-4" id="staff-teams">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          ⚖️ {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
+          <Icon name="scale" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
         </h2>
         {teams.length > 0 && (
           <Input
@@ -766,10 +840,12 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           ? <p className="text-zinc-500 text-sm">{t.staff.noTeams}</p>
           : visibleTeams.length === 0
           ? <p className="text-zinc-500 text-sm">{t.staff.noTeamsMatch}</p>
-          : visibleTeams.map((tm) => (
+          : listedTeams.map((tm) => (
+            <div key={tm.id} id={`staff-team-${tm.id}`} className="scroll-mt-4">
             <TeamOpsCard
-              key={tm.id}
               team={tm}
+              followed={follow.isFollowed(tm.id)}
+              onToggleFollow={() => toggleFollow(tm.id)}
               ack={adjustAck[tm.id]}
               busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
               can={{ score: can('score'), hold: can('hold'), route: can('route') }}
@@ -787,6 +863,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               titleOf={titleOf}
               outlineStages={outline?.stages ?? []}
             />
+            </div>
           ))}
       </section>
 
@@ -796,7 +873,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       )}
 
       {/* ── Live map of every team's last known position ── */}
-      {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} spots={missionSpots(outline)} />}
+      {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} spots={missionSpots(outline)} followed={follow.list} mineOnly={follow.mineOnly} />}
 
       {/* ── Staff ↔ admin channel ── */}
       {can('staffChannel') && <StaffAdminChannelSection ctx={ctx} senderName={staff.name} />}
@@ -826,8 +903,12 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 // points dozens of times a run and holds a team maybe twice.
 function TeamOpsCard({
   team, ack, busy, can, onAdjust, onHold, onClearOob, onSkipTask, onRoute, onSendBack, titleOf, outlineStages, callTargets = [], ctx, letInTaskId = null, onLetIn,
+  followed = false, onToggleFollow,
 }: {
   team: TeamRow;
+  /** followed-teams: is this one of my teams, and the star that changes it. */
+  followed?: boolean;
+  onToggleFollow?: () => void;
   ack?: string;
   busy: boolean;
   /** What this staff member's code allows (staff-capabilities). A control that is not allowed is
@@ -857,6 +938,14 @@ function TeamOpsCard({
   const [reasonText, setReasonText] = useState('');
   const [holdReason, setHoldReason] = useState('');
 
+  // What can still WORK on this team, on top of what this code may do (a finished
+  // team is not held or routed). lib/staffTeamActions.ts.
+  const acts = staffTeamActions(team, can);
+  // change: staff-team-card-actions. Score steps, a custom amount and routing wait behind one
+  // "פעולות" button; hold and the state-driven safety actions stay on the card. A panel that
+  // is open keeps them shown, so nothing half-typed can disappear.
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const showMore = actionsOpen || openPanel !== null;
   const parsedAmount = parseAdjustAmount(amountDraft);
   // The reason vocabulary follows the SIGN of the amount being entered, so a
   // marshal typing -20 is never offered "creativity bonus".
@@ -884,7 +973,14 @@ function TeamOpsCard({
   return (
     <Card className={`p-3 mb-2 ${team.held ? 'border-accent/50' : ''}`}>
       <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
+        {onToggleFollow && (
+          <button type="button" onClick={onToggleFollow} aria-pressed={followed} data-testid="staff-follow-star"
+            aria-label={followed ? t.staff.follow.unfollowAria({ team: team.displayName }) : t.staff.follow.followAria({ team: team.displayName })}
+            className={`${TAP_TARGET} -ms-2 shrink-0 inline-flex items-center justify-center text-2xl ${followed ? 'text-indigo-600' : 'text-zinc-500'}`}>
+            <Icon name="star" className={followed ? 'w-6 h-6 fill-current' : 'w-6 h-6'} />
+          </button>
+        )}
+        <div className="min-w-0 flex-1">
           <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{team.displayName}</div>
           <div className="text-xs text-zinc-500">{t.staff.scoreLabel} {team.score}</div>
           {/* State badges. Both mean "someone must act", so they sit next to the
@@ -892,12 +988,18 @@ function TeamOpsCard({
           <div className="flex flex-wrap items-center gap-1.5 mt-1">
             {team.held && (
               <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">
-                ⏸ {t.staff.heldBadge}
+                <Icon name="pause" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {t.staff.heldBadge}
               </span>
             )}
             {team.outOfBounds && (
               <span className="inline-flex items-center rounded-full bg-danger/20 border border-danger/50 px-2 py-0.5 text-[13px] font-semibold text-danger">
                 {t.staff.outOfBoundsBadge}
+              </span>
+            )}
+            {/* Says why a finished team offers fewer actions (lib/staffTeamActions.ts). */}
+            {team.status === 'finished' && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-app-raised border border-glass-border px-2 py-0.5 text-[13px] font-semibold text-zinc-300" data-testid="staff-finished-badge">
+                <Icon name="flag" className="w-3.5 h-3.5" /> {t.staff.follow.status.finished}
               </span>
             )}
           </div>
@@ -911,10 +1013,10 @@ function TeamOpsCard({
               {callTargets.map((c, i) => (
                 <span key={i} className="inline-flex items-center gap-1.5">
                   <a href={toTelHref(c.phone) ?? undefined} className={`${TAP_TARGET} inline-flex items-center gap-1 px-1 text-xs font-semibold text-ink-fire`}
-                    aria-label={t.staff.callTeam({ label: c.label })}>📞 <span dir="ltr">{c.phone}</span></a>
+                    aria-label={t.staff.callTeam({ label: c.label })}><Icon name="phone" className="w-3.5 h-3.5" /> <span dir="ltr">{c.phone}</span></a>
                   <a href={toWhatsAppHref(c.phone) ?? undefined} target="_blank" rel="noreferrer"
                     className={`${TAP_TARGET} inline-flex items-center justify-center text-xs font-semibold text-ink-fire`}
-                    aria-label={t.staff.whatsappTeam({ label: c.label })}>💬</a>
+                    aria-label={t.staff.whatsappTeam({ label: c.label })}><Icon name="chat" className="w-4 h-4" /></a>
                 </span>
               ))}
             </div>
@@ -928,7 +1030,7 @@ function TeamOpsCard({
         {/* Two groups with a wide separator: -5 and +5 used to sit ~4px
             apart, so the deduct and the award were one thumb-width from
             each other on a control with no undo. */}
-        {can.score && <div className="flex items-center gap-4 shrink-0">
+        {showMore && acts.score && <div className="flex items-center gap-4 shrink-0">
           {[[-10, -5], [5, 10]].map((group) => (
             <div key={group[0]} className="flex items-center gap-2">
               {group.map((d) => (
@@ -949,7 +1051,7 @@ function TeamOpsCard({
 
       {/* ── Secondary actions ── */}
       <div className="flex flex-wrap items-center gap-2 mt-2.5">
-        {can.score && <button
+        {showMore && acts.score && <button
           className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
           disabled={busy}
           onClick={() => setOpenPanel((p) => (p === 'amount' ? null : 'amount'))}
@@ -958,7 +1060,7 @@ function TeamOpsCard({
         </button>}
         {/* Hold is the one action that changes whether the team can play at all,
             so it is styled as the standout and never hidden behind another tap. */}
-        {can.hold && <button
+        {acts.hold && <button
           className={`min-h-[44px] px-3 rounded-lg text-xs font-semibold border disabled:opacity-40 ${
             team.held
               ? 'bg-accent text-black border-accent'
@@ -996,7 +1098,7 @@ function TeamOpsCard({
             {t.staff.letIn({ title: titleOf(letInTaskId) })}
           </button>
         )}
-        {can.route && (
+        {showMore && acts.assign && (
           <button
             className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
             disabled={busy}
@@ -1005,7 +1107,7 @@ function TeamOpsCard({
             {t.staff.forceAssign}
           </button>
         )}
-        {can.route && team.activeTaskId && (
+        {showMore && acts.skip && (
           <button
             className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-400 disabled:opacity-40"
             disabled={busy}
@@ -1015,7 +1117,7 @@ function TeamOpsCard({
           </button>
         )}
         {/* send-team-back: always offered; the panel says so when there is nowhere to go yet. */}
-        {can.route && <button
+        {showMore && acts.sendBack && <button
           className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
           disabled={busy}
           onClick={() => setOpenPanel((p) => (p === 'sendBack' ? null : 'sendBack'))}
@@ -1023,6 +1125,20 @@ function TeamOpsCard({
         >
           {t.staff.sendBack}
         </button>}
+        {/* Hidden while a panel is open: that panel closes with its own cancel, so the toggle
+            can neither drop half-typed input nor look like it did nothing. */}
+        {hasMoreActions(acts) && openPanel === null && (
+          <button
+            type="button"
+            data-testid="staff-team-actions-toggle"
+            aria-expanded={showMore}
+            onClick={() => setActionsOpen((o) => !o)}
+            className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 inline-flex items-center gap-1"
+          >
+            {showMore ? t.staff.fewerActions : t.staff.moreActions}
+            <span aria-hidden>{showMore ? '▴' : '▾'}</span>
+          </button>
+        )}
       </div>
 
       {/* ── Custom amount + reason ──────────────────────────────────────────
@@ -1285,7 +1401,7 @@ function StaffChatSection({
         onToggle={() => setOpen((o) => !o)}
         header={(
           <>
-            💬 {t.chat.chatTitle}
+            <Icon name="chat" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.teamChatTitle}
             {totalUnread > 0 && (
               <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">{totalUnread}</span>
             )}
@@ -1349,7 +1465,7 @@ function StaffChatSection({
                     </div>
                     {replyErr && (
                       <p role="status" aria-live="polite" className="mt-1.5 text-xs font-semibold text-ink-alert">
-                        ⚠ {replyErr}
+                        {replyErr}
                       </p>
                     )}
                   </div>
@@ -1431,7 +1547,7 @@ function StaffAdminChannelSection({
         onToggle={() => setOpen((o) => !o)}
         header={(
           <>
-            📻 {t.staff.channelTitle}
+            <Icon name="radio" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.channelTitle}
             {unread > 0 && (
               <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">{unread}</span>
             )}
@@ -1499,11 +1615,13 @@ function StaffAdminChannelSection({
 const StaffTeamMap = lazyWithRetry('staff-team-map', () => import('../components/StaffTeamMap'));
 
 function StaffTeamMapSection({
-  ctx, teams, spots,
+  ctx, teams, spots, followed, mineOnly,
 }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: TeamRow[];
   spots: MissionSpot[];
+  followed: readonly string[];
+  mineOnly: boolean;
 }) {
   const { t } = useT();
   // staff-event-map: once opened it stays open on this phone for this run, so a marshal who uses
@@ -1520,10 +1638,10 @@ function StaffTeamMapSection({
       <Collapsible
         open={open}
         onToggle={() => setOpen((o) => !o)}
-        header={<span>🗺️ {t.staff.teamMap}</span>}
+        header={<span className="inline-flex items-center gap-1.5"><Icon name="map" className="w-4 h-4 shrink-0" />{t.staff.teamMap}</span>}
       >
         <Suspense fallback={<div className="h-56 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <StaffTeamMap ctx={ctx} teams={teams} spots={spots} />
+          <StaffTeamMap ctx={ctx} teams={teams} spots={spots} followed={followed} mineOnly={mineOnly} />
         </Suspense>
       </Collapsible>
     </section>
@@ -1541,7 +1659,7 @@ function StaffFeedSection({ ctx }: { ctx: { ownerUid: string; gameId: string; ru
       <Collapsible
         open={open}
         onToggle={() => setOpen((o) => !o)}
-        header={<span>📸 {t.feed.feedTitle}</span>}
+        header={<span className="inline-flex items-center gap-1.5"><Icon name="image" className="w-4 h-4 shrink-0" />{t.feed.feedTitle}</span>}
       >
         {myUid && (
           <Suspense fallback={<div className="h-24 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
@@ -1595,7 +1713,7 @@ function StaffFlashSection({ ctx, teams, canReview, canEnd }: {
 
   return (
     <section className="mb-6 scroll-mt-4" id="staff-flash" data-testid="staff-flash">
-      <h2 className="text-sm font-semibold text-zinc-300 mb-2">⚡ {f.staffTitle}</h2>
+      <h2 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="bolt" className="w-4 h-4 shrink-0" />{f.staffTitle}</h2>
       {waiting.length > 0 && (
         <>
           <p className="text-[13px] text-zinc-400 mb-1">{f.staffWaiting}</p>
@@ -1683,14 +1801,14 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
 
   return (
     <section className="pt-2 border-t border-glass-border scroll-mt-4" id="staff-broadcast">
-      <h2 className="text-sm font-semibold text-zinc-300 mb-2">📢 {t.staff.announcement}</h2>
+      <h2 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="megaphone" className="w-4 h-4 shrink-0" />{t.staff.announcement}</h2>
       {/* Hebrew is the primary field (this is a Hebrew-first product and the
           volunteers are Hebrew speakers); English is explicitly optional. */}
       <div className="space-y-2">
         <Input value={msgHe} onChange={(e) => setMsgHe(e.target.value)} placeholder={t.staff.msgHePrimary} dir="rtl" />
         <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.staff.msgEnOptional} dir="ltr" />
       </div>
-      {err && <p role="status" aria-live="polite" className="text-danger text-xs mt-2">⚠ {err}</p>}
+      {err && <p role="status" aria-live="polite" className="text-danger text-xs mt-2">{err}</p>}
       <Button disabled={busy || (!msg.trim() && !msgHe.trim())} loading={busy} onClick={() => void sendAction.run()} className="mt-3">
         {sent ? t.staff.sent : t.staff.broadcast}
       </Button>

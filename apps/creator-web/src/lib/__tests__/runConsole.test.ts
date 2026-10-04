@@ -770,6 +770,22 @@ function quietSignals(status: RunStatus = 'live'): RunSignalInput {
   };
 }
 
+describe('buildRunSignals — a flash mission waiting for you', () => {
+  // Found 2026-10-04: a team sent a flash mission that needs the organizer's approval and the
+  // "needs you now" strip said nothing, while a mission photo in the same state did get a chip.
+  it('says so, as a warning that opens the flash panel', () => {
+    const out = buildRunSignals({ ...quietSignals('live'), pendingFlashCount: 2 } as RunSignalInput);
+    expect(out.map((s) => [s.id, s.count, s.severity, s.panel])).toEqual([['flashPending', 2, 'warn', 'flashMission']]);
+  });
+  it('stays quiet with nothing waiting', () => {
+    expect(buildRunSignals({ ...quietSignals('live'), pendingFlashCount: 0 } as RunSignalInput)).toEqual([]);
+  });
+  it('has copy in both languages that reads right at one', () => {
+    expect(translations.he.runConsole.signal.flashPending({ n: 1 })).not.toMatch(/(^|\s)1 [֐-׿]/);
+    expect(translations.en.runConsole.signal.flashPending({ n: 1 })).toMatch(/^1 /);
+  });
+});
+
 describe('buildRunSignals — biased to silence', () => {
   it('says nothing at all about a run where nothing is wrong', () => {
     expect(buildRunSignals(quietSignals('live'))).toEqual([]);

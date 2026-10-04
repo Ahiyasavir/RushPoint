@@ -65,6 +65,8 @@ import {
   quickSetupLaunchBlockers, currentQuickSetupStep, quickSetupProgress,
   quickSetupFocusPlan, shouldAutoOpenQuickSetup, missionSummaryLine,
   quickSetupStorageKey, readQuickSetupRecord, writeQuickSetupRecord, isJustCreatedNavState,
+  isQuickSetupDecision,
+  reachedFinishLine,
   type QuickSetupState, type QuickSetupAction, type TaskEditorTab, type TaskOptInGroup,
   type QuickSetupCopyKey,
 } from '../lib/quickSetup';
@@ -77,7 +79,7 @@ import { initDraft, replaceDraft, isDirty, commit, type DraftState } from '../li
 import { blankTask, shouldAutoOpenFirstTask } from '../lib/wizardLogic';
 // ONE readiness computation, shared by the persistent panel and the launch guard
 // (change: builder-first-task-flow), so the two can never drift.
-import { computeGameReadiness, canLaunchGame, splitTestDriveReadiness, shouldAutoOpenReadiness, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
+import { groupReadinessIssues, computeGameReadiness, canLaunchGame, splitTestDriveReadiness, shouldAutoOpenReadiness, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
 import { storyFieldCount } from '../lib/wizardSections';
 import { stageSettingsState, stageChips } from '../lib/stageSettings';
 import type { StageSettingsState } from '../lib/stageSettings';
@@ -107,6 +109,7 @@ import {
 // OverflowMenu. Branching on the hook (rather than rendering both rows and hiding
 // one with CSS) keeps a single menu instance, so the two copies cannot drift.
 import { useIsMobile } from '../hooks/useMediaQuery';
+import { Icon, type IconName } from '../components/Icon';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -129,7 +132,7 @@ function MapSkeleton({ className = 'h-44' }: { className?: string }) {
   const b = useT().builder;
   return (
     <div className={`${className} rounded-lg border border-[--rp-border] bg-[--surface-2] animate-pulse flex items-center justify-center gap-2 text-xs text-[--ink-3]`}>
-      <span>🗺</span> {b.loadingMapShort}
+      <Icon name="map" className="w-4 h-4" /> {b.loadingMapShort}
     </div>
   );
 }
@@ -314,6 +317,13 @@ export default function BuilderPage() {
   // navigation that opened this page, and the Quick Setup effect below must give
   // the same answer whether it runs on mount or after a later re-render.
   const justCreated = useRef(isJustCreatedNavState(location.state));
+  // Consume the stamp once read (change: quick-setup-reachable). Router state lives
+  // in history.state, which SURVIVES a reload, so leaving it in place deferred the
+  // invitation on every refresh too. The ref above keeps this mount's answer.
+  useEffect(() => {
+    if (justCreated.current) nav(location.pathname + location.search, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const { user } = useAuth();
   const t = useT();
   const b = t.builder;
@@ -946,7 +956,11 @@ export default function BuilderPage() {
       // moves until they say yes, and `shouldAutoOpenQuickSetup` offers it only
       // once (a stored record of any status is a decision we must not override).
       if (shouldAutoOpenQuickSetup({
-        hasRecord: rec !== null,
+        // Only a DECISION suppresses the invitation (change: quick-setup-reachable).
+        // A stale untouched `idle` record — written by the old persist effect on
+        // the landing from the wizard — reads as no record, which is what lets
+        // creators already stuck behind one get the invitation back.
+        hasRecord: isQuickSetupDecision(rec),
         outstanding: outstandingQuickSetupIds(game).length,
         total: quickSetupSteps(game).length,
         // Landing from the new-game wizard DEFERS the invitation to the next
@@ -972,7 +986,16 @@ export default function BuilderPage() {
   useEffect(() => {
     if (!game || qsLoadedFor !== game.id) return;
     try {
-      localStorage.setItem(quickSetupStorageKey(user?.uid, game.id), writeQuickSetupRecord(qsState));
+      const key = quickSetupStorageKey(user?.uid, game.id);
+      // An untouched state is not a decision and is never stored (change:
+      // quick-setup-reachable). Writing it on the landing from the wizard is what
+      // used to suppress the invitation forever; a stale one is removed so the
+      // next visit reads "never decided".
+      if (!isQuickSetupDecision(qsState)) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(key, writeQuickSetupRecord(qsState));
     } catch { /* storage unavailable */ }
   }, [qsState, game?.id, qsLoadedFor, user?.uid]);
 
@@ -1025,13 +1048,13 @@ export default function BuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qsStep?.id, qsState.status]);
 
-  // The finish line. Fires on the TRANSITION into `done`, so a creator who reopens
-  // a finished game is not congratulated again for work they did last week.
-  const qsWasDone = useRef(qsState.status === 'done');
+  // The finish line. Fires only when the creator FINISHES (`running → done`). The
+  // stored record loads after the first render, so "any transition into done" also
+  // matched every page load and reopened the dialog on each visit.
+  const qsPrevStatus = useRef(qsState.status);
   useEffect(() => {
-    const done = qsState.status === 'done';
-    if (done && !qsWasDone.current) setQsCelebrating(true);
-    qsWasDone.current = done;
+    if (reachedFinishLine(qsPrevStatus.current, qsState.status)) setQsCelebrating(true);
+    qsPrevStatus.current = qsState.status;
   }, [qsState.status]);
 
   const dispatchQs = useCallback((action: QuickSetupAction) => {
@@ -1079,7 +1102,7 @@ export default function BuilderPage() {
 
   if (error && !game) return (
     <Card className="p-8 text-center space-y-4">
-      <div className="text-3xl">⚠️</div>
+      <div className="text-ink-amber flex justify-center"><Icon name="alert" className="w-8 h-8" /></div>
       <p className="font-semibold text-[--ink-1]">{b.cannotLoad}</p>
       <p className="text-sm text-[--ink-3]">{error}</p>
       <Button onClick={() => { setError(null); setLoadKey((k) => k + 1); }}>{b.tryAgain}</Button>
@@ -1091,7 +1114,7 @@ export default function BuilderPage() {
   if (game.sharedLaunch?.locked === true) {
     return (
       <Card className="max-w-lg mx-auto mt-10 p-6 text-center space-y-3">
-        <div className="text-3xl" aria-hidden="true" data-testid="builder-share-locked">🔒</div>
+        <div className="text-[--ink-3] flex justify-center" aria-hidden="true" data-testid="builder-share-locked"><Icon name="lock" className="w-8 h-8" /></div>
         <p className="font-semibold text-[--ink-1]" dir="auto">{game.title}</p>
         <p className="text-sm text-[--ink-2]">{t.sharedGame.launchLockedCopy}</p>
         <Button onClick={() => nav('/live')}>{t.sharedGame.launchLockedToRuns}</Button>
@@ -1158,7 +1181,7 @@ export default function BuilderPage() {
           onClose={() => dispatchQs({ type: 'close' })}
         />
       )}
-      {qsVisible && qsCelebrating && <QuickSetupCelebration onClose={() => setQsCelebrating(false)} />}
+      {qsVisible && qsCelebrating && <QuickSetupCelebration onClose={() => setQsCelebrating(false)} remaining={qsOutstanding.length} />}
       {/* Deliberately NOT arbitrated: this is the refusal that answers a launch
           press, not a guidance overlay. Suppressing it would make the launch button
           look dead. */}
@@ -1262,7 +1285,7 @@ export default function BuilderPage() {
             title={b.pastRunsHint}
             className="shrink-0 min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-medium border border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
           >
-            🏁 {b.pastRuns}
+            <Icon name="finish" className="w-4 h-4" /> {b.pastRuns}
           </button>
         )}
 
@@ -1329,6 +1352,13 @@ export default function BuilderPage() {
               className={HEADER_MENU_ITEM_CLASS}
             >
               {t.share.menuLabel}
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => nav(`/host-sheet/${game.id}`)}
+              className={HEADER_MENU_ITEM_CLASS}
+            >
+              {t.hostSheet.menuItem}
             </button>
           </OverflowMenu>
         </div>
@@ -1443,7 +1473,7 @@ export default function BuilderPage() {
             aria-label={b.readinessAria(readiness.length)}
             className="shrink-0 inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg border border-rp-amber/60 bg-rp-amber/10 text-ink-amber text-sm font-semibold transition-colors hover:bg-rp-amber/20"
           >
-            <span aria-hidden>⚠</span>
+            <Icon name="alert" className="w-4 h-4 shrink-0" />
             <span>{b.launchRun}</span>
             <span aria-hidden className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rp-amber text-white text-[12px] font-bold leading-none tabular-nums">{readiness.length}</span>
           </button>
@@ -1522,6 +1552,25 @@ export default function BuilderPage() {
               >
                 {t.share.menuLabel}
               </button>
+              <button
+                role="menuitem"
+                onClick={() => nav(`/host-sheet/${game.id}`)}
+                className={HEADER_MENU_ITEM_CLASS}
+              >
+                {t.hostSheet.menuItem}
+              </button>
+              {/* Quick Setup on a phone (change: quick-setup-reachable). The
+                  header pill is desktop-only, so without this entry the flow had
+                  no door at all on a phone once the auto-invite was spent. */}
+              {qsSteps.length > 0 && (
+                <button
+                  role="menuitem"
+                  onClick={() => dispatchQs({ type: 'resume' })}
+                  className={HEADER_MENU_ITEM_CLASS}
+                >
+                  {q.menuItem(qsOutstanding.length)}
+                </button>
+              )}
             </OverflowMenu>
           </div>
         )}
@@ -1596,7 +1645,7 @@ export default function BuilderPage() {
           be able to say so and never see it again this session. */}
       {needsNoteCleanup && !cleanupDismissed && activeTab === 'build' && !qsFocusMode && (
         <div className="shrink-0 mx-2 mt-2 rounded-xl border border-rp-amber/50 bg-rp-amber/5 px-3 py-2 flex items-start gap-3">
-          <span aria-hidden className="text-base leading-6">🧹</span>
+          <Icon name="broom" className="w-5 h-5 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-[--ink-1]">{q.cleanupTitle}</p>
             <p className="text-xs text-[--ink-3] leading-snug mt-0.5">{q.cleanupBody}</p>
@@ -1663,7 +1712,7 @@ export default function BuilderPage() {
         {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} qsAnchor={qsFocusAnchor} /></div></div>}
         {activeTab === 'analytics' && (
           <Card className="p-10 text-center space-y-3">
-            <div className="text-3xl">📊</div>
+            <div className="text-[--ink-3] flex justify-center"><Icon name="chart" className="w-8 h-8" /></div>
             <p className="font-semibold text-[--ink-1]">{b.analyticsTitle}</p>
             <p className="text-sm text-[--ink-3]">{b.analyticsBody}</p>
             <Button onClick={() => nav('/live')}>{b.analyticsOpenRuns}</Button>
@@ -1692,8 +1741,8 @@ export default function BuilderPage() {
 // handler — only the position and the touch target change. Icons are decorative
 // and paired with their word, never on their own: a builder's three surfaces are
 // not conventional enough for a glyph alone to name them.
-const BUILDER_TAB_ICON: Record<BuilderTab, string> = {
-  build: '🧩', preview: '👁', settings: '⚙', analytics: '📊',
+const BUILDER_TAB_ICON: Record<BuilderTab, IconName> = {
+  build: 'puzzle', preview: 'eye', settings: 'gear', analytics: 'chart',
 };
 
 function BuilderTabBar({ tabs, active, label, onSelect }: {
@@ -1721,7 +1770,7 @@ function BuilderTabBar({ tabs, active, label, onSelect }: {
             className={`flex-1 min-w-0 min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
               on ? 'bg-rp-fire/10 text-ink-fire' : 'text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1]'}`}
           >
-            <span aria-hidden className="text-base leading-none">{BUILDER_TAB_ICON[id]}</span>
+            <Icon name={BUILDER_TAB_ICON[id]} className="w-5 h-5" />
             <span className="text-[12px] font-medium truncate max-w-full px-1">{label[id]}</span>
           </button>
         );
@@ -1825,7 +1874,7 @@ function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true
             ? 'border-rp-go/40 text-ink-go hover:bg-[--surface-2]'
             : 'border-rp-amber/50 text-ink-amber hover:bg-[--surface-2]'}`}
       >
-        <span aria-hidden>{issues.length === 0 ? '✓' : '⚠'}</span>
+        {issues.length === 0 ? <span aria-hidden>✓</span> : <Icon name="alert" className="w-4 h-4 shrink-0" />}
         <span className="hidden 2xl:inline">{b.readinessTitle}</span>
         {issues.length > 0 && <Badge color="gold">{b.readinessCount(issues.length)}</Badge>}
       </button>
@@ -1843,26 +1892,39 @@ function ReadinessPanel({ issues, open, onToggle, onActivate, showTrigger = true
           className="absolute z-50 top-full mt-1 rounded-xl border border-[--rp-border] bg-[--surface-1] shadow-soft">
           <Advanced dense title={b.readinessTitle} open onToggle={onToggle}>
             {issues.length === 0 ? (
-              <EmptyState icon="🚀" title={b.readinessReadyTitle} body={b.readinessReadyBody} />
+              <EmptyState icon="rocket" title={b.readinessReadyTitle} body={b.readinessReadyBody} />
             ) : (
               <div className="space-y-1">
                 <p className="text-[13px] text-[--ink-3] leading-snug">{b.readinessIntro}</p>
                 <ul className="space-y-1 max-h-72 overflow-y-auto">
-                  {issues.map((issue, i) => (
-                    <li key={`${issue.code}-${issue.stageId}-${issue.taskId ?? ''}-${i}`}>
-                      <button
-                        type="button"
-                        onClick={() => onActivate(issue)}
-                        disabled={!issue.stageId}
-                        className="w-full text-start rounded-lg border border-[--rp-border] px-2 py-1.5 hover:bg-[--surface-2] disabled:hover:bg-transparent disabled:opacity-70"
-                      >
-                        <span className="block text-[12px] text-[--ink-1]">{ISSUE_LABEL[issue.code]}</span>
-                        {issue.stageId && (
-                          <span dir="auto" className="block text-[13px] text-[--ink-3] truncate">{where(issue)}</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
+                  {/* One row per KIND of problem (change: quick-setup-reachable):
+                      six missions without a pin are one job, not six identical
+                      rows. A group of one keeps its exact location; a bigger
+                      group opens its first offender, and fixing it shrinks the
+                      count, so the list still walks the creator through all. */}
+                  {groupReadinessIssues(issues).map((group) => {
+                    const issue = group.first;
+                    const many = group.count > 1;
+                    return (
+                      <li key={group.code}>
+                        <button
+                          type="button"
+                          onClick={() => onActivate(issue)}
+                          disabled={!issue.stageId}
+                          className="w-full text-start rounded-lg border border-[--rp-border] px-2 py-1.5 hover:bg-[--surface-2] disabled:hover:bg-transparent disabled:opacity-70"
+                        >
+                          <span className="block text-[12px] text-[--ink-1]">
+                            {many ? b.issueGroup[group.code](group.count) : ISSUE_LABEL[issue.code]}
+                          </span>
+                          {issue.stageId && (
+                            <span dir="auto" className="block text-[13px] text-[--ink-3] truncate">
+                              {many ? b.issueGroupHint : where(issue)}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
@@ -2506,11 +2568,11 @@ function StatusChip({ title, children }: { title: string; children: ReactNode })
 // over the actual control, generously spaced so the drawer reads as a short list
 // of choices rather than a dense form.
 function SettingRow({ icon, title, hint, children }: {
-  icon: string; title: string; hint?: string; children: ReactNode;
+  icon: IconName; title: string; hint?: string; children: ReactNode;
 }) {
   return (
     <div className="flex items-start gap-2.5">
-      <span aria-hidden className="text-base leading-6 shrink-0">{icon}</span>
+      <Icon name={icon} className="w-5 h-5 shrink-0 mt-0.5 text-[--ink-3]" />
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="text-xs font-semibold text-[--ink-2]" title={hint}>{title}</div>
         <div className="text-xs text-[--ink-3]">{children}</div>
@@ -3230,7 +3292,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 shows, and it did it with an always-live <input>, which on a touch
                 screen is a tap magnet that opens the keyboard by accident — with a
                 bare red ✕ that destroys the whole stage sitting right beside it.
-                Renaming, the finale toggle and delete all moved INTO the ⚙ stage
+                Renaming, the finale toggle and delete all moved INTO the gear stage
                 settings pane, one deliberate tap away, where delete can also carry
                 its own heading rather than being a loose glyph. */}
             {!isMobile && (
@@ -3271,7 +3333,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                       ? 'border-rp-fire/50 bg-rp-fire/10 text-ink-fire'
                       : 'border-[--rp-border] bg-[--surface-2]/60 text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1]'}`}
                 >
-                  <span aria-hidden>⚙</span>
+                  <Icon name="gear" className="w-4 h-4" />
                   <span>{b.stageSettings}</span>
                   {settings.activeCount > 0 && (
                     <span aria-hidden className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rp-fire text-white text-[12px] font-bold leading-none tabular-nums">{settings.activeCount}</span>
@@ -3281,9 +3343,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
 
                 {/* Read-only status chips — one per non-default setting, derived by
                     the pure `stageChips`. They only advertise a folded setting; the
-                    ⚙ pill above is the single way to open the settings to change it.
+                    gear pill above is the single way to open the settings to change it.
                     The completion chip reads in words ("3 מתוך 6 משימות") instead of
-                    the old ambiguous 🎯 fraction. Exclusive groups also show their
+                    the old ambiguous target fraction. Exclusive groups also show their
                     colourblind-safe letter badge on each task card. */}
                 {stageChips(settings).map((kind) => {
                   switch (kind) {
@@ -3296,21 +3358,21 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                     case 'release':
                       return (
                         <StatusChip key={kind} title={b.releaseChipAria(settings.releaseMinutes)}>
-                          <span aria-hidden>⏰</span>
+                          <Icon name="alarm" className="w-3.5 h-3.5" />
                           <span>{settings.releaseMinutes} {b.releaseUnitShort}</span>
                         </StatusChip>
                       );
                     case 'story':
                       return (
                         <StatusChip key={kind} title={b.storyTitle}>
-                          <span aria-hidden>📖</span>
+                          <Icon name="book" className="w-3.5 h-3.5" />
                           <span>{b.storyTitle}</span>
                         </StatusChip>
                       );
                     case 'groups':
                       return (
                         <StatusChip key={kind} title={b.exclusiveChipAria(b.exclusiveGroupLetter(0), settings.groupCount)}>
-                          <span aria-hidden>🔀</span>
+                          <Icon name="shuffle" className="w-3.5 h-3.5" />
                           <span>{b.taskCount(settings.groupCount)}</span>
                         </StatusChip>
                       );
@@ -3322,7 +3384,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             )}
 
             {/* The advanced controls now live in the StageSettingsPanel side pane
-                (opened by the ⚙ pill), so they no longer sit on the calm surface. */}
+                (opened by the gear pill), so they no longer sit on the calm surface. */}
 
             {/* Warnings stay ALWAYS visible — the unwinnable-stage guard must
                 surface whether or not the panel is open (invariant). */}
@@ -3334,9 +3396,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
               <button
                 type="button"
                 onClick={() => { setEditing(null); setSettingsOpen(true); }}
-                className="text-xs text-amber-400 underline decoration-dotted cursor-pointer hover:text-amber-300 text-start"
+                className="text-xs text-ink-amber underline decoration-dotted cursor-pointer hover:opacity-80 text-start"
               >
-                ⚠ {b.exclusiveUnwinnableWarn}
+                <Icon name="alert" className="w-4 h-4 inline-block align-text-bottom me-1" />{b.exclusiveUnwinnableWarn}
               </button>
             )}
 
@@ -3346,9 +3408,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
               <button
                 type="button"
                 onClick={() => { setEditing(null); setSettingsOpen(true); }}
-                className="text-xs text-amber-400 underline decoration-dotted cursor-pointer hover:text-amber-300 text-start"
+                className="text-xs text-ink-amber underline decoration-dotted cursor-pointer hover:opacity-80 text-start"
               >
-                ⚠ {b.unlockRequiredCountWarn}
+                <Icon name="alert" className="w-4 h-4 inline-block align-text-bottom me-1" />{b.unlockRequiredCountWarn}
               </button>
             )}
 
@@ -3358,8 +3420,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 branching content and the server now retires the dead branch, so
                 this never blocks a save or a launch. */}
             {exclusiveUnlockRisks(activeStage).slice(0, 1).map((risk) => (
-              <p key={risk.taskId} className="text-xs text-amber-400">
-                ⚠ {b.exclusiveUnlockRiskWarn(
+              <p key={risk.taskId} className="text-xs text-ink-amber">
+                <Icon name="alert" className="w-4 h-4 inline-block align-text-bottom me-1" />{b.exclusiveUnlockRiskWarn(
                   activeStage.tasks.find((t) => t.id === risk.taskId)?.title || risk.taskId,
                   activeStage.tasks.find((t) => t.id === risk.prerequisiteId)?.title || risk.prerequisiteId,
                 )}
@@ -3373,9 +3435,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
               <button
                 type="button"
                 onClick={() => { setEditing(null); setSettingsOpen(true); }}
-                className="text-xs text-amber-400 underline decoration-dotted cursor-pointer hover:text-amber-300 text-start"
+                className="text-xs text-ink-amber underline decoration-dotted cursor-pointer hover:opacity-80 text-start"
               >
-                ⚠ {b.partialStarvationWarn}
+                <Icon name="alert" className="w-4 h-4 inline-block align-text-bottom me-1" />{b.partialStarvationWarn}
               </button>
             )}
             </div>
@@ -3503,6 +3565,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           focus={quickSetupFocus && quickSetupFocus.taskId === editingTask.id ? quickSetupFocus : null}
           siblings={editingStage.tasks}
           gameAnchors={gameAnchors}
+          scoringPreset={game.scoringPreset}
           quickSetupStep={quickSetupInlineBar}
           /* Guided only when the flow is pointing at THIS mission. The identity
              comes from the STEP's own resolved target, not from `quickSetupFocus`
@@ -3570,8 +3633,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, quickSetupStep, gameAnchors, guided, onRegenerate }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, quickSetupStep, gameAnchors, guided, onRegenerate, scoringPreset }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
+  /** The game's scoring preset: step 3 shows only the scoring control it reads (change: mission-editor-value-rows). */
+  scoringPreset?: unknown;
   siblings?: Task[];
   // Every PLACED mission of the whole game (change: location-picker-game-anchor):
   // the view an unplaced mission's map opens on. Drilled rather than contexted —
@@ -3705,7 +3770,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
               a container that can scroll is not the same as a card that does. */}
           <div className="shrink-0 lg:w-[20rem] lg:overflow-y-auto flex flex-col">{quickSetupStep}</div>
           <div className="flex-1 min-h-0 p-2.5">
-            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors} scoringPreset={scoringPreset}
               focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
               guided={!!guided} guidedAnchor={guided?.anchor ?? null} onExitGuided={guided?.onExit} />
           </div>
@@ -3714,7 +3779,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
         <>
           {quickSetupStep}
           <div className="flex-1 min-h-0 p-2.5">
-            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors}
+            <TaskWizard task={state.draft} onChange={handleChange} onRegenerate={regenerate} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} gameAnchors={gameAnchors} scoringPreset={scoringPreset}
               focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce}
               /* This branch is the NOT-guided one, so these are constants — the
                  optional chains that used to be here narrowed to `never`. */
@@ -3889,10 +3954,10 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
   return (
     <SlidePanel shown={shown}>
       <div className="flex-1 min-h-0 p-2.5 flex flex-col">
-        {/* Header: ⚙ title + close ✕ — one compact row, like the wizard's tab row. */}
+        {/* Header: gear, title and close ✕ in one compact row, like the wizard's tab row. */}
         <div className="flex items-center gap-1.5 pb-2 shrink-0">
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <span aria-hidden className="text-base leading-none">⚙</span>
+            <Icon name="gear" className="w-5 h-5" />
             <span className="text-sm font-semibold text-[--ink-1] truncate">{b.stageSettings}</span>
           </div>
           <button onClick={onClose} aria-label={b.closePanel}
@@ -3907,7 +3972,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
               gave up. Same `onUpdateStage` path as before, so the field is still a
               plain live edit feeding the Builder's autosave. */}
           {identity && (
-            <SettingRow icon="🏷️" title={b.stageTitlePlaceholder}>
+            <SettingRow icon="tag" title={b.stageTitlePlaceholder}>
               <Input
                 value={stage.title}
                 onChange={(e) => onUpdateStage({ title: e.target.value })}
@@ -3932,7 +3997,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 
           {/* Task completion — how many of the pool a team must finish */}
           {settings.requiredApplies && (
-            <SettingRow icon="☑️" title={b.settingCompletionTitle}>
+            <SettingRow icon="checkCircle" title={b.settingCompletionTitle}>
               <div className="flex items-center flex-wrap gap-1.5 text-start">
                 <span>{b.completionLead}</span>
                 <Select
@@ -3960,8 +4025,8 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
                 <p className="mt-1 text-xs text-[--ink-3]">{b.completionCappedByGroups(ceiling, m)}</p>
               )}
               {req > ceiling && (
-                <p className="mt-1 text-xs text-amber-400">
-                  ⚠ {b.completionStoredUnreachable(req, ceiling)}{' '}
+                <p className="mt-1 text-xs text-ink-amber">
+                  <Icon name="alert" className="w-4 h-4 inline-block align-text-bottom me-1" />{b.completionStoredUnreachable(req, ceiling)}{' '}
                   <button
                     type="button"
                     className="underline hover:text-[--ink-1]"
@@ -3974,7 +4039,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 
           {/* Timed release — when this later stage opens */}
           {settings.releaseApplies && (
-            <SettingRow icon="⏰" title={b.settingReleaseTitle} hint={b.releaseAfterUnit}>
+            <SettingRow icon="alarm" title={b.settingReleaseTitle} hint={b.releaseAfterUnit}>
               <div className="flex items-center flex-wrap gap-1.5 text-start">
                 <span>{b.releaseLead}</span>
                 <Input
@@ -3998,7 +4063,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
               modal; here we show the current groups and a clear way in. The task
               cards carry the colourblind-safe letter badges. */}
           {settings.groupsApply && (
-            <SettingRow icon="🔀" title={b.settingGroupsTitle} hint={b.exclusiveHint}>
+            <SettingRow icon="shuffle" title={b.settingGroupsTitle} hint={b.exclusiveHint}>
               <div className="flex flex-wrap items-center gap-2">
                 {effectiveGroups.map((members, gi) => {
                   const letter = b.exclusiveGroupLetter(gi);
@@ -4076,7 +4141,7 @@ function StepPreview({ game }: { game: Game }) {
             <span className="text-sm text-[--ink-2]" dir="auto">{s.title}</span>
             <span className="text-xs text-[--ink-3]">
               {b.taskCount(playableTasks(s).length)}{playableTasks(s).length > 1 ? b.routedSuffix : ''}
-              {s.isFinal ? ` · 🏁 ${b.finalTag}` : ''}
+              {s.isFinal ? ` · ${b.finalTag}` : ''}
             </span>
           </li>
         ))}

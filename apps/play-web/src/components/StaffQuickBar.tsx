@@ -6,12 +6,17 @@ import {
 import { useT } from '../i18nContext';
 import { Button } from './ui';
 import { TAP_TARGET } from '../lib/interaction';
+import { Icon, type IconName } from './Icon';
 
 // The staff console's quick bar (change: quick-dial-and-actions 2.6). One tap to the section a
 // marshal needs on a long scroll: the photo queue, the teams, the chat. Only sections this person's
 // code allows (a shortcut to a hidden section would jump nowhere). The choice is per device, in
 // localStorage, which may be blocked: then the default bar still works for this session.
 
+// Drawn icons per quick action (change: no-stock-emoji).
+const STAFF_QUICK_ICON: Record<StaffQuickActionId, IconName> = {
+  alerts: 'sos', review: 'camera', teams: 'users', chat: 'chat', map: 'map', staffChannel: 'radio', broadcast: 'megaphone',
+};
 const storageKey = (runId: string) => `rp-staff-quick:${runId}`;
 
 // Two whole static strings (Tailwind only sees static class strings, and the contrast scan reads each
@@ -63,7 +68,7 @@ export default function StaffQuickBar({ runId, can, badges }: {
         {chosen.map((id) => (
           <button key={id} type="button" onClick={() => jump(id)}
             className="shrink-0 inline-flex items-center gap-1.5 min-h-[44px] rounded-full border border-glass-border bg-app-card px-3 text-[13px] font-semibold text-zinc-100">
-            <span aria-hidden="true">{q.icon[id]}</span>{q.label[id]}
+            <Icon name={STAFF_QUICK_ICON[id]} className="w-4 h-4" />{q.label[id]}
             {badges?.[id] && (
               <span data-testid={`staff-quick-badge-${id}`}
                 className={badges[id]!.urgent ? BADGE_URGENT : BADGE_CALM}>
@@ -77,7 +82,7 @@ export default function StaffQuickBar({ runId, can, badges }: {
         {/* Outside the scrolling row, so it is always on screen. */}
         <button type="button" onClick={() => setCustomising(true)} aria-label={q.customise} title={q.customise}
           className={`${TAP_TARGET} shrink-0 inline-flex items-center justify-center rounded-full border border-dashed border-glass-border text-zinc-400`}>
-          ⚙️
+          <Icon name="gear" className="w-5 h-5" />
         </button>
       </div>
 
@@ -95,7 +100,7 @@ export default function StaffQuickBar({ runId, can, badges }: {
                     <label className={`flex flex-1 items-center gap-3 min-h-[44px] rounded-lg px-2 ${full ? 'opacity-50' : ''}`}>
                       <input type="checkbox" checked={on} disabled={full}
                         onChange={() => save(on ? chosen.filter((x) => x !== id) : [...chosen, id])} />
-                      <span aria-hidden="true">{q.icon[id]}</span>
+                      <Icon name={STAFF_QUICK_ICON[id]} className="w-4 h-4 shrink-0" />
                       <span className="text-sm text-zinc-100">{q.label[id]}</span>
                     </label>
                     {on && (

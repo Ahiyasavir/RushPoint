@@ -382,7 +382,7 @@ export default function AdminMissionBankPage() {
       </div>
     );
   }
-  if (gate === 'denied') return <EmptyState icon="🔒" title={m.deniedTitle} body={m.deniedBody} />;
+  if (gate === 'denied') return <EmptyState icon="lock" title={m.deniedTitle} body={m.deniedBody} />;
   if (!overrides) {
     return (
       <div className="animate-fade-up space-y-4">
@@ -459,7 +459,7 @@ export default function AdminMissionBankPage() {
       </div>
 
       {rows.length === 0
-        ? <EmptyState icon="🔎" title={m.emptyTitle} body={m.emptyBody} />
+        ? <EmptyState icon="search" title={m.emptyTitle} body={m.emptyBody} />
         : (
           <div className="space-y-2">
             {rows.map((entry) => {

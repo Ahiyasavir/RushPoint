@@ -53,7 +53,7 @@ export function ShareSheet({
   const publishing = publishAction.busy;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-app-card border border-glass-border rounded-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold">{title}</h3>
@@ -64,11 +64,11 @@ export function ShareSheet({
         </div>
 
         {notPublic && (
-          <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+          <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-ink-amber">
             {b.shareNotInGallery}
             {onPublish && (
               <button onClick={() => void publishAction.run()} disabled={publishing}
-                className="ms-1 underline hover:text-amber-200 disabled:opacity-50">
+                className="ms-1 underline hover:opacity-80 disabled:opacity-50">
                 {publishing ? b.sharePublishing : b.sharePublishNow}
               </button>
             )}

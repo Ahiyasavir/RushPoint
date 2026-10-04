@@ -68,8 +68,8 @@ function buildGame(now) {
     {
       id: 'stage-3', order: 2, title: 'משימת רצף',
       tasks: [t({
-        id: 'task-3', title: 'שלושה שלבים', type: 'sequence',
-        description: 'השלימו את שלושת השלבים לפי הסדר.',
+        id: 'task-3', title: 'שלושה צעדים', type: 'sequence',
+        description: 'השלימו את שלושת הצעדים לפי הסדר.',
         difficulty: 4, pointValue: 140, tags: ['demo'],
         steps: [
           { id: 'step-1', prompt: 'מתחו את הרגליים והקישו לאישור' },

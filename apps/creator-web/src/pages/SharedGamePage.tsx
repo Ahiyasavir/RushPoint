@@ -23,6 +23,7 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { getSharedGame, duplicateGame, launchSharedRun } from '../services/calls';
 import { SHARE_RETURN_KEY } from '../lib/publicCreatorPath';
+import { Icon } from '../components/Icon';
 
 const RoutePreviewMap = lazyWithRetry('sharedRouteMap', () => import('../components/RoutePreviewMap'));
 
@@ -128,7 +129,7 @@ export default function SharedGamePage({ token: tokenProp, signedIn = true }: {
   if (state.phase === 'gone') {
     return (
       <div className="max-w-md mx-auto py-20 text-center">
-        <div className="text-4xl mb-3" aria-hidden="true">🔗</div>
+        <div className="mb-3 flex justify-center text-[--ink-3]" aria-hidden="true"><Icon name="link" className="w-10 h-10" /></div>
         <h1 className="text-lg font-semibold mb-2">{g.notFoundTitle}</h1>
         <p className="text-sm text-[--ink-3]">
           {state.reason === 'revoked' ? g.revoked : state.reason === 'expired' ? g.expired : g.notFound}

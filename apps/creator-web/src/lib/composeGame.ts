@@ -74,7 +74,8 @@ import {
   prepWantsPlacedMissions,
   type PrepLevel,
 } from '../bankTags';
-import type { TaskBankEntry } from '../taskBank';
+import { SPOT_KINDS, type BankSiting, type SpotKind, type TaskBankEntry } from '../taskBank';
+export { SPOT_KINDS, type BankSiting, type SpotKind };
 import { isOccasionId, occasionProfile, type OccasionId } from './occasions';
 import { uuid } from '../taskShorthands';
 import {
@@ -187,6 +188,12 @@ export interface ComposerDescriptionCopy extends NewGameDescriptionCopy {
    * property of the DECISION this composition made.
    */
   placeMissionPrompt(): string;
+  /**
+   * A short line naming the kind of spot a station wants ("a bench works"),
+   * appended to the place prompt (change: composer-siting-by-station). Optional:
+   * absent or empty leaves the prompt as it was.
+   */
+  placeSpotHint?(spot: SpotKind): string;
 }
 
 /** Where a stage sits in the arc. Drives which name list it draws from. */
@@ -895,6 +902,14 @@ function walkMinutesFor(setting: SettingTagId): number {
  * them through pinning each one via Quick Setup (`siteableInPlacedGame` below),
  * the same guided flow the harvested location-based missions already use.
  */
+/** The station's Quick Setup prompt, naming the spot kind when the mission has one. */
+function stationPrompt(placePrompt: string, spot: SpotKind | null, copy: ComposerDescriptionCopy | null | undefined): string {
+  if (!spot) return placePrompt;
+  let hint = '';
+  try { hint = oneParagraph(copy?.placeSpotHint?.(spot) ?? ''); } catch { hint = ''; }
+  return hint ? `${placePrompt} ${hint}` : placePrompt;
+}
+
 function wantsPlacedMissions(setting: SettingTagId, locationMissions: boolean): boolean {
   return setting !== 'fromAnywhere' && locationMissions === true;
 }
@@ -911,8 +926,73 @@ function wantsPlacedMissions(setting: SettingTagId, locationMissions: boolean): 
  * A mission already tied to a place is not "siteable" — it is simply sited.
  */
 export function siteableInPlacedGame(entry: TaskBankEntry): boolean {
-  const tags = Array.isArray(entry?.tags) ? entry.tags : [];
-  return tags.includes('fromAnywhere') && !tags.includes('locationBased');
+  return bankSiting(entry) === 'possible';
+}
+
+/**
+ * Does a place help this mission (change: composer-siting-by-station)?
+ *
+ * An explicit `siting` wins. Otherwise it is derived from the tags exactly as
+ * the old `siteableInPlacedGame` decided: tied to a place ⇒ `must`, playable
+ * anywhere ⇒ `possible`, anything else ⇒ `never`. So an unannotated mission
+ * behaves as before and an annotation can only take a pin away. Total.
+ */
+export function bankSiting(entry: TaskBankEntry | null | undefined): BankSiting {
+  const explicit = (entry as { siting?: unknown } | null | undefined)?.siting;
+  if (explicit === 'never' || explicit === 'possible' || explicit === 'must') return explicit;
+  const tags: readonly string[] = Array.isArray(entry?.tags) ? entry.tags : [];
+  if (tags.includes('locationBased')) return 'must';
+  if (tags.includes('fromAnywhere')) return 'possible';
+  return 'never';
+}
+
+function spotOf(entry: TaskBankEntry | null | undefined): SpotKind | null {
+  const s = (entry as { spot?: unknown } | undefined)?.spot;
+  return typeof s === 'string' && (SPOT_KINDS as readonly string[]).includes(s) ? (s as SpotKind) : null;
+}
+
+/**
+ * The one mission of a stage that carries the stage's STATION pin, or null when
+ * the stage invents none (change: composer-siting-by-station). A stage holding a
+ * mission sited by nature already has a place, so it invents nothing. Otherwise
+ * the first possible mission with a spot kind, else the first possible one.
+ */
+export function stationAnchorIndex(entries: readonly (TaskBankEntry | null | undefined)[]): number | null {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.some((e) => e && bankSiting(e) === 'must')) return null;
+  const withSpot = list.findIndex((e) => e && bankSiting(e) === 'possible' && spotOf(e) !== null);
+  if (withSpot >= 0) return withSpot;
+  const any = list.findIndex((e) => e && bankSiting(e) === 'possible');
+  return any >= 0 ? any : null;
+}
+
+/** Minutes a creator spends per station pin, for the questionnaire's cost line. */
+export const MINUTES_PER_STATION_PIN = 1.5;
+
+/**
+ * What the prep answer costs in pins, before anything is composed
+ * (change: composer-siting-by-station). With stations a placed game invents at
+ * most one pin per stage, and the stage count is known under the shared seed
+ * (`previewShape`), so this is a plan like the rest of the shape panel: a
+ * mission tied to a place can add one, a stage that holds one invents none.
+ * Total: junk yields zero.
+ */
+export function previewPrepCost(
+  bank: readonly TaskBankEntry[],
+  answers: ComposerAnswers,
+  seed: number,
+  recent: RecentPickState = { recentBankKeys: [] },
+): { pins: number; minutes: number } {
+  try {
+    const a = (answers ?? {}) as Partial<ComposerAnswers>;
+    const ctx = buildFitContext(answers, recent ?? { recentBankKeys: [] });
+    if (!wantsPlacedMissions(ctx.setting, a.locationMissions === true)) return { pins: 0, minutes: 0 };
+    const shape = previewShape(Array.isArray(bank) ? bank : [], answers, Number.isFinite(seed) ? seed : 1, recent);
+    const pins = shape.possible ? shape.stages.length : 0;
+    return { pins, minutes: Math.ceil(pins * MINUTES_PER_STATION_PIN) };
+  } catch {
+    return { pins: 0, minutes: 0 };
+  }
 }
 
 /**
@@ -1508,7 +1588,11 @@ export function composeGame(
     const tasks: Task[] = [];
     const stageId = uuid();
 
-    for (const entry of chosen[s]) {
+    // Stations, not a pin per mission (change: composer-siting-by-station): at
+    // most ONE invented pin per stage, chosen AFTER the fill so the missions the
+    // rng picked are exactly what they were; only which of them carries a pin moved.
+    const anchor = placedGame ? stationAnchorIndex(chosen[s]) : null;
+    for (const [slotInStage, entry] of chosen[s].entries()) {
       if (!entry) continue;
       let task: Task;
       try {
@@ -1526,7 +1610,7 @@ export function composeGame(
       // actually ask for that pin. With no prompt to show, the creator would meet
       // a mandatory blank field with no explanation — leave the mission playable
       // from anywhere instead.
-      const siteIt = placedGame && placePrompt !== '' && siteableInPlacedGame(entry);
+      const siteIt = placedGame && placePrompt !== '' && slotInStage === anchor;
       if (siteIt) {
         task.locationless = false;
         task.triggerMode = 'radius';
@@ -1543,7 +1627,7 @@ export function composeGame(
           stageId,
           taskId: task.id,
           targetFieldPath: 'coordinates',
-          instructionPrompt: placePrompt,
+          instructionPrompt: stationPrompt(placePrompt, spotOf(entry), copy),
           // Required: the mission was just made location-gated, so an unplaced
           // one would strand a team at a pin that is not there.
           isRequired: true,

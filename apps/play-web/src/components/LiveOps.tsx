@@ -10,6 +10,7 @@ import { boardTimeSeconds, formatDuration } from '../lib/boardTime';
 import { TAP_INLINE } from '../lib/interaction';
 import { loadDismissed, saveDismissed } from '../lib/dismissedAnnouncements';
 import { Collapsible } from './ui';
+import { Icon } from './Icon';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
@@ -231,7 +232,7 @@ export default function LiveOps({
             || (a.delta != null ? formatScoreNotice(a.delta, a.reason, lang) : '');
           return (
             <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/15 border-2 border-accent/40 px-3 py-2">
-              <span className="text-sm">💯</span>
+              <Icon name="star" className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-zinc-400">{label}</p>
                 <p dir="auto" className="text-sm font-mono text-ink-fire">{notice}</p>
@@ -242,23 +243,24 @@ export default function LiveOps({
         }
         return (
           <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/10 border border-accent/30 px-3 py-2">
-            <span className="text-sm">📢</span>
+            <Icon name="megaphone" className="w-4 h-4 shrink-0 mt-0.5" />
             <p dir="auto" className="flex-1 text-sm text-zinc-200">{lang === 'he' && a.messageHe ? a.messageHe : a.message}</p>
             <button aria-label={translations[lang].liveOps.dismiss} className={`text-zinc-500 text-xs shrink-0 ${TAP_INLINE}`} onClick={() => dismiss(a.id)}>✕</button>
           </div>
         );
       })}
 
-      {liveFlashes.map((f) => {
+      {/* The flash this team is ON is shown by FlashRunner, with its countdown: said once. */}
+      {liveFlashes.filter((f) => f.id !== teamFlashId).map((f) => {
         const secsLeft = Math.max(0, Math.round((new Date(f.expiresAt).getTime() - now) / 1000));
         const mm = String(Math.floor(secsLeft / 60)).padStart(2, '0');
         const ss = String(secsLeft % 60).padStart(2, '0');
         return (
           <div key={f.id} className="rounded-xl bg-purple-500/10 border border-purple-400/40 px-3 py-2">
             <div className="flex items-start gap-2">
-              <span className="text-sm">⚡</span>
+              <Icon name="bolt" className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <div dir="auto" className="text-sm font-semibold text-purple-200">
+                <div dir="auto" className="text-sm font-semibold text-purple-900">
                   {lang === 'he' && f.titleHe ? f.titleHe : f.title}
                   {f.bonusPoints ? <span className="ms-2 text-ink-fire font-mono">+{f.bonusPoints}</span> : null}
                 </div>
@@ -266,19 +268,18 @@ export default function LiveOps({
                   <p dir="auto" className="text-xs text-zinc-300 mt-0.5">{lang === 'he' && f.descriptionHe ? f.descriptionHe : f.description}</p>
                 )}
               </div>
-              <span className="text-xs font-mono text-purple-300 shrink-0">{mm}:{ss}</span>
+              <span className="text-xs font-mono text-purple-700 shrink-0">{mm}:{ss}</span>
             </div>
             {/* flash-missions-v2: the action. First-team missions say who took them. */}
             {f.claimMode && f.doneBy && f.doneBy !== 'announce' && (() => {
               const fl = translations[lang].flash;
               const mine = myFlashClaims?.[f.id];
               const state = flashMissionState(f, now);
-              if (teamFlashId === f.id) return <p className="mt-2 text-[13px] font-semibold text-purple-200">{fl.youAreOnIt}</p>;
               // What happened to OUR claim: taken, sent and waiting, won, or not approved.
               const line = flashMyClaimLine(mine);
               if (line) {
                 const text = line === 'waiting' ? fl.myWaiting : line === 'won' ? fl.myWon({ points: f.bonusPoints ?? 0 }) : line === 'rejected' ? fl.myRejected : fl.alreadyYours;
-                return <p role="status" className={`mt-2 text-[13px] ${line === 'won' ? 'font-bold text-purple-100' : 'text-purple-200'}`}>{text}</p>;
+                return <p role="status" className={`mt-2 text-[13px] ${line === 'won' ? 'font-bold text-purple-900' : 'text-purple-800'}`}>{text}</p>;
               }
               if (state === 'taken') return <p className="mt-2 text-[13px] text-zinc-400">{fl.takenByOther}</p>;
               return (
@@ -300,7 +301,7 @@ export default function LiveOps({
           <button type="button" className="absolute inset-0 w-full h-full cursor-default"
             aria-label={translations[lang].flash.momentDismiss} onClick={() => setMoment(null)} />
           <div className="relative text-center text-white pointer-events-none">
-            <div className="text-7xl mb-3 motion-safe:animate-bounce" aria-hidden>⚡</div>
+            <div className="mb-3 flex justify-center motion-safe:animate-bounce" aria-hidden><Icon name="bolt" className="w-20 h-20" /></div>
             <p className="text-sm font-bold uppercase tracking-widest mb-2">{translations[lang].flash.momentLabel}</p>
             <h2 id="rp-flash-moment" dir="auto" className="text-3xl font-extrabold mb-2">{lang === 'he' && moment.titleHe ? moment.titleHe : moment.title}</h2>
             {moment.bonusPoints ? <p className="text-2xl font-bold text-amber-300">+{moment.bonusPoints}</p> : null}
@@ -328,7 +329,7 @@ export function LeaderboardPeek({
       onToggle={() => setOpen((o) => !o)}
       bodyClassName="px-3 pb-2 space-y-1"
       header={
-        <span className="truncate">🏆 {translations[lang].liveOps.leaderboardHeading}
+        <span className="truncate inline-flex items-center gap-1.5"><Icon name="trophy" className="w-4 h-4 shrink-0" />{translations[lang].liveOps.leaderboardHeading}
           {leaderboard.frozen && <span className="ms-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
           {mine && <span className="ms-2 text-ink-fire font-mono">#{mine.rank}</span>}
         </span>

@@ -11,9 +11,10 @@ import { loadSound } from '../store';
 
 // ── Pure, DOM-free core (unit-tested in scripts/test-sound.ts) ───────────────
 
-export type Cue = 'task' | 'stage' | 'alert' | 'rankUp';
+// hurry / tick / timeUp: the mission countdown's moments (change: mission-countdown-fuse).
+export type Cue = 'task' | 'stage' | 'alert' | 'rankUp' | 'hurry' | 'tick' | 'timeUp';
 
-export const CUES: Cue[] = ['task', 'stage', 'alert', 'rankUp'];
+export const CUES: Cue[] = ['task', 'stage', 'alert', 'rankUp', 'hurry', 'tick', 'timeUp'];
 
 /** A short synthesizable envelope: notes played in sequence over durationMs. */
 export interface Envelope {
@@ -35,6 +36,12 @@ export const ENVELOPES: Record<Cue, Envelope> = {
   rankUp: { freqs: [523, 659, 988],  durationMs: 300, type: 'triangle', gain: 0.22 },
   // Urgent two-tone — shared by SOS send and staff SOS receive.
   alert:  { freqs: [880, 620, 880],  durationMs: 260, type: 'square',   gain: 0.25 },
+  // Countdown: two quick rising notes at half time / the final stretch: "move!", not an alarm.
+  hurry:  { freqs: [740, 988],       durationMs: 160, type: 'triangle', gain: 0.2 },
+  // One short high click per second in the last seconds. Very short and quiet: it repeats.
+  tick:   { freqs: [1320],           durationMs: 50,  type: 'square',   gain: 0.08 },
+  // Time up: a falling buzz.
+  timeUp: { freqs: [440, 330, 220],  durationMs: 420, type: 'sawtooth', gain: 0.18 },
 };
 
 /** Haptic pattern paired with each cue (see lib/haptics.ts). */
@@ -43,6 +50,9 @@ export const CUE_HAPTIC: Record<Cue, 'tap' | 'success' | 'warn' | 'error'> = {
   stage:  'success',
   rankUp: 'success',
   alert:  'error',
+  hurry:  'warn',
+  tick:   'tap',
+  timeUp: 'error',
 };
 
 /** Whether a leaderboard change is a genuine improvement (strictly lower rank). */

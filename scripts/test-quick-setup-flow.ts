@@ -17,6 +17,7 @@
 //     "never started" rather than throwing inside the Builder.
 //
 //   npx tsx scripts/test-quick-setup-flow.ts
+import { readFileSync } from 'node:fs';
 import type { Game, Stage, Task } from '../packages/shared/src/types';
 import type { TemplateWizardStep } from '../packages/shared/src/templateWizard';
 import {
@@ -37,6 +38,10 @@ import {
   quickSetupStorageKey,
   readQuickSetupRecord,
   writeQuickSetupRecord,
+  isQuickSetupDecision,
+  isShortNote,
+  finishVerdict,
+  reachedFinishLine,
   quickSetupFocusPlan,
   QUICK_SETUP_FIELDS,
   QUICK_SETUP_COPY_KEYS,
@@ -402,6 +407,94 @@ console.log('\npersistence');
   noThrow('reading an array is safe', () => readQuickSetupRecord('[1,2,3]'));
 }
 
+// ── 4b. An untouched state is not a decision (change: quick-setup-reachable) ─
+//
+// The landing from the new-game wizard DEFERS the invitation and writes nothing.
+// The persist effect then wrote the untouched `idle` state on that same mount,
+// and the load effect read ANY record as "the creator already decided" — so on a
+// phone, where there is no pill, Quick Setup became unreachable for good. One
+// predicate now answers "is this a decision?" on BOTH sides, which is also what
+// heals a creator who already carries a stale `idle` record.
+console.log('\nan untouched state is not a decision');
+{
+  eq('a fresh idle state is not a decision', isQuickSetupDecision(INITIAL_QUICK_SETUP_STATE), false);
+  eq('a stored fresh idle record is not a decision',
+    isQuickSetupDecision(readQuickSetupRecord('{"version":1,"status":"idle","index":0,"deferred":[]}')), false);
+  eq('idle with a deferred step IS a decision', isQuickSetupDecision({ status: 'idle', index: 0, deferred: ['pin'] }), true);
+  eq('idle with progress IS a decision', isQuickSetupDecision({ status: 'idle', index: 2, deferred: [] }), true);
+  for (const status of ['closed', 'done', 'running', 'welcome'] as const) {
+    eq(`${status} is a decision`, isQuickSetupDecision({ status, index: 0, deferred: [] }), true);
+  }
+  for (const junk of [null, undefined, {}, 'idle', 42, { status: 'weird' }]) {
+    eq(`junk ${JSON.stringify(junk)} is not a decision`, isQuickSetupDecision(junk as never), false);
+  }
+
+  // The contract the Builder relies on: a stale idle record no longer blocks the
+  // invitation on the next ordinary visit.
+  const stale = readQuickSetupRecord('{"version":1,"status":"idle","index":0,"deferred":[]}');
+  eq('a stale idle record does not suppress the next invitation',
+    shouldAutoOpenQuickSetup({ hasRecord: isQuickSetupDecision(stale), outstanding: 3, total: 3 }), true);
+  const closed = readQuickSetupRecord('{"version":1,"status":"closed","index":0,"deferred":[]}');
+  eq('a closed record still suppresses it',
+    shouldAutoOpenQuickSetup({ hasRecord: isQuickSetupDecision(closed), outstanding: 3, total: 3 }), false);
+}
+
+// ── 4c. The Builder wires it on both sides, and the phone can reach the flow ─
+//
+// No component runner exists, so this is a source assertion: the load effect must
+// read through the predicate, the persist effect must skip a non-decision, and the
+// phone overflow menu must carry an entry that resumes the flow.
+console.log('\nthe Builder wiring');
+{
+  const src = readFileSync('apps/creator-web/src/pages/BuilderPage.tsx', 'utf8');
+  ok('the load effect reads hasRecord through isQuickSetupDecision',
+    /hasRecord:\s*isQuickSetupDecision\(rec\)/.test(src));
+  ok('the persist effect skips a non-decision',
+    /if \(!isQuickSetupDecision\(qsState\)\)/.test(src));
+  const menuStart = src.indexOf('ariaLabel={b.headerMoreMenuAria}');
+  const menuEnd = src.indexOf('</OverflowMenu>', menuStart);
+  const menu = menuStart >= 0 && menuEnd > menuStart ? src.slice(menuStart, menuEnd) : '';
+  ok('the phone overflow menu exists in the source', menu.length > 0);
+  ok('the phone overflow menu offers Quick Setup when there are steps',
+    /qsSteps\.length > 0[\s\S]{0,400}dispatchQs\(\{ type: 'resume' \}\)/.test(menu));
+  // Router state lives in history.state, which SURVIVES a reload. Found at 375px:
+  // reloading the Builder kept `rpJustCreated` and deferred the invitation again,
+  // so the stamp must be consumed (replaced with no state) once it has been read.
+  // Found at 375px: in the guided layout below `lg` the inline card sits in a
+  // wrapper whose height comes from its own content, so `max-h-[45%]` resolved
+  // to 113px of a 242px card and the step's buttons were scrolled out of sight.
+  // On a phone the cap is a share of the SCREEN.
+  const qsSrc = readFileSync('apps/creator-web/src/components/QuickSetup.tsx', 'utf8');
+  ok('the beside card is capped by the screen below lg, not by its wrapper',
+    /beside\s*\?\s*'max-h-\[45dvh\]/.test(qsSrc));
+  // A one-line note is cheap and shown open; only a paragraph hides behind the
+  // disclosure. Found at 375px: the composer's station line ("this is the stage's
+  // station, open grass works") was hidden behind "show the template note".
+  ok('a short note is shown open', isShortNote('ספסל מתאים כאן.') === true);
+  ok('a paragraph is not short', isShortNote('א'.repeat(141)) === false);
+  ok('a multi-line note is not short', isShortNote('one\ntwo') === false);
+  ok('junk is not short', isShortNote(undefined as never) === false && isShortNote('   ') === false);
+  ok('QuickSetup shows a short note without the disclosure', /isShortNote\(step\.instructionPrompt\)/.test(qsSrc));
+  // Found at 375px: walking off the end with "next" over required steps that were
+  // never filled showed "that's it, your game is ready to launch" while launch
+  // still listed 3 missing points. The finish line must tell the truth.
+  ok('nothing outstanding ⇒ celebrate', finishVerdict(0).kind === 'celebrate');
+  ok('3 outstanding ⇒ say what is left', finishVerdict(3).kind === 'remaining' && finishVerdict(3).count === 3);
+  ok('junk ⇒ celebrate is never claimed falsely', finishVerdict(NaN as never).kind === 'celebrate' || finishVerdict(NaN as never).kind === 'remaining');
+  // The finish line fires when the creator FINISHES, not when a page load restores a
+  // finished state: the stored record loads after the first render, so idle → done
+  // on every visit looked like a transition and the dialog reappeared each time.
+  ok('running → done finishes', reachedFinishLine('running', 'done') === true);
+  ok('idle → done (a restored record) does not', reachedFinishLine('idle', 'done') === false);
+  ok('done → done does not', reachedFinishLine('done', 'done') === false);
+  ok('closed → done does not', reachedFinishLine('closed', 'done') === false);
+  ok('the Builder decides with reachedFinishLine', /reachedFinishLine\(/.test(src));
+  ok('the Builder passes what is left to the finish line',
+    /<QuickSetupCelebration[^\n]*remaining=\{qsOutstanding\.length\}/.test(src));
+  ok('the just-created stamp is consumed after it is read',
+    /justCreated\.current[\s\S]{0,600}replace: true, state: null/.test(src));
+}
+
 // ── 5. The focus plan ───────────────────────────────────────────────────────
 console.log('\nquickSetupFocusPlan');
 {
@@ -413,8 +506,8 @@ console.log('\nquickSetupFocusPlan');
   eq('media lives on the details tab, not behind a chip', [plan('media').wizardStep, plan('media').optInGroup], ['details', null]);
   eq('an answer key lives on the execution tab', plan('answers').wizardStep, 'execution');
   eq('the paid hint hides inside the hint group', [plan('hint').wizardStep, plan('hint').optInGroup], ['execution', 'hint']);
-  eq('points hide inside the timing group', plan('pointValue').optInGroup, 'timerPoints');
-  eq('the concurrency cap hides inside the rules group', plan('maxConcurrentTeams').optInGroup, 'rules');
+  eq('points open the scoring row', plan('pointValue').optInGroup, 'scoring');
+  eq('the concurrency cap opens the more-settings row', plan('maxConcurrentTeams').optInGroup, 'more');
   eq('a game-level field has no editor tab', [plan('title', 'game').wizardStep, plan('title', 'game').anchor], [null, 'game.title']);
   eq('the primer anchors on its own control', plan('instructions.bodyHe', 'game').anchor, 'game.instructions');
   eq('a task field anchors on its own path', plan('answers').anchor, 'answers');
