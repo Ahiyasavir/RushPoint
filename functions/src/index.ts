@@ -69,7 +69,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, closeTaskForTeam, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -2150,6 +2150,25 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
     },
     { merge: true },
   );
+
+  // run-gate-integrity: a closure leaves a mission whose photo awaits review alone
+  // (closeTaskForTeam). A REJECTION of that photo is the moment the closure applies: the
+  // team must not be left holding a closed mission it could only resubmit into.
+  if (!approved) {
+    try {
+      const runData = (await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get()).data() as
+        { taskStatusOverrides?: Record<string, string>; launchedAt?: string } | undefined;
+      if (runData?.taskStatusOverrides?.[taskId] === 'closed') {
+        const gameDoc = (await db.doc(`users/${ownerUid}/games/${gameId}`).get()).data() as Game | undefined;
+        if (gameDoc) {
+          const title = gameDoc.stages?.flatMap((st) => st.tasks).find((t) => t.id === taskId)?.title ?? '';
+          await closeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, gameDoc, runData.launchedAt, title);
+        }
+      }
+    } catch (e) {
+      functions.logger.warn('reviewStationSubmission: closure after rejection skipped', { runId, err: String(e) });
+    }
+  }
 
   // Approved photo = task complete → score it + advance the team.
   if (approved) {

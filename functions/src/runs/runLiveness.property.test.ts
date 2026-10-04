@@ -210,23 +210,80 @@ async function phone(s: Sim) {
   }
 }
 
-/** MIRROR completeTaskForTeam's guard sequence + its exclusive-sibling retirement. */
-function tryComplete(s: Sim): 'done' | string {
-  if (s.team.held === true) return 'held'; // assertTeamNotHeld on every submission door
+type Subs = Record<string, { status?: string }>;
+const subsOf = (t: RunTeam): Subs => ((t as { taskSubmissions?: Subs }).taskSubmissions ??= {});
+const pendingOf = (t: RunTeam) => Object.entries(subsOf(t)).filter(([, v]) => v.status === 'pending').map(([k]) => k);
+
+/** MIRROR submitStationPhoto (staff-reviewed): the door checks pass, the record stays `assigned`. */
+function submitPhoto(s: Sim) {
+  if (s.team.held === true) return;
+  const idx = activeIdx(s);
+  if (idx < 0) return;
+  const rec = s.team.stages[idx].tasks.find((t) => t.status === 'assigned');
+  if (!rec || subsOf(s.team)[rec.taskId]?.status === 'pending') return;
+  const gameTask = findTask(s, rec.taskId);
+  if (!gameTask) return;
+  if (gameTask.timeLimitMinutes && rec.startedAt && s.now - Date.parse(rec.startedAt) >= gameTask.timeLimitMinutes * 60_000 + 5_000) return;
+  if (scheduleRefusal(gameTask, LAUNCH, s.now, rec)) return;
+  subsOf(s.team)[rec.taskId] = { status: 'pending' };
+  s.log.push(`${s.team.id} photo ${rec.taskId} pending`);
+}
+
+/** MIRROR reviewStationSubmission: approve ⇒ completeTaskForTeam (no submission-door checks);
+ *  reject ⇒ the submission is rejected, and a run-wide closure it was spared from now applies. */
+function review(s: Sim, approve: boolean) {
+  const pending = pendingOf(s.team);
+  if (pending.length === 0) return;
+  const taskId = pending[0];
+  subsOf(s.team)[taskId] = { status: approve ? 'approved' : 'rejected' };
+  const recBefore = s.team.stages.flatMap((st) => st.tasks).find((t) => t.taskId === taskId);
+  s.log.push(`${s.team.id} review ${taskId} ${approve ? 'approve' : 'reject'} (rec ${recBefore?.status})`);
+  if (approve) {
+    if (recBefore?.status !== 'assigned') return; // a terminal record is a no-op (deliberate skips)
+    const res = tryComplete(s, taskId);
+    if (res !== 'done') fail(s, `${s.team.id}: approving the photo for held ${taskId} scored nothing (${res})`);
+    return;
+  }
+  if (s.overrides[taskId] === 'closed') closeForTeam(s, s.team, taskId);
+}
+
+/** MIRROR closeTaskForTeam: one team's step of a run-wide closure. */
+function closeForTeam(s: Sim, team: RunTeam, taskId: string) {
+  if (subsOf(team)[taskId]?.status === 'pending') return; // spared until reviewed
+  const keep = s.team;
+  s.team = team;
+  const stages = clone(team.stages);
+  const out = applyTaskClosure(stages, s.game, taskId, LAUNCH, iso(s.now));
+  if (out.changed) {
+    team.stages = stages;
+    team.activeTaskId = heldTaskIdOf(stages);
+    settleFinished(s);
+    for (const id of new Set(out.releaseIds)) dec(s, id);
+  }
+  s.team = keep;
+}
+
+/** MIRROR completeTaskForTeam's guard sequence + its exclusive-sibling retirement. With `reviewed`,
+ *  the call comes from a staff approval: none of the submission-door checks run. */
+function tryComplete(s: Sim, reviewed?: string): 'done' | string {
+  if (!reviewed && s.team.held === true) return 'held'; // assertTeamNotHeld on every submission door
   const idx = activeIdx(s);
   if (idx < 0) return 'no active stage';
   const stages = clone(s.team.stages);
-  const rec = stages[idx].tasks.find((t) => t.status === 'assigned');
+  const rec = stages[idx].tasks.find((t) => (reviewed ? t.taskId === reviewed : t.status === 'assigned'));
   if (!rec) return 'nothing held';
+  if (!reviewed && subsOf(s.team)[rec.taskId]?.status === 'pending') return 'pending';
   const gameTask = findTask(s, rec.taskId);
   // The phone renders a mission from its template content: a mission deleted from the game while
   // held reaches the phone with NO content, so the player cannot submit it at all.
-  if (!gameTask) return 'noContent';
-  const lim = gameTask.smart?.attemptLimit;
-  if (typeof lim === 'number' && lim > 0 && (s.team.taskAttempts?.[rec.taskId] ?? 0) >= lim) return 'noAttempts';
-  // The submission door (completeTask): time limit, then the shared schedule rule.
-  if (gameTask?.timeLimitMinutes && rec.startedAt && s.now - Date.parse(rec.startedAt) >= gameTask.timeLimitMinutes * 60_000 + 5_000) return 'timeLimit';
-  if (gameTask) { const refusal = scheduleRefusal(gameTask, LAUNCH, s.now, rec); if (refusal) return refusal; }
+  if (!gameTask && !reviewed) return 'noContent';
+  if (!reviewed && gameTask) {
+    const lim = gameTask.smart?.attemptLimit;
+    if (typeof lim === 'number' && lim > 0 && (s.team.taskAttempts?.[rec.taskId] ?? 0) >= lim) return 'noAttempts';
+    // The submission door (completeTask): time limit, then the shared schedule rule.
+    if (gameTask?.timeLimitMinutes && rec.startedAt && s.now - Date.parse(rec.startedAt) >= gameTask.timeLimitMinutes * 60_000 + 5_000) return 'timeLimit';
+    if (gameTask) { const refusal = scheduleRefusal(gameTask, LAUNCH, s.now, rec); if (refusal) return refusal; }
+  }
   if (gameTask && rec.gateOverride !== true && rec.status !== 'assigned' && !isUnlocked(gameTask, gateSatisfiedTaskIds(stages, s.game.stages))) return 'locked';
   const gs = s.game.stages.find((g) => g.id === stages[idx].stageId);
   const siblings = gs ? resolveExclusions({ tasks: runStageTasks(gs.tasks, stages[idx].tasks), exclusiveGroups: gs.exclusiveGroups }, rec.taskId) : [];
@@ -260,19 +317,8 @@ function setStatus(s: Sim, taskId: string, next: StationStatus, r: R) {
   s.overrides = { ...s.overrides, [taskId]: next };
   s.log.push(`${next} ${taskId}${plan.stageUnwinnable ? ' (forced)' : ''}`);
   if (next === 'closed' && from !== 'closed') {
-    // MIRROR closeTaskForAllTeams: every team, then the slots.
-    const keep = s.team;
-    for (const team of s.teams) {
-      s.team = team;
-      const stages = clone(team.stages);
-      const out = applyTaskClosure(stages, s.game, taskId, LAUNCH, iso(s.now));
-      if (!out.changed) continue;
-      team.stages = stages;
-      team.activeTaskId = heldTaskIdOf(stages);
-      settleFinished(s);
-      for (const id of new Set(out.releaseIds)) dec(s, id);
-    }
-    s.team = keep;
+    // MIRROR closeTaskForAllTeams: closeTaskForTeam for every team.
+    for (const team of s.teams) closeForTeam(s, team, taskId);
   }
 }
 
@@ -620,6 +666,8 @@ async function drain(s: Sim) {
       if (team.status === 'finished') continue;
       s.team = team;
       const before = JSON.stringify(team.stages);
+      // Staff work the review queue.
+      while (pendingOf(team).length) review(s, round % 2 === 0);
       // Twice: one requestNextTask can settle a stage and leave the next one to the following
       // call (production's client retries; see TaskRunner's routing backoff).
       await phone(s);
@@ -628,7 +676,7 @@ async function drain(s: Sim) {
       if ((team.status as string) === 'finished') { progressed = true; continue; }
       const res = tryComplete(s);
       assertSafe(s);
-      if (res === 'locked' || res === 'exclusiveTaken' || res === 'notReleased' || res === 'noContent' || res === 'noAttempts') {
+      if (res === 'locked' || res === 'exclusiveTaken' || res === 'notReleased' || res === 'noContent' || res === 'noAttempts' || res === 'pending') {
         fail(s, `${team.id} holds a mission it cannot complete: ${res}`);
       }
       if (res === 'done' || JSON.stringify(team.stages) !== before) progressed = true;
@@ -668,7 +716,7 @@ async function play(seed: number) {
     const auto = roll < 0.28 || (roll >= 0.46 && roll < 0.56);
     const heldBefore = auto ? s.teams.filter((t) => t.held === true).map((t) => [t, heldTaskIdOf(t.stages)] as const) : [];
     if (roll < 0.28) await poll(s);
-    else if (roll < 0.46) { if (r.chance(0.3)) wrongAnswer(s); else tryComplete(s); }
+    else if (roll < 0.46) { const c = r.next(); if (c < 0.25) wrongAnswer(s); else if (c < 0.45) submitPhoto(s); else if (c < 0.6) review(s, r.chance(0.6)); else tryComplete(s); }
     else if (roll < 0.56) { s.now += r.int(1, 25) * 60_000; s.log.push(`+time → ${(s.now - L) / 60_000}m`); }
     else if (roll < 0.63 && allIds.length) setStatus(s, r.pick(allIds), r.pick(['paused', 'active'] as StationStatus[]), r);
     else if (roll < 0.67 && allIds.length) setStatus(s, r.pick(allIds), 'closed', r);

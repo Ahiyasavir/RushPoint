@@ -1664,6 +1664,65 @@ async function main() {
 
   }); // scenario: paid hints
 
+  // run-gate-integrity: closing a mission mid-run must not eat a photo that is WAITING FOR REVIEW.
+  // The team did its part before the close; the record stays `assigned` while staff decide, so the
+  // closure used to skip it with 0 points and a later approval silently scored nothing.
+  await scenario('closing a mission keeps photos awaiting review', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const photoUrl = (path) =>
+      `http://127.0.0.1:${EMU.storage}/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token`;
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    const { gameId: g } = await creator.call('createGame', { title: 'Close vs review', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-cr1', order: 0, title: 'Photo', tasks: [{
+          id: 'cr-photo', title: 'Selfie', type: 'photo', coordinates: { lat: 31.78, lng: 35.21 },
+          difficulty: 2, estimatedMinutes: 5, pointValue: 70, maxConcurrentTeams: 5, triggerMode: 'instant',
+        }] },
+        { id: 'st-cr2', order: 1, title: 'End', isFinal: true, tasks: [{
+          id: 'cr-end', title: 'Finish line', type: 'self_report', coordinates: { lat: 31.78, lng: 35.21 },
+          difficulty: 1, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 5, triggerMode: 'instant',
+        }] },
+      ],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g });
+    const parties = {};
+    for (const name of ['crKeep', 'crReject', 'crIdle']) {
+      const p = makeParty(name);
+      const cred = await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: c, displayName: name });
+      parties[name] = { p, uid: cred.user.uid };
+    }
+    await creator.call('startTeams', { gameId: g, runId: r });
+    for (const name of ['crKeep', 'crReject']) {
+      const { p, uid } = parties[name];
+      const path = `runs/${r}/teams/${uid}/cr.jpg`;
+      await p.uploadBytesAt(path, jpeg, 'image/jpeg');
+      const sub = await p.call('submitStationPhoto', { ownerUid, gameId: g, runId: r, teamId: uid, taskId: 'cr-photo', photoUrl: photoUrl(path) });
+      check(`close-vs-review: ${name} photo is pending review`, sub?.submitted === true, JSON.stringify(sub));
+    }
+    await creator.call('setRunTaskStatus', { ownerUid, gameId: g, runId: r, taskId: 'cr-photo', status: 'closed' });
+    const rec = async (name) => {
+      const st = await parties[name].p.call('getMyTeamState', { code: c });
+      return (st?.team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((t) => t.taskId === 'cr-photo');
+    };
+    check('close-vs-review: a team that never submitted loses the closed mission', (await rec('crIdle'))?.status === 'skipped');
+    check('close-vs-review: a team whose photo awaits review keeps it', (await rec('crKeep'))?.status === 'assigned',
+      JSON.stringify(await rec('crKeep')));
+    await creator.call('reviewStationSubmission', { ownerUid, gameId: g, runId: r, teamId: parties.crKeep.uid, taskId: 'cr-photo', approved: true });
+    const kept = await rec('crKeep');
+    check('close-vs-review: approving it after the close scores it', kept?.status === 'completed' && kept?.earnedScore === 70,
+      JSON.stringify(kept));
+    await creator.call('reviewStationSubmission', { ownerUid, gameId: g, runId: r, teamId: parties.crReject.uid, taskId: 'cr-photo', approved: false });
+    const rejected = await rec('crReject');
+    check('close-vs-review: rejecting it after the close applies the closure (no resubmit into a closed mission)',
+      rejected?.status === 'skipped' && rejected?.closedByOrganizer === true, JSON.stringify(rejected));
+    const rejState = await parties.crReject.p.call('getMyTeamState', { code: c });
+    check('close-vs-review: the rejected team moves on to the next stage',
+      rejState?.team?.activeTaskId !== 'cr-photo', JSON.stringify({ active: rejState?.team?.activeTaskId }));
+  });
+
   // scoring-v2: every bonus is a PERCENTAGE of the mission points a team earned. The old flat +500
   // completion bonus outweighed every mission of a game whose missions are worth 10 points each, and
   // a lone finisher's speed was judged against the author's estimate even when that estimate was

@@ -410,6 +410,59 @@ export function applyMissedClosures(
  * team's failure is logged and never undoes the others (the override is already written, and a
  * late joiner or the next call picks the rest up). Returns how many teams were moved off it.
  */
+/**
+ * Apply a run-wide closure to ONE team (closeTaskForAllTeams' per-team step, and the reject path of
+ * reviewStationSubmission). A mission whose submission is WAITING FOR REVIEW is left alone: the team
+ * did its part before the close, and taking it would throw the photo away with 0 points while a
+ * later approval silently scored nothing. The review decides it instead — an approval completes it,
+ * a rejection calls this again, and with the submission no longer pending the closure applies.
+ */
+export async function closeTaskForTeam(
+  ownerUid: string, gameId: string, runId: string, teamId: string, taskId: string, game: Game,
+  launchedAt: string | undefined, title: string,
+): Promise<{ changed: boolean; moved: boolean }> {
+  const ref = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+  const now = new Date().toISOString();
+  let outcome = { changed: false, wasHolding: false, releaseIds: [] as string[] };
+  await db.runTransaction(async (tx) => {
+    outcome = { changed: false, wasHolding: false, releaseIds: [] };
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const team = snap.data() as RunTeam;
+    if ((team as { taskSubmissions?: Record<string, { status?: string }> }).taskSubmissions?.[taskId]?.status === 'pending') return;
+    const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
+    const heldBefore = heldTaskIdOf(stages);
+    outcome = applyTaskClosure(stages, game, taskId, launchedAt, now);
+    if (!outcome.changed) return;
+    // run-gate-integrity: the closure can END the stage, auto-skipping a DIFFERENT mission the
+    // team was on (found by the liveness simulation). That team was moved too, and must be told
+    // and re-routed exactly like a holder of the closed mission — not left pointing at a record
+    // that is no longer theirs.
+    const stillHeld = heldTaskIdOf(stages);
+    // Judged on the RECORDS before and after, never on a pointer that may already have been stale.
+    const holding = outcome.wasHolding || (!!heldBefore && heldBefore !== stillHeld);
+    const allDone = stages.every((st) => st.status === 'completed');
+    tx.update(ref, {
+      stages,
+      // The mission the team still holds (never a blind null: a stale pointer must not blank it).
+      ...(holding ? { activeTaskId: stillHeld, closedTaskNotice: { taskId, title, at: now } } : {}),
+      ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+      updatedAt: now,
+    });
+    outcome = { ...outcome, wasHolding: holding };
+  });
+  if (!outcome.changed) return { changed: false, moved: false };
+  for (const id of [...new Set(outcome.releaseIds)]) await releaseTask(id, ownerUid, gameId, runId);
+  if (outcome.wasHolding) {
+    try {
+      await assignNextInActiveStage(ownerUid, gameId, runId, teamId, { lat: 0, lng: 0 }, now, game);
+    } catch (e) {
+      functions.logger.warn('closeTaskForTeam: re-assignment skipped', { ownerUid, gameId, runId, teamId, error: (e as Error).message });
+    }
+  }
+  return { changed: true, moved: outcome.wasHolding };
+}
+
 export async function closeTaskForAllTeams(
   ownerUid: string, gameId: string, runId: string, taskId: string, game: Game,
 ): Promise<{ teamsMoved: number; teamsChanged: number }> {
@@ -421,44 +474,9 @@ export async function closeTaskForAllTeams(
   let teamsChanged = 0;
   for (const doc of teams.docs) {
     try {
-      const now = new Date().toISOString();
-      let outcome = { changed: false, wasHolding: false, releaseIds: [] as string[] };
-      await db.runTransaction(async (tx) => {
-        const snap = await tx.get(doc.ref);
-        if (!snap.exists) return;
-        const team = snap.data() as RunTeam;
-        const stages = (team.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
-        const heldBefore = heldTaskIdOf(stages);
-        outcome = applyTaskClosure(stages, game, taskId, launchedAt, now);
-        if (!outcome.changed) return;
-        // run-gate-integrity: the closure can END the stage, auto-skipping a DIFFERENT mission the
-        // team was on (found by the liveness simulation). That team was moved too, and must be told
-        // and re-routed exactly like a holder of the closed mission — not left pointing at a record
-        // that is no longer theirs.
-        const stillHeld = heldTaskIdOf(stages);
-        // Judged on the RECORDS before and after, never on a pointer that may already have been stale.
-        const holding = outcome.wasHolding || (!!heldBefore && heldBefore !== stillHeld);
-        const allDone = stages.every((st) => st.status === 'completed');
-        tx.update(doc.ref, {
-          stages,
-          // The mission the team still holds (never a blind null: a stale pointer must not blank it).
-          ...(holding ? { activeTaskId: stillHeld, closedTaskNotice: { taskId, title, at: now } } : {}),
-          ...(allDone ? { status: 'finished', finishedAt: now } : {}),
-          updatedAt: now,
-        });
-        outcome = { ...outcome, wasHolding: holding };
-      });
-      if (!outcome.changed) continue;
-      teamsChanged++;
-      for (const id of [...new Set(outcome.releaseIds)]) await releaseTask(id, ownerUid, gameId, runId);
-      if (outcome.wasHolding) {
-        teamsMoved++;
-        try {
-          await assignNextInActiveStage(ownerUid, gameId, runId, doc.id, { lat: 0, lng: 0 }, now, game);
-        } catch (e) {
-          functions.logger.warn('closeTaskForAllTeams: re-assignment skipped', { ownerUid, gameId, runId, teamId: doc.id, error: (e as Error).message });
-        }
-      }
+      const r = await closeTaskForTeam(ownerUid, gameId, runId, doc.id, taskId, game, launchedAt, title);
+      if (r.changed) teamsChanged++;
+      if (r.moved) teamsMoved++;
     } catch (e) {
       functions.logger.warn('closeTaskForAllTeams: team skipped', { ownerUid, gameId, runId, teamId: doc.id, taskId, error: (e as Error).message });
     }
