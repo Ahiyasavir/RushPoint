@@ -1753,6 +1753,137 @@ async function main() {
       rejState?.team?.activeTaskId !== 'cr-photo', JSON.stringify({ active: rejState?.team?.activeTaskId }));
   });
 
+  // run-gate-integrity: LIVE-OP RACES against the real server — two conflicting actions fired at the
+  // same instant, repeated so the interleaving varies, then the invariants every outcome must keep:
+  // score == Σ earned, station slots == who holds what, activeTaskId == the held record, hint charges
+  // == the ledger, and the team can still play to the finish.
+  await scenario('live-op races keep every invariant', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const q = (id, answer) => ({
+      id, title: `Q ${id}`, type: 'quiz', answers: [answer], choices: [answer, 'x', 'y', 'z'],
+      coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5, pointValue: 50,
+      maxConcurrentTeams: 5, triggerMode: 'instant', hint: 'h', hintPenalty: 20,
+    });
+    const ANSWERS = { 'rq-a': 'a', 'rq-b': 'b', 'rq-c': 'c', 'rq-z': 'z' };
+    const { gameId: g } = await creator.call('createGame', { title: 'Races', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-rq1', order: 0, title: 'Q', tasks: [q('rq-a', 'a'), q('rq-b', 'b'), q('rq-c', 'c')], requiredTaskCount: 2 },
+        { id: 'st-rq2', order: 1, title: 'End', isFinal: true, tasks: [q('rq-z', 'z')] },
+      ],
+    });
+    const teamDoc = async (r, uid) => (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}/teams/${uid}`).get()).data();
+    const runDoc = async (r) => (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}`).get()).data();
+    const held = (t) => (t?.stages ?? []).flatMap((s) => s.tasks ?? []).find((x) => x.status === 'assigned')?.taskId ?? null;
+
+    async function invariants(label, r, parties) {
+      const docs = [];
+      for (const { uid } of parties) docs.push(await teamDoc(r, uid));
+      for (const t of docs) {
+        assertScoreConservation(`${label} ${t?.displayName}`, t);
+        check(`${label} ${t?.displayName}: activeTaskId is the held record`,
+          (t?.activeTaskId ?? null) === held(t), JSON.stringify({ active: t?.activeTaskId, held: held(t) }));
+        const ledger = (t?.scoreLedger ?? []).filter((e) => e.kind === 'hint' || e.kind === 'hintRefund');
+        const fromLedger = -ledger.reduce((a, e) => a + e.delta, 0);
+        check(`${label} ${t?.displayName}: hint charges match the ledger`, (t?.bonusPenalty ?? 0) === fromLedger,
+          JSON.stringify({ bonusPenalty: t?.bonusPenalty, fromLedger }));
+      }
+      const counts = (await runDoc(r))?.taskCounts ?? {};
+      const expected = {};
+      for (const t of docs) { const h = held(t); if (h) expected[h] = (expected[h] ?? 0) + 1; }
+      const keys = new Set([...Object.keys(counts), ...Object.keys(expected)]);
+      check(`${label}: station slots == who is holding what`,
+        [...keys].every((k) => (counts[k] ?? 0) === (expected[k] ?? 0)), JSON.stringify({ counts, expected }));
+    }
+
+    async function finishAll(label, r, c, parties) {
+      for (const { p, uid } of parties) {
+        for (let i = 0; i < 8; i++) {
+          let t = await teamDoc(r, uid);
+          if (t?.status === 'finished') break;
+          await p.call('getMyTeamState', { code: c });
+          try { await p.call('requestNextTask', { ownerUid, gameId: g, runId: r }); } catch { /* nothing to hand out */ }
+          t = await teamDoc(r, uid);
+          const h = held(t);
+          if (h) { try { await p.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] }); } catch { /* raced */ } }
+        }
+        const t = await teamDoc(r, uid);
+        check(`${label} ${t?.displayName}: can still play to the finish`, t?.status === 'finished',
+          JSON.stringify((t?.stages ?? []).map((s) => [s.stageId, s.status, (s.tasks ?? []).map((x) => [x.taskId, x.status])])));
+      }
+    }
+
+    async function launch(n, tag) {
+      const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g });
+      const parties = [];
+      for (let i = 0; i < n; i++) {
+        const p = makeParty(`race-${tag}-${i}`);
+        const cred = await signInAnonymously(p.auth);
+        await p.call('joinRun', { code: c, displayName: `${tag}${i}` });
+        parties.push({ p, uid: cred.user.uid });
+      }
+      await creator.call('startTeams', { gameId: g, runId: r });
+      return { r, c, parties };
+    }
+
+    for (let round = 0; round < 3; round++) {
+      // A) a correct answer vs the organizer closing that very mission.
+      {
+        const { r, c, parties } = await launch(2, `A${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        await Promise.allSettled([
+          p.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] }),
+          creator.call('setRunTaskStatus', { ownerUid, gameId: g, runId: r, taskId: h, status: 'closed' }),
+        ]);
+        await invariants(`race A${round} (answer vs close)`, r, parties);
+        await finishAll(`race A${round}`, r, c, parties);
+      }
+      // B) a correct answer vs a staff skip of that mission for this team.
+      {
+        const { r, c, parties } = await launch(1, `B${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        await Promise.allSettled([
+          p.call('submitTaskAnswer', { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] }),
+          creator.call('skipTaskForTeam', { ownerUid, gameId: g, runId: r, teamId: uid, taskId: h }),
+        ]);
+        await invariants(`race B${round} (answer vs skip)`, r, parties);
+        await finishAll(`race B${round}`, r, c, parties);
+      }
+      // C) buying the hint vs the mission closing (refund must match the charge).
+      {
+        const { r, c, parties } = await launch(1, `C${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        await Promise.allSettled([
+          p.call('requestTaskHint', { ownerUid, gameId: g, runId: r, taskId: h }),
+          creator.call('setRunTaskStatus', { ownerUid, gameId: g, runId: r, taskId: h, status: 'closed' }),
+        ]);
+        await invariants(`race C${round} (hint vs close)`, r, parties);
+        await finishAll(`race C${round}`, r, c, parties);
+      }
+      // D) a double tap of the right answer + a "next mission" request, all at once.
+      {
+        const { r, c, parties } = await launch(1, `D${round}`);
+        const { p, uid } = parties[0];
+        const h = held(await teamDoc(r, uid));
+        const ans = { ownerUid, gameId: g, runId: r, taskId: h, answer: ANSWERS[h] };
+        await Promise.allSettled([
+          p.call('submitTaskAnswer', ans), p.call('submitTaskAnswer', ans),
+          p.call('requestNextTask', { ownerUid, gameId: g, runId: r }),
+        ]);
+        await invariants(`race D${round} (double tap + next)`, r, parties);
+        const t = await teamDoc(r, uid);
+        const rec = (t?.stages ?? []).flatMap((s) => s.tasks ?? []).find((x) => x.taskId === h);
+        check(`race D${round}: the double-tapped mission is paid exactly once`, rec?.earnedScore === 50 && t?.score === 50,
+          JSON.stringify({ rec, score: t?.score }));
+        await finishAll(`race D${round}`, r, c, parties);
+      }
+    }
+  });
+
   // scoring-v2: every bonus is a PERCENTAGE of the mission points a team earned. The old flat +500
   // completion bonus outweighed every mission of a game whose missions are worth 10 points each, and
   // a lone finisher's speed was judged against the author's estimate even when that estimate was

@@ -689,6 +689,8 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     if (tooFar) return { text: t.task.tooFar({ m: Number(tooFar[1]) }), tone: 'error' };
     if (raw.includes('Not within the POI radius')) return { text: t.task.notWithinRadius, tone: 'error' };
     if (raw.includes('This task has expired')) return { text: t.task.submitExpired, tone: 'error' };
+    // run-gate-integrity: the mission was closed / skipped / retired while the player was on it.
+    if (raw.includes('no longer in play')) return { text: t.task.noLongerInPlay, tone: 'error' };
     if (raw.includes('Location required to check in here')) return { text: t.task.locationRequired, tone: 'error' };
     if (raw.includes('keep following the clue')) return { text: t.task.notHereYet, tone: 'error' };
     if (raw.includes('This task is not available yet')) return { text: t.task.notAvailableYet, tone: 'error' };
