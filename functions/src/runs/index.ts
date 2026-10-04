@@ -5896,6 +5896,13 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
     const team = snap.data() as RunTeam & { taskAttempts?: Record<string, number> };
     const used = team.taskHintsUsed ?? [];
     if (used.includes(taskId)) return { alreadyUsed: true, charged: 0, free: false }; // don't double-charge
+    // run-gate-integrity: never sell a hint for a mission the team can no longer play — closed by
+    // the organizer, skipped, retired or already finished. Judged on the fresh record inside the
+    // transaction, so a close landing while the hint sheet is open cannot be charged for.
+    const recNow = team.stages.flatMap((s) => s.tasks).find((r) => r.taskId === taskId);
+    if (!recNow || recNow.status === 'completed' || recNow.status === 'skipped') {
+      throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
+    }
     // Hint auto escalation (change: hint-auto-escalation): the charge decision is
     // made HERE, inside the transaction, from the same team doc we update — no
     // TOCTOU between "is it free?" and "charge". Time basis is the task record's

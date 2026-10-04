@@ -1637,7 +1637,13 @@ async function main() {
         coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5, pointValue: 100, maxConcurrentTeams: 3,
         smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'OLIVE' },
         hint: 'It grows on a tree and makes oil.', hintPenalty: 30,
+      }, {
+        // A second hinted mission the organizer closes below: its hint must no longer be for sale.
+        id: 'h-2', title: 'The other riddle', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3,
+        hint: 'Look up.', hintPenalty: 40,
       }],
+      requiredTaskCount: 1,
     }],
   });
   const { runId: r3, accessCode: c3 } = await creator.call('launchRun', { gameId: g3 });
@@ -1661,6 +1667,14 @@ async function main() {
   check('second hint request does NOT double-charge', hintAgain?.alreadyUsed === true && hintAgain?.penalty === 0, JSON.stringify(hintAgain));
   const afterAgain = await player3.call('getMyTeamState', { code: c3 });
   check('bonusPenalty unchanged after re-request', afterAgain?.team?.bonusPenalty === 30, String(afterAgain?.team?.bonusPenalty));
+
+  // A hint for a mission the team can no longer play (closed by the organizer) is not sold.
+  await creator.call('setRunTaskStatus', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-2', status: 'closed' });
+  await expectError('a hint for a CLOSED mission is refused (nothing to spend it on)',
+    player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-2' }),
+    { codeIn: ['functions/failed-precondition'] });
+  const afterClosed = await player3.call('getMyTeamState', { code: c3 });
+  check('no charge for the refused hint', afterClosed?.team?.bonusPenalty === 30, String(afterClosed?.team?.bonusPenalty));
 
   }); // scenario: paid hints
 
