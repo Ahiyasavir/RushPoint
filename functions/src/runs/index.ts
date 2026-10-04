@@ -1887,13 +1887,25 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
     const out = applySkipStage(stages, activeIdx, game, (runSnap.data() as Run).launchedAt, now, skipBy);
     skippedHeldTaskIds.push(...out.heldTaskIds);
     const { awardTotal, skipLedger } = out;
+    // A hint the team paid for on any mission this skip took away is refunded, like a close or a
+    // one-mission skip: it can no longer be used. Amounts come from the ledger the charge wrote.
+    const refunds = stages[activeIdx].tasks
+      .filter((t) => t.status === 'skipped' && t.skipCause === 'operatorStage' && t.completedAt === now)
+      .map((t) => ({ taskId: t.taskId, amount: hintRefundOwed(team.scoreLedger, t.taskId) }))
+      .filter((x) => x.amount > 0);
+    const refundTotal = refunds.reduce((a, x) => a + x.amount, 0);
+    const ledgerAdds = [
+      ...skipLedger,
+      ...refunds.map((x) => ({ at: now, delta: x.amount, kind: 'hintRefund' as const, taskId: x.taskId, by: skipBy })),
+    ];
 
     const allDone = stages.every((s) => s.status === 'completed');
 
     tx.update(teamRef, {
       stages,
       score: (team.score ?? 0) + awardTotal,
-      ...(skipLedger.length > 0 ? { scoreLedger: appendScoreLedger(team.scoreLedger, skipLedger) } : {}),
+      ...(refundTotal > 0 ? { bonusPenalty: (team.bonusPenalty ?? 0) - refundTotal } : {}),
+      ...(ledgerAdds.length > 0 ? { scoreLedger: appendScoreLedger(team.scoreLedger, ledgerAdds) } : {}),
       ...(allDone ? { status: 'finished', finishedAt: now } : {}),
       activeTaskId: null,
       updatedAt: now,

@@ -1686,6 +1686,33 @@ async function main() {
 
   }); // scenario: paid hints
 
+  // A hint paid for on a mission that a staff STAGE skip then takes away is refunded too.
+  await scenario('skipping a stage refunds the hints paid in it', async () => {
+    const ownerUid = creatorCred.user.uid;
+    const { gameId: g } = await creator.call('createGame', { title: 'Stage skip refund', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: g, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-sr1', order: 0, title: 'S1', tasks: [{ id: 'sr-1', title: 'Riddle', type: 'self_report',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3,
+          hint: 'h', hintPenalty: 25 }] },
+        { id: 'st-sr2', order: 1, title: 'S2', isFinal: true, tasks: [{ id: 'sr-2', title: 'End', type: 'self_report',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 10, maxConcurrentTeams: 3 }] },
+      ],
+    });
+    const { runId: r, accessCode: c } = await creator.call('launchRun', { gameId: g, testDrive: true });
+    const p = makeParty('stageSkipRefund');
+    const cred = await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: c, displayName: 'SR' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    const h = await p.call('requestTaskHint', { ownerUid, gameId: g, runId: r, taskId: 'sr-1' });
+    check('stage-skip refund: the hint is charged', h?.penalty === 25, JSON.stringify(h));
+    await creator.call('skipStage', { gameId: g, runId: r, teamId: cred.user.uid });
+    const t = (await adminSdk.firestore().doc(`users/${ownerUid}/games/${g}/runs/${r}/teams/${cred.user.uid}`).get()).data();
+    check('stage-skip refund: skipping the stage gives the 25 back', (t?.bonusPenalty ?? 0) === 0, String(t?.bonusPenalty));
+    assertScoreConservation('stage-skip refund', t);
+  });
+
   // run-gate-integrity: closing a mission mid-run must not eat a photo that is WAITING FOR REVIEW.
   // The team did its part before the close; the record stays `assigned` while staff decide, so the
   // closure used to skip it with 0 points and a later approval silently scored nothing.
