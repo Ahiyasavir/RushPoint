@@ -2027,6 +2027,8 @@ async function main() {
     for (let i = 0; i < 2; i++) {
       try { await p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-2', answer: `nope${i}` }); } catch { /* refused is fine */ }
     }
+    await expectError('even the RIGHT answer on a closed mission is refused, not acknowledged',
+      p.call('submitTaskAnswer', { ...ctx, taskId: 'wc-2', answer: 'fig' }), { codeIn: ['functions/failed-precondition'] });
     const afterClosed = await p.call('getMyTeamState', { code: c });
     check('wrong answers on a CLOSED mission are not charged', (afterClosed?.team?.bonusPenalty ?? 0) === 0,
       String(afterClosed?.team?.bonusPenalty));

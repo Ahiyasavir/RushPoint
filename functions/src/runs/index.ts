@@ -2265,6 +2265,23 @@ export async function assertRunNotFinished(ownerUid: string, gameId: string, run
   }
 }
 
+/**
+ * run-gate-integrity: the ONE "is this mission still in play for this team" check every answer door
+ * runs before grading. A mission closed by the organizer, skipped or retired takes no answer, code,
+ * step or photo — it used to be graded (and charged, or queued for review, or answered "verified")
+ * for a record that could never score.
+ */
+export function assertMissionInPlay(team: Pick<RunTeam, 'stages'>, taskId: string): void {
+  const rec = teamTaskRecord(team as RunTeam, taskId);
+  // Only what the ORGANIZER took: an automatic retirement (the alternative of a mission the team just
+  // completed, a satisfied stage's leftovers) is routinely still on a slow phone's screen, and its
+  // late submission stays the silent no-op it always was — wrong answers on it cost nothing (below).
+  const byOrganizer = rec?.closedByOrganizer === true || rec?.skipCause === 'operator' || rec?.skipCause === 'operatorStage';
+  if (rec?.status === 'skipped' && byOrganizer) {
+    throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
+  }
+}
+
 export function assertTeamNotHeld(team: Pick<RunTeam, 'held' | 'heldReason'>): void {
   if (team?.held !== true) return;
   // `failed-precondition` (not permission-denied): the caller is legitimate, the
@@ -5645,6 +5662,7 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
 
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   assertTeamNotHeld(team); // staff-console-field-ops — no check-in while held
+  assertMissionInPlay(team, taskId); // run-gate-integrity
   const now = new Date().toISOString();
   const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
   // Set by the proximity gate below when the grace window let a coarse fix through
@@ -6303,10 +6321,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // organizer, skipped, retired) is refused before grading — it used to be graded and, when wrong,
   // CHARGED, for a mission that could never score.
   // (A mission retired for exhausting its attempts keeps answering with the attempt-cap error below.)
-  const answerRec = teamTaskRecord(team, taskId);
-  if (answerRec?.status === 'skipped' && answerRec.skipCause !== 'attempts') {
-    throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
-  }
+  assertMissionInPlay(team, taskId);
 
   // Optional presence gate (change: quiz-location-verification): when the creator
   // opted this task into requirePresence AND it has real coordinates, the submitted
@@ -6524,9 +6539,12 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       ? matchesOrderedAnswer(task.orderItems as string[], orderedAnswer)
       : matchesTaskAnswer(task, String(answer));
   if (!correct) {
-    // A FINISHED mission is graded (a double-tapped correct answer stays an idempotent repeat) but a
-    // wrong answer on it records and costs nothing: there is nothing left to get wrong.
-    if (teamTaskRecord(team, taskId)?.status === 'completed') return { correct: false };
+    // A FINISHED (or automatically retired) mission is graded — a double-tapped correct answer stays an
+    // idempotent repeat — but a wrong answer on it records and costs nothing: nothing is left to get wrong.
+    const answeredRec = teamTaskRecord(team, taskId);
+    if (answeredRec?.status === 'completed' || (answeredRec?.status === 'skipped' && answeredRec.skipCause !== 'attempts')) {
+      return { correct: false };
+    }
     // A finished run is frozen: a wrong answer there records and costs nothing.
     await assertRunNotFinished(ctx.ownerUid, ctx.gameId, ctx.runId);
     // Record the wrong attempt under a real nested map (not a dotted key).
@@ -6707,6 +6725,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   // stage throws the identical error regardless of step-answer correctness,
   // before any step-progress read/write.
   assertStageActiveForTask(team, taskId);
+  assertMissionInPlay(team, taskId); // run-gate-integrity
   // Task expiry (change: task-expiry): a closed task takes no more steps.
   await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task, team);
 

@@ -69,7 +69,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, closeTaskForTeam, assertRunNotFinished, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld, closeTaskForAllTeams, closeTaskForTeam, assertRunNotFinished, assertMissionInPlay, assertWithinTimeLimit, teamTaskRecord, throwScheduleRefusal } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -1573,6 +1573,7 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   // wrong code and a correct code on a locked stage now throw the identical
   // "stage not active" error instead of 'Incorrect code' vs a stage error.
   assertStageActiveForTask(team, taskId);
+  assertMissionInPlay(team, taskId); // run-gate-integrity
 
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -1884,8 +1885,13 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // run-gate-integrity: a mission the team can no longer play (closed by the organizer, skipped,
   // retired) takes no submission: it would sit in the staff review queue as a photo whose approval
   // can score nothing.
-  if (teamTaskRecord(team, taskId)?.status === 'skipped') {
-    throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
+  // A photo for ANY retired mission is refused (not just an organizer's close): it would otherwise sit
+  // in the staff review queue as a submission whose approval can score nothing.
+  {
+    const photoRec = teamTaskRecord(team, taskId);
+    if (photoRec?.status === 'skipped' && photoRec.skipCause !== 'attempts') {
+      throw new functions.https.HttpsError('failed-precondition', 'This mission is no longer in play');
+    }
   }
   // background-media-upload D1: a deferral the server would not auto-approve writes NOTHING. The
   // phone then uploads and submits the ordinary way, so the review path never sees a fileless row.
