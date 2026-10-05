@@ -13,14 +13,15 @@ import {
   sigmoidMultiplier,
   taskScoreSmart,
   scoreSmartWeighted,
-  applyCompletionBonus,
   applyPenalties,
-  applyZScoreBonus,
   skipAward,
-  COMPLETION_BONUS,
+  finalSpeedBonus,
+  FINAL_SPEED_BONUS_MAX_FRACTION,
+  FINAL_SPEED_BONUS_MIN_FINISHERS,
   SPEED_BONUS_CAP,
   SPEED_BONUS_PER_MINUTE,
 } from '../packages/shared/src/scoringPresets';
+import * as presets from '../packages/shared/src/scoringPresets';
 import type { RunStageRecord, RunTaskRecord } from '../packages/shared/src/types';
 
 let failures = 0;
@@ -131,41 +132,35 @@ check('taskScoreFixed returns the task pointValue', taskScoreFixed({ pointValue:
   check('smart_weighted: empty run → 0', scoreSmartWeighted([]) === 0);
 }
 
-// ── applyCompletionBonus ──────────────────────────────────────────────────────
-{
-  const allDone = [stage('completed', []), stage('completed', [])];
-  const partial = [stage('completed', []), stage('active', [])];
-  check('completion bonus applied only when ALL stages completed',
-    applyCompletionBonus(1000, allDone) === 1000 + COMPLETION_BONUS);
-  check('completion bonus NOT applied with an unfinished stage',
-    applyCompletionBonus(1000, partial) === 1000);
-  check('completion bonus: empty stage list counts as all-done (vacuous truth)',
-    applyCompletionBonus(1000, []) === 1000 + COMPLETION_BONUS);
-}
+// ── No completion bonus (change: fair-final-score) ───────────────────────────
+// Run pCADVITcbzIZMEPjVqcV, 2026-10-05: +500 for finishing and ±200 Z-score turned 100/50 on
+// the phones into 800/350 on the organizer's board. Both are gone; the only addition is
+// finalSpeedBonus below.
+check('the completion bonus and the Z-score are gone (no export left to apply them)',
+  !('applyCompletionBonus' in presets) && !('COMPLETION_BONUS' in presets) && !('applyZScoreBonus' in presets));
 
 // ── applyPenalties — never drives score negative ──────────────────────────────
 check('penalties subtract from score', applyPenalties(1000, 250) === 750);
 check('penalties clamp at 0 (never negative)', applyPenalties(100, 999) === 0);
 check('zero penalty is a no-op', applyPenalties(500, 0) === 500);
 
-// ── applyZScoreBonus — final time normalization ───────────────────────────────
+// ── finalSpeedBonus — small, proportional, only with enough finishers ─────────
 {
-  // Fewer than 2 finishers → no normalization (can't compute a distribution).
-  check('z-score: <2 finishers → score unchanged', applyZScoreBonus(1000, 30, [30]) === 1000);
-
-  // All identical durations → sigma 0 → no bonus.
-  check('z-score: zero variance → score unchanged', applyZScoreBonus(1000, 30, [30, 30, 30]) === 1000);
-
-  // Faster than the mean → bonus (z negative → -z positive → +points).
-  const durations = [20, 40, 60]; // mean 40
-  const faster = applyZScoreBonus(1000, 20, durations);
-  const slower = applyZScoreBonus(1000, 60, durations);
-  check('z-score: faster-than-mean team gets a bonus', faster > 1000, `faster=${faster}`);
-  check('z-score: slower-than-mean team gets a malus', slower < 1000, `slower=${slower}`);
-  check('z-score: exactly-mean team unchanged', applyZScoreBonus(1000, 40, durations) === 1000);
-  check('z-score: bonus is symmetric around the mean',
-    (faster - 1000) === (1000 - slower), `+${faster - 1000} / -${1000 - slower}`);
-  check('z-score: never drives score below 0', applyZScoreBonus(10, 999, [1, 2, 999]) >= 0);
+  check("max is 10% of the team's own points", FINAL_SPEED_BONUS_MAX_FRACTION === 0.1);
+  check('needs at least 4 finishers', FINAL_SPEED_BONUS_MIN_FINISHERS === 4);
+  const four = [10, 20, 30, 40];
+  check('fastest of four: +10% of its points', finalSpeedBonus(100, 10, four) === 10);
+  check('slowest of four: nothing', finalSpeedBonus(100, 40, four) === 0);
+  check('in between: linear (20 of 10..40 → two thirds of 10%)', finalSpeedBonus(300, 20, four) === 20);
+  check("proportional to the team's OWN points, never to a fixed number", finalSpeedBonus(50, 10, four) === 5);
+  check('the 2026-10-05 run: two finishers → no bonus at all', finalSpeedBonus(100, 0, [0, 2.7]) === 0 && finalSpeedBonus(50, 2.7, [0, 2.7]) === 0);
+  check('three finishers → no bonus', finalSpeedBonus(100, 10, [10, 20, 30]) === 0);
+  check('everyone equally fast → no bonus', finalSpeedBonus(100, 20, [20, 20, 20, 20]) === 0);
+  check('0 points → 0 bonus', finalSpeedBonus(0, 10, four) === 0);
+  check('a non-finite duration never poisons the result',
+    finalSpeedBonus(100, Infinity, four) === 0 && Number.isFinite(finalSpeedBonus(100, 10, [10, 20, 30, 40, Infinity])));
+  check('never negative, never more than 10%',
+    [5, 10, 25, 40, 99].every((d) => { const b = finalSpeedBonus(200, d, four); return b >= 0 && b <= 20; }));
 }
 
 // ── skipAward — fair substitute score per preset ──────────────────────────────

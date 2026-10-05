@@ -1,26 +1,17 @@
-// Defense-in-depth for applyZScoreBonus: a non-finite duration in the cohort
-// (Infinity from an unstarted-but-finished team) makes mu=Infinity, variance=NaN,
-// sigma=NaN. The old `sigma === 0` guard did NOT catch NaN, so the function
-// returned NaN and poisoned every finisher's score. Pure logic — no emulator.
+// Defense-in-depth for finalSpeedBonus (change: fair-final-score; it replaced the Z-score whose
+// same guard lived here): a non-finite duration in the cohort, Infinity from an
+// unstarted-but-finished team, must never poison a finisher's bonus.
 import { describe, test, expect } from 'vitest';
-import { applyZScoreBonus } from './scoringPresets';
+import { finalSpeedBonus } from './scoringPresets';
 
-describe('applyZScoreBonus — non-finite sigma never poisons the score', () => {
-  test('an Infinity in the cohort returns the raw score (finite)', () => {
-    // mu = Infinity, variance = NaN, sigma = NaN → must fall back to raw.
-    const result = applyZScoreBonus(500, Infinity, [Infinity, 10]);
-    expect(Number.isFinite(result)).toBe(true);
-    expect(result).toBe(500);
+describe('finalSpeedBonus — a non-finite duration never poisons the score', () => {
+  test('an Infinity in the cohort is ignored', () => {
+    expect(finalSpeedBonus(100, 10, [10, 20, 30, 40, Infinity])).toBe(10);
   });
-
-  test('sigma === 0 (all equal) still returns the raw score', () => {
-    expect(applyZScoreBonus(500, 10, [10, 10])).toBe(500);
+  test('a team whose own duration is not finite gets nothing', () => {
+    expect(finalSpeedBonus(100, Infinity, [10, 20, 30, 40])).toBe(0);
   });
-
-  test('a normal spread returns a finite adjusted score (regression guard)', () => {
-    const result = applyZScoreBonus(300, 5, [5, 15]);
-    expect(Number.isFinite(result)).toBe(true);
-    // team is faster than mean (mu=10) → bonus, score > raw.
-    expect(result).toBeGreaterThan(300);
+  test('NaN points give 0, not NaN', () => {
+    expect(finalSpeedBonus(Number.NaN, 10, [10, 20, 30, 40])).toBe(0);
   });
 });

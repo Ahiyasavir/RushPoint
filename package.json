@@ -24,6 +24,8 @@
         "base:check": "node scripts/check-build-base.mjs",
         "origin:check": "node scripts/check-backend-origin.mjs",
         "env:check": "node scripts/check-env-present.mjs",
+        "checks:pdf": "node scripts/deploy-checks-pdf.mjs",
+        "deploy:test-game": "node scripts/deploy-test-game.mjs",
         "verify": "npm run verify:graph && npm run verify:builds && npm run verify:artifacts",
         "verify:emulator": "npm run shared:build && npm run build --workspace=functions && node scripts/emulator-exec.mjs \"node scripts/e2e-verify.mjs\" && node scripts/emulator-exec.mjs --only=firestore \"npx tsx scripts/check-doc-cache-emulator.ts\" && node scripts/emulator-exec.mjs --only=firestore,storage \"node scripts/run-rules-suites.mjs\" && node scripts/emulator-exec.mjs \"node scripts/simulate-run.mjs --teams=8\" && node scripts/emulator-exec.mjs \"node scripts/simulate-adversarial.mjs --teams=9 --cheaters=0.5\"",
         "lint:fix": "turbo run lint -- --fix",

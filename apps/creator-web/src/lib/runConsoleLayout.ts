@@ -629,3 +629,15 @@ export function gridTemplateClass(gridColumns: number): string {
 export function columnSpanClass(span: number): string {
   return span >= 2 ? 'lg:col-span-2' : '';
 }
+
+/**
+ * The jump index at the top of a section (Ahiya, 2026-10-05: "שיתוף והגדרות" landed on the join
+ * code with nothing saying what else the section holds, which read as "the wrong place"). A section
+ * of three or more panels lists them, in the order they are drawn, so the organizer sees where they
+ * landed and reaches any panel in one tap. One or two panels are visible at a glance: no index.
+ */
+export const SECTION_INDEX_MIN_PANELS = 3;
+export function sectionIndexPanels(panels: readonly PanelId[] | null | undefined): PanelId[] {
+  const list = Array.isArray(panels) ? panels : [];
+  return list.length >= SECTION_INDEX_MIN_PANELS ? [...list] : [];
+}

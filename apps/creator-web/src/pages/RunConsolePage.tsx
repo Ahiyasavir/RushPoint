@@ -77,6 +77,7 @@ import {
   summaryChips, CONSOLE_MEDIUM_QUERY, CONSOLE_WIDE_QUERY,
   type PanelId, type RunStatus, type GroupSummary, type SectionId, type RunConsoleSection,
   type ColumnLayout, type SummaryChipKey,
+  sectionIndexPanels,
 } from '../lib/runConsoleLayout';
 import { downloadCsv as saveCsv, downloadUrl } from '../lib/downloadFile';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -188,7 +189,7 @@ export default function RunConsolePage() {
       () => undefined,
     );
   }, [ownerUid, gameId, runId]);
-  const [alerts, setAlerts] = useState<{ id: string; teamId: string; type: string; message: string; lat: number | null; lng: number | null; createdAt: string }[]>([]);
+  const [alerts, setAlerts] = useState<{ id: string; teamId: string; type: string; message: string; lat: number | null; lng: number | null; createdAt: string; callbackPhone: string }[]>([]);
   // Live-stream resilience (change: run-console-live-stream-resilience). The teams
   // poll and the alerts listener are the console's live picture; when either
   // degrades the board must SAY so instead of freezing at last-known state.
@@ -244,8 +245,8 @@ export default function RunConsolePage() {
     return onSnapshot(ref, (snap) => {
       setAlertsStreamError(false);
       const rows = snap.docs.map((d) => {
-        const a = d.data() as Partial<{ teamId: string; type: string; message: string; lat: number; lng: number; createdAt: string }>;
-        return { id: d.id, teamId: a.teamId ?? '', type: a.type ?? 'sos', message: a.message ?? '', lat: a.lat ?? null, lng: a.lng ?? null, createdAt: a.createdAt ?? '' };
+        const a = d.data() as Partial<{ teamId: string; type: string; message: string; lat: number; lng: number; createdAt: string; callbackPhone: string }>;
+        return { id: d.id, teamId: a.teamId ?? '', type: a.type ?? 'sos', message: a.message ?? '', lat: a.lat ?? null, lng: a.lng ?? null, createdAt: a.createdAt ?? '', callbackPhone: a.callbackPhone ?? '' };
       });
       rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       const ids = new Set(rows.map((r) => r.id));
@@ -723,6 +724,9 @@ export default function RunConsolePage() {
   // Team search (team-dossier-and-search D4). Hooks live HERE, above the page's
   // early return. The box shows itself past 6 teams; `/` opens it at any size.
   const [teamQuery, setTeamQuery] = useState('');
+  // The "עכשיו" screen's own team picker (follow from the inbox, Ahiya 2026-10-05). Separate from
+  // teamQuery so typing here never filters the Teams section behind the organizer's back.
+  const [pickQuery, setPickQuery] = useState('');
   // team-lifecycle-controls: teams taken out of the game sit behind this switch, not in the list.
   const [showRemovedTeams, setShowRemovedTeams] = useState(false);
   const [teamFilter, setTeamFilter] = useState<TeamFilter>('all');
@@ -928,7 +932,10 @@ export default function RunConsolePage() {
     // the staff codes panel (name + checklist pre-filled from the game default) rather than from a
     // bare name prompt that silently granted everything. Open it, with the new-code form showing.
     setStaffPanelWanted(true);
-    openSection('shareAndScreens');
+    // To the PANEL, not just its section (Ahiya, 2026-10-05: "לוקח אותי לשום מקום"). openSection
+    // alone stopped at the section's top, with the staff codes below the join code, the station QR
+    // codes and the screens, so on a phone nothing on screen changed.
+    goToPanel('staffInvite');
   }
   async function refreshStandings(publish?: boolean) {
     // Turning the board ON is a PUBLIC act: one click and every player, plus
@@ -1381,9 +1388,15 @@ export default function RunConsolePage() {
   async function skipTeamStage(team: RunTeamRow) {
     // The label said "skip"; it skipped the team's WHOLE STAGE. The consequence
     // table now says so out loud (change: run-console-clarity).
-    if (!(await confirmAction('skipStage'))) return;
+    // With or without the consolation (Ahiya, 2026-10-05: skip "ללא הוספת ניקוד"). The choice is
+    // the confirmation: Cancel abandons the skip.
+    const pick = await dialog.choose(rc.skipStageChoose({ team: team.displayName }), [
+      { id: 'none', label: rc.skipStageNoPoints },
+      { id: 'award', label: rc.skipStageWithPoints },
+    ], { title: rc.confirmTitle });
+    if (pick !== 'none' && pick !== 'award') return;
     try {
-      await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id });
+      await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id, noPoints: pick === 'none' });
       await loadTeams();
       toast.success(rc.skipStageDone({ team: team.displayName }));
     }
@@ -1569,6 +1582,13 @@ export default function RunConsolePage() {
                   {a.message && <span dir="auto" className="text-[--ink-2] flex-1 truncate">{a.message}</span>}
                   {a.lat != null && a.lng != null && (
                     <a className="text-ink-fire text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{rc.map}</a>
+                  )}
+                  {/* sos-callback-and-authorities: the number the team left to call back. */}
+                  {a.callbackPhone && toTelHref(a.callbackPhone) && (
+                    <a href={toTelHref(a.callbackPhone)!} data-testid="sos-callback"
+                      className="inline-flex items-center gap-1 min-h-[44px] rounded-lg bg-ink-alert px-3 text-xs font-bold text-white">
+                      <Icon name="phone" className="w-3.5 h-3.5" /> {rc.sosCallback({ phone: a.callbackPhone })}
+                    </a>
                   )}
                   <Button
                     variant={runActionVariant('acknowledgeAlert')}
@@ -1956,6 +1976,8 @@ export default function RunConsolePage() {
                   <span className="w-6 text-[--ink-3]">{r.rank}</span>
                   <span dir="auto" className="flex-1 text-[--ink-2]">{r.teamName}</span>
                   <span className="text-[13px] text-[--ink-3]">{rc.stageDone({ n: r.completedStages })}</span>
+                  {/* fair-final-score: the published speed bonus is shown, never folded in silently. */}
+                  {(r.speedBonus ?? 0) > 0 && <span className="text-[12px] text-[--ink-3]">{rc.scoreWithSpeed({ points: r.points ?? r.score, bonus: r.speedBonus ?? 0 })}</span>}
                   <span className="text-ink-fire font-mono">{r.score}</span>
                 </div>
               ))}
@@ -1996,6 +2018,7 @@ export default function RunConsolePage() {
                 <div key={r.teamId} className="flex items-center gap-3 text-sm">
                   <span className="w-6 text-[--ink-3]">{r.rank}</span>
                   <span dir="auto" className="flex-1 text-[--ink-2]">{r.teamName}</span>
+                  {(r.speedBonus ?? 0) > 0 && <span className="text-[12px] text-[--ink-3]">{rc.scoreWithSpeed({ points: r.points ?? r.score, bonus: r.speedBonus ?? 0 })}</span>}
                   <span className="text-ink-fire font-mono">{r.score}</span>
                 </div>
               ))}
@@ -2033,7 +2056,18 @@ export default function RunConsolePage() {
         };
         return (
           <PanelShell panel="inbox">
-            <FollowedStrip cards={buildFollowedCards(reviewNow)} mineOnly={follow.mineOnly} onMineOnly={follow.setMineOnly} onOpen={openTeamPage} />
+            <FollowedStrip cards={buildFollowedCards(reviewNow)} mineOnly={follow.mineOnly} onMineOnly={follow.setMineOnly} onOpen={openTeamPage}
+              picker={(() => {
+                const active = teams.filter((tm) => tm.removed !== true);
+                return {
+                  teams: searchTeams(active, { query: pickQuery, sort: 'name', locale: lang })
+                    .map((tm) => ({ id: tm.id, name: tm.displayName, followed: follow.isFollowed(tm.id) })),
+                  total: active.length,
+                  query: pickQuery,
+                  onQuery: setPickQuery,
+                  onToggle: toggleFollow,
+                };
+              })()} />
             {shownItems.length === 0 ? (
               <p className="text-sm text-[--ink-3]" role="status" data-testid="inbox-empty">{rc.panel.inbox.empty}</p>
             ) : (
@@ -2349,6 +2383,20 @@ export default function RunConsolePage() {
           <section ref={sectionPaneRef} aria-label={groupTitles[activeSection]} className="flex-1 min-w-0 space-y-3">
             {/* Named in the pane too: on a phone the rail scrolls out of view. */}
             <h2 className="text-sm font-semibold text-[--ink-1] px-1">{groupTitles[activeSection]}</h2>
+            {/* What this section holds, one tap from each (change: console-section-index). A
+                section opened on its first panel with nothing saying the rest existed, which read
+                as "the wrong place" (Ahiya, 2026-10-05). */}
+            {sectionIndexPanels(sectionPanels).length > 0 && (
+              <nav aria-label={rc.sectionIndexLabel({ section: groupTitles[activeSection] })} className="flex flex-wrap gap-2 px-1" data-testid="section-index">
+                {sectionIndexPanels(sectionPanels).map((p) => (
+                  <button key={p} type="button" onClick={() => goToPanel(p)}
+                    className="inline-flex items-center gap-1.5 min-h-[40px] rounded-full border border-[--rp-border] bg-[--surface-2] px-3 text-[13px] font-medium text-[--ink-2] hover:text-ink-fire hover:border-ink-fire">
+                    <Icon name={panelCopy(p).icon} className="w-4 h-4 shrink-0" aria-hidden />
+                    {(rc.panel[p] as { title: string }).title}
+                  </button>
+                ))}
+              </nav>
+            )}
             {/* The console used to TELEPORT: a section that emptied under the
                 organizer's feet was replaced with no explanation, which reads as
                 the app losing their place (change: run-console-clarity). */}

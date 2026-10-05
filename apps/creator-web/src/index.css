@@ -387,32 +387,11 @@ html.dark .glass-card {
   border: 1px solid rgba(255,255,255,0.07);
 }
 
-/* ── Print sheet ─────────────────────────────────────────────────────────── */
-.print-sheet { display: none; }
-@media print {
-  body { background: #fff !important; background-image: none !important; }
-  body * { visibility: hidden; }
-  .print-sheet, .print-sheet * { visibility: visible; }
-  .print-sheet {
-    display: block; position: absolute;
-    inset-block-start: 0; inset-inline-start: 0;
-    width: 100%; padding: 16px;
-    background: #fff; color: #000;
-  }
-  .print-sheet-header {
-    display: flex; justify-content: space-between; align-items: baseline;
-    border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 16px;
-  }
-  .print-sheet-header h2 { font-size: 20px; font-weight: 700; margin: 0; }
-  .print-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-  .print-cell {
-    border: 1px solid #000; border-radius: 8px; padding: 10px 8px;
-    text-align: center; break-inside: avoid; page-break-inside: avoid;
-  }
-  .print-cell svg { display: block; margin: 0 auto; }
-  .print-code { font-family: var(--rp-font-mono); font-size: 16px; font-weight: 700; letter-spacing: 1px; margin-top: 6px; }
-  .print-meta { font-size: 11px; color: #333; margin-top: 2px; }
-}
+/* ── Print ──────────────────────────────────────────────────────────────────
+   No global print rule. A `.print-sheet` block used to hide EVERY element on EVERY page
+   (a visibility rule on every body element) for a QR sheet that no longer exists, so the host sheet
+   printed as empty pages (2026-10-05). A page with its own print layout scopes it itself
+   (HostSheetPage PRINT_CSS). scripts/test-print-css.ts keeps it that way. */
 
 /* ── הקמה מהירה / Quick Setup glass surface + focus-mode scrim
    (change: quick-setup-wizard) ─────────────────────────────────────────────

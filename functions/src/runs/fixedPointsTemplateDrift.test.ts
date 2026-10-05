@@ -59,8 +59,10 @@ function finishedTeam(id: string, durationMin: number, stamps?: [number, number]
 describe('fixed_points_speed template drift — a finished team is immutable', () => {
   test('1.1 editing a completed task expected duration does NOT re-score a finished team', () => {
     const team = finishedTeam('a', 27, [10, 20]);
+    // fair-final-score (2026-10-05): the board ranks on the points the team earned. The route
+    // speed bonus, the +500 and the Z-score are gone from ranking; immutability still holds.
     const s1 = buildRankings(twoTaskGame(10, 20), [team], now)[0].score;
-    expect(s1).toBe(630);
+    expect(s1).toBe(100);
 
     // Mutate the template mid-run: lower s0t0's expected duration 10 → 2. Under the
     // OLD code this shrank expectedTotal to 22, killed the speed bonus and dropped
@@ -71,8 +73,8 @@ describe('fixed_points_speed template drift — a finished team is immutable', (
 
   test('1.2 an unedited run scores the golden pre-change number', () => {
     const team = finishedTeam('a', 27, [10, 20]);
-    // 100 taskPoints + 30 speed bonus + 500 completion bonus.
-    expect(buildRankings(twoTaskGame(10, 20), [team], now)[0].score).toBe(630);
+    // fair-final-score: 100 task points, nothing hidden on top.
+    expect(buildRankings(twoTaskGame(10, 20), [team], now)[0].score).toBe(100);
     // And the stamped sum equals the template reduce for the unedited template:
     // scoreFixedPointsSpeed (raw, no completion bonus) = 100 + 30 = 130.
     const raw = scoreFixedPointsSpeed(team.stages, team.startedAt, team.finishedAt, twoTaskGame(10, 20));
@@ -83,8 +85,8 @@ describe('fixed_points_speed template drift — a finished team is immutable', (
     const legacy = finishedTeam('a', 27); // no stamps
     let score = 0;
     expect(() => { score = buildRankings(twoTaskGame(10, 20), [legacy], now)[0].score; }).not.toThrow();
-    // Fallback resolves to the same template values → identical pre-change score.
-    expect(score).toBe(630);
+    // fair-final-score: the board is the task points (100); no throw is the point here.
+    expect(score).toBe(100);
   });
 
   test('1.3b a stamped record whose template task was deleted contributes its stamp (no NaN)', () => {
@@ -100,7 +102,7 @@ describe('fixed_points_speed template drift — a finished team is immutable', (
     } as unknown as Game;
     const score = buildRankings(gameMissingT0, [team], now)[0].score;
     expect(Number.isFinite(score)).toBe(true);
-    expect(score).toBe(630);
+    expect(score).toBe(100); // fair-final-score: task points only
   });
 
   test('1.3c a LEGACY record whose template task was deleted contributes 0, never NaN', () => {
@@ -116,7 +118,7 @@ describe('fixed_points_speed template drift — a finished team is immutable', (
     // taskPoints 100 + completion 500 = 600. Finite, no throw.
     const score = buildRankings(gameMissingT0, [legacy], now)[0].score;
     expect(Number.isFinite(score)).toBe(true);
-    expect(score).toBe(600);
+    expect(score).toBe(100); // fair-final-score: task points only
   });
 
   test('1.4 a mid-run edit near the 200-pt cap cannot flip two close finished teams', () => {

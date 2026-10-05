@@ -960,6 +960,13 @@ async function main() {
 
   const lbShown = await creator.call('refreshLeaderboard', { ...lbCtx, publish: true });
   check('refreshLeaderboard can publish to teams', lbShown?.published === true);
+  // Ahiya, 2026-10-05: "publishing the ranking takes forever". Phones listen to their OWN team
+  // document and read the run only every 60 s, so publishing stamps each team document once.
+  {
+    const stamped = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/teams/${playerCred.user.uid}`)).data ?? {};
+    check('publishing stamps the team document, so a phone listening to it updates at once',
+      typeof stamped.boardPublishedAt === 'string', JSON.stringify(stamped.boardPublishedAt));
+  }
   midState = await player.call('getMyTeamState', { code: accessCode });
   check('published standings are visible to participant', midState?.run?.leaderboard?.published === true);
 
@@ -7258,6 +7265,58 @@ async function main() {
       !!tok?.customToken, JSON.stringify({ hasToken: !!tok?.customToken }));
   });
 
+  // ═══ staff-code-from-join-code: a name and a code are enough ═════════════════
+  // The staff screen without a link asked for owner, game and run ids. A staff code is now the
+  // join code with two characters planted inside it, and the server finds the run from it.
+  await scenario('staff sign in with the code alone (staff-code-from-join-code)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: sg } = await creator.call('createGame', { title: 'Code Alone', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: sg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'sc-0', order: 0, isFinal: true, title: 'Only stage', tasks: [
+        { id: 'sc-t', title: 'T', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: sr, accessCode: join } = await creator.call('launchRun', { gameId: sg });
+    const { pin: code } = await creator.call('inviteStaff', { ownerUid: OWNER, gameId: sg, runId: sr, name: 'Gate' });
+    let i = 0;
+    for (const ch of String(code)) if (ch === join[i]) i++;
+    check('the staff code is the join code with two characters planted in it',
+      typeof code === 'string' && code.length === join.length + 2 && i === join.length, JSON.stringify({ code, join }));
+
+    // Typed the way people type it: lower case, with a space.
+    const typed = `${code.slice(0, 4)} ${code.slice(4)}`.toLowerCase();
+    const marshal = makeParty('codeAlone');
+    await signInAnonymously(marshal.auth);
+    const res = await marshal.call('staffSignIn', { pin: typed, name: 'Noa' });
+    check('a name and the code alone sign a marshal in', !!res?.customToken);
+    check('the result carries the run address the console needs',
+      res?.ownerUid === OWNER && res?.gameId === sg && res?.runId === sr, JSON.stringify({ o: res?.ownerUid, g: res?.gameId, r: res?.runId }));
+
+    // A wrong code built on the join code is refused AND counted against this run.
+    const wrong = code === `${join}22` ? `${join}33` : `${join}22`;
+    const guesser = makeParty('codeGuess');
+    await signInAnonymously(guesser.auth);
+    let wrongCode = '';
+    try { await guesser.call('staffSignIn', { pin: wrong }); } catch (e) { wrongCode = e.code; }
+    check('a wrong planted code is refused as not-found', wrongCode === 'functions/not-found', wrongCode);
+    const runCounter = await adminSdk.firestore()
+      .doc(`users/${OWNER}/games/${sg}/runs/${sr}/staffAttempts/_run`).get();
+    check('the wrong guess counts against that run (bounded guessing)', (runCounter.data()?.count ?? 0) >= 1, runCounter.data());
+
+    // A code built on no join code at all finds no run.
+    let strayCode = '';
+    try { await guesser.call('staffSignIn', { pin: 'ZZZZZZZZ' }); } catch (e) { strayCode = e.code; }
+    check('a code on no join code is not-found', strayCode === 'functions/not-found', strayCode);
+
+    // Old links still carry the address, and that path still works.
+    const viaLink = makeParty('codeLink');
+    await signInAnonymously(viaLink.auth);
+    const linked = await viaLink.call('staffSignIn', { ownerUid: OWNER, gameId: sg, runId: sr, pin: code, name: 'Dan' });
+    check('a link that carries the run address still signs in', !!linked?.customToken);
+  });
+
   // ═══ WO-5: bad-coordinate inputs return clean errors, not 500 ════════════════
   // Client {lat,lng} flowed into haversineKm; only null/undefined defaulted to
   // (0,0). Out-of-range/NaN/string coords reached haversineKm → LocationError →
@@ -9088,8 +9147,16 @@ async function main() {
     check('pushFlashMission returns an id', !!flash?.id, flash?.id);
 
     // SOS from the participant, acknowledged by the owner.
-    const sos = await cvP.call('triggerSOS', { ...CV, lat: 31.78, lng: 35.21, message: 'need help' });
+    // sos-callback-and-authorities: the alert carries a number to call back.
+    const sos = await cvP.call('triggerSOS', { ...CV, lat: 31.78, lng: 35.21, message: 'need help', callbackPhone: ' 050-123 4567 ' });
     check('triggerSOS raises an alert', !!sos?.alertId, sos?.alertId);
+    const sosDoc = await adminSdk.firestore()
+      .doc(`users/${CV.ownerUid}/games/${CV.gameId}/runs/${CV.runId}/alerts/${sos.alertId}`).get();
+    check('the SOS alert stores the callback number as typed, trimmed',
+      sosDoc.data()?.callbackPhone === '050-123 4567', JSON.stringify(sosDoc.data()?.callbackPhone));
+    let badPhone = '';
+    try { await cvP.call('triggerSOS', { ...CV, callbackPhone: 'call me maybe' }); } catch (e) { badPhone = e.code; }
+    check('a callback number that cannot be dialled is invalid-argument', badPhone === 'functions/invalid-argument', badPhone);
     const ack = await creator.call('acknowledgeAlert', { ...CV, alertId: sos.alertId });
     check('acknowledgeAlert clears the alert', ack?.ok === true);
 
@@ -11640,6 +11707,17 @@ async function main() {
     check('contrib: the contribution set survives on the team doc',
       new Set(after.taskContributions?.['cn-a'] ?? []).size === 2,
       JSON.stringify(after.taskContributions));
+
+    // Ahiya, 2026-10-05: a team with ONE phone saw "I did my part" beside the answer, a second
+    // button for one action. The requirement reduces to one, and the submitter counts as that one.
+    const { runId: cr2, accessCode: cc2 } = await creator.call('launchRun', { gameId: cg });
+    const solo = makeParty('contribSolo');
+    await signInAnonymously(solo.auth);
+    await solo.call('joinRun', { code: cc2, displayName: 'Solo phone', memberNames: ['A', 'B'] });
+    await creator.call('startTeams', { gameId: cg, runId: cr2 });
+    const soloDone = await solo.call('completeTask', { ownerUid: OWNER, gameId: cg, runId: cr2, taskId: 'cn-a' });
+    check('contrib: a one-phone team completes without tapping "I did my part" (the submitter counts)',
+      soloDone?.ok === true, JSON.stringify(soloDone));
   });
 
   await scenario('single task skip (one mission, same stage, no stage jump)', async () => {
@@ -11824,6 +11902,25 @@ async function main() {
       check('ledger: skipStage records its consolation, and the ledger sums to the score it paid',
         led.length >= 1 && total === (team3.score ?? 0) && total > 0,
         JSON.stringify({ ledger: team3.scoreLedger, score: team3.score }));
+    }
+
+    // ── skipStage({ noPoints: true }) skips the whole stage and pays NOTHING (Ahiya, 2026-10-05:
+    //    "לדלג לקבוצה על שלב או משימה ללא הוספת ניקוד").
+    {
+      const { runId: sr4, accessCode: sc4 } = await creator.call('launchRun', { gameId: sg });
+      const sp4 = makeParty('skipPlayer4');
+      await signInAnonymously(sp4.auth);
+      await sp4.call('joinRun', { code: sc4, displayName: 'No Points' });
+      await creator.call('startTeams', { gameId: sg, runId: sr4 });
+      const sp4Uid = sp4.auth.currentUser.uid;
+      await creator.call('skipStage', { gameId: sg, runId: sr4, teamId: sp4Uid, noPoints: true });
+      const team4 = (await creator.getDocAt(`users/${OWNER}/games/${sg}/runs/${sr4}/teams/${sp4Uid}`)).data ?? {};
+      const stage4 = (team4.stages ?? [])[0] ?? {};
+      check('skip without points: every task of the stage is skipped', (stage4.tasks ?? []).every((t) => t.status === 'skipped') && stage4.status === 'completed',
+        JSON.stringify((stage4.tasks ?? []).map((t) => [t.taskId, t.status])));
+      check('skip without points: the score stays 0 and nothing reaches the ledger',
+        (team4.score ?? 0) === 0 && !(team4.scoreLedger ?? []).some((l) => l.kind === 'skipAward'),
+        JSON.stringify({ score: team4.score, ledger: team4.scoreLedger }));
     }
 
     // ── The durable trail: a skip removes a scoring opportunity from ONE team.

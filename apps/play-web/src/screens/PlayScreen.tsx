@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
-import { emergencyTelHref, gateSatisfiedTaskIds, senderQuiet, toTelHref } from '@rushpoint/shared';
+import { gateSatisfiedTaskIds, senderQuiet, toTelHref } from '@rushpoint/shared';
 import { claimController } from '../services/calls';
 import { haptic } from '../lib/haptics';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
@@ -29,6 +29,7 @@ import { useOrientationIntent } from '../lib/orientation';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
+import SosSheet from '../components/SosSheet';
 import { LoadingView } from '../components/LoadingView';
 import TeamDevicesPanel from '../components/TeamDevicesPanel';
 import InRunAlerts from '../components/InRunAlerts';
@@ -471,16 +472,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     if (await dialog.confirm(t.play.leaveConfirm, { confirmLabel: t.play.leave, danger: true })) { clearSession(); onLeave(); }
   }
 
-  async function sos() {
-    // Emergency services FIRST (change: sos-points-to-101). This alert reaches the ORGANIZER, who
-    // may be far away; an injury or a real danger needs 101, so every dialog of this flow offers
-    // the call, and none of them promises that help is on the way.
-    const call101 = { href: emergencyTelHref(), label: t.play.sosCall101 };
-    if (!(await dialog.confirm(t.play.sosConfirm, { confirmLabel: t.play.sosSend, danger: true, callAction: call101 }))) return;
-    // Resolve a best-effort location first, THEN actually send — and only confirm
-    // "sent" once triggerSOS resolves. Reporting success before the call (or
-    // ignoring its failure) on a SAFETY feature could leave a team in trouble
-    // believing help is coming when the alert never reached the host.
+  // The SOS sheet (change: sos-callback-and-authorities): every emergency service as a call link,
+  // then the organizer alert with a number to call back. It replaces the confirm dialog that
+  // offered 101 only (sos-points-to-101); emergency services still come first on the sheet.
+  const [sosOpen, setSosOpen] = useState(false);
+  async function sos() { setSosOpen(true); }
+  async function sendSos(callbackPhone: string | undefined) {
+    // Resolve a best-effort location first, THEN actually send, and only report "sent" once
+    // triggerSOS resolves (the sheet waits on this promise). Reporting success before the call on
+    // a SAFETY feature could leave a team in trouble believing the organizers know.
     const coords = await new Promise<{ lat: number; lng: number } | null>((resolve) => {
       if (!navigator.geolocation) { resolve(null); return; }
       navigator.geolocation.getCurrentPosition(
@@ -489,14 +489,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         { timeout: 8000 },
       );
     });
-    try {
-      await triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, ...(coords ?? {}) });
-      feedback('alert');
-      await dialog.alert(t.play.sosSent, { callAction: call101 });
-    } catch {
-      await dialog.alert(t.play.sosFailed, { callAction: call101 });
-    }
+    await triggerSOS({
+      ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId,
+      ...(coords ?? {}), ...(callbackPhone ? { callbackPhone } : {}),
+    });
+    feedback('alert');
   }
+  const sosSheet = sosOpen
+    ? <SosSheet runId={session.runId} onSend={sendSos} onClose={() => setSosOpen(false)} />
+    : null;
 
   // Mid-race brag card — same branded story image as the finish screen, but with
   // a "we're racing / we're #N" headline. Every share carries the build-your-own
@@ -639,6 +640,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           ) : null;
         })}
         <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
+        {sosSheet}
       </Screen>
     );
   }
@@ -704,6 +706,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           ) : null;
         })}
         <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
+        {sosSheet}
       </Screen>
     );
   }
@@ -814,6 +817,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       {/* Test mode (change: test-mode-hidden-scoring): the brag card is withheld —
           storyCard bakes score and rank into the image pixels, and a sealed run
           has neither, so the button would draw blanks. */}
+      {sosSheet}
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}

@@ -212,3 +212,28 @@ export function contributorsSatisfied(
   }
   return seen.size >= want;
 }
+
+/**
+ * What the phone shows for a mission that needs several team members (Ahiya, 2026-10-05).
+ *
+ * The phone that SUBMITS counts as having done its part (the server adds the submitter's uid
+ * before checking, see completeTask), so:
+ *   - need ≤ 1 (one phone, or a requirement reduced to one): no box at all. A second button
+ *     beside the answer, for the same single action, is what read as "not clear at all";
+ *   - the sender sees progress that already counts itself, and no button;
+ *   - every other phone sees progress and "I did my part" until it has tapped.
+ */
+export function contributionView(input: {
+  need: number;
+  contributors: readonly string[] | null | undefined;
+  myUid: string | null | undefined;
+  isSender: boolean;
+}): { show: boolean; done: number; need: number; showButton: boolean } {
+  const need = positiveInt(input.need) ?? 0;
+  const seen = new Set<string>();
+  for (const u of Array.isArray(input.contributors) ? input.contributors : []) if (typeof u === 'string' && u) seen.add(u);
+  const mine = !!input.myUid && seen.has(input.myUid);
+  if (input.isSender && input.myUid) seen.add(input.myUid);
+  if (need <= 1) return { show: false, done: Math.min(seen.size, need), need, showButton: false };
+  return { show: true, done: seen.size, need, showButton: !input.isSender && !mine };
+}

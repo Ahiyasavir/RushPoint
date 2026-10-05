@@ -30,6 +30,7 @@ import {
   teamDeviceAllowance,
   effectiveContributorRequirement,
   contributorsSatisfied,
+  contributionView,
   teamShouldWaitForMembers,
   MEMBERS_OFFLINE_HOLD,
   TEAM_DEVICE_FLOOR,
@@ -278,6 +279,24 @@ console.log('team-participation — the attendance gate');
   ok('the hold reason is a stable, non-empty wire string',
     typeof MEMBERS_OFFLINE_HOLD === 'string' && MEMBERS_OFFLINE_HOLD.length > 0
     && MEMBERS_OFFLINE_HOLD === MEMBERS_OFFLINE_HOLD.trim(), MEMBERS_OFFLINE_HOLD);
+}
+
+// Ahiya, 2026-10-05: on a one-phone team "עשיתי את החלק שלי" sat beside the answer box as a
+// second button for one action. The phone that SUBMITS counts as having done its part.
+console.log('\nteam-participation — what the phone shows');
+{
+  const solo = contributionView({ need: 1, contributors: [], myUid: 'a', isSender: true });
+  ok('one phone: no contribution box at all (its own submit is its part)', solo.show === false);
+  const sender = contributionView({ need: 2, contributors: [], myUid: 'a', isSender: true });
+  ok('two phones, the sender: progress counts the sender, no button', sender.show && sender.done === 1 && sender.need === 2 && !sender.showButton, JSON.stringify(sender));
+  const other = contributionView({ need: 2, contributors: [], myUid: 'b', isSender: false });
+  ok('two phones, the other phone: 0 of 2 and the button', other.show && other.done === 0 && other.showButton, JSON.stringify(other));
+  const otherDone = contributionView({ need: 2, contributors: ['b'], myUid: 'b', isSender: false });
+  ok('the other phone after tapping: 1 of 2, no button', otherDone.done === 1 && !otherDone.showButton, JSON.stringify(otherDone));
+  const both = contributionView({ need: 2, contributors: ['b', 'a'], myUid: 'a', isSender: true });
+  ok('the sender is never counted twice', both.done === 2, JSON.stringify(both));
+  ok('no requirement: nothing shown', contributionView({ need: 0, contributors: [], myUid: 'a', isSender: true }).show === false);
+  ok('the server rule agrees: the submitter plus one tap satisfies two', contributorsSatisfied([...['b'], 'a'], 2) === true);
 }
 
 console.log('');

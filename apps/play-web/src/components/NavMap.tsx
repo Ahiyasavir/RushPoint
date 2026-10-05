@@ -323,7 +323,7 @@ export default function NavMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify((searchAreas ?? []).map((s) => [s.id, s.lat, s.lng, s.radiusMeters]))]);
 
-  // Sync target markers. located-mission-arrival: the ACTIVE mission is a labelled flag with a pulse
+  // Sync target markers. located-mission-arrival: the ACTIVE mission is a flag with a pulse
   // (a bare brand-coloured dot did not say "go here"); others stay plain dots.
   useEffect(() => {
     if (!map.current) return;
@@ -341,12 +341,13 @@ export default function NavMap({
         const flag = document.createElement('div');
         flag.innerHTML = iconSvgMarkup('flag', 32, accent);
         flag.style.cssText = 'line-height:0;filter:drop-shadow(0 1px 1px #fff) drop-shadow(0 2px 2px rgba(0,0,0,.4));position:relative;';
-        const label = document.createElement('div');
-        label.textContent = t.title;
-        label.dir = 'auto';
-        label.style.cssText = `max-width:140px;margin-top:2px;padding:2px 6px;border-radius:8px;background:#fff;color:#1c1917;font:600 12px system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 3px rgba(0,0,0,.3);border:2px solid ${accent};`;
-        el.append(ring, flag, label);
-        return new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([t.lng, t.lat]).addTo(map.current!);
+        // Flag only (Ahiya, 2026-10-05): the mission name beside it was big and covered the road
+        // the team has to walk. The name is still the marker's accessible name, and a tap shows it.
+        el.append(ring, flag);
+        return new maplibregl.Marker({ element: el, anchor: 'bottom' })
+          .setLngLat([t.lng, t.lat])
+          .setPopup(new maplibregl.Popup({ offset: 30, closeButton: false }).setText(t.title))
+          .addTo(map.current!);
       }
       el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#64748b;border:3px solid #0b0f17;box-shadow:0 0 0 2px #475569;cursor:pointer;';
       return new maplibregl.Marker({ element: el })

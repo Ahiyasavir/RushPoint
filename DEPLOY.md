@@ -304,6 +304,38 @@ work exactly once.
 
 ## 9. Re-deploying later
 
+> 📄 **EVERY production deploy ends with a checklist PDF for Ahiya (standing rule, 2026-10-05).**
+> One designed PDF, always the same template, split into **checks on a computer**, **checks on a
+> phone** and **special checks** (walking outside with GPS, several phones in one team, airplane
+> mode, printing, installed apps), with a **short report of what changed** at the end. Write the
+> source as `docs/deploy-checks/<YYYY-MM-DD>.md` (format at the top of
+> `scripts/lib/deployChecks.mjs`; copy the previous file as the starting point), then:
+>
+> ```bash
+> npm run checks:pdf -- docs/deploy-checks/<YYYY-MM-DD>.md
+> ```
+>
+> Cover what changed since the PREVIOUS deploy (`git log <last deploy commit>..HEAD`), drop what
+> he already confirmed, and list open issues from the current `docs/ISSUES-*.md` in the report so
+> nobody reports a known problem twice.
+>
+> 🎮 **And EVERY production deploy creates a TEST GAME in Ahiya's creator account (standing rule,
+> 2026-10-05).** One mission per thing to check, each mission's description saying what to do and
+> what should happen, titled with the deploy date, so he never builds a test game by hand. The
+> template lives in the repo and grows with every feature that needs checking by playing; the
+> game is created through the real `importGameFile` callable (same validation as any game), by
+> the script below. Template: `scripts/lib/deployTestGame.mjs` (pinned by
+> `scripts/test-deploy-test-game.ts`); behaviour fixed in the repo but not live yet goes in a
+> notes file so it is not reported twice:
+>
+> ```bash
+> npm run deploy:test-game -- --uid <Ahiya's creator uid> --date <YYYY-MM-DD> --notes docs/deploy-checks/<YYYY-MM-DD>.notes.json
+> ```
+>
+> Idempotent (a game with the same title is left alone). Deploy order itself: VPS API → Firestore rules/indexes
+> (`--only firestore:rules,firestore:indexes`, never `deploy:rules`) → hosting, never during a live
+> run.
+
 > ⚠️ **VERIFY THE PUBLIC PATH AFTER EVERY BACKEND DEPLOY — a healthy container proves nothing.**
 > On 2026-08-14 `sudo bash deploy/bootstrap.sh` overwrote the live `/etc/caddy/Caddyfile` with the
 > repo TEMPLATE, whose hostname is still the `api.example.com` placeholder. A placeholder hostname

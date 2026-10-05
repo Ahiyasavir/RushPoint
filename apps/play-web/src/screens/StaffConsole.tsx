@@ -94,6 +94,8 @@ interface Alert {
   lat: number | null;
   lng: number | null;
   createdAt: string;
+  /** sos-callback-and-authorities: '' when the team left none. */
+  callbackPhone: string;
 }
 
 // ── A team row for the manual bonus/deduction panel ──
@@ -178,28 +180,31 @@ function StaffSignIn({
   onExit: () => void;
 }) {
   const { t } = useT();
-  const [ownerUid, setOwnerUid] = useState(ctx?.ownerUid ?? '');
-  const [gameId, setGameId] = useState(ctx?.gameId ?? '');
-  const [runId, setRunId] = useState(ctx?.runId ?? '');
   const [name, setName] = useState('');
   const [pin, setPin] = useState('');
   const [err, setErr] = useState('');
-  // Full context from the link ⇒ the short form (name + PIN).
-  const fromLink = !!ctx;
+  // Which field the last press found empty, so the answering button can point at it.
+  const [missing, setMissing] = useState<'name' | 'pin' | null>(null);
 
   async function submit() {
     setErr('');
+    // An answering button, not a disabled one (CLAUDE.md): say what is missing.
+    if (!name.trim()) { setMissing('name'); setErr(t.staff.signInNeedName); return; }
+    if (!pin.trim()) { setMissing('pin'); setErr(t.staff.signInNeedCode); return; }
+    setMissing(null);
     try {
       // Send the typed name so it reaches the `staffName` token claim: audit rows
       // (approvals, score adjustments) are written server-side from the claim, so a
       // client-only name would leave the trail saying "Staff 1" instead of who acted.
+      // A link still sends the run address it carries; without one the code finds its own run
+      // (staff-code-from-join-code) and the address comes back in the result.
       const res = await staffSignIn({
-        ownerUid: ownerUid.trim(), gameId: gameId.trim(), runId: runId.trim(),
-        pin: pin.trim(), name: name.trim() || undefined,
+        ...(ctx ? { ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId } : {}),
+        pin: pin.trim(), name: name.trim(),
       });
       await signInStaff(res.customToken);
       const session: StaffSession = {
-        ownerUid: ownerUid.trim(), gameId: gameId.trim(), runId: runId.trim(),
+        ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         // The marshal's own name wins over the placeholder the organizer typed
         // when minting the PIN. NOTE: attribution in the audit trail still comes
         // from the `staffName` token claim — carrying this to the server needs a
@@ -235,34 +240,34 @@ function StaffSignIn({
         <h1 className="font-brand text-2xl font-extrabold text-ink-fire text-center mb-1">{t.staff.consoleTitle}</h1>
         <p className="text-zinc-500 text-center mb-8 text-sm">{t.staff.signInSub}</p>
         <div className="space-y-3">
-          {/* Only shown when the link did NOT carry the run address. */}
-          {!fromLink && (
-            <>
-              <Input value={ownerUid} onChange={(e) => setOwnerUid(e.target.value)} placeholder={t.staff.ownerUid} />
-              <Input value={gameId} onChange={(e) => setGameId(e.target.value)} placeholder={t.staff.gameId} />
-              <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder={t.staff.runId} />
-            </>
-          )}
+          {/* Two fields, with or without a link (staff-code-from-join-code). The three run ids
+              this screen used to ask for are inside the code now. */}
           <Input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); if (missing === 'name') setMissing(null); }}
             placeholder={t.join.yourName}
-            autoFocus={fromLink}
+            autoFocus
             dir="auto"
+            aria-invalid={missing === 'name' || undefined}
             onKeyDown={(e) => { if (e.key === 'Enter') void submitAction.run(); }}
           />
           <Input
             value={pin}
             dir="ltr"
-            onChange={(e) => setPin(e.target.value)}
+            onChange={(e) => { setPin(e.target.value.toUpperCase()); if (missing === 'pin') setMissing(null); }}
             placeholder={t.staff.pin}
-            inputMode="numeric"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={16}
+            aria-invalid={missing === 'pin' || undefined}
             className="text-center text-xl font-mono tracking-[0.3em]"
             onKeyDown={(e) => { if (e.key === 'Enter') void submitAction.run(); }}
           />
         </div>
-        {err && <p className="text-danger text-sm text-center mt-3">{err}</p>}
-        <Button disabled={busy || !ownerUid || !gameId || !runId || !name.trim() || !pin} loading={busy} onClick={() => void submitAction.run()} className="mt-5">
+        {err && <p className="text-danger text-sm text-center mt-3" role="alert">{err}</p>}
+        <Button disabled={busy} loading={busy} onClick={() => void submitAction.run()} className="mt-5">
           {t.staff.signIn}
         </Button>
         <button className="inline-flex items-center justify-center min-h-[44px] px-3 text-zinc-500 text-sm mt-2 mx-auto" onClick={onExit}>{t.staff.backToJoin}</button>
@@ -442,6 +447,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           lat: a.lat ?? null,
           lng: a.lng ?? null,
           createdAt: a.createdAt ?? '',
+          callbackPhone: a.callbackPhone ?? '',
         };
       });
       rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -716,6 +722,13 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   <div className="text-sm font-medium text-zinc-100">{(t.staff.alertType as Record<string, string>)[a.type] ?? a.type}</div>
                   <div className="text-xs text-zinc-500 truncate">{t.staff.teamLabel} {nameFor(a.teamId)}</div>
                   {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
+                  {/* sos-callback-and-authorities: the number the team left to call back. */}
+                  {a.callbackPhone && toTelHref(a.callbackPhone) && (
+                    <a href={toTelHref(a.callbackPhone)!} data-testid="sos-callback"
+                      className="mt-1 inline-flex items-center gap-1 min-h-[44px] rounded-lg bg-ink-alert px-3 text-sm font-bold text-white">
+                      <Icon name="phone" className="w-4 h-4" /> {t.staff.sosCallback({ phone: a.callbackPhone })}
+                    </a>
+                  )}
                   {a.lat != null && a.lng != null && (
                     <a
                       className="inline-flex items-center min-h-[44px] px-2 -ms-2 text-ink-fire text-xs underline"

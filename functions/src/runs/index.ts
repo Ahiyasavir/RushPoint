@@ -142,13 +142,11 @@ import {
   scoreFixedPointsSpeed,
   scoreSmartWeighted,
   durationSeconds,
-  applyCompletionBonus,
   applyPenalties,
-  applyZScoreBonus,
+  finalSpeedBonus,
   skipAward,
   taskScoreFixed,
   taskScoreSmart,
-  COMPLETION_BONUS,
   resolveExpectedMinutes,
   FIRESTORE_PATHS,
 } from '@rushpoint/shared';
@@ -215,6 +213,7 @@ import {
 // must be invisible on every run-facing path too — launch, join, instant play, the
 // shareable board, the recap, and the GM overview.
 import { assertGameNotDeleted } from '../games/lifecycle';
+import { MAX_BATCH_OPS } from '../batchUtil';
 import { isGameDeleted } from '@rushpoint/shared';
 
 function gamePath(ownerUid: string, gameId: string) {
@@ -1703,7 +1702,12 @@ async function recordPlayerResult(
 
 export const skipStage = loggedCallable('skipStage', async (data, context) => {
   const uid = requireAuth(context);
-  const { gameId, runId, teamId } = data as { gameId: string; runId: string; teamId: string };
+  const { gameId, runId, teamId, noPoints } = data as {
+    gameId: string; runId: string; teamId: string;
+    // Skip without the consolation (Ahiya, 2026-10-05): the organizer decides whether skipped
+    // missions pay their skipAward. Absent or false keeps the old behaviour.
+    noPoints?: boolean;
+  };
 
   const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
@@ -1743,7 +1747,7 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
         // hit the wrong stage/task and mis-award. Same fix completeTaskForTeam already
         // uses (nightly hardening).
         const gameTask = findGameTask(game, taskRec.taskId);
-        const award = gameTask ? skipAward(game.scoringPreset, gameTask) : 0;
+        const award = gameTask && noPoints !== true ? skipAward(game.scoringPreset, gameTask) : 0;
         taskRec.status = 'skipped';
         taskRec.skipCause = 'operatorStage'; // skip-keeps-the-stage
         taskRec.completedAt = now;
@@ -3090,7 +3094,12 @@ export const getRunOutline = loggedCallable('getRunOutline', async (data, contex
 // Compute ranked standings for a run from the current team state. Used by both
 // finalizeRun (terminal) and refreshLeaderboard (live, mid-run) so the two can
 // never drift. `now` is the reference time for not-yet-finished teams.
-export function buildRankings(game: Game, teams: RunTeam[], now: string): LeaderboardEntry[] {
+/**
+ * @param opts.speedBonus  add finalSpeedBonus (fair-final-score): true for a PUBLISHED board and
+ *   for finalizeRun, false (the default) for the organizer's unpublished live view. Ahiya,
+ *   2026-10-05: the bonus may appear only when the results are published, "so as not to reveal".
+ */
+export function buildRankings(game: Game, teams: RunTeam[], now: string, opts: { speedBonus?: boolean } = {}): LeaderboardEntry[] {
   type ScoredTeam = LeaderboardEntry & { durationMin: number };
   // team-lifecycle-controls: a team the organizers REMOVED is in no standing, live or final.
   // Filtered here, the one function both finalizeRun and refreshLeaderboard call, so the two
@@ -3135,20 +3144,20 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
         // server wrote at each record's terminal transition (with a template fallback
         // for legacy records), NOT re-reduced over game.stages — so a mid-run edit to
         // a task's expected duration cannot retroactively re-score a finished team.
-        rawScore = scoreFixedPointsSpeed(
-          team.stages,
-          team.startedAt,
-          team.status === 'finished' ? team.finishedAt : undefined,
-          game,
-          excludedMs,
-        );
+        //
+        // fair-final-score (2026-10-05): the route speed bonus is no longer added at ranking. It
+        // never reached team.score, so the organizer's board disagreed with the phones. Passing
+        // no finishedAt makes scoreFixedPointsSpeed return the task points alone; the only time
+        // reward is finalSpeedBonus below, the same for every preset.
+        rawScore = scoreFixedPointsSpeed(team.stages, team.startedAt, undefined, game, excludedMs);
         break;
       case 'smart_weighted':
         rawScore = scoreSmartWeighted(team.stages);
         break;
     }
 
-    rawScore = applyCompletionBonus(rawScore, team.stages);
+    // No completion bonus (fair-final-score): +500 for finishing turned 100 and 50 on the phones
+    // into 600 and 550 before the Z-score even started.
     // Default a missing bonusPenalty to 0 (every other read of it in this file
     // does) — the auto-refresh path reads teams with a raw cast (no parseRunTeam),
     // so an absent field here would otherwise yield NaN in run.leaderboard.
@@ -3189,6 +3198,10 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
       // order (a NaN score otherwise scrambles TimSort → live/final ordering drift,
       // since teams are read from an unordered Firestore query).
       score: Number.isFinite(rawScore) ? rawScore : 0,
+      // fair-final-score: what the team earned, shown beside any speed bonus so the line reads
+      // "points + speed" everywhere. score === points + speedBonus, always.
+      points: Number.isFinite(rawScore) ? rawScore : 0,
+      speedBonus: 0,
       completedStages: team.stages.filter((s) => s.status === 'completed').length,
       finishedAt: team.finishedAt,
       durationSeconds: durFinite,
@@ -3197,17 +3210,19 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     };
   });
 
-  // Apply Z-Score for non-time presets (only meaningful once teams have finished)
-  if (game.scoringPreset !== 'time_only' && scored.length >= 2) {
+  // The published speed bonus (fair-final-score) replaced the Z-score, which gave ±200 to any two
+  // finishers however small the gap. At most +10% of the team's own points, linear from the
+  // fastest finisher to the slowest, only with at least 4 finishers, and only on a published or
+  // final board. A pure function of the stored teams, so finalize and a published refresh agree.
+  if (opts.speedBonus === true && game.scoringPreset !== 'time_only') {
     const finishedDurations = scored
       .filter((t) => t.finishedAt && Number.isFinite(t.durationMin))
       .map((t) => t.durationMin);
-    if (finishedDurations.length >= 2) {
-      for (const t of scored) {
-        if (t.finishedAt && Number.isFinite(t.durationMin)) {
-          t.score = applyZScoreBonus(t.score, t.durationMin, finishedDurations);
-        }
-      }
+    for (const t of scored) {
+      if (!t.finishedAt || !Number.isFinite(t.durationMin)) continue;
+      const bonus = finalSpeedBonus(t.points ?? t.score, t.durationMin, finishedDurations);
+      t.speedBonus = bonus;
+      t.score = (t.points ?? t.score) + bonus;
     }
   }
 
@@ -3242,6 +3257,8 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     teamId: t.teamId,
     teamName: t.teamName,
     score: t.score,
+    points: t.points,
+    speedBonus: t.speedBonus,
     completedStages: t.completedStages,
     finishedAt: t.finishedAt,
     durationSeconds: t.durationSeconds,
@@ -3304,7 +3321,8 @@ export async function maybeRefreshLeaderboardSnapshot(
     );
 
     const now = new Date().toISOString();
-    const rankings = buildRankings(game, teams, now);
+    // fair-final-score: the speed bonus only on a board that is already published.
+    const rankings = buildRankings(game, teams, now, { speedBonus: run.leaderboard?.published === true });
 
     // Commit under a SHORT transaction that RE-READS the run doc. The game + teams
     // reads above take tens of ms; an organizer publish (refreshLeaderboard
@@ -3559,7 +3577,9 @@ async function finalizeRunCore(
       .catch((e) => logBestEffort('finalizeRunCore.settleHold', { runId, teamId: s.teamId }, e));
   }
 
-  const rankings = buildRankings(game, teams, now);
+  // fair-final-score: the final board always carries the speed bonus. Under a staged reveal the
+  // players still see nothing until the organizer publishes (the board itself is gated).
+  const rankings = buildRankings(game, teams, now, { speedBonus: true });
 
   // Finalizing publishes the final standings to participants UNLESS the creator
   // opted into a staged reveal (change: manual-leaderboard-reveal) — then the
@@ -3976,11 +3996,12 @@ export const refreshLeaderboard = loggedCallable('refreshLeaderboard', async (da
   const teams = parseTeamsQuarantining(teamsSnap.docs);
 
   const now = new Date().toISOString();
-  const rankings = buildRankings(game, teams, now);
 
   // Preserve the previous published flag unless explicitly changed.
   const wasPublished = run.leaderboard?.published ?? false;
   const isPublished = publish ?? wasPublished;
+  // fair-final-score: the speed bonus appears when the board is published, not before.
+  const rankings = buildRankings(game, teams, now, { speedBonus: isPublished });
   const isFrozen = frozen ?? run.leaderboard?.frozen ?? false;
 
   await runRef.update({
@@ -3993,6 +4014,19 @@ export const refreshLeaderboard = loggedCallable('refreshLeaderboard', async (da
     },
     updatedAt: now,
   });
+
+  // Publishing reaches every phone NOW (Ahiya, 2026-10-05: "takes forever"). A phone listens to
+  // its OWN team document and reads the run (where the board lives) only on a 60 s poll, a
+  // read-budget decision. So the moment the board goes public, each team document gets one
+  // stamp: one write per team, once, and every phone's existing listener refreshes. Never on a
+  // plain refresh, which runs constantly: that would turn the listener into a per-refresh cost.
+  if (isPublished && !wasPublished) {
+    for (const part of chunk(teamsSnap.docs, MAX_BATCH_OPS)) {
+      const batch = db.batch();
+      for (const d of part) batch.update(d.ref, { boardPublishedAt: now });
+      await batch.commit();
+    }
+  }
 
   return { rankings, published: isPublished, frozen: isFrozen };
 });
@@ -5723,8 +5757,12 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
       gtask?.requiredContributors,
       attachedDeviceUids(team).length,
     );
-    if (need > 0 && !contributorsSatisfied(team.taskContributions?.[taskId], need)) {
-      const have = new Set(team.taskContributions?.[taskId] ?? []).size;
+    // The SUBMITTING phone counts as having done its part (Ahiya, 2026-10-05): on a one-phone
+    // team the requirement reduces to one, and asking that phone to tap "I did my part" before
+    // its own answer was a second button for one action. contributionView shows the same count.
+    const withSubmitter = [...(team.taskContributions?.[taskId] ?? []), uid];
+    if (need > 0 && !contributorsSatisfied(withSubmitter, need)) {
+      const have = new Set(withSubmitter).size;
       throw new functions.https.HttpsError(
         'failed-precondition',
         `waiting-for-teammates: ${have} of ${need} have done their part`,

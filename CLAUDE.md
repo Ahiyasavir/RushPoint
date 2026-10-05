@@ -1298,6 +1298,18 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   X is restored from storage AFTER the first render (`idle → done` on every page load); decide on
   the transition that actually means the event (`reachedFinishLine`, `running → done`).
 
+- **A staff code addresses its own run: it is the join code with two characters planted inside
+  it** (Ahiya, 2026-10-05; change: staff-code-from-join-code). `63MZWC` → `6K3MZW7C`
+  (`packages/shared/src/staffCode.ts`). The staff screen asks for a name and the code only;
+  `staffSignIn` without an address removes two characters every way (≤28) and `getAll`s those
+  `accessCodes`, so there is NO pointer collection to clean up. Two characters, not one, on
+  purpose: the join code is public, one character is ~250 codes (a player can try them all
+  within an event), two are 27,157 (measured), and a wrong guess built on a join code counts
+  against THAT run's lockout. Never shorten it, and never put the code in a link or QR.
+- **SOS is a sheet, not a confirm** (change: sos-callback-and-authorities): "פנייה לרשויות" opens
+  `tel:` links for every service in `EMERGENCY_SERVICES` (101, 100, 102), and the alert carries an
+  optional `callbackPhone` (`sosCallbackVerdict`, same rule client and server). An empty number
+  never blocks an SOS.
 - **Hebrew sentences speak in the plural; short labels keep their form** (Ahiya, 2026-10-04;
   change: hebrew-one-voice). A Hebrew string of four words or more addresses the reader as
   "אתם" ("הקלידו", "שלכם", "בדקו") or impersonally, never one man ("הקלד", "שלך", "שמחקת"); a short

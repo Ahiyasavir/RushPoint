@@ -120,7 +120,8 @@ export const startTeams    = callable<
   { gameId: string; runId: string; teamIds?: string[] },
   { launched: number; heldForConsent?: number; heldForMembers?: number }
 >('startTeams');
-export const skipStage     = callable<{ gameId: string; runId: string; teamId: string }, { ok: boolean }>('skipStage');
+// noPoints: skip without the consolation the skipped missions would pay (Ahiya, 2026-10-05).
+export const skipStage     = callable<{ gameId: string; runId: string; teamId: string; noPoints?: boolean }, { ok: boolean }>('skipStage');
 // Skip ONE mission for ONE team, keeping them inside the same stage
 // (change: skip-single-task). `taskId` omitted means "the mission this team is on
 // right now", resolved server-side. `requiredTaskCount` comes back so the console

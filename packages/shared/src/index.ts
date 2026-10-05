@@ -9,6 +9,7 @@ export * from './registration';
 export * from './freeMode';
 export * from './templateVisibility';
 export * from './staffThrottle';
+export * from './staffCode';
 export * from './rateLimit';
 // Which hostnames report to Google Analytics, and how the tag is hardened
 // (change: google-analytics-tag). Pure — the inline copy in each app's index.html

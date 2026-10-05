@@ -908,6 +908,10 @@ export interface LeaderboardEntry {
   teamId: string;
   teamName: string;
   score: number;
+  /** fair-final-score: what the team earned (its phone shows the same). score = points + speedBonus. */
+  points?: number;
+  /** fair-final-score: the published speed bonus, 0 on an unpublished board. Absent on old boards. */
+  speedBonus?: number;
   completedStages: number;
   finishedAt?: string;
   durationSeconds?: number;   // for time_only preset

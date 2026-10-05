@@ -23,8 +23,9 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // Undoing an approval and taking the points back with it (change:
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
+import { sosCallbackVerdict } from '@rushpoint/shared';
 import { planApprovalReversal, appendScoreLedger, validateRunContacts, contactsFor, matchAnswerOutcome, mediaDurationForRecord, autoApproveLengthVerdict, type AnswerOutcome } from '@rushpoint/shared';
-import { defaultCodeCapabilities, normalizeStaffCapabilities, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
+import { defaultCodeCapabilities, normalizeStaffCapabilities, normalizeStaffCode, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
 import { storageOriginOpts } from './storageOriginOpts';
@@ -68,7 +69,7 @@ async function recordStationCodeAttempt(
 }
 
 
-import { createRunStaffInvite } from './runs/staffInvite';
+import { createRunStaffInvite, resolveStaffRun } from './runs/staffInvite';
 import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamMayAdvance, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { flashClaimVerdict, resumedStartedAt, type FlashMissionDoc } from '@rushpoint/shared';
@@ -248,18 +249,33 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
 
 export const staffSignIn = loggedCallable('staffSignIn', async (data, context) => {
   const uid = requireAuth(context);
-  const { ownerUid, gameId, runId, pin, name } = data as {
-    ownerUid: string;
-    gameId: string;
-    runId: string;
+  const raw = data as {
+    // The run address is OPTIONAL since staff-code-from-join-code: a link still carries it
+    // (old printed QR codes, old 6-digit codes), but a code alone now finds its own run.
+    ownerUid?: string;
+    gameId?: string;
+    runId?: string;
     pin: string;
     // Optional self-declared display name (change: staff-onboarding-simplification).
     // The staffer types who they are at sign-in; see the staffName claim below for
     // why this is attribution, not authorization.
     name?: string;
   };
-
+  const { name } = raw;
+  // Folded the way people type it ("6k3m zw7c"), and refused before it reaches any path or query.
+  const pin = normalizeStaffCode(raw.pin);
   if (!pin) throw new functions.https.HttpsError('invalid-argument', 'PIN required');
+
+  let ownerUid = raw.ownerUid ?? '';
+  let gameId = raw.gameId ?? '';
+  let runId = raw.runId ?? '';
+  if (!ownerUid || !gameId || !runId) {
+    // No address: the code is the run's join code with two planted characters (design D2). A code
+    // built on no join code has no run to count against, so it is refused without a counter (D3).
+    const found = await resolveStaffRun(pin);
+    if (!found) throw new functions.https.HttpsError('not-found', 'Invalid or already-used PIN');
+    ({ ownerUid, gameId, runId } = found);
+  }
 
   // Brute-force throttle (row 40): too many failed PIN attempts within the
   // cooldown window locks this caller out of THIS run — even with a correct PIN.
@@ -396,7 +412,8 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
 
   // quick-dial-and-actions 2.5: staff cannot read the run document, so the STAFF-visible contacts
   // travel with the session.
-  return { customToken, name: invite.name, capabilities: caps, codeId: invite.id, contacts: await staffContacts(ownerUid, gameId, runId) };
+  // The address goes back too (design D4): a marshal who typed only a code has no other way to know it.
+  return { customToken, name: invite.name, capabilities: caps, codeId: invite.id, ownerUid, gameId, runId, contacts: await staffContacts(ownerUid, gameId, runId) };
 });
 
 
@@ -778,17 +795,25 @@ export const triggerSOS = loggedCallable('triggerSOS', async (data, context) => 
   requireAuth(context);
   const uid = context.auth!.uid;
   await enforceRateLimit(uid, 'triggerSOS');
-  const { ownerUid, gameId, runId, lat, lng, message } = data as {
+  const { ownerUid, gameId, runId, lat, lng, message, callbackPhone } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     lat?: number;
     lng?: number;
     message?: string;
+    // A team member's number for the organizers to call back (sos-callback-and-authorities).
+    callbackPhone?: string;
   };
 
   if (!ownerUid || !gameId || !runId) {
     throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId required');
+  }
+  // Optional: an alert without a number beats no alert. A number that cannot be dialled is
+  // refused, because a call-back button that dials the wrong digits is worse than none.
+  const callback = sosCallbackVerdict(callbackPhone);
+  if (!callback.ok) {
+    throw new functions.https.HttpsError('invalid-argument', 'callbackPhone is not a phone number');
   }
 
   // Shared team devices: ANY attached phone may raise SOS (safety beats role
@@ -806,6 +831,8 @@ export const triggerSOS = loggedCallable('triggerSOS', async (data, context) => 
     lat: lat ?? null,
     lng: lng ?? null,
     message: validate(() => optionalString(message, 'message', MAX_MESSAGE_LEN)) ?? '',
+    // Swept with the rest of the run's PII (`alerts` is in the retention list, maintenance/index.ts).
+    ...(callback.phone ? { callbackPhone: callback.phone } : {}),
     acknowledged: false,
     createdAt: new Date().toISOString(),
   });

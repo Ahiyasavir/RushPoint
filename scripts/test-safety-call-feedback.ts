@@ -37,9 +37,12 @@ const SAFETY_CALL_SITES = [
   {
     file: 'apps/play-web/src/screens/PlayScreen.tsx',
     call: 'triggerSOS',
-    // The panic button: a modal is right here, because nothing else is happening.
-    reports: /sosFailed/,
-    how: 'dialog.alert(t.play.sosFailed)',
+    // The panic button (sos-callback-and-authorities): PlayScreen sends, and the SOS sheet it
+    // opens shows the failure in place, with the authorities still one tap away. The sheet only
+    // reaches 'sent' once the send promise resolves, and any rejection lands on 'failed'.
+    reportsIn: 'apps/play-web/src/components/SosSheet.tsx',
+    reports: /catch \{\s*setPhase\('failed'\);[\s\S]*phase === 'failed' \? p\.sosFailed/,
+    how: "the SOS sheet's failed phase (p.sosFailed)",
   },
   {
     file: 'apps/play-web/src/components/TaskRunner.tsx',
@@ -57,7 +60,8 @@ for (const site of SAFETY_CALL_SITES) {
   ok(src.includes(site.call),
     `${site.file} still calls ${site.call}`,
     'if this moved, update the declared list rather than deleting the assertion');
-  ok(site.reports.test(src),
+  const reporter = 'reportsIn' in site ? read(site.reportsIn) : src;
+  ok(site.reports.test(reporter),
     `${site.file} surfaces a failed ${site.call} via ${site.how}`,
     'a safety call that fails must say so — the player is already stuck, and silence is indistinguishable from success');
 }
@@ -67,7 +71,7 @@ for (const site of SAFETY_CALL_SITES) {
 console.log('\n[safety feedback] both entry points use the same message');
 {
   const key = /sosFailed/;
-  const bothUse = SAFETY_CALL_SITES.every((s) => key.test(read(s.file)));
+  const bothUse = SAFETY_CALL_SITES.every((s) => key.test(read('reportsIn' in s ? s.reportsIn : s.file)));
   ok(bothUse, 'both entry points name t.play.sosFailed rather than inventing their own copy');
 }
 

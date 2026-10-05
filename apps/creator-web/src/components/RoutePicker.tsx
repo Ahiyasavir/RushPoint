@@ -48,7 +48,7 @@ export default function RoutePicker({ teamName, stages, teamBusy, onRoute, onClo
   const accept = chosen ? chosen.blockers.waivable.map((b) => b.kind) : [];
 
   return createPortal(
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
       <button type="button" aria-label={p.cancel} onClick={onClose} className="absolute inset-0 w-full h-full cursor-default" />
       <div className="relative bg-app-card border border-glass-border rounded-2xl w-full max-w-lg p-5 my-8"
         role="dialog" aria-modal="true" aria-label={p.title({ team: teamName })} data-testid="route-picker">

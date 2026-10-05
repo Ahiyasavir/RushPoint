@@ -9,7 +9,7 @@ import {
 // Reduced to the devices this team actually has, the same way the server reduces it at
 // submit time, so the two never disagree about what the team is waiting for
 // (change: every-member-plays).
-import { effectiveContributorRequirement, normalizeContentType, autoApproveLengthVerdict } from '@rushpoint/shared';
+import { contributionView, effectiveContributorRequirement, normalizeContentType, autoApproveLengthVerdict } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
@@ -608,9 +608,12 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     task?.requiredContributors, attachedDevices,
   );
   const contributedUids = (task && state.team.taskContributions?.[task.id]) || [];
-  const contributorsDone = new Set(contributedUids).size;
   const myUid = uid();
-  const iContributed = !!myUid && contributedUids.includes(myUid);
+  // One rule for what the phone shows (contributionView, Ahiya 2026-10-05): the submitting phone
+  // counts as having done its part, so a one-phone team sees no extra button at all.
+  const contribution = contributionView({
+    need: contributorsNeeded, contributors: contributedUids, myUid, isSender: !isViewer,
+  });
   const [contributing, setContributing] = useState(false);
   async function contribute() {
     if (!task || contributing) return;
@@ -1517,12 +1520,12 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
 
           The controller sees the progress line too: they are the one who will be refused
           at submit time, so they need to know who they are waiting for. */}
-      {contributorsNeeded > 0 && (
+      {contribution.show && (
         <div className="mt-4 rounded-xl border border-glass-border bg-app-raised px-3 py-2.5">
           <p className="text-[13px] text-ink-warm">
-            {t.task.contributorsProgress({ done: contributorsDone, need: contributorsNeeded })}
+            {t.task.contributorsProgress({ done: contribution.done, need: contribution.need })}
           </p>
-          {!iContributed && (
+          {contribution.showButton && (
             <Button
               className="mt-2"
               loading={contributing}

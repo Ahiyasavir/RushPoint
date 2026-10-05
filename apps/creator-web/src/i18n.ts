@@ -1206,6 +1206,7 @@ const HE = {
     unknownIssue: ({ id }: { id: string }) => `תקלה לא מזוהה ${id}`,
     map: 'מפה',
     acknowledge: 'אישור קבלה',
+    sosCallback: ({ phone }: { phone: string }) => `חזרה ל ${phone}`,
     startAllTeams: 'התחילו את כל הקבוצות',
     refreshStandings: 'רענון דירוג',
     standingsRefreshed: 'הדירוג עודכן.',
@@ -1220,7 +1221,7 @@ const HE = {
     staffInviteFailed: 'יצירת קוד הצוות נכשלה. בדקו את החיבור ונסו שוב.',
     staffPinLabel: 'קוד צוות:',
     staffLinkCopy: 'העתקת קישור לצוות',
-    staffLinkNote: 'הקישור ממלא מראש את פרטי הריצה. איש הצוות רק מקליד את הקוד למעלה.',
+    staffLinkNote: 'איך נכנסים: סורקים את ה QR, או פותחים את אפליקציית השחקנים ולוחצים "כניסת מארגנים". שם מקלידים שם ואת קוד הצוות שלמטה, וזהו.',
     staffLinkQrAlt: 'קוד QR לכניסת צוות',
     // change: staff-capabilities. Codes shared by several staff, each with its own permissions.
     staffCodes: {
@@ -1322,6 +1323,9 @@ const HE = {
     teamStageLabel: ({ n }: { n: number }) => `בשלב ${n}`,
     // היקף הדילוג כתוב על הכפתור, לא רק בדיאלוג (change: run-console-clarity).
     skipStage: 'דילוג על השלב',
+    skipStageChoose: ({ team }: { team: string }) => `לדלג ל${team} על כל השלב הנוכחי? המשימות שנשארו בו נסגרות לה. לתת על המשימות שדולגו ניקוד ניחומים?`,
+    skipStageNoPoints: 'דילוג בלי ניקוד',
+    skipStageWithPoints: 'דילוג עם ניקוד ניחומים',
     skipTask: 'דילוג על המשימה',
     // send-team-back: the row button and its picker.
     sendBack: 'החזרת הקבוצה',
@@ -1486,6 +1490,9 @@ const HE = {
     follow: {
       title: 'הקבוצות שלי',
       empty: 'סמנו את הכוכב ליד קבוצה כדי לעקוב אחריה. היא תופיע כאן ובסגול במפה.',
+      emptyPick: 'סמנו כוכב ליד הקבוצות שאתם אחראים עליהן. הן יופיעו כאן ובסגול במפה.',
+      pickOpen: 'בחירת קבוצות',
+      pickClose: 'סגירת הרשימה',
       full: 'אפשר לעקוב אחרי עד 8 קבוצות. הסירו אחת כדי להוסיף.',
       followAria: ({ team }: { team: string }) => `לעקוב אחרי ${team}`,
       unfollowAria: ({ team }: { team: string }) => `להפסיק לעקוב אחרי ${team}`,
@@ -1598,7 +1605,8 @@ const HE = {
     teamSearchCount: ({ shown, total }: { shown: number; total: number }) => `מוצגות ${shown} מתוך ${total} קבוצות`,
     sectionShortcut: ({ name, key }: { name: string; key: number }) => `${name} (מקש ${key})`,
     groupMechanics: 'משחק',
-    groupShare: 'שיתוף והגדרות',
+    groupShare: 'שיתוף וצוות',
+    sectionIndexLabel: ({ section }: { section: string }) => `מה יש ב${section}`,
     groupAfter: 'דוחות וניתוח',
 
     // ── זמינות משימות בזמן ריצה (change: live-task-pause) ──
@@ -1674,6 +1682,7 @@ const HE = {
     reasonCreativity: 'בונוס יצירתיות',
     reasonTeamwork: 'עבודת צוות',
     reasonSpeed: 'בונוס מהירות',
+    scoreWithSpeed: ({ points, bonus }: { points: number; bonus: number }) => `${points} נקודות + ${bonus} מהירות`,
     reasonHelpfulness: 'עזרה לקבוצה אחרת',
     reasonLate: 'קנס איחור',
     reasonRuleBreak: 'הפרת כללים',
@@ -2273,7 +2282,7 @@ const HE = {
       contributors: 'כמה מהקבוצה חייבים להשתתף',
       presence: 'חובת נוכחות כדי לענות',
       pauseClock: 'להקפיא את שעון המרוץ כאן',
-      durationStop: 'זמן יעד לבונוס מהירות',
+      durationStop: 'זמן משוער במשימה',
       durationTotal: 'זמן יעד (כולל הליכה)',
       useSuggested: ({ n }: { n: string }) => `להשתמש בהערכה (${n} דק׳)`,
       hintFree: 'רמז חינם אחרי',
@@ -2488,7 +2497,7 @@ const HE = {
     advGroupScoring: 'ניקוד',
     advGroupLimits: 'מגבלות',
     // task-duration-defaults
-    durationHelp: 'כמה דקות המשימה אמורה לקחת בנקודה עצמה. קבוצה שמסיימת את המשחק מהר יותר מסך זמני היעד חוטפת בונוס מהירות.',
+    durationHelp: 'כמה דקות המשימה אמורה לקחת בנקודה עצמה. משמש להערכת משך המשחק.',
     estimateHelp: 'כמה זמן אמור לקחת להגיע ולבצע. מי שמהיר מהיעד מקבל יותר נקודות, מי שאיטי מקבל פחות.',
     noConfigNote: (desc: string) => `${desc} אין צורך בהגדרת תשובה נוספת.`,
     typeStation: 'תחנה',
@@ -2639,7 +2648,7 @@ const HE = {
     },
     presetLabels: {
       time_only: { name: 'מרוץ מהירות', desc: 'דירוג לפי זמן כולל בלבד. אין נקודות, הקבוצה המהירה ביותר מנצחת.' },
-      fixed_points_speed: { name: 'נקודות + בונוס מהירות', desc: "כל משימה מזכה בערך הנקודות הקבוע שלה. סיימו את כל השלבים מהר מהצפוי לבונוס (עד +200 נק')." },
+      fixed_points_speed: { name: 'נקודות + בונוס מהירות', desc: 'כל משימה מזכה בערך הנקודות הקבוע שלה. כשמפרסמים את התוצאות, הקבוצות המהירות מקבלות בונוס קטן, עד 10% מהנקודות שלהן (כשסיימו לפחות 4 קבוצות).' },
       smart_weighted: { name: 'ניקוד חכם', desc: 'ניקוד לפי רמת הקושי של המשימה ומהירות הביצוע ביחס להערכה. משימות קשות שוות יותר.' },
     },
     advRegistration: 'שדות הרשמה מתקדמים',
@@ -4449,6 +4458,7 @@ const EN: typeof HE = {
     unknownIssue: ({ id }: { id: string }) => `unidentified issue ${id}`,
     map: 'map',
     acknowledge: 'Acknowledge',
+    sosCallback: ({ phone }: { phone: string }) => `Call back ${phone}`,
     startAllTeams: 'Start all teams',
     refreshStandings: 'Refresh standings',
     standingsRefreshed: 'Standings updated.',
@@ -4463,7 +4473,7 @@ const EN: typeof HE = {
     staffInviteFailed: 'Could not create the staff PIN. Check your connection and try again.',
     staffPinLabel: 'Staff PIN:',
     staffLinkCopy: 'Copy staff link',
-    staffLinkNote: 'The link fills in the run details. Staff just type the PIN above.',
+    staffLinkNote: 'How staff get in: scan the QR, or open the player app and tap "Organizer sign in". They type their name and the staff code below, and that is it.',
     staffLinkQrAlt: 'Staff sign in QR code',
     // change: staff-capabilities. Codes shared by several staff, each with its own permissions.
     staffCodes: {
@@ -4567,6 +4577,9 @@ const EN: typeof HE = {
     // The scope of the skip is on the button, not only in the dialog
     // (change: run-console-clarity).
     skipStage: 'Skip the stage',
+    skipStageChoose: ({ team }: { team: string }) => `Skip the whole current stage for ${team}? Its remaining missions close for them. Give consolation points for the skipped missions?`,
+    skipStageNoPoints: 'Skip without points',
+    skipStageWithPoints: 'Skip with consolation points',
     skipTask: 'Skip the mission',
     // send-team-back: the row button and its picker.
     sendBack: 'Send team back',
@@ -4731,6 +4744,9 @@ const EN: typeof HE = {
     follow: {
       title: 'My teams',
       empty: 'Tap the star next to a team to follow it. It shows up here and in purple on the map.',
+      emptyPick: 'Star the teams you look after. They appear here and in purple on the map.',
+      pickOpen: 'Choose teams',
+      pickClose: 'Close the list',
       full: 'You can follow up to 8 teams. Remove one to add another.',
       followAria: ({ team }: { team: string }) => `Follow ${team}`,
       unfollowAria: ({ team }: { team: string }) => `Stop following ${team}`,
@@ -4843,7 +4859,8 @@ const EN: typeof HE = {
     teamSearchCount: ({ shown, total }: { shown: number; total: number }) => `Showing ${shown} of ${total} teams`,
     sectionShortcut: ({ name, key }: { name: string; key: number }) => `${name} (key ${key})`,
     groupMechanics: 'Game',
-    groupShare: 'Sharing and setup',
+    groupShare: 'Sharing and staff',
+    sectionIndexLabel: ({ section }: { section: string }) => `What is in ${section}`,
     groupAfter: 'Reports and analytics',
 
     // ── Live task availability (change: live-task-pause) ──
@@ -4912,6 +4929,7 @@ const EN: typeof HE = {
     reasonCreativity: 'Creativity bonus',
     reasonTeamwork: 'Teamwork',
     reasonSpeed: 'Speed bonus',
+    scoreWithSpeed: ({ points, bonus }: { points: number; bonus: number }) => `${points} points + ${bonus} speed`,
     reasonHelpfulness: 'Helped another team',
     reasonLate: 'Late penalty',
     reasonRuleBreak: 'Rule violation',
@@ -5513,7 +5531,7 @@ const EN: typeof HE = {
       contributors: 'How many in the team must take part',
       presence: 'Must be at the spot to answer',
       pauseClock: 'Freeze the race clock here',
-      durationStop: 'Speed bonus target',
+      durationStop: 'Expected time at the mission',
       durationTotal: 'Target time (with the walk)',
       useSuggested: ({ n }: { n: string }) => `Use the estimate (${n} min)`,
       hintFree: 'Hint is free after',
@@ -5730,7 +5748,7 @@ const EN: typeof HE = {
     advGroupScoring: 'Scoring',
     advGroupLimits: 'Limits',
     // task-duration-defaults
-    durationHelp: 'How many minutes the mission should take at the spot. A team that finishes the game faster than the sum of the targets grabs a speed bonus.',
+    durationHelp: 'How many minutes the mission should take at the spot. Used to estimate how long the game runs.',
     estimateHelp: 'How long getting there and doing it should take. Faster than the target earns more points, slower earns fewer.',
     noConfigNote: (desc: string) => `${desc} No extra answer config needed.`,
     typeStation: 'Station',
@@ -5881,7 +5899,7 @@ const EN: typeof HE = {
     },
     presetLabels: {
       time_only: { name: 'Speed Race', desc: 'Ranked purely by total race time. No points, fastest team wins.' },
-      fixed_points_speed: { name: 'Points + Speed Bonus', desc: 'Each mission earns its fixed point value. Complete all stages faster than expected for a bonus (up to +200 pts).' },
+      fixed_points_speed: { name: 'Points + Speed Bonus', desc: 'Each mission earns its fixed point value. When the results are published, faster teams get a small bonus, up to 10% of their points (once at least 4 teams finished).' },
       smart_weighted: { name: 'Smart Score', desc: 'Score based on mission difficulty and how fast each mission was completed relative to its estimate. Harder missions are worth more.' },
     },
     advRegistration: 'Advanced registration fields',

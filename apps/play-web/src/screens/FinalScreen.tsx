@@ -367,6 +367,10 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
                       )}
                     </span>
                     <span dir="auto" className="flex-1 text-start font-medium">{r.teamName}</span>
+                    {/* fair-final-score: the published speed bonus is shown, never folded in silently. */}
+                    {!isTimeOnly && (r.speedBonus ?? 0) > 0 && (
+                      <span className="text-[11px] text-zinc-500">{t.final.scoreWithSpeed({ points: r.points ?? r.score, bonus: r.speedBonus ?? 0 })}</span>
+                    )}
                     <span className={`font-mono text-xs font-semibold${isMe ? ' text-ink-fire' : ''}`}>
                       {isTimeOnly ? (r.durationSeconds != null ? fmtDuration(r.durationSeconds) : '—') : r.score}
                     </span>

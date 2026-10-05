@@ -182,18 +182,11 @@ export function scoreSmartWeighted(stages: RunStageRecord[]): number {
 }
 
 
-// ─── Shared final score formula ───────────────────────────────────────────────
-// Applied on top of any preset when running finalizeRun.
-
-export const COMPLETION_BONUS = 500;
-
-export function applyCompletionBonus(
-  rawScore: number,
-  stages: Pick<RunStageRecord, 'status'>[],
-): number {
-  const allDone = stages.every((s) => s.status === 'completed');
-  return rawScore + (allDone ? COMPLETION_BONUS : 0);
-}
+// ─── Final score (change: fair-final-score) ───────────────────────────────────
+// There used to be a +500 completion bonus here and a ±200 Z-score below. Run
+// pCADVITcbzIZMEPjVqcV (2026-10-05) showed what they did: 100 and 50 on the phones became 800
+// and 350 on the organizer's board, with nothing explaining either number. A board now ranks on
+// the points the team actually earned, plus finalSpeedBonus once the results are published.
 
 // bonusPenalty is subtracted after all other scoring:
 export function applyPenalties(score: number, bonusPenalty: number): number {
@@ -218,21 +211,30 @@ export function sprintPenalty(secondsLate: number): number {
 }
 
 
-// ─── Z-Score normalization (finalizeRun) ─────────────────────────────────────
-// Applied to all finishers when the run ends. Faster than average → bonus.
+// ─── Final speed bonus (change: fair-final-score) ─────────────────────────────
+// Ahiya, 2026-10-05: a small, fair speed bonus, proportional to the real time, revealed only when
+// the results are published. At most +10% of the team's OWN points for the fastest finisher,
+// linear down to 0 for the slowest, and only once at least 4 teams finished: with two or three
+// finishers any spread is an extreme, which is exactly what the Z-score did.
 
-export function applyZScoreBonus(
-  rawScore: number,
-  teamDurationMinutes: number,
-  allDurationMinutes: number[],
-): number {
-  if (allDurationMinutes.length < 2) return rawScore;
-  const mu = allDurationMinutes.reduce((a, b) => a + b, 0) / allDurationMinutes.length;
-  const variance = allDurationMinutes.reduce((s, d) => s + (d - mu) ** 2, 0) / allDurationMinutes.length;
-  const sigma = Math.sqrt(variance);
-  if (!Number.isFinite(sigma) || sigma === 0) return rawScore;
-  const z = (teamDurationMinutes - mu) / sigma;
-  return Math.max(0, rawScore + Math.round(-z * 200));
+export const FINAL_SPEED_BONUS_MAX_FRACTION = 0.1;
+export const FINAL_SPEED_BONUS_MIN_FINISHERS = 4;
+
+/**
+ * @param points           the team's own points (what its phone shows)
+ * @param durationMinutes  its clock-adjusted time (paused tasks and holds already excluded)
+ * @param finisherMinutes  every finisher's clock-adjusted time, this team included
+ * Total: anything non-finite contributes nothing, and the result is a whole number ≥ 0.
+ */
+export function finalSpeedBonus(points: number, durationMinutes: number, finisherMinutes: readonly number[]): number {
+  if (!Number.isFinite(points) || points <= 0 || !Number.isFinite(durationMinutes)) return 0;
+  const times = finisherMinutes.filter((m) => Number.isFinite(m));
+  if (times.length < FINAL_SPEED_BONUS_MIN_FINISHERS) return 0;
+  const fastest = Math.min(...times);
+  const slowest = Math.max(...times);
+  if (slowest <= fastest) return 0;
+  const share = Math.min(1, Math.max(0, (slowest - durationMinutes) / (slowest - fastest)));
+  return Math.round(points * FINAL_SPEED_BONUS_MAX_FRACTION * share);
 }
 
 
@@ -245,7 +247,7 @@ export const PRESET_LABELS: Record<ScoringPreset, { en: string; description: str
   },
   fixed_points_speed: {
     en: 'Points + Speed Bonus',
-    description: 'Each task earns its fixed point value. Complete all stages faster than expected for a bonus (up to +200 pts).',
+    description: 'Each task earns its fixed point value. When the results are published, faster teams get a small bonus, up to 10% of their points (once at least 4 teams finished).',
   },
   smart_weighted: {
     en: 'Smart Score',

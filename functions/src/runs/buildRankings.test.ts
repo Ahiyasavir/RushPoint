@@ -137,10 +137,46 @@ describe('buildRankings — fixed_points_speed bonus gated on completion', () =>
       stages: [{ stageId: 's0', status: 'completed', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: 50 }] }],
     } as unknown as RunTeam;
     const board = buildRankings(game('fixed_points_speed'), [fast], now1);
-    // 50 taskPoints + 500 completion bonus + a positive speed bonus (finished under
-    // expected). The exact bonus is (5-1)*10 = 40. Assert the bonus is present.
-    expect(board[0].score).toBe(50 + 500 + 40);
+    // fair-final-score (2026-10-05): the board ranks on the 50 points the team earned. No route
+    // speed bonus and no +500 on top; the only addition is the published speed bonus below.
+    expect(board[0].score).toBe(50);
   });
+});
+
+// fair-final-score: run pCADVITcbzIZMEPjVqcV (2026-10-05). Phones read 100 and 50; the board read
+// 800 and 350 (+500 completion, ±200 Z-score). The board must read what the phones read, and the
+// only addition is a speed bonus of at most 10%, with at least 4 finishers, when published.
+describe('buildRankings — the final score is the points, plus a small published speed bonus', () => {
+  const T = 1_700_000_000_000;
+  const done = (id: string, earned: number, minutes: number): RunTeam => ({
+    id, displayName: id, status: 'finished',
+    startedAt: new Date(T).toISOString(), finishedAt: new Date(T + minutes * 60_000).toISOString(),
+    score: earned, bonusPenalty: 0,
+    stages: [{ stageId: 's0', status: 'completed', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: earned }] }],
+  } as unknown as RunTeam);
+  const at = new Date(T + 3_600_000).toISOString();
+
+  for (const preset of ['fixed_points_speed', 'smart_weighted'] as Game['scoringPreset'][]) {
+    test(`[${preset}] the 2026-10-05 run: two teams read 100 and 50, published or not`, () => {
+      for (const speedBonus of [false, true]) {
+        const board = buildRankings(game(preset), [done('a', 100, 0.01), done('b', 50, 2.7)], at, { speedBonus });
+        expect(board.map((r) => [r.teamId, r.score])).toEqual([['a', 100], ['b', 50]]);
+      }
+    });
+
+    test(`[${preset}] four finishers: the fastest gets +10% only once published`, () => {
+      const teams = [done('a', 100, 10), done('b', 100, 20), done('c', 100, 30), done('d', 100, 40)];
+      const live = buildRankings(game(preset), teams, at);
+      expect(live.every((r) => r.score === 100 && (r.speedBonus ?? 0) === 0)).toBe(true);
+      const pub = buildRankings(game(preset), teams, at, { speedBonus: true });
+      const byId = Object.fromEntries(pub.map((r) => [r.teamId, r]));
+      expect(byId.a.score).toBe(110);
+      expect(byId.a.points).toBe(100);
+      expect(byId.a.speedBonus).toBe(10);
+      expect(byId.d.score).toBe(100);
+      expect(pub.every((r) => r.score === (r.points ?? 0) + (r.speedBonus ?? 0))).toBe(true);
+    });
+  }
 });
 
 // Wave-G #1 (discovery-poi-bonus-channel): claimDiscoveryPoi awards its surprise-

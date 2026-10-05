@@ -153,6 +153,10 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
   copy(out, t, 'stationHintsUsed');
   copy(out, t, 'smartVerifications');
   copy(out, t, 'taskSubmissions');
+  // every-member-plays: who on the team already did their part. Missing from this list, the
+  // phone never saw its own contribution and stayed on "0 of 1" (Ahiya, 2026-10-05). Device
+  // uids of the team's own phones, not a score: visible under test mode too.
+  copy(out, t, 'taskContributions');
   copy(out, t, 'discoveryState');
   // Safety + why-are-we-paused. Withholding any of these would leave a stopped
   // participant with no explanation, which is a worse failure than a leaked score.

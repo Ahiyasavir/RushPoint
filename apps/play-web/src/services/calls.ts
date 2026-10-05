@@ -345,7 +345,8 @@ export const submitStationPhoto = callable<
 // Not idempotent — creates a fresh auto-id alert doc each call, so a retry after
 // a timeout would post a DUPLICATE SOS. Opt out of the client retry wrapper.
 export const triggerSOS = callable<
-  Ctx & { lat?: number; lng?: number; message?: string },
+  // callbackPhone: a team member's number for the organizers (sos-callback-and-authorities).
+  Ctx & { lat?: number; lng?: number; message?: string; callbackPhone?: string },
   { alertId: string }
 >('triggerSOS', { retry: false });
 
@@ -435,9 +436,15 @@ export const reportFeedItem = callable<
 export const staffSignIn = callable<
   // `name` is the staffer's self-declared display name (attribution only — the
   // server treats it as untrusted and it grants nothing). Omitted ⇒ the invite's name.
-  { ownerUid: string; gameId: string; runId: string; pin: string; name?: string },
+  // The run address is optional (staff-code-from-join-code): a code alone finds its run, and the
+  // address comes back in the result.
+  { ownerUid?: string; gameId?: string; runId?: string; pin: string; name?: string },
   // contacts: the run's staff-visible numbers (quick-dial-and-actions 2.5).
-  { customToken: string; name: string; capabilities: string[]; codeId: string; contacts?: { id: string; label: string; phone: string }[] }
+  {
+    customToken: string; name: string; capabilities: string[]; codeId: string;
+    ownerUid: string; gameId: string; runId: string;
+    contacts?: { id: string; label: string; phone: string }[];
+  }
 >('staffSignIn');
 
 // Re-mint this staff member's token with their code's CURRENT capabilities (staff-capabilities).

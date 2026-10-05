@@ -270,5 +270,15 @@ check('empty / whitespace-only yields undefined', boundStoredAnswer('   ') === u
   check('flashClaims: absent stays absent', (sanitizeTeamForParticipant(fullTeam, false) as unknown as { flashClaims?: unknown }).flashClaims === undefined);
 }
 
+// every-member-plays: "עשיתי את החלק שלי" wrote team.taskContributions, but the projection never
+// carried it, so the phone stayed on "0 מתוך 1" with the button showing (Ahiya, 2026-10-05).
+{
+  const withParts = { ...fullTeam, taskContributions: { t1: ['u1', 'u2'] } } as never;
+  for (const sealedFlag of [false, true]) {
+    const p = sanitizeTeamForParticipant(withParts, sealedFlag) as unknown as { taskContributions?: Record<string, string[]> };
+    check(`taskContributions reaches the phone (sealed=${sealedFlag})`, JSON.stringify(p.taskContributions) === JSON.stringify({ t1: ['u1', 'u2'] }));
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL TEST-MODE TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);
