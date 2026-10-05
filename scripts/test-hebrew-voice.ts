@@ -12,9 +12,11 @@ import { translations as PLAY } from '../apps/play-web/src/i18n';
 
 // A masculine-singular imperative at a word start. Not in the list: "עבור" (almost always the
 // preposition "for") and "מלא" (almost always the adjective "full").
-const SING_VERB = /(^|[\s"'(])(גלה|העתק|לחץ|בחר|הוסף|צור|שמור|ערוך|מחק|גרור|הזן|הקלד|סמן|פתח|שתף|נסה|התחל|הפעל|שלח|חפש|הורד|עדכן|בדוק|המתן|אשר|השתמש|הירשם|היכנס|צא|קרא|ודא|הקש|העלה|ייבא|שחק|תן|קח|בוא|הכנס|הגדר|הצג|הסתר|שנה|כתוב|הסר|נקה|השאר|עצב|הפוך|עיין|אפס|פנה|הגדל|בנה|השק|צפה|הירגע|התכונן)(\s|$|[.,:!?])/;
-// A singular second person: a possessive or object suffix, or a second-person past.
-const SING_YOU = /(^|[\s"'(])(שלך|עליך|אותך|ממך|בשבילך|חשבונך|שמך|אתה|שמחקת|התחברת|הוזמנת|יצרת|בחרת|הוספת)(\s|$|[.,:!?])/;
+const SING_VERB = /(^|[\s"'(])(גלה|העתק|לחץ|בחר|הוסף|צור|שמור|ערוך|מחק|גרור|הזן|הקלד|סמן|פתח|שתף|נסה|התחל|הפעל|שלח|חפש|הורד|עדכן|בדוק|המתן|אשר|השתמש|הירשם|היכנס|צא|קרא|ודא|הקש|העלה|ייבא|שחק|תן|קח|בוא|הכנס|הגדר|הצג|הסתר|שנה|כתוב|הסר|נקה|השאר|עצב|הפוך|עיין|אפס|פנה|הגדל|בנה|השק|צפה|הירגע|התכונן|ראה|נהל|טען|עקוב|פדה|קבל|תרוץ|הוספת)(\s|$|[.,:!?])/;
+// A singular second person: a possessive or object suffix, or a second-person past. ("הוספת" is
+// in SING_VERB instead: on a short button it is the noun "adding", in a sentence it is "you added".)
+// Checked at every length, see walk().
+const SING_YOU = /(^|[\s"'(])(שלך|עליך|אותך|ממך|בשבילך|חשבונך|שמך|אתה|לך|שכחת|שמחקת|התחברת|הוזמנת|יצרת|בחרת)(\s|$|[.,:!?])/;
 
 /** Hits that are other grammar, by `<app>.<path>`, each with its reason. */
 const OTHER_GRAMMAR: Record<string, string> = {
@@ -43,9 +45,12 @@ function walk(node: unknown, path: string, app: string): void {
     for (const [k, v] of Object.entries(node)) walk(v, path ? `${path}.${k}` : k, app);
     return;
   }
-  if (!s || s.trim().split(/\s+/).length < 4) return;
-  examined++;
-  if (!SING_VERB.test(s) && !SING_YOU.test(s)) return;
+  if (!s) return;
+  // A short label may keep a singular verb ("שמור"), but a singular "you" is address at any
+  // length: "אין לך חשבון?" and "התגים שלך" are three and two words (found live 2026-10-05).
+  const sentence = s.trim().split(/\s+/).length >= 4;
+  if (sentence) examined++;
+  if (!SING_YOU.test(s) && !(sentence && SING_VERB.test(s))) return;
   const id = `${app}.${path}`;
   if (id in OTHER_GRAMMAR) { seen.add(id); return; }
   hits.push(`${id} → ${s.slice(0, 90)}`);

@@ -415,7 +415,7 @@ const HE = {
       `${done} מתוך ${need} עשו את החלק שלהם במשימה הזאת`,
   },
   badges: {
-    title: 'התגים שלך',
+    title: 'התגים שלכם',
     new: 'חדש',
     first_finish: 'סיום ראשון',
     explorer: 'חוקר',
