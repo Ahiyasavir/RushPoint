@@ -1,0 +1,72 @@
+{
+  "id": "REPLACE",
+  "title": "REPLACE",
+  "source": "what this reel is and who decided what (keep it current)",
+  "rules": [
+    "read SKILL.md hard rules first"
+  ],
+  "shots": [
+    {
+      "id": "open",
+      "start": 0,
+      "end": 2.0,
+      "clip": "clips/open.mp4",
+      "in": 0,
+      "effect": "none"
+    },
+    {
+      "id": "body",
+      "start": 2.0,
+      "end": 4.5,
+      "clip": "clips/body.mp4",
+      "in": 0,
+      "effect": "none"
+    }
+  ],
+  "captions": [
+    {
+      "start": 0.05,
+      "end": 1.95,
+      "text": "TODO הוק",
+      "style": "box",
+      "y": 1150,
+      "size": 100,
+      "max_words": 4
+    }
+  ],
+  "overlays": [],
+  "sfx": [],
+  "voice": {},
+  "keep_clip_audio": 0.0,
+  "music": {
+    "style": "TODO pick one NOT used by another reel (suspense / funk / synthwave or a new one)",
+    "bpm": 100,
+    "gain": -14,
+    "energy": [
+      [
+        0,
+        1
+      ],
+      [
+        2.0,
+        3
+      ]
+    ],
+    "accents": [],
+    "drops": []
+  },
+  "default_opening": "A",
+  "openings": {},
+  "cover": {
+    "headline": {
+      "A": "TODO"
+    },
+    "frame_at": 1.0
+  },
+  "min_seconds": 15,
+  "max_seconds": 60,
+  "todo": [
+    "fill shots from the measured footage",
+    "pick the music style"
+  ]
+}

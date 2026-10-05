@@ -122,17 +122,17 @@ const HE = {
       { n: '3', title: 'תרוץ', body: 'קבוצות משחקות בעולם האמיתי; לוח התוצאות מתעדכן אוטומטית עד הסיום.' },
     ],
     signInNav:  'כניסה →',
-    footerText: 'RushPoint · בנה והפעל משחקי שדה בעולם האמיתי.',
+    footerText: 'RushPoint · בונים ומפעילים משחקי שדה בעולם האמיתי.',
     referralBadge: (runs: number) => `הוזמנתם! הירשמו ושניכם מקבלים ${runs === 1 ? 'ריצה חינמית נוספת' : `${runs} ריצות חינמיות`}`,
     privacyLink: 'מדיניות פרטיות',
     termsLink:   'תנאי שימוש',
     legalSep:    'ו',
   },
   auth: {
-    welcomeBack:    'ברוך הבא',
+    welcomeBack:    'ברוכים הבאים',
     welcomeBackSub: 'כניסה לחשבון היוצר שלכם',
     createAccount:    'צור את חשבונך',
-    createAccountSub: 'בנה משחקי שדה בחינם',
+    createAccountSub: 'בונים משחקי שדה בחינם',
     continueWithGoogle: 'המשך עם גוגל',
     orWithEmail:       'או עם אימייל',
     fullName:        'שם מלא',
@@ -305,9 +305,9 @@ const HE = {
     colMedianMinutes: 'זמן חציוני (דק׳)',
   },
   dashboard: {
-    welcomeBack:    (name: string) => `ברוך הבא, ${name}`,
+    welcomeBack:    (name: string) => `ברוכים הבאים, ${name}`,
     title:          'המשחקים שלי',
-    subtitle:       'בנה משחק שדה, השק אותו בשידור חי וראה קבוצות מתחרות בזמן אמת.',
+    subtitle:       'בונים משחק שדה, משיקים אותו בשידור חי ורואים קבוצות מתחרות בזמן אמת.',
     newGame:        '＋ משחק חדש',
     importGame:     'ייבוא משחק',
     importGameHint: 'טענו קובץ משחק ששמרתם בעבר (למשל, כזה שיוצא לכם בעבר או שקיבלתם) כדי ליצור ממנו עותק חדש.',
@@ -507,8 +507,8 @@ const HE = {
       areasHint:     'אפשר לסמן כמה. נתאים משימות למקומות שבחרתם.',
       // Shown in Quick Setup for a mission that can be played מכל מקום, in a game
       // that does have real places — the creator picks its spot.
-      placeMissionPrompt: 'זו התחנה של השלב. שאר המשימות בו נעשות איפה שהקבוצה עומדת.',
-      // What kind of spot suits a station (change: composer-siting-by-station).
+      placeMissionPrompt: 'המשימה הזאת יכולה לקרות בכל מקום. בחרו לה נקודה על המפה.',
+      // What kind of spot suits the mission (change: composer-siting-by-station).
       placeSpotHint: {
         bench: 'ספסל מתאים כאן.',
         bigTree: 'עץ גדול מתאים כאן.',
@@ -3795,7 +3795,7 @@ const EN: typeof HE = {
       areasLabel:    'Kinds of places',
       areasHint:     'Pick as many as you like. We match missions to them.',
       /** Whether to pin missions to real spots — see the note on the Hebrew entry. */
-      placeMissionPrompt: "This is the stage's station. Its other missions are played wherever the team stands.",
+      placeMissionPrompt: 'This mission works anywhere. Pick a spot for it on the map.',
       placeSpotHint: {
         bench: 'A bench works well.',
         bigTree: 'A big tree works well.',

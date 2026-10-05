@@ -951,31 +951,15 @@ function spotOf(entry: TaskBankEntry | null | undefined): SpotKind | null {
   return typeof s === 'string' && (SPOT_KINDS as readonly string[]).includes(s) ? (s as SpotKind) : null;
 }
 
-/**
- * The one mission of a stage that carries the stage's STATION pin, or null when
- * the stage invents none (change: composer-siting-by-station). A stage holding a
- * mission sited by nature already has a place, so it invents nothing. Otherwise
- * the first possible mission with a spot kind, else the first possible one.
- */
-export function stationAnchorIndex(entries: readonly (TaskBankEntry | null | undefined)[]): number | null {
-  const list = Array.isArray(entries) ? entries : [];
-  if (list.some((e) => e && bankSiting(e) === 'must')) return null;
-  const withSpot = list.findIndex((e) => e && bankSiting(e) === 'possible' && spotOf(e) !== null);
-  if (withSpot >= 0) return withSpot;
-  const any = list.findIndex((e) => e && bankSiting(e) === 'possible');
-  return any >= 0 ? any : null;
-}
-
 /** Minutes a creator spends per station pin, for the questionnaire's cost line. */
 export const MINUTES_PER_STATION_PIN = 1.5;
 
 /**
- * What the prep answer costs in pins, before anything is composed
- * (change: composer-siting-by-station). With stations a placed game invents at
- * most one pin per stage, and the stage count is known under the shared seed
- * (`previewShape`), so this is a plan like the rest of the shape panel: a
- * mission tied to a place can add one, a stage that holds one invents none.
- * Total: junk yields zero.
+ * What the prep answer costs in pins, before the game is built
+ * (change: composer-pins-follow-prep). The questionnaire and the real build share
+ * one seed (`state.seed` is what `composeGame` is handed), so this composes the
+ * game the creator will get and counts the location steps it asks for: the line
+ * is exact rather than a plan. Total: junk yields zero.
  */
 export function previewPrepCost(
   bank: readonly TaskBankEntry[],
@@ -987,8 +971,14 @@ export function previewPrepCost(
     const a = (answers ?? {}) as Partial<ComposerAnswers>;
     const ctx = buildFitContext(answers, recent ?? { recentBankKeys: [] });
     if (!wantsPlacedMissions(ctx.setting, a.locationMissions === true)) return { pins: 0, minutes: 0 };
-    const shape = previewShape(Array.isArray(bank) ? bank : [], answers, Number.isFinite(seed) ? seed : 1, recent);
-    const pins = shape.possible ? shape.stages.length : 0;
+    const result = composeGame(
+      Array.isArray(bank) ? bank : [],
+      answers,
+      { placeMissionPrompt: () => 'x' } as unknown as ComposerDescriptionCopy,
+      seededRng(Number.isFinite(seed) ? seed : 1),
+      recent ?? { recentBankKeys: [] },
+    );
+    const pins = result ? result.wizardSteps.filter((st) => st.targetFieldPath === 'coordinates').length : 0;
     return { pins, minutes: Math.ceil(pins * MINUTES_PER_STATION_PIN) };
   } catch {
     return { pins: 0, minutes: 0 };
@@ -1588,11 +1578,10 @@ export function composeGame(
     const tasks: Task[] = [];
     const stageId = uuid();
 
-    // Stations, not a pin per mission (change: composer-siting-by-station): at
-    // most ONE invented pin per stage, chosen AFTER the fill so the missions the
-    // rng picked are exactly what they were; only which of them carries a pin moved.
-    const anchor = placedGame ? stationAnchorIndex(chosen[s]) : null;
-    for (const [slotInStage, entry] of chosen[s].entries()) {
+    // A pin for every mission a place can help (change: composer-pins-follow-prep):
+    // choosing a location level on the prep scale IS choosing to place locations,
+    // so the composer does not second-guess it with one station per stage.
+    for (const entry of chosen[s]) {
       if (!entry) continue;
       let task: Task;
       try {
@@ -1610,7 +1599,7 @@ export function composeGame(
       // actually ask for that pin. With no prompt to show, the creator would meet
       // a mandatory blank field with no explanation — leave the mission playable
       // from anywhere instead.
-      const siteIt = placedGame && placePrompt !== '' && slotInStage === anchor;
+      const siteIt = placedGame && placePrompt !== '' && bankSiting(entry) === 'possible';
       if (siteIt) {
         task.locationless = false;
         task.triggerMode = 'radius';

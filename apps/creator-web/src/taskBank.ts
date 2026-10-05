@@ -3768,7 +3768,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // seconds of typing into an actual small social task, and it is what makes
     // the mission belong in a FIELD game rather than a pub quiz.
     key: 'trivia-bones',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'trivia-fact',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
@@ -3790,7 +3789,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'trivia-longest-river',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'trivia-fact',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
@@ -4065,7 +4063,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'the-hard-riddle',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
       'office', 'school', 'mall', 'park', 'cityCenter',
@@ -4259,7 +4256,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // undisputed chronological order, same "ask around, no Googling" rule the
     // other trivia missions use so it stays a field-game beat, not a quiz app.
     key: 'invention-order',
-    siting: 'never',
     // NOT tagged family: 'trivia-fact' — that family groups the pick-an-answer
     // quizzes (trivia-bones, trivia-longest-river), which really are one
     // mechanic with different questions. Dragging five items into
@@ -4694,7 +4690,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   // a spoiler of the answer.
   {
     key: 'anagram-easy',
-    siting: 'never',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'youth', 'mixed', 'easy',
@@ -4715,7 +4710,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'anagram-medium',
-    siting: 'never',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'mixed',
@@ -4736,7 +4730,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'anagram-hard',
-    siting: 'never',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'adults', 'corporate', 'mixed',
@@ -4796,7 +4789,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Identical-kit-per-team, same precedent as challenge-shampoo-pitch — no
     // hunting, no scarcity, every team assembles their own copy.
     key: 'puzzle-code',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'home', 'adults', 'corporate', 'hard'],
     difficulty: 7,
@@ -4819,7 +4811,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'mystery-gift',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
     difficulty: 3,
@@ -4845,7 +4836,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Rule 19: every balloon of the ONE chosen color carries the same code, so
     // there is never a "which one is correct" ambiguity for the team.
     key: 'balloon-message',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'medium'],
     difficulty: 4,
@@ -4930,7 +4920,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // one thing in the room that can genuinely answer back — teams that read it
     // aloud usually hear it before they solve it.
     key: 'echo-riddle',
-    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate',
       'mixed', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall',
@@ -4954,7 +4943,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // in a week) are true for every reader, so nothing here can come out
     // ambiguous the way a venue-dependent count could (rule 8/31).
     key: 'vault-combination-riddle',
-    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate',
       'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall',
@@ -4987,7 +4975,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // difficulty is re-priced from 5 to 3 (rule 75): what is left is doing three
     // things in the right order.
     key: 'disarm-the-device',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults',
       'corporate', 'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood',
@@ -5012,7 +4999,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // played (rule 31): every home, office and school bathroom holds one. The
     // youngest-friendly entry of the three, and the only one carrying `home`.
     key: 'household-riddle-comb',
-    siting: 'never',
     sourceTemplateKey: 'authored',
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'forest',
       'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor',
@@ -5302,7 +5288,6 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Rule 15: the puzzle is authored, with a real checkable answer, not a
     // mechanic label.
     key: 'thinking-room',
-    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: [
       'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'park',

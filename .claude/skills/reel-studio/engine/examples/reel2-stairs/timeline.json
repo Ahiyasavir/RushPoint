@@ -1,0 +1,423 @@
+{
+  "id": "reel2-stairs",
+  "title": "ריל 2 · כל קפיצה, הוצאה",
+  "source": "EDIT-SPEC § סרטון 2 + Ahiya's notes: street take 1 (20261001_152507 = 2A_take2, he looks at the camera), dead time cut, callouts, music",
+  "rules": [
+    "result first in opening B",
+    "zero speech",
+    "sfx only, no music",
+    "no dashes, maqaf included (spec's ו־1,000 written ו 1,000)",
+    "no invented numbers",
+    "Ahiya 2026-10-02 v7: the staircase IS the receipt: each expense written on the step he lands on (positions measured on landing frames + step edges of the empty plate); one continuous take, 1.0x"
+  ],
+  "_take_notes": "Street take 1: hops every ~1.6s; the last 11 (motion peak + 0.08s) used, 0.55s before and 0.72s after each touchdown kept.",
+  "shots": [
+    {
+      "id": "take0_0",
+      "start": 0.0,
+      "end": 2.1333333333333333,
+      "clip": "clips/2A_take2.mp4",
+      "in": 8.9,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "take0_1",
+      "start": 2.1333333333333333,
+      "end": 4.266666666666667,
+      "clip": "clips/2A_take2.mp4",
+      "in": 11.0333,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "take0_2",
+      "start": 4.266666666666667,
+      "end": 6.4,
+      "clip": "clips/2A_take2.mp4",
+      "in": 13.1667,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "take1_0",
+      "start": 6.4,
+      "end": 8.2,
+      "clip": "clips/2A_take2.mp4",
+      "in": 15.3,
+      "speed": 0.5,
+      "effect": "none"
+    },
+    {
+      "id": "take2_0",
+      "start": 8.2,
+      "end": 10.633333333333333,
+      "clip": "clips/2A_take2.mp4",
+      "in": 16.2,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "take2_1",
+      "start": 10.633333333333333,
+      "end": 13.066666666666666,
+      "clip": "clips/2A_take2.mp4",
+      "in": 18.6333,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "take2_2",
+      "start": 13.066666666666666,
+      "end": 15.5,
+      "clip": "clips/2A_take2.mp4",
+      "in": 21.0667,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "take2_3",
+      "start": 15.5,
+      "end": 17.933333333333334,
+      "clip": "clips/2A_take2.mp4",
+      "in": 23.5,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "take3_0",
+      "start": 17.933333333333334,
+      "end": 19.833333333333332,
+      "clip": "clips/2A_take2.mp4",
+      "in": 25.95,
+      "speed": 0.33,
+      "effect": "none"
+    },
+    {
+      "id": "take3_1",
+      "start": 19.833333333333332,
+      "end": 21.733333333333334,
+      "clip": "clips/2A_take2.mp4",
+      "in": 26.577,
+      "speed": 0.33,
+      "effect": "none"
+    }
+  ],
+  "captions": [
+    {
+      "start": 6.987,
+      "end": 8.717,
+      "text": "אבל זה בכלל לא החלק היקר.",
+      "style": "box",
+      "y": 1300,
+      "size": 104,
+      "max_words": 3
+    },
+    {
+      "start": 17.95,
+      "end": 21.683,
+      "style": "box",
+      "y": 1545,
+      "size": 88,
+      "max_words": 4,
+      "words": [
+        [
+          "אני",
+          17.95,
+          18.19
+        ],
+        [
+          "אעשה",
+          18.19,
+          18.49
+        ],
+        [
+          "הכל",
+          18.49,
+          18.92
+        ],
+        [
+          "כדי",
+          18.92,
+          19.24
+        ],
+        [
+          "שההשקעה",
+          19.24,
+          19.79
+        ],
+        [
+          "הזאת",
+          19.79,
+          19.93
+        ],
+        [
+          "לא",
+          19.93,
+          20.05
+        ],
+        [
+          "תהיה",
+          20.05,
+          20.28
+        ],
+        [
+          "לשווא,",
+          20.28,
+          20.72
+        ],
+        [
+          "תעקבו.",
+          20.96,
+          21.36
+        ]
+      ]
+    }
+  ],
+  "overlays": [],
+  "sfx": [],
+  "voice": {
+    "file": "voice/end.wav",
+    "at": 17.95,
+    "gain": 0
+  },
+  "keep_clip_audio": 0.0,
+  "loop": {
+    "note": "one take, top to bottom; ends close on him, loops to him at the top"
+  },
+  "default_opening": "A",
+  "openings": {
+    "A": {
+      "cut": 2.1333333333333333,
+      "why": "the staircase is the receipt",
+      "shots": [
+        {
+          "id": "take0_0",
+          "start": 0.0,
+          "end": 2.1333333333333333,
+          "clip": "clips/2A_take2.mp4",
+          "in": 8.9,
+          "speed": 1.0,
+          "effect": "none"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.05,
+          "end": 1.95,
+          "text": "כל מדרגה = מה שהאפליקציה שבניתי בגיל 17 עלתה לי.",
+          "style": "box",
+          "y": 1450,
+          "size": 90,
+          "max_words": 5
+        }
+      ]
+    },
+    "B": {
+      "cut": 2.1333333333333333,
+      "why": "the staircase is the receipt",
+      "shots": [
+        {
+          "id": "take0_0",
+          "start": 0.0,
+          "end": 2.1333333333333333,
+          "clip": "clips/2A_take2.mp4",
+          "in": 8.9,
+          "speed": 1.0,
+          "effect": "none"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.05,
+          "end": 1.95,
+          "text": "₪1,900 ו 1,000 שעות. והחלק היקר בכלל לא בכסף.",
+          "style": "box",
+          "y": 1450,
+          "size": 90,
+          "max_words": 5
+        }
+      ]
+    },
+    "C": {
+      "cut": 2.1333333333333333,
+      "why": "the staircase is the receipt",
+      "shots": [
+        {
+          "id": "take0_0",
+          "start": 0.0,
+          "end": 2.1333333333333333,
+          "clip": "clips/2A_take2.mp4",
+          "in": 8.9,
+          "speed": 1.0,
+          "effect": "none"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.05,
+          "end": 1.95,
+          "text": "11 מדרגות. 11 דברים שהאפליקציה הזאת עלתה לי.",
+          "style": "box",
+          "y": 1450,
+          "size": 90,
+          "max_words": 5
+        }
+      ]
+    }
+  },
+  "cover": {
+    "headline": {
+      "A": "כל קפיצה, הוצאה",
+      "B": "₪1,900 ו 1,000 שעות",
+      "C": "11 מדרגות. 11 הוצאות."
+    },
+    "frame_at": 18.2
+  },
+  "ig_caption": "השורה האחרונה עוד ריקה.",
+  "todo": [
+    "usd_ils_rate in config.json on edit day ($451 x rate + ₪240 should be ≈ ₪1,900)",
+    "narration per landing (Ahiya records 2026-10-02): one short line per step, then fit speeds"
+  ],
+  "min_seconds": 15,
+  "music": {
+    "style": "funk",
+    "bpm": 94.737,
+    "gain": -13,
+    "seed": 22,
+    "energy": [
+      [
+        0,
+        1
+      ],
+      [
+        2.0,
+        2
+      ],
+      [
+        6.966666666666667,
+        2
+      ],
+      [
+        8.766666666666667,
+        3
+      ],
+      [
+        17.8,
+        1
+      ]
+    ],
+    "accents": [],
+    "drops": [
+      [
+        6.986666666666666,
+        8.667
+      ]
+    ]
+  },
+  "progress_bar": {
+    "color": "0xFF5722",
+    "h": 10,
+    "y": 196
+  },
+  "dissolve": 0,
+  "stair_labels": {
+    "landings": [
+      0.6666666666666666,
+      2.0,
+      3.566666666666667,
+      5.066666666666666,
+      6.966666666666667,
+      8.766666666666667,
+      10.766666666666667,
+      12.4,
+      14.3,
+      16.1,
+      17.8
+    ],
+    "items": [
+      {
+        "text": "קוד עם AI",
+        "amount": "$400+",
+        "y": 556,
+        "x": 580
+      },
+      {
+        "text": "שיווק",
+        "amount": "₪240+",
+        "y": 590,
+        "x": 560
+      },
+      {
+        "text": "שרתים",
+        "amount": "$40",
+        "y": 628,
+        "x": 570
+      },
+      {
+        "text": "דומיין",
+        "amount": "$11",
+        "y": 672,
+        "x": 560
+      },
+      {
+        "kind": "blank",
+        "text": "",
+        "y": 712,
+        "x": 560
+      },
+      {
+        "text": "שעות",
+        "amount": "1,000+",
+        "accent": "fire",
+        "y": 744,
+        "x": 560
+      },
+      {
+        "text": "מאז",
+        "amount": "פסח",
+        "accent": "fire",
+        "y": 880,
+        "x": 530
+      },
+      {
+        "text": "",
+        "amount": "08:00 עד 02:00",
+        "accent": "fire",
+        "y": 972,
+        "x": 520
+      },
+      {
+        "text": "",
+        "amount": "בין הבגרויות",
+        "accent": "fire",
+        "y": 1068,
+        "x": 520
+      },
+      {
+        "text": "",
+        "amount": "בכל הפסקה",
+        "accent": "fire",
+        "y": 1192,
+        "x": 540
+      },
+      {
+        "kind": "total",
+        "text": "סה״כ",
+        "amount": "₪1,900 + 1,000 שעות",
+        "y": 1440,
+        "x": 560
+      }
+    ],
+    "y_top": 556,
+    "y_bottom": 1192,
+    "size_top": 40,
+    "size_bottom": 66,
+    "gap": 170,
+    "total_y": 1290,
+    "total_separate": true
+  },
+  "max_seconds": 30,
+  "shelved": true,
+  "_shelved_note": "shelved by Ahiya 2026-10-02; kept as docs/marketing/videos/drafts/11-stairs"
+}

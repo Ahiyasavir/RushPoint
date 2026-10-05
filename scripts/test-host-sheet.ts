@@ -195,8 +195,8 @@ for (const junk of [undefined, null, {}, { stages: 'nope' }, { stages: [null, { 
 }
 check('an empty game has a cover and an empty route',
   buildHostSheet({ title: 'Empty', stages: [] } as never, { options: ON, ...ctx }).stages.length === 0);
-check('the plot has a point per located card', sheet.plot.length === cards.filter((c) => c.location.kind === 'point').length);
-check('no map plot when the map is off', buildHostSheet(game, { options: { ...ON, includeMap: false }, ...ctx }).plot.length === 0);
+check('the street map has a marker per located card (change: host-sheet-street-map)', (sheet.map?.markers.length ?? 0) === cards.filter((c) => c.location.kind === 'point').length && (sheet.map?.tiles.length ?? 0) > 0);
+check('no map when the map is off', buildHostSheet(game, { options: { ...ON, includeMap: false }, ...ctx }).map === null);
 
 // The printed footer carries the game title inside a CSS string.
 check('cssString escapes quotes', cssString('Game "X"') === '"Game \\"X\\""', cssString('Game "X"'));

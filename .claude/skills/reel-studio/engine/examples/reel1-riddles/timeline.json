@@ -1,0 +1,734 @@
+{
+  "id": "reel1-riddles",
+  "title": "ריל 1 · 30 שניות, 1%",
+  "source": "EDIT-SPEC סרטון 1, final version relayed by אודי 2026-10-01 (supersedes every earlier reel 1 update)",
+  "rules": [
+    "answers 1 to 4 shown after each timer (Ahiya, 2026-10-01); riddle 5 never answered, 'התשובה בתגובות'",
+    "the CTA ('הגעת עד לכאן') comes right after the 10% riddle (4), full take 1, no splice",
+    "on screen percentages are display numbers; speech says 'האחוזון העליון', captions follow speech",
+    "no maqaf",
+    "Ahiya 2026-10-01 v4: voice 1.12x, pauses tightened; riddles 3.5/4/7/8/9s; a 'השאלה האחרונה בעוד N' window counts down over the CTA into riddle 5; music bed (synthesised), ducked under his voice"
+  ],
+  "shots": [
+    {
+      "id": "open-a",
+      "start": 0,
+      "end": 2.0,
+      "graphic": "@intro",
+      "effect": "none"
+    },
+    {
+      "id": "open-b",
+      "start": 2.0,
+      "end": 4.033333333333333,
+      "graphic": "@intro",
+      "effect": "none"
+    },
+    {
+      "id": "q1",
+      "start": 4.033333333333333,
+      "end": 7.533333333333333,
+      "graphic": "@q1",
+      "timer": {
+        "x": 70,
+        "y": 640,
+        "w": 940,
+        "h": 26,
+        "dur": 3.5,
+        "count": true,
+        "count_y": 540
+      },
+      "effect": "none"
+    },
+    {
+      "id": "q1-ans",
+      "start": 7.533333333333333,
+      "end": 9.133333333333333,
+      "graphic": "@q1a",
+      "effect": "none"
+    },
+    {
+      "id": "q2",
+      "start": 9.133333333333333,
+      "end": 13.133333333333333,
+      "graphic": "@q2",
+      "timer": {
+        "x": 70,
+        "y": 640,
+        "w": 940,
+        "h": 26,
+        "dur": 4.0,
+        "count": true,
+        "count_y": 540
+      },
+      "effect": "none"
+    },
+    {
+      "id": "q2-ans",
+      "start": 13.133333333333333,
+      "end": 14.733333333333333,
+      "graphic": "@q2a",
+      "effect": "none"
+    },
+    {
+      "id": "q3",
+      "start": 14.733333333333333,
+      "end": 21.733333333333334,
+      "graphic": "@q3",
+      "timer": {
+        "x": 70,
+        "y": 640,
+        "w": 940,
+        "h": 26,
+        "dur": 7.0,
+        "count": true,
+        "count_y": 540
+      },
+      "effect": "none"
+    },
+    {
+      "id": "q3-ans",
+      "start": 21.733333333333334,
+      "end": 23.333333333333332,
+      "graphic": "@q3a",
+      "effect": "none"
+    },
+    {
+      "id": "q4",
+      "start": 23.333333333333332,
+      "end": 31.333333333333332,
+      "graphic": "@q4",
+      "timer": {
+        "x": 70,
+        "y": 640,
+        "w": 940,
+        "h": 26,
+        "dur": 8.0,
+        "count": true,
+        "count_y": 540
+      },
+      "effect": "none"
+    },
+    {
+      "id": "q4-ans",
+      "start": 31.333333333333332,
+      "end": 32.93333333333333,
+      "graphic": "@q4a",
+      "effect": "none"
+    },
+    {
+      "id": "mid-10",
+      "start": 32.93333333333333,
+      "end": 35.03333333333333,
+      "graphic": "@mid10",
+      "effect": "none"
+    },
+    {
+      "id": "mid-walk",
+      "start": 35.03333333333333,
+      "end": 37.13333333333333,
+      "clip": "clips/broll_walk_phone.mp4",
+      "in": 16.4,
+      "crop": [
+        330,
+        380,
+        600,
+        1067
+      ],
+      "effect": "none"
+    },
+    {
+      "id": "mid-door",
+      "start": 37.13333333333333,
+      "end": 39.5,
+      "clip": "clips/broll_door.mp4",
+      "in": 18.6,
+      "effect": "none"
+    },
+    {
+      "id": "q5",
+      "start": 39.5,
+      "end": 48.5,
+      "graphic": "@q5",
+      "timer": {
+        "x": 70,
+        "y": 640,
+        "w": 940,
+        "h": 26,
+        "dur": 9.0,
+        "count": true,
+        "count_y": 540
+      },
+      "effect": "none"
+    },
+    {
+      "id": "end",
+      "start": 48.5,
+      "end": 52.5,
+      "graphic": "@end",
+      "effect": "none"
+    }
+  ],
+  "screens": {
+    "q1": {
+      "type": "quiz",
+      "n": 1,
+      "of": 5,
+      "q": "כמה ימים יש בשנה?",
+      "pct": "80%",
+      "ltr": false
+    },
+    "q2": {
+      "type": "quiz",
+      "n": 2,
+      "of": 5,
+      "q": "מה יותר כבד, קילו ברזל או קילו נוצות?",
+      "pct": "50%",
+      "ltr": false
+    },
+    "q3": {
+      "type": "quiz",
+      "n": 3,
+      "of": 5,
+      "q": "לאבא של דני יש שלושה בנים: שלום, שלומי, ו...?",
+      "pct": "20%",
+      "ltr": false
+    },
+    "q4": {
+      "type": "quiz",
+      "n": 4,
+      "of": 5,
+      "q": "1, 1, 2, 3, 5, 8, ?",
+      "pct": "10%",
+      "ltr": true,
+      "q_size": 62
+    },
+    "q5": {
+      "type": "quiz",
+      "n": 5,
+      "of": 5,
+      "q": "8 ÷ 2(2+2) = ?",
+      "pct": "1%",
+      "ltr": true,
+      "q_size": 72
+    },
+    "end": {
+      "lines": [
+        {
+          "text": "התשובה בתגובות.",
+          "size": 130,
+          "color": "#FFB300"
+        },
+        {
+          "text": "פתרת? כתוב אותה.",
+          "size": 116
+        }
+      ],
+      "arrow_to_comments": true,
+      "arrow_label": "כתוב כאן",
+      "arrow_y": 1250
+    },
+    "openB": {
+      "lines": [
+        {
+          "text": "חמש חידות.",
+          "size": 124
+        },
+        {
+          "text": "רק האחוזון העליון פותר את האחרונה.",
+          "size": 92,
+          "accent": {
+            "האחוזון": "#FFB300",
+            "העליון": "#FFB300"
+          }
+        }
+      ]
+    },
+    "intro": {
+      "type": "intro",
+      "n": "30",
+      "unit": "שניות",
+      "chip": "5 חידות",
+      "cta": "התחל",
+      "hint": "תספור כמה אתה פותר"
+    },
+    "pill": {
+      "type": "pill",
+      "label": "עקוב",
+      "y": 1290
+    },
+    "mid10": {
+      "lines": [
+        {
+          "text": "10%",
+          "size": 300,
+          "color": "#FFB300",
+          "css": "direction:ltr"
+        },
+        {
+          "text": "העליונים",
+          "size": 110
+        }
+      ]
+    },
+    "q1a": {
+      "type": "quiz",
+      "n": 1,
+      "of": 5,
+      "q": "כמה ימים יש בשנה?",
+      "pct": "80%",
+      "ltr": false,
+      "reveal": true,
+      "answer": "365"
+    },
+    "q2a": {
+      "type": "quiz",
+      "n": 2,
+      "of": 5,
+      "q": "מה יותר כבד, קילו ברזל או קילו נוצות?",
+      "pct": "50%",
+      "ltr": false,
+      "reveal": true,
+      "answer": "אותו דבר"
+    },
+    "q3a": {
+      "type": "quiz",
+      "n": 3,
+      "of": 5,
+      "q": "לאבא של דני יש שלושה בנים: שלום, שלומי, ו...?",
+      "pct": "20%",
+      "ltr": false,
+      "reveal": true,
+      "answer": "דני"
+    },
+    "q4a": {
+      "type": "quiz",
+      "n": 4,
+      "of": 5,
+      "q": "1, 1, 2, 3, 5, 8, ?",
+      "pct": "10%",
+      "ltr": true,
+      "q_size": 62,
+      "reveal": true,
+      "answer": "13"
+    }
+  },
+  "captions": [
+    {
+      "start": 32.93333333333333,
+      "end": 39.45,
+      "style": "big",
+      "y": 1180,
+      "size": 96,
+      "max_words": 4,
+      "accent_words": [
+        "10%"
+      ],
+      "words": [
+        [
+          "הגעת",
+          33.06,
+          33.79
+        ],
+        [
+          "עד",
+          33.79,
+          33.97
+        ],
+        [
+          "לכאן?",
+          33.97,
+          34.27
+        ],
+        [
+          "אתה",
+          34.44,
+          34.8
+        ],
+        [
+          "ב",
+          34.8,
+          34.92
+        ],
+        [
+          "10%",
+          34.92,
+          35.52
+        ],
+        [
+          "העליונים.",
+          35.52,
+          35.95
+        ],
+        [
+          "תעקוב,",
+          36.11,
+          36.61
+        ],
+        [
+          "אני",
+          36.75,
+          37.22
+        ],
+        [
+          "בן",
+          37.22,
+          37.38
+        ],
+        [
+          "17",
+          37.38,
+          37.73
+        ],
+        [
+          "ובונה",
+          37.73,
+          38.23
+        ],
+        [
+          "אפליקציה",
+          38.23,
+          38.72
+        ],
+        [
+          "לבד.",
+          38.72,
+          39.0
+        ]
+      ]
+    }
+  ],
+  "overlays": [
+    {
+      "png": "C:\\Users\\savir\\Desktop\\RushPoint-reels-work\\reel1-riddles\\graphics\\countdown_07.png",
+      "start": 32.933,
+      "end": 33.5,
+      "kind": "text"
+    },
+    {
+      "png": "C:\\Users\\savir\\Desktop\\RushPoint-reels-work\\reel1-riddles\\graphics\\countdown_06.png",
+      "start": 33.5,
+      "end": 34.5,
+      "kind": "text"
+    },
+    {
+      "png": "C:\\Users\\savir\\Desktop\\RushPoint-reels-work\\reel1-riddles\\graphics\\countdown_05.png",
+      "start": 34.5,
+      "end": 35.5,
+      "kind": "text"
+    },
+    {
+      "png": "C:\\Users\\savir\\Desktop\\RushPoint-reels-work\\reel1-riddles\\graphics\\countdown_04.png",
+      "start": 35.5,
+      "end": 36.5,
+      "kind": "text"
+    },
+    {
+      "png": "C:\\Users\\savir\\Desktop\\RushPoint-reels-work\\reel1-riddles\\graphics\\countdown_03.png",
+      "start": 36.5,
+      "end": 37.5,
+      "kind": "text"
+    },
+    {
+      "png": "C:\\Users\\savir\\Desktop\\RushPoint-reels-work\\reel1-riddles\\graphics\\countdown_02.png",
+      "start": 37.5,
+      "end": 38.5,
+      "kind": "text"
+    },
+    {
+      "png": "C:\\Users\\savir\\Desktop\\RushPoint-reels-work\\reel1-riddles\\graphics\\countdown_01.png",
+      "start": 38.5,
+      "end": 39.5,
+      "kind": "text"
+    },
+    {
+      "png": "@pill",
+      "start": 36.11,
+      "end": 39.5,
+      "kind": "text"
+    }
+  ],
+  "sfx": [
+    {
+      "at": 4.033333333333333,
+      "file": "sfx/pop.wav",
+      "gain": -8
+    },
+    {
+      "at": 7.533333333333333,
+      "file": "sfx/ding.wav",
+      "gain": -2
+    },
+    {
+      "at": 9.133333333333333,
+      "file": "sfx/pop.wav",
+      "gain": -8
+    },
+    {
+      "at": 13.133333333333333,
+      "file": "sfx/ding.wav",
+      "gain": -2
+    },
+    {
+      "at": 14.733333333333333,
+      "file": "sfx/pop.wav",
+      "gain": -8
+    },
+    {
+      "at": 21.733333333333334,
+      "file": "sfx/ding.wav",
+      "gain": -2
+    },
+    {
+      "at": 23.333333333333332,
+      "file": "sfx/pop.wav",
+      "gain": -8
+    },
+    {
+      "at": 31.333333333333332,
+      "file": "sfx/ding.wav",
+      "gain": -2
+    },
+    {
+      "at": 32.933,
+      "file": "sfx/tick.wav",
+      "gain": -6
+    },
+    {
+      "at": 33.5,
+      "file": "sfx/tick.wav",
+      "gain": -6
+    },
+    {
+      "at": 34.5,
+      "file": "sfx/tick.wav",
+      "gain": -6
+    },
+    {
+      "at": 35.5,
+      "file": "sfx/tick.wav",
+      "gain": -6
+    },
+    {
+      "at": 36.5,
+      "file": "sfx/tick.wav",
+      "gain": -1
+    },
+    {
+      "at": 37.5,
+      "file": "sfx/tick.wav",
+      "gain": -1
+    },
+    {
+      "at": 38.5,
+      "file": "sfx/tick.wav",
+      "gain": -1
+    },
+    {
+      "at": 39.5,
+      "file": "sfx/hit.wav",
+      "gain": -2
+    },
+    {
+      "at": 48.5,
+      "file": "sfx/hit.wav",
+      "gain": -3
+    }
+  ],
+  "voice": {
+    "file": "voice/mid_cta.wav",
+    "at": 32.93333333333333,
+    "gain": 0
+  },
+  "keep_clip_audio": 0.0,
+  "default_opening": "A",
+  "openings": {
+    "A": {
+      "cut": 4.033333333333333,
+      "why": "his voice: 'יש לך 30 שניות להוכיח שאתה באחוזון העליון.' over the app's start card",
+      "shots": [
+        {
+          "id": "open-a",
+          "start": 0,
+          "end": 2.0,
+          "graphic": "@intro",
+          "effect": "none"
+        },
+        {
+          "id": "open-b",
+          "start": 2.0,
+          "end": 4.033333333333333,
+          "graphic": "@intro",
+          "effect": "none"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.0,
+          "end": 3.9833333333333334,
+          "style": "big",
+          "y": 1060,
+          "size": 100,
+          "max_words": 4,
+          "words": [
+            [
+              "יש",
+              0.11,
+              0.79
+            ],
+            [
+              "לך",
+              0.79,
+              1.0
+            ],
+            [
+              "30",
+              1.0,
+              1.34
+            ],
+            [
+              "שניות",
+              1.34,
+              1.91
+            ],
+            [
+              "להוכיח",
+              1.91,
+              2.48
+            ],
+            [
+              "שאתה",
+              2.48,
+              2.8
+            ],
+            [
+              "באחוזון",
+              2.8,
+              3.27
+            ],
+            [
+              "העליון.",
+              3.27,
+              3.59
+            ]
+          ]
+        }
+      ],
+      "sfx": [
+        {
+          "at": 0.0,
+          "file": "voice/open_A.wav",
+          "gain": 0
+        }
+      ]
+    },
+    "B": {
+      "cut": 4.033333333333333,
+      "why": "text only",
+      "shots": [
+        {
+          "id": "openB",
+          "start": 0,
+          "end": 2.0,
+          "graphic": "@openB",
+          "effect": "none"
+        },
+        {
+          "id": "openB-b",
+          "start": 2.0,
+          "end": 4.033333333333333,
+          "graphic": "@openB",
+          "effect": "none"
+        }
+      ],
+      "captions": []
+    },
+    "C": {
+      "cut": 4.033333333333333,
+      "why": "text only until C is recorded",
+      "shots": [
+        {
+          "id": "open-a",
+          "start": 0,
+          "end": 2.0,
+          "graphic": "@intro",
+          "effect": "none"
+        },
+        {
+          "id": "open-b",
+          "start": 2.0,
+          "end": 4.033333333333333,
+          "graphic": "@intro",
+          "effect": "none"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.1,
+          "end": 3.9833333333333334,
+          "text": "רק האחוזון העליון פותר את כל החמש.",
+          "style": "big",
+          "y": 1060,
+          "size": 100,
+          "max_words": 4
+        }
+      ]
+    }
+  },
+  "cover": {
+    "headline": {
+      "A": "1% פותרים",
+      "B": "1% פותרים",
+      "C": "1% פותרים"
+    },
+    "frame_at": 40.5
+  },
+  "ig_caption": "פתרת את כולן? כתוב את התשובה לחידה האחרונה בתגובות.",
+  "loop": {
+    "note": "end card hard cuts to the opening selfie"
+  },
+  "todo": [
+    "opening C: not recorded (text only)",
+    "pin the answer (16) as the first comment after posting"
+  ],
+  "max_seconds": 60,
+  "music": {
+    "style": "suspense",
+    "bpm": 92,
+    "gain": -15,
+    "seed": 11,
+    "energy": [
+      [
+        0,
+        1
+      ],
+      [
+        4.033333333333333,
+        2
+      ],
+      [
+        14.733333333333333,
+        3
+      ],
+      [
+        32.93333333333333,
+        1
+      ],
+      [
+        39.5,
+        4
+      ],
+      [
+        48.5,
+        0
+      ]
+    ],
+    "accents": [
+      7.533333333333333,
+      13.133333333333333,
+      21.733333333333334,
+      31.333333333333332
+    ],
+    "drops": []
+  }
+}

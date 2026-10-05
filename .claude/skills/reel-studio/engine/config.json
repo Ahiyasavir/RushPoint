@@ -1,0 +1,106 @@
+{
+  "_comment": "Single settings file for every reel. Anything marked TODO is a number or fact Ahiya has not given yet; qa.py --final refuses to pass while one is still used by a reel.",
+  "paths": {
+    "work_root_windows": "%USERPROFILE%\\Desktop\\RushPoint-reels-work",
+    "out_root_windows": "%USERPROFILE%\\Desktop\\RushPoint-reels-out",
+    "work_root_fallback": "_work",
+    "out_root_fallback": "_out",
+    "browser_windows": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "browser_fallbacks": [
+      "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+      "/usr/bin/chromium",
+      "/usr/bin/google-chrome"
+    ],
+    "logo": "../../../../apps/play-web/public/icon.svg",
+    "_logo_comment": "Relative to this folder. Point it at C:\\\\Users\\\\ahiya\\\\Desktop\\\\RushPoint-logo\\\\<file> to use the master logo."
+  },
+  "video": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "min_seconds": 25,
+    "max_seconds": 30,
+    "max_shot_seconds": 3.0,
+    "crf_master": 16,
+    "crf_delivery": 21,
+    "audio_lufs": -14,
+    "audio_tp": -1.0
+  },
+  "safe_zone": {
+    "top": 250,
+    "bottom": 500,
+    "platform_ui_bottom": 1420,
+    "platform_ui_strict": true,
+    "_platform_comment": "Founder rule 14 (2026-09-28): text above y 1420 and left of x 960 below y 850, or it lands under Instagram's description/name/buttons. Strict = fails --final.",
+    "right_column_x": 960,
+    "right_column_from_y": 850,
+    "_comment": "Founder rule 14: readable things live in y 250..1420 and, below y 850, left of x 960 (IG/TikTok description, name, like/comment/share column)."
+  },
+  "colors": {
+    "fire": "#FF5722",
+    "amber": "#FFB300",
+    "plasma": "#06B6D4",
+    "green": "#10B981",
+    "dark": "#1C1917",
+    "bone": "#F5EFE6"
+  },
+  "fonts": {
+    "_comment": "RushPoint rule (relayed by אודי 2026-10-01): only Inter, Space Grotesk, JetBrains Mono. None has a Hebrew glyph, so Hebrew falls back to the system font; 'hebrew_fallback' names it explicitly (Arial, bold) so the fallback is deterministic in both HTML and libass instead of whatever the OS picks. To return to the app's Rubik/Assistant pair, set display/body back and hebrew_fallback to the same names.",
+    "display": "Space Grotesk",
+    "display_weight": 700,
+    "body": "Inter",
+    "body_weight": 700,
+    "mono": "JetBrains Mono",
+    "mono_weight": 700,
+    "latin_display": "Space Grotesk",
+    "latin_display_weight": 700,
+    "hebrew_fallback": "Arial"
+  },
+  "captions": {
+    "active_color": "#FFB300",
+    "idle_color": "#FFFFFF",
+    "outline_color": "#000000",
+    "sub_size": 66,
+    "big_size": 118,
+    "sub_center_y": 1180,
+    "big_center_y": 760,
+    "max_words_per_group": 4,
+    "font": "Arial",
+    "bold": true,
+    "outline_px": 10,
+    "center_x": 505,
+    "max_width": 860
+  },
+  "money": {
+    "usd_ils_rate": "TODO",
+    "_rate_comment": "ILS per 1 USD. Update on edit day (Bank of Israel representative rate). The receipt's dollar line renders TODO until this is a number."
+  },
+  "landscape": {
+    "_comment": "RP_FORMAT=landscape (16:9, projected in a classroom). Merged over the blocks of the same name.",
+    "video": {
+      "width": 1920,
+      "height": 1080,
+      "min_seconds": 90,
+      "max_seconds": 180,
+      "max_shot_seconds": 8.0
+    },
+    "safe_zone": {
+      "top": 60,
+      "bottom": 60,
+      "platform_ui_bottom": 1080,
+      "platform_ui_strict": false,
+      "right_column_x": 1920,
+      "right_column_from_y": 1080
+    },
+    "captions": {
+      "sub_size": 64,
+      "big_size": 120,
+      "sub_center_y": 968,
+      "big_center_y": 540,
+      "max_words_per_group": 6,
+      "center_x": 960,
+      "max_width": 1600,
+      "outline_px": 9
+    }
+  }
+}

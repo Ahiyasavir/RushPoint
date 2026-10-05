@@ -16,6 +16,7 @@
 //
 // Total: a malformed or empty game yields a sheet with what could be read, never a
 // throw — the page renders whatever the Builder last saved.
+import { printMapLayout, type PrintMapLayout } from './printMap';
 import { isTaskHidden, maxCompletableTasks, type StaffCapability } from '@rushpoint/shared';
 
 export interface HostSheetOptions {
@@ -150,8 +151,8 @@ export interface HostSheet {
    * counts instead. `{ kind: 'missing' }` is kept for a key that should exist.
    */
   answerRows: { number: number; title: string; completion: HostCompletion; answer: HostAnswer | null }[];
-  /** Station positions scaled into a unit square (x right, y DOWN), for the drawn plot. */
-  plot: { number: number; stage: number; x: number; y: number }[];
+  /** The street map: tiles and numbered markers (change: host-sheet-street-map). Null when off or nothing is located. */
+  map: PrintMapLayout | null;
   staffPage: { codes: HostStaffCard[] } | null;
 }
 
@@ -463,26 +464,11 @@ export function buildHostSheet(gameIn: unknown, input: BuildHostSheetInput): Hos
     ? cards.map((c) => ({ number: c.number, title: c.title, completion: c.completion, answer: c.answer }))
     : [];
 
-  // The drawn plot: located stations scaled into a unit square, north up.
+  // The street map: every located station, framed, north up (change: host-sheet-street-map).
   const located = stages.flatMap((s) => s.cards
     .filter((c) => c.location.kind === 'point')
     .map((c) => ({ number: c.number, stage: s.number, ...(c.location as { lat: number; lng: number }) })));
-  let plot: HostSheet['plot'] = [];
-  if (options.includeMap && located.length > 0) {
-    const lats = located.map((p) => p.lat); const lngs = located.map((p) => p.lng);
-    const minLat = Math.min(...lats); const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs); const maxLng = Math.max(...lngs);
-    // Equal scale on both axes (longitude shrinks with latitude), centred.
-    const kx = Math.cos(((minLat + maxLat) / 2) * Math.PI / 180);
-    const w = (maxLng - minLng) * kx; const h = maxLat - minLat;
-    const span = Math.max(w, h) || 1;
-    plot = located.map((p) => ({
-      number: p.number,
-      stage: p.stage,
-      x: 0.5 + ((p.lng - minLng) * kx - w / 2) / span,
-      y: 0.5 - ((p.lat - minLat) - h / 2) / span,
-    }));
-  }
+  const map = options.includeMap ? printMapLayout(located) : null;
 
   const accessCode = str(run?.accessCode);
   const playUrl = str(input?.playUrl).replace(/\/+$/, '');
@@ -524,7 +510,7 @@ export function buildHostSheet(gameIn: unknown, input: BuildHostSheetInput): Hos
     },
     stages,
     answerRows,
-    plot,
+    map,
     staffPage,
   };
 }

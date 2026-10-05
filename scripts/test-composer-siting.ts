@@ -1,4 +1,5 @@
-// Stations, not a pin per mission (change: composer-siting-by-station).
+// Which missions of a composed game ask for a map pin (changes: composer-siting-by-station,
+// then composer-pins-follow-prep, which made the pins follow the prep answer).
 //
 // At prep level 2 the composer used to turn ~11 missions per game into a required
 // map pin, most of them invented: a conversation or a riddle that gains nothing
@@ -64,14 +65,16 @@ ok('no mission is both never and given a spot', neverWithSpot.length === 0, neve
 ok('the bank keys are unique (annotations target one mission each)', keys.size === TASK_BANK.length);
 
 // ── 2. Over the answer space at prep level 2 ────────────────────────────────
-console.log(' 2. composed games at prep level 2');
+// change: composer-pins-follow-prep. Choosing a location level IS choosing to place
+// locations (Ahiya, 2026-10-04), so every mission a place can help gets a pin.
+console.log(' 2. composed games at prep level 2: a pin for every mission a place can help');
 const byKey = new Map(TASK_BANK.map((e) => [e.key, e]));
 const AUDIENCES = ['kids', 'youth', 'adults', 'corporate', 'mixed'] as const;
 const SETTINGS = ['outdoor', 'indoor'] as const;
 const DURATIONS = [45, 90, 150];
 let games = 0;
-let pinsAfter = 0;
-let pinsBefore = 0;
+let pins = 0;
+let costMismatch = 0;
 const violations: string[] = [];
 for (const audience of AUDIENCES) for (const setting of SETTINGS) for (const minutes of DURATIONS) for (const seed of [1, 2, 3, 4]) {
   const answers: ComposerAnswers = {
@@ -82,40 +85,50 @@ for (const audience of AUDIENCES) for (const setting of SETTINGS) for (const min
   if (!r) continue;
   games++;
   const label = `${audience}/${setting}/${minutes}/s${seed}`;
-  // What the old rule would have asked: one pin per possible mission.
-  pinsBefore += r.usedBankKeys.filter((k) => bankSiting(byKey.get(k)!) === 'possible' || (byKey.get(k)!.tags.includes('fromAnywhere') && !byKey.get(k)!.tags.includes('locationBased'))).length;
-  const invented = r.wizardSteps.filter((s) => s.id.endsWith('-placed-coordinates'));
-  pinsAfter += r.wizardSteps.filter((s) => s.targetFieldPath === 'coordinates').length;
-
-  // Map each task id → its bank entry, through the order the composer used.
+  const located = r.wizardSteps.filter((s) => s.targetFieldPath === 'coordinates');
+  pins += located.length;
+  const cost = previewPrepCost(TASK_BANK, answers, seed, { recentBankKeys: [] });
+  if (cost.pins !== located.length) costMismatch++;
+  const invented = new Set(r.wizardSteps.filter((s) => s.id.endsWith('-placed-coordinates')).map((s) => s.taskId));
   const taskIds = r.stages.flatMap((s) => s.tasks.map((t) => t.id));
-  const entryOfTask = new Map(taskIds.map((id, i) => [id, byKey.get(r.usedBankKeys[i])]));
-  for (const stage of r.stages) {
-    const inStage = invented.filter((s) => s.stageId === stage.id);
-    if (inStage.length > 1) violations.push(`${label}: ${inStage.length} invented pins in one stage`);
-    const hasMust = stage.tasks.some((t) => bankSiting(entryOfTask.get(t.id)!) === 'must');
-    if (hasMust && inStage.length > 0) violations.push(`${label}: a stage with a located mission still invented a pin`);
-    for (const st of inStage) {
-      const e = entryOfTask.get(st.taskId);
-      if (!e || bankSiting(e) !== 'possible') violations.push(`${label}: sited ${e?.key} (${e ? bankSiting(e) : 'unknown'})`);
-    }
-    // A play-anywhere mission that is NOT the anchor stays playable anywhere.
-    for (const t of stage.tasks) {
-      const e = entryOfTask.get(t.id);
-      if (e && bankSiting(e) !== 'must' && !inStage.some((s) => s.taskId === t.id) && t.locationless === false && t.triggerMode === 'radius'
-        && !(e.build().locationless === false)) {
-        violations.push(`${label}: ${e.key} was made location-gated without a pin`);
-      }
-    }
-  }
+  taskIds.forEach((id, i) => {
+    const e = byKey.get(r.usedBankKeys[i]);
+    if (!e) return;
+    const siting = bankSiting(e);
+    if (siting === 'possible' && !invented.has(id)) violations.push(`${label}: ${e.key} (possible) got no pin`);
+    if (siting !== 'possible' && invented.has(id)) violations.push(`${label}: ${e.key} (${siting}) was given an invented pin`);
+  });
 }
-const meanBefore = games ? pinsBefore / games : 0;
-const meanAfter = games ? pinsAfter / games : 0;
-console.log(`    ${games} games · location steps per game: before ≈ ${meanBefore.toFixed(1)}, after ${meanAfter.toFixed(1)}`);
+console.log(`    ${games} games · location steps per game: ${games ? (pins / games).toFixed(1) : 0}`);
 ok(`the sample really composed games (${games})`, games >= 60, games);
-ok('no stage invents more than one pin, none beside a located mission, never a "never"', violations.length === 0, violations.slice(0, 5));
-ok(`mean location steps per game ≤ 5 (got ${meanAfter.toFixed(2)})`, meanAfter <= 5);
-ok('the change really removed pins', meanAfter < meanBefore);
+ok('every possible mission is pinned and nothing else is invented', violations.length === 0, violations.slice(0, 5));
+ok(`the cost line equals the pins the game asks for (${games - costMismatch} of ${games})`, costMismatch === 0, costMismatch);
+
+// Prep level 1 asks for no pin at all.
+let level1Pins = 0;
+let level1Games = 0;
+for (const seed of [1, 2, 3, 4, 5, 6]) {
+  const r = composeGame(TASK_BANK, { audience: 'youth', setting: 'outdoor', minutes: 90, locationMissions: false, prepEffort: 1, people: 24,
+    difficultyPreference: 'balanced', ageBandId: 'band-14-17' } as ComposerAnswers, COPY, seededRng(seed), { recentBankKeys: [] });
+  if (!r) continue;
+  level1Games++;
+  level1Pins += r.wizardSteps.filter((s) => s.id.endsWith('-placed-coordinates')).length;
+}
+ok(`prep level 1 invents no pin (${level1Games} games)`, level1Games > 0 && level1Pins === 0, level1Pins);
+
+// ── 2b. Riddles and trivia can be placed; conversations and chores cannot ─────
+console.log(' 2b. which missions a place can help');
+const RIDDLES = ['trivia-bones', 'trivia-longest-river', 'the-hard-riddle', 'invention-order', 'anagram-easy',
+  'anagram-medium', 'anagram-hard', 'puzzle-code', 'mystery-gift', 'balloon-message', 'echo-riddle',
+  'vault-combination-riddle', 'disarm-the-device', 'household-riddle-comb', 'thinking-room'];
+const STAY_NEVER = ['open-team-name', 'two-truths-one-lie', 'honest-compliment', 'open-team-pact', 'best-moment-so-far',
+  'celebrants-favorites-ranking', 'chore-sock-pairs', 'chore-room-reset'];
+const missing = [...RIDDLES, ...STAY_NEVER].filter((k) => !byKey.has(k));
+ok('every named key is in the bank', missing.length === 0, missing);
+const stillNever = RIDDLES.filter((k) => byKey.has(k) && bankSiting(byKey.get(k)!) !== 'possible');
+ok(`riddles and trivia are possible (${RIDDLES.length - stillNever.length} of ${RIDDLES.length})`, stillNever.length === 0, stillNever);
+const nowPossible = STAY_NEVER.filter((k) => byKey.has(k) && bankSiting(byKey.get(k)!) !== 'never');
+ok('conversations, pacts and chores stay never', nowPossible.length === 0, nowPossible);
 
 // ── 3. The questionnaire cost line ───────────────────────────────────────────
 console.log(' 3. previewPrepCost');
@@ -123,7 +136,7 @@ const base = { audience: 'youth', setting: 'outdoor', minutes: 90, people: 24, d
 const notPlaced = previewPrepCost(TASK_BANK, { ...base, locationMissions: false, prepEffort: 1 } as ComposerAnswers, 7);
 ok('no pins when nothing is placed', notPlaced.pins === 0 && notPlaced.minutes === 0, notPlaced);
 const placed = previewPrepCost(TASK_BANK, { ...base, locationMissions: true, prepEffort: 2 } as ComposerAnswers, 7);
-ok('a placed plan costs one pin per planned stage', placed.pins >= 2 && placed.pins <= 6, placed);
+ok('a placed plan asks for pins', placed.pins >= 3, placed);
 ok('…and about a minute and a half each', placed.minutes === Math.ceil(placed.pins * 1.5), placed);
 ok('fromAnywhere is never placed', previewPrepCost(TASK_BANK, { ...base, setting: 'fromAnywhere', locationMissions: true } as ComposerAnswers, 7).pins === 0);
 let threw = false;

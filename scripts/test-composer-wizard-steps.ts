@@ -24,7 +24,7 @@ import { resolveWizardTarget, AGE_BANDS } from '@rushpoint/shared';
 import {
   composeGame,
   seededRng,
-  stationAnchorIndex,
+  bankSiting,
   type ComposerAnswers,
   type ComposerDescriptionCopy,
 } from '../apps/creator-web/src/lib/composeGame';
@@ -157,17 +157,16 @@ for (const cell of CELLS) {
   // Matches wantsPlacedMissions: any venue setting, only when the creator
   // explicitly asked for pinned missions.
   const placedGame = cell.answers.setting !== 'fromAnywhere' && cell.answers.locationMissions === true;
-  // Stations, not a pin per mission (change: composer-siting-by-station): the
-  // composition adds ONE pin request per stage, on that stage's anchor, read
-  // through the composer's own `stationAnchorIndex`.
+  // A pin for every mission a place can help (change: composer-pins-follow-prep):
+  // the composition adds a pin request for each `possible` mission of a placed game.
   const expected: string[] = [];
   let cursor = 0;
   for (const stage of r.stages) {
     const entries = stage.tasks.map(() => byKey.get(r.usedBankKeys[cursor++]));
-    const anchor = placedGame ? stationAnchorIndex(entries) : null;
-    entries.forEach((entry, i) => {
+    entries.forEach((entry) => {
       const declared = (entry?.setup ?? []).map((st) => st.field);
-      expected.push(...(i === anchor ? ['coordinates', ...declared] : declared));
+      const sited = placedGame && !!entry && bankSiting(entry) === 'possible';
+      expected.push(...(sited ? ['coordinates', ...declared] : declared));
     });
   }
   const produced = r.wizardSteps.map((st) => st.targetFieldPath);
@@ -291,19 +290,19 @@ console.log('\n── 4. two missions asking for the same field stay distinct �
     const ids = r.wizardSteps.map((s) => s.id);
     if (new Set(ids).size !== ids.length) bad ||= `seed ${seed}: duplicate step ids ${ids.join(',')}`;
     // Every mission declares one step, and every one is siteable in this OUTDOOR
-    // game with locationMissions on, so each STAGE adds one station pin request
-    // (change: composer-siting-by-station).
-    const want = r.usedBankKeys.length + r.stages.length;
+    // game with locationMissions on, so each MISSION adds a pin request too
+    // (change: composer-pins-follow-prep).
+    const want = r.usedBankKeys.length * 2;
     if (r.wizardSteps.length !== want) {
       bad ||= `seed ${seed}: ${r.wizardSteps.length} steps, expected ${want}`;
     }
 
     // Each must still point at its OWN mission, not all at the first one: one
-    // step per mission, plus the station pin on exactly one mission per stage.
+    // declared step and one pin per mission.
     const perTask = new Map<string, number>();
     for (const st of r.wizardSteps) perTask.set(st.taskId, (perTask.get(st.taskId) ?? 0) + 1);
     const twos = [...perTask.values()].filter((n) => n === 2).length;
-    if ([...perTask.values()].some((n) => n !== 1 && n !== 2) || twos !== r.stages.length) bad ||= `seed ${seed}: uneven steps per mission`;
+    if ([...perTask.values()].some((n) => n !== 2) || twos !== r.usedBankKeys.length) bad ||= `seed ${seed}: uneven steps per mission`;
     if (perTask.size !== r.usedBankKeys.length) bad ||= `seed ${seed}: steps share a mission id`;
 
     const game = { stages: r.stages, wizardSteps: r.wizardSteps };

@@ -72,7 +72,9 @@ SLOT: <seconds> · <platform>
 
 Then, after the script:
 - **ROLL** — the exact clips he has to film or already has (cross check `assets.md`).
-- **CAPTION** — the post caption, in his voice, with the CTA.
+- **CAPTION** — the post caption, in his voice, with the CTA. **ONE caption for every platform**
+  (Instagram, TikTok, Shorts, Facebook), ending in **exactly 5 hashtags, two of which are always
+  `#RushPoint` and `#רשפוינט`** (his rule, 2026-10-02). No hyphen inside a hashtag either.
 - **THE RISK** — one honest line on why this video might not work. Never skip it.
 
 ## Hard rules

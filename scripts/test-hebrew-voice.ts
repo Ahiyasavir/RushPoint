@@ -12,7 +12,7 @@ import { translations as PLAY } from '../apps/play-web/src/i18n';
 
 // A masculine-singular imperative at a word start. Not in the list: "עבור" (almost always the
 // preposition "for") and "מלא" (almost always the adjective "full").
-const SING_VERB = /(^|[\s"'(])(גלה|העתק|לחץ|בחר|הוסף|צור|שמור|ערוך|מחק|גרור|הזן|הקלד|סמן|פתח|שתף|נסה|התחל|הפעל|שלח|חפש|הורד|עדכן|בדוק|המתן|אשר|השתמש|הירשם|היכנס|צא|קרא|ודא|הקש|העלה|ייבא|שחק|תן|קח|בוא|הכנס|הגדר|הצג|הסתר|שנה|כתוב|הסר|נקה|השאר|עצב|הפוך|עיין|אפס|פנה|הגדל)(\s|$|[.,:!?])/;
+const SING_VERB = /(^|[\s"'(])(גלה|העתק|לחץ|בחר|הוסף|צור|שמור|ערוך|מחק|גרור|הזן|הקלד|סמן|פתח|שתף|נסה|התחל|הפעל|שלח|חפש|הורד|עדכן|בדוק|המתן|אשר|השתמש|הירשם|היכנס|צא|קרא|ודא|הקש|העלה|ייבא|שחק|תן|קח|בוא|הכנס|הגדר|הצג|הסתר|שנה|כתוב|הסר|נקה|השאר|עצב|הפוך|עיין|אפס|פנה|הגדל|בנה|השק|צפה|הירגע|התכונן)(\s|$|[.,:!?])/;
 // A singular second person: a possessive or object suffix, or a second-person past.
 const SING_YOU = /(^|[\s"'(])(שלך|עליך|אותך|ממך|בשבילך|חשבונך|שמך|אתה|שמחקת|התחברת|הוזמנת|יצרת|בחרת|הוספת)(\s|$|[.,:!?])/;
 
@@ -24,6 +24,7 @@ const OTHER_GRAMMAR: Record<string, string> = {
   'creator.builder.completionStoredUnreachable': '"השלב שמור" is "the stage is saved", not an order',
   'creator.adminTemplates.importHint': '"קובץ משחק שמור" is "a saved game file"',
   'creator.adminMissionBank.noCreateHint': '"הוספת משימה" is the noun "adding a mission"',
+  'creator.sharedGame.readOnlyHelp': '"היוצר בנה אותו" is past tense: the creator built it',
 };
 
 const SAMPLES: unknown[] = [{ n: 2, count: 2, title: 'X', name: 'X', team: 'X', email: 'a@b.c', code: 'X', teams: 'X', label: 'X' }, 2, 'X'];

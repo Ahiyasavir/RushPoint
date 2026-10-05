@@ -1,0 +1,772 @@
+{
+  "id": "reel3-ai",
+  "title": "ריל 3 · יש לי AI שעושה הכל",
+  "source": "EDIT-SPEC סרטון 3, the 5 part structure relayed by אודי 2026-10-01 (supersedes the 9 capability version)",
+  "rules": [
+    "3I caption = what Ahiya actually says ('ואת הסרטון הזה הוא גם ערך וגם כתב'), not the spec wording",
+    "P1..P6 built in his phone's style by reels/reel3-ai/make_proofs.py (his call: 'create them yourself'); other names blurred",
+    "3I runs to src 6.05 so 'כתב' is heard (Ahiya: it was cut)",
+    "montage: violin + robotics = Pexels photos (licence in assets/STOCK-LICENSE.txt, Ahiya approved the download), training = his pull ups (park faces blurred in circles), hiking = his wallpaper, the app = real builder footage",
+    "narration (Ahiya's own recording, 2026-10-01) drives the layout: every line sits on its shot, montage words land on the cuts; music ducks under it"
+  ],
+  "shots": [
+    {
+      "id": "hook-a",
+      "start": 0,
+      "end": 1.8,
+      "graphic": "assets/hook_0404_empty.png",
+      "effect": "slow_push"
+    },
+    {
+      "id": "hook-b",
+      "start": 1.8,
+      "end": 3.6,
+      "graphic": "assets/hook_0404.png",
+      "effect": "slow_push"
+    },
+    {
+      "id": "reveal-a",
+      "start": 3.6,
+      "end": 5.133333333333334,
+      "clip": "clips/3C_door_take1.mp4",
+      "in": 18.6,
+      "effect": "slow_push",
+      "_note": "stand in for 3A_run_night until the night shoot"
+    },
+    {
+      "id": "reveal-b",
+      "start": 5.133333333333334,
+      "end": 6.7,
+      "clip": "clips/3C_door_take1.mp4",
+      "in": 20.133,
+      "effect": "none",
+      "_note": "stand in for 3A_run_night until the night shoot"
+    },
+    {
+      "id": "cap1",
+      "start": 6.7,
+      "end": 9.0,
+      "clip": "clips/3E_kitchen.mp4",
+      "in": 5.0,
+      "speed": 1.0,
+      "effect": "slow_push"
+    },
+    {
+      "id": "cap2",
+      "start": 9.0,
+      "end": 11.2,
+      "clip": "clips/3B_stairs.mp4",
+      "in": 9.0,
+      "speed": 1.4,
+      "effect": "none"
+    },
+    {
+      "id": "cap3",
+      "start": 11.2,
+      "end": 13.4,
+      "clip": "clips/3G_walk.mp4",
+      "in": 16.4,
+      "speed": 1.0,
+      "effect": "slow_push",
+      "crop": [
+        330,
+        380,
+        600,
+        1067
+      ]
+    },
+    {
+      "id": "cap4",
+      "start": 13.4,
+      "end": 15.666666666666666,
+      "clip": "clips/3C_door_take2.mp4",
+      "in": 8.6,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "cap5",
+      "start": 15.666666666666666,
+      "end": 18.533333333333335,
+      "clip": "clips/3I_talk_catch_take1.mp4",
+      "in": 0.2,
+      "speed": 1.0,
+      "effect": "slow_push"
+    },
+    {
+      "id": "cap6",
+      "start": 18.533333333333335,
+      "end": 20.933333333333334,
+      "clip": "clips/3C_door_take1.mp4",
+      "in": 1.0,
+      "speed": 1.0,
+      "effect": "none"
+    },
+    {
+      "id": "rest",
+      "start": 20.933333333333334,
+      "end": 23.066666666666666,
+      "clip": "clips/3G_walk.mp4",
+      "in": 2.6,
+      "effect": "none"
+    },
+    {
+      "id": "m0",
+      "start": 23.066666666666666,
+      "end": 23.866666666666667,
+      "graphic": "assets/stock_violin.jpg",
+      "effect": "zoom_in"
+    },
+    {
+      "id": "m1",
+      "start": 23.866666666666667,
+      "end": 24.733333333333334,
+      "clip": "clips/3D_pullups.mp4",
+      "in": 9.0,
+      "effect": "none",
+      "blur": [
+        {
+          "shape": "circle",
+          "r": 40,
+          "x": 75,
+          "y": 895,
+          "x1": 15,
+          "y1": 897,
+          "t1": 0.8
+        },
+        {
+          "shape": "circle",
+          "r": 38,
+          "x": 170,
+          "y": 870,
+          "t1": 0.8
+        },
+        {
+          "shape": "circle",
+          "r": 40,
+          "x": 320,
+          "y": 865,
+          "x1": 307,
+          "y1": 868,
+          "t1": 0.8
+        },
+        {
+          "shape": "circle",
+          "r": 38,
+          "x": 378,
+          "y": 872,
+          "x1": 370,
+          "y1": 872,
+          "t1": 0.8
+        },
+        {
+          "shape": "circle",
+          "r": 38,
+          "x": 300,
+          "y": 925,
+          "x1": 308,
+          "y1": 922,
+          "t1": 0.8
+        },
+        {
+          "shape": "circle",
+          "r": 38,
+          "x": 595,
+          "y": 805,
+          "t1": 0.8
+        },
+        {
+          "shape": "circle",
+          "r": 38,
+          "x": 645,
+          "y": 818,
+          "x1": 652,
+          "y1": 815,
+          "t1": 0.8
+        },
+        {
+          "shape": "circle",
+          "r": 38,
+          "x": 678,
+          "y": 812,
+          "t1": 0.8
+        }
+      ]
+    },
+    {
+      "id": "m2",
+      "start": 24.733333333333334,
+      "end": 25.533333333333335,
+      "effect": "none",
+      "clip": "clips/rappel.mp4",
+      "in": 0.3
+    },
+    {
+      "id": "m3a",
+      "start": 25.533333333333335,
+      "end": 26.033333333333335,
+      "graphic": "assets/first_crop.jpg",
+      "effect": "zoom_in"
+    },
+    {
+      "id": "m3b",
+      "start": 26.033333333333335,
+      "end": 26.533333333333335,
+      "clip": "clips/robot.mp4",
+      "in": 2.0,
+      "effect": "none"
+    },
+    {
+      "id": "app",
+      "start": 26.533333333333335,
+      "end": 27.5,
+      "clip": "clips/app_builder.mp4",
+      "in": 23.8,
+      "effect": "none"
+    },
+    {
+      "id": "3I-a",
+      "start": 27.5,
+      "end": 28.9,
+      "clip": "clips/3I_talk_catch_take3.mp4",
+      "in": 2.3,
+      "audio_gain": 1.0,
+      "effect": "none",
+      "speed": 1.15
+    },
+    {
+      "id": "3I-b",
+      "start": 28.9,
+      "end": 31.166666666666668,
+      "clip": "clips/3I_talk_catch_take3.mp4",
+      "in": 3.9,
+      "audio_gain": 1.0,
+      "effect": "none",
+      "speed": 1.15
+    }
+  ],
+  "proofs": [
+    {
+      "id": "P1",
+      "n": 1,
+      "image": "proofs/P1.png",
+      "label": "מעיר אותי ומתכנן לי את היום",
+      "start": 6.7,
+      "end": 9.0
+    },
+    {
+      "id": "P2",
+      "n": 2,
+      "image": "proofs/P2.png",
+      "label": "קורא לי את המיילים",
+      "start": 9.0,
+      "end": 11.2
+    },
+    {
+      "id": "P3",
+      "n": 3,
+      "image": "proofs/P3.png",
+      "label": "עונה בוואטסאפ בשמי",
+      "start": 11.2,
+      "end": 13.4
+    },
+    {
+      "id": "P4",
+      "n": 4,
+      "image": "proofs/P4.png",
+      "label": "מכניס כל מבחן ליומן",
+      "start": 13.4,
+      "end": 15.666666666666666
+    },
+    {
+      "id": "P5",
+      "n": 5,
+      "image": "proofs/P5.png",
+      "label": "מסכם לי שיעורים ומכין דפי עזר",
+      "start": 15.666666666666666,
+      "end": 18.533333333333335
+    },
+    {
+      "id": "P6",
+      "n": 6,
+      "image": "proofs/P6.png",
+      "label": "כותב למורים כשלא הגעתי",
+      "start": 18.533333333333335,
+      "end": 20.933333333333334
+    }
+  ],
+  "captions": [
+    {
+      "start": 3.65,
+      "end": 6.521,
+      "text": "זה AI. בניתי לעצמי מזכיר אישי.",
+      "style": "box",
+      "y": 1210,
+      "size": 118,
+      "max_words": 3
+    },
+    {
+      "start": 20.983,
+      "end": 22.927,
+      "text": "ככה נשאר לי זמן לכל השאר.",
+      "style": "box",
+      "y": 1210,
+      "size": 112,
+      "max_words": 5
+    },
+    {
+      "start": 23.097,
+      "end": 23.837,
+      "text": "כינור.",
+      "style": "box",
+      "y": 1170,
+      "size": 160,
+      "max_words": 2
+    },
+    {
+      "start": 23.897,
+      "end": 24.703,
+      "text": "אימונים.",
+      "style": "box",
+      "y": 1170,
+      "size": 160,
+      "max_words": 2
+    },
+    {
+      "start": 24.763,
+      "end": 25.503,
+      "text": "טיולים.",
+      "style": "box",
+      "y": 1170,
+      "size": 160,
+      "max_words": 2
+    },
+    {
+      "start": 25.563,
+      "end": 26.503,
+      "text": "רובוטיקה.",
+      "style": "box",
+      "y": 1170,
+      "size": 160,
+      "max_words": 2
+    },
+    {
+      "start": 26.563,
+      "end": 27.47,
+      "text": "ואפליקציה.",
+      "style": "box",
+      "y": 1170,
+      "size": 160,
+      "max_words": 2,
+      "accent_words": [
+        "ואפליקציה."
+      ]
+    },
+    {
+      "start": 27.5,
+      "end": 31.117,
+      "style": "box",
+      "y": 1250,
+      "size": 104,
+      "max_words": 4,
+      "words": [
+        [
+          "ואת",
+          28.01,
+          28.71
+        ],
+        [
+          "הסרטון",
+          28.71,
+          29.06
+        ],
+        [
+          "הזה",
+          29.06,
+          29.27
+        ],
+        [
+          "הוא",
+          29.27,
+          29.65
+        ],
+        [
+          "גם",
+          29.65,
+          29.77
+        ],
+        [
+          "ערך",
+          29.77,
+          30.13
+        ],
+        [
+          "וגם",
+          30.13,
+          30.64
+        ],
+        [
+          "כתב.",
+          30.64,
+          30.95
+        ]
+      ]
+    }
+  ],
+  "overlays": [],
+  "sfx": [
+    {
+      "at": 3.65,
+      "file": "voice/n_reveal.wav",
+      "gain": 0
+    },
+    {
+      "at": 3.6,
+      "file": "sfx/whoosh.wav",
+      "gain": -9
+    },
+    {
+      "at": 6.82,
+      "file": "voice/n_c1.wav",
+      "gain": 0
+    },
+    {
+      "at": 6.7,
+      "file": "sfx/pop.wav",
+      "gain": -10
+    },
+    {
+      "at": 9.12,
+      "file": "voice/n_c2.wav",
+      "gain": 0
+    },
+    {
+      "at": 9.0,
+      "file": "sfx/pop.wav",
+      "gain": -10
+    },
+    {
+      "at": 11.32,
+      "file": "voice/n_c3.wav",
+      "gain": 0
+    },
+    {
+      "at": 11.2,
+      "file": "sfx/pop.wav",
+      "gain": -10
+    },
+    {
+      "at": 13.52,
+      "file": "voice/n_c4.wav",
+      "gain": 0
+    },
+    {
+      "at": 13.4,
+      "file": "sfx/pop.wav",
+      "gain": -10
+    },
+    {
+      "at": 15.787,
+      "file": "voice/n_c5.wav",
+      "gain": 0
+    },
+    {
+      "at": 15.666666666666666,
+      "file": "sfx/pop.wav",
+      "gain": -10
+    },
+    {
+      "at": 18.653,
+      "file": "voice/n_c6.wav",
+      "gain": 0
+    },
+    {
+      "at": 18.533333333333335,
+      "file": "sfx/pop.wav",
+      "gain": -10
+    },
+    {
+      "at": 20.983,
+      "file": "voice/n_rest.wav",
+      "gain": 0
+    },
+    {
+      "at": 20.933333333333334,
+      "file": "sfx/whoosh.wav",
+      "gain": -9
+    },
+    {
+      "at": 23.087,
+      "file": "voice/n_w_violin.wav",
+      "gain": 0
+    },
+    {
+      "at": 23.887,
+      "file": "voice/n_w_train.wav",
+      "gain": 0
+    },
+    {
+      "at": 24.753,
+      "file": "voice/n_w_hike.wav",
+      "gain": 0
+    },
+    {
+      "at": 25.553,
+      "file": "voice/n_w_robot.wav",
+      "gain": 0
+    },
+    {
+      "at": 26.553,
+      "file": "voice/n_w_app.wav",
+      "gain": 0
+    }
+  ],
+  "voice": {},
+  "keep_clip_audio": 0.0,
+  "default_opening": "A",
+  "openings": {
+    "A": {
+      "cut": 3.6,
+      "why": "his voice, 3H",
+      "shots": [
+        {
+          "id": "hook-a",
+          "start": 0,
+          "end": 1.8,
+          "graphic": "assets/hook_0404_empty.png",
+          "effect": "slow_push"
+        },
+        {
+          "id": "hook-b",
+          "start": 1.8,
+          "end": 3.6,
+          "graphic": "assets/hook_0404.png",
+          "effect": "slow_push"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.05,
+          "end": 3.55,
+          "style": "box",
+          "y": 1250,
+          "size": 103,
+          "max_words": 4,
+          "words": [
+            [
+              "ארבע",
+              0.05,
+              0.71
+            ],
+            [
+              "בבוקר,",
+              0.71,
+              1.37
+            ],
+            [
+              "ומי",
+              1.49,
+              1.93
+            ],
+            [
+              "שהעיר",
+              1.93,
+              2.25
+            ],
+            [
+              "אותי",
+              2.25,
+              2.51
+            ],
+            [
+              "זה",
+              2.51,
+              2.95
+            ],
+            [
+              "לא",
+              2.95,
+              3.11
+            ],
+            [
+              "אמא.",
+              3.11,
+              3.39
+            ]
+          ]
+        }
+      ],
+      "sfx": [
+        {
+          "at": 0.05,
+          "file": "voice/3H_open_A.wav",
+          "gain": 0
+        },
+        {
+          "at": 1.8,
+          "file": "sfx/ding.wav",
+          "gain": -4
+        },
+        {
+          "at": 1.8,
+          "file": "sfx/buzz.wav",
+          "gain": -6
+        }
+      ]
+    },
+    "B": {
+      "cut": 3.6,
+      "why": "text only",
+      "shots": [
+        {
+          "id": "hook-a",
+          "start": 0,
+          "end": 1.8,
+          "graphic": "assets/hook_0404_empty.png",
+          "effect": "slow_push"
+        },
+        {
+          "id": "hook-b",
+          "start": 1.8,
+          "end": 3.6,
+          "graphic": "assets/hook_0404.png",
+          "effect": "slow_push"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.2,
+          "end": 3.55,
+          "text": "יש לי מזכיר אישי. הוא לא בן אדם.",
+          "style": "box",
+          "y": 1250,
+          "size": 103,
+          "max_words": 4
+        }
+      ],
+      "sfx": [
+        {
+          "at": 1.8,
+          "file": "sfx/ding.wav",
+          "gain": -4
+        },
+        {
+          "at": 1.8,
+          "file": "sfx/buzz.wav",
+          "gain": -6
+        }
+      ]
+    },
+    "C": {
+      "cut": 3.6,
+      "why": "text only",
+      "shots": [
+        {
+          "id": "hook-a",
+          "start": 0,
+          "end": 1.8,
+          "graphic": "assets/hook_0404_empty.png",
+          "effect": "slow_push"
+        },
+        {
+          "id": "hook-b",
+          "start": 1.8,
+          "end": 3.6,
+          "graphic": "assets/hook_0404.png",
+          "effect": "slow_push"
+        }
+      ],
+      "captions": [
+        {
+          "start": 0.2,
+          "end": 3.55,
+          "text": "בן 17, ויש לי AI שעושה לי הכל.",
+          "style": "box",
+          "y": 1250,
+          "size": 103,
+          "max_words": 4
+        }
+      ],
+      "sfx": [
+        {
+          "at": 1.8,
+          "file": "sfx/ding.wav",
+          "gain": -4
+        },
+        {
+          "at": 1.8,
+          "file": "sfx/buzz.wav",
+          "gain": -6
+        }
+      ]
+    }
+  },
+  "cover": {
+    "headline": {
+      "A": "הוא עושה הכל",
+      "B": "הוא עושה הכל",
+      "C": "הוא עושה הכל"
+    },
+    "frame_at": 1.5
+  },
+  "ig_caption": "איזה מהשישה הכי היית רוצה?",
+  "loop": {
+    "note": "3I ends, cut back to 3F in the dark"
+  },
+  "todo": [
+    "3F_bed + 3A_run_night (night shoot): replace hook-a/hook-b background and the reveal stand in"
+  ],
+  "screens": {},
+  "music": {
+    "style": "synthwave",
+    "bpm": 100,
+    "gain": -13,
+    "seed": 33,
+    "energy": [
+      [
+        0,
+        1
+      ],
+      [
+        3.6,
+        2
+      ],
+      [
+        6.7,
+        3
+      ],
+      [
+        13.4,
+        4
+      ],
+      [
+        20.933333333333334,
+        2
+      ],
+      [
+        23.066666666666666,
+        4
+      ],
+      [
+        27.5,
+        1
+      ]
+    ],
+    "accents": [
+      6.7,
+      9.0,
+      11.2,
+      13.4,
+      15.666666666666666,
+      18.533333333333335
+    ],
+    "drops": []
+  },
+  "dissolve": 0.15,
+  "progress_bar": {
+    "color": "0xFFB300",
+    "h": 10,
+    "y": 196
+  },
+  "max_seconds": 32
+}

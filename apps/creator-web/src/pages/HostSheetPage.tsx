@@ -22,6 +22,26 @@ import { Button, Spinner } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { buildHostSheet, DEFAULT_HOST_SHEET_OPTIONS, pageFooterCss, stepAnswerSummary, type HostAnswer, type HostSheetOptions, type HostTaskCard } from '../lib/hostSheet';
 import { buildStaffCodeRows, type StaffCodeDocLike, type StaffGrantDocLike } from '../lib/staffCodes';
+import { mergeMarkers, printTileUrl } from '../lib/printMap';
+
+const MAPTILER_KEY = (import.meta.env.VITE_MAPTILER_KEY as string | undefined) ?? '';
+// The map sources' required credit: names, not copy, so the same in both languages.
+const MAP_CREDIT = MAPTILER_KEY.trim() !== '' ? '© MapTiler © OpenStreetMap' : '© OpenTopoMap © OpenStreetMap'; // i18n-ignore: provider names
+
+/**
+ * Print once the street map has loaded (change: host-sheet-street-map). A tile
+ * still in flight prints as a hole, so wait for every map image to load or fail,
+ * at most 8 s, then open the print dialog anyway.
+ */
+async function printWhenMapReady(): Promise<void> {
+  const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('.hs-map img'));
+  const pending = imgs.filter((img) => !img.complete).map((img) => new Promise<void>((resolve) => {
+    img.addEventListener('load', () => resolve(), { once: true });
+    img.addEventListener('error', () => resolve(), { once: true });
+  }));
+  await Promise.race([Promise.all(pending), new Promise<void>((resolve) => { setTimeout(resolve, 8000); })]);
+  window.print();
+}
 
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
@@ -271,8 +291,9 @@ export default function HostSheetPage() {
       {/* Every printed page says what it is and when it was printed (lib/hostSheet.ts). */}
       <style>{pageFooterCss(h.printedOn(sheet.cover.title, printed))}</style>
 
-      {/* Toolbar: never printed. */}
-      <div className="hs-toolbar sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[--rp-border] bg-[--surface-1] p-3">
+      {/* Toolbar: never printed. Sticky only from sm up: on a phone its wrapped options are
+          ~170px, a fifth of the screen, and it sat over the map while scrolling. */}
+      <div className="hs-toolbar sm:sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[--rp-border] bg-[--surface-1] p-3">
         <Link to={backTo} className="inline-flex min-h-[44px] items-center px-2 text-sm text-[--ink-2] hover:text-[--ink-1]">{h.back}</Link>
         <h1 className="font-brand font-semibold text-[--ink-1] me-auto">{h.title}</h1>
         {([['includeAnswers', h.optAnswers], ['includeMap', h.optMap], ['cardPerPage', h.optCardPerPage]] as const).map(([key, label]) => (
@@ -281,7 +302,7 @@ export default function HostSheetPage() {
             {label}
           </label>
         ))}
-        <Button onClick={() => window.print()} className="min-h-[44px]">
+        <Button onClick={() => { void printWhenMapReady(); }} className="min-h-[44px]">
           <span className="inline-flex items-center gap-2"><Icon name="printer" className="w-4 h-4" aria-hidden />{h.print}</span>
         </Button>
       </div>
@@ -329,16 +350,45 @@ export default function HostSheetPage() {
         {options.includeMap && (
           <section className="hs-break hs-keep mt-8">
             <h2 className="font-brand text-xl font-bold mb-2">{h.mapTitle}</h2>
-            {sheet.plot.length === 0 ? <p className="text-sm">{h.mapEmpty}</p> : (
+            {sheet.map === null ? <p className="text-sm">{h.mapEmpty}</p> : (
               <>
-                <svg viewBox="-0.08 -0.08 1.16 1.16" className="w-full max-w-[520px] mx-auto aspect-square rounded-xl border border-[#d6d3d1]" role="img" aria-label={h.mapTitle}>
-                  {sheet.plot.map((p) => (
-                    <g key={p.number}>
-                      <circle cx={p.x} cy={p.y} r={0.032} fill={p.stage % 2 ? '#1c1917' : '#fff'} stroke="#1c1917" strokeWidth={0.006} />
-                      <text x={p.x} y={p.y + 0.012} textAnchor="middle" fontSize={0.034} fontWeight={700} fill={p.stage % 2 ? '#fff' : '#1c1917'}>{p.number}</text>
-                    </g>
+                {/* Real map tiles as plain images, so it prints like a picture; the
+                    numbered markers sit on top. A tile that fails is hidden and the
+                    markers stay, on the light background. */}
+                <div
+                  className="hs-map relative mx-auto w-full overflow-hidden rounded-xl border border-[#d6d3d1] bg-[#f5f5f4]"
+                  style={{ maxWidth: sheet.map.widthPx, aspectRatio: `${sheet.map.widthPx} / ${sheet.map.heightPx}` }}
+                  role="img"
+                  aria-label={h.mapTitle}
+                >
+                  {sheet.map.tiles.map((tl) => (
+                    <img
+                      key={`${tl.z}/${tl.x}/${tl.y}/${tl.left}`}
+                      src={printTileUrl(tl.z, tl.x, tl.y, MAPTILER_KEY)}
+                      alt=""
+                      loading="eager"
+                      decoding="async"
+                      draggable={false}
+                      onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                      className="absolute max-w-none select-none"
+                      style={{ left: `${tl.left * 100}%`, top: `${tl.top * 100}%`, width: `${tl.w * 100}%`, height: `${tl.h * 100}%` }}
+                    />
                   ))}
-                </svg>
+                  {/* Missions sharing a spot share one label ("4·5·6"), so no number hides
+                      another. Fixed-size labels on percentage positions: they stay
+                      readable however small the map is drawn. */}
+                  {mergeMarkers(sheet.map.markers, sheet.map.widthPx, sheet.map.heightPx).map((g) => (
+                    <span
+                      key={g.numbers.join('-')}
+                      dir="ltr"
+                      className={`absolute flex h-7 min-w-[28px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[3px] border-[#1c1917] px-1.5 text-[14px] font-bold leading-none ${g.stage % 2 ? 'bg-[#1c1917] text-white' : 'bg-white text-[#1c1917]'}`}
+                      style={{ left: `${g.x * 100}%`, top: `${g.y * 100}%` }}
+                    >
+                      {g.numbers.join('·')}
+                    </span>
+                  ))}
+                  <p className="absolute bottom-0 end-0 bg-white/85 px-1.5 text-[9px] text-[#44403c]" dir="ltr">{MAP_CREDIT}</p>
+                </div>
                 <ol className="mt-3 grid gap-x-4 text-[12px] sm:grid-cols-2">
                   {sheet.stages.flatMap((s) => s.cards.filter((c) => c.location.kind === 'point').map((c) => (
                     <li key={c.id} dir="auto"><b>{c.number}</b> · {c.title} · {h.stageHeading(s.number, '')}</li>
