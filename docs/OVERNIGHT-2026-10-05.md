@@ -31,7 +31,7 @@ coherent batches. Every fix test-first, every UI change seen in a real browser.
 
 ## D. Tidy and document
 - [x] D1 CLAUDE.md, DEPLOY.md, scripts/README.md, docs/README.md, openspec changes README.
-- [ ] D2 Archive the finished OpenSpec changes into the living specs.
+- [x] D2 Archive the finished OpenSpec changes into the living specs.
 - [x] D3 Regenerate the deploy checklist PDF (what is left for him + what the next deploy brings).
 
 ## E. Desktop layouts
@@ -46,3 +46,4 @@ coherent batches. Every fix test-first, every UI change seen in a real browser.
 - 00:30 D1: scripts/README (checks:pdf, deploy:test-game), docs/README (deploy checks, issues, overnight), CLAUDE.md scoring. D2 prepared: specs for fair-final-score + deploy-test-game, umbrella change deploy-feedback-2026-10-05 (6 capabilities), all five valid; archive after C1. D3: 2026-10-05 PDF report updated; NEXT-draft.md/.pdf = the next deploy's checklist, ready.
 - 01:20 E1: change desktop-layouts-play-staff (proposal, spec, tasks). E2 code: useWideLayout (one query, 1024px), staffLayout table (phone order unchanged, 3 desktop columns, quick bar phone-only), StaffConsole renders every section through the table, PlayScreen map + mission column side by side on wide, GameScreen/Screen take `wide`, final screen wider. test-staff-layout + test-wide-layout green, typecheck + lint clean. Browser check after C1 frees the emulator ports.
 - 01:55 C1: e2e ALL PASS, Firestore + Storage rules suites passed, doc-cache check ran; the 8-team sim then FAILED live/final ordering parity. Cause: fair-final-score adds the speed bonus only to published/final boards, and the audit compared the UNPUBLISHED live board with the final one (8 finishers ⇒ bonus ⇒ different order). Not drift, the requested behaviour. Audits now compare the published live board with the final one and assert an unpublished board has no bonus (run-audit.mjs, simulate-adversarial.mjs); CLAUDE.md notes it. Rerun: LOAD SIM CONSISTENT, ADVERSARIAL SIM CONSISTENT.
+- 02:05 D2: archived staff-code-from-join-code, sos-callback-and-authorities, fair-final-score, deploy-test-game, deploy-feedback-2026-10-05 into openspec/specs (11 new capability specs).
