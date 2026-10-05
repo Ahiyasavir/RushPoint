@@ -21,21 +21,21 @@ coherent batches. Every fix test-first, every UI change seen in a real browser.
   SOS sheet + callback in console/staff, flag only, one-phone contribution, send back + route from
   the team page, skip stage choice, now-screen picker, host sheet print preview, publish reaching the
   phone, score breakdown.
-- [ ] B4 Think one step further on each fix: places that show a score (public board, TV, report),
+- [x] B4 Think one step further on each fix: places that show a score (public board, TV, report),
   places that show a staff code (host sheet staff page, codes panel), old links and 6-digit codes,
   CLAUDE.md sections that describe the old behaviour.
 
 ## C. Serious verification
-- [ ] C1 `verify:emulator` (rules, 8-team simulate, adversarial simulate).
+- [x] C1 `verify:emulator` (rules, 8-team simulate, adversarial simulate).
 - [ ] C2 Browser-fidelity play of the deploy test game end to end at 375px.
 
 ## D. Tidy and document
-- [ ] D1 CLAUDE.md, DEPLOY.md, scripts/README.md, docs/README.md, openspec changes README.
+- [x] D1 CLAUDE.md, DEPLOY.md, scripts/README.md, docs/README.md, openspec changes README.
 - [ ] D2 Archive the finished OpenSpec changes into the living specs.
-- [ ] D3 Regenerate the deploy checklist PDF (what is left for him + what the next deploy brings).
+- [x] D3 Regenerate the deploy checklist PDF (what is left for him + what the next deploy brings).
 
 ## E. Desktop layouts
-- [ ] E1 OpenSpec: player app and staff app on a computer (use the width, no phone squeeze).
+- [x] E1 OpenSpec: player app and staff app on a computer (use the width, no phone squeeze).
 - [ ] E2 Build and verify at 1440 and 1024, without changing the phone layout.
 
 ## Log
@@ -43,3 +43,6 @@ coherent batches. Every fix test-first, every UI change seen in a real browser.
 - 23:40 B1: cause found by rendering his point: open fields at z16 = no text. Fix: detail map ≤ z16, retina tiles, "איפה זה" overview 3 levels out with the detail frame (test-print-map). Seen in a browser.
 - 23:55 B3 in a real browser (local stack, run wM52knEOQyXt2UGHmCwj): staff sign-in with name + code typed "mk6u 5fwb" ✓; answering button ✓; SOS sheet, callback reaches staff app as tel:+972527654321 ✓; now-screen picker auto-opens, star adds the card ✓ (fixed: list closed after the first star); section index + goToPanel ✓ (smooth scroll does not animate in a hidden pane, verified the call); send-back picker above the team page ✓; skip stage without points: stage completed, score 0, no ledger ✓.
 - B4 so far: CLAUDE.md scoring section rewritten; speed-bonus line on public board, TV, ceremony; printed staff card says how to sign in without a scanner; SOS service names no longer repeat the number.
+- 00:30 D1: scripts/README (checks:pdf, deploy:test-game), docs/README (deploy checks, issues, overnight), CLAUDE.md scoring. D2 prepared: specs for fair-final-score + deploy-test-game, umbrella change deploy-feedback-2026-10-05 (6 capabilities), all five valid; archive after C1. D3: 2026-10-05 PDF report updated; NEXT-draft.md/.pdf = the next deploy's checklist, ready.
+- 01:20 E1: change desktop-layouts-play-staff (proposal, spec, tasks). E2 code: useWideLayout (one query, 1024px), staffLayout table (phone order unchanged, 3 desktop columns, quick bar phone-only), StaffConsole renders every section through the table, PlayScreen map + mission column side by side on wide, GameScreen/Screen take `wide`, final screen wider. test-staff-layout + test-wide-layout green, typecheck + lint clean. Browser check after C1 frees the emulator ports.
+- 01:55 C1: e2e ALL PASS, Firestore + Storage rules suites passed, doc-cache check ran; the 8-team sim then FAILED live/final ordering parity. Cause: fair-final-score adds the speed bonus only to published/final boards, and the audit compared the UNPUBLISHED live board with the final one (8 finishers ⇒ bonus ⇒ different order). Not drift, the requested behaviour. Audits now compare the published live board with the final one and assert an unpublished board has no bonus (run-audit.mjs, simulate-adversarial.mjs); CLAUDE.md notes it. Rerun: LOAD SIM CONSISTENT, ADVERSARIAL SIM CONSISTENT.

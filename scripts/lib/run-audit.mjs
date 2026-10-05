@@ -39,6 +39,15 @@ export async function auditRun({ creator, ownerUid, gameId, runId, states, audit
 
   const live = await creator.call('refreshLeaderboard', { gameId, runId, publish: false });
   oracle('live board', live?.rankings);
+  // fair-final-score: the speed bonus appears only on a published or final board, so the parity
+  // that proves buildRankings cannot drift compares two boards computed the SAME way: the live
+  // board once published, and the final one. The unpublished board must carry no bonus at all.
+  audit('an unpublished board carries no speed bonus',
+    (live?.rankings ?? []).every((r) => (r.speedBonus ?? 0) === 0));
+  const livePublished = await creator.call('refreshLeaderboard', { gameId, runId, publish: true });
+  oracle('live board, published', livePublished?.rankings);
+  audit('score = points + speedBonus on the published board',
+    (livePublished?.rankings ?? []).every((r) => r.score === (r.points ?? r.score) + (r.speedBonus ?? 0)));
 
   // Station slots — read the LIVE run doc BEFORE finalizeRun (finalizeRun reconciles
   // taskCounts, which would erase a mid-run leak before we can see it). Two checks:
@@ -72,7 +81,7 @@ export async function auditRun({ creator, ownerUid, gameId, runId, states, audit
   const fin = await creator.call('finalizeRun', { gameId, runId });
   oracle('final board', fin?.rankings);
   audit('live/final ordering parity (no drift)',
-    JSON.stringify((live?.rankings ?? []).map((r) => r.teamId)) === JSON.stringify((fin?.rankings ?? []).map((r) => r.teamId)));
+    JSON.stringify((livePublished?.rankings ?? []).map((r) => r.teamId)) === JSON.stringify((fin?.rankings ?? []).map((r) => r.teamId)));
 
   return { live, fin };
 }

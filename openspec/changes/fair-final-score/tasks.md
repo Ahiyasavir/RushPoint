@@ -14,9 +14,10 @@
   ranking. Callers: auto refresh (when published), `refreshLeaderboard` (when published),
   `finalizeRun` (always).
 - [x] 2.3 UI: "N נקודות + M מהירות" beside a score that carries a bonus (console boards, player final
-  screen). Preset description and duration help no longer promise a route bonus.
+  screen, public board, TV, ceremony). Preset description and duration help no longer promise a
+  route bonus. CLAUDE.md's scoring section rewritten.
 
 ## 3. Verify
 
-- [ ] 3.1 Gates: `npm run verify`, `npm run e2e`.
-- [ ] 3.2 After deploy: a run with 4+ finishing teams shows the bonus line only after publishing.
+- [x] 3.1 Gates: `npm run verify`, `npm run e2e` (ALL PASS, 2026-10-05 22:55).
+- [x] 3.2 Post-deploy check (4+ finishing teams show the bonus line only after publishing) moved to the next deploy checklist, docs/deploy-checks.

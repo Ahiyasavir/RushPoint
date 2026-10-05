@@ -22,6 +22,18 @@ Index last verified **2026-09-08**.
 | [ux-improvement-queue.md](ux-improvement-queue.md) | The UX/UI improvement queue an autonomous loop works through, with its 2026-08-21 audit baseline. Was `.ux_progress_queue.md` at the repo root until 2026-09-08. |
 | [nightly-run-log.md](nightly-run-log.md) | Log of the overnight autonomous dev loop, newest first. Was `dev-logs/nightly-run.md` until 2026-09-08. |
 
+## Deploys: checklists, test games, reported issues
+Standing rule since 2026-10-05 (DEPLOY.md §9): every production deploy gets a designed checklist
+PDF and a `deploy <date>` test game in the organizer's account, and what he reports while checking
+goes into an issues table.
+
+| Path | What it is |
+|---|---|
+| [deploy-checks/](deploy-checks) | One `<date>.md` per deploy (computer · phone · special checks + what changed), built into `<date>.pdf` by `npm run checks:pdf`; `<date>.notes.json` marks test-game missions whose fix is not live yet. |
+| [ISSUES-2026-10-05.md](ISSUES-2026-10-05.md) | Everything reported while checking the 5.10 deploy, with status and what was done. |
+| [OVERNIGHT-2026-10-05.md](OVERNIGHT-2026-10-05.md) | The 5.10 overnight work log: plan, evidence per item. |
+| [PHONE-CHECKLIST-2026-10-04.md](PHONE-CHECKLIST-2026-10-04.md) | The 5.10 checklist before the PDF format existed; superseded by `deploy-checks/2026-10-05.*`. |
+
 ## Marketing & store material
 | Path | What it is |
 |---|---|

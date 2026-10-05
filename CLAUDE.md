@@ -468,7 +468,11 @@ team's own points, linear from the fastest finisher to the slowest, only with �
 on a PUBLISHED board or the final one (`buildRankings(…, { speedBonus })`). Every entry carries
 `points` and `speedBonus` beside `score`, and the UI shows the bonus as its own line. The old +500
 and ±200 turned 100/50 on the phones into 800/350 on the organizer's board (run
-pCADVITcbzIZMEPjVqcV); never fold a bonus into a score silently again. `bonusPenalty` absorbs hints +
+pCADVITcbzIZMEPjVqcV); never fold a bonus into a score silently again. **Consequence for parity:** an
+UNPUBLISHED live board (no bonus) may order teams differently from the final board (bonus) — that is
+the requested behaviour, not drift. The no-drift audits (`scripts/lib/run-audit.mjs`,
+`simulate-adversarial.mjs`) therefore compare the PUBLISHED live board with the final one, and assert
+separately that an unpublished board carries no bonus; found by the 8-team sim on 2026-10-05. `bonusPenalty` absorbs hints +
 adjustments. `buildRankings()` is shared by `finalizeRun` and `refreshLeaderboard` so live and final
 standings can't drift.
 

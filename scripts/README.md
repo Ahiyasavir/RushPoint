@@ -73,6 +73,8 @@ Three rules that hold across the folder:
 |---|---|---|
 | `deploy-functions.mjs` | `deploy:fn` | Deploys ONE function instead of rebuilding all of them. |
 | `cost-preflight.mjs` | `cost:preflight` | Cost sanity check before an expensive deploy. |
+| `deploy-checks-pdf.mjs` | `checks:pdf` | **Every deploy (standing rule, 2026-10-05):** turns `docs/deploy-checks/<date>.md` into the designed checklist PDF Ahiya checks the deploy with (computer · phone · special checks, then what changed). Format and template in `lib/deployChecks.mjs`, pinned by `test-deploy-checks.ts`. |
+| `deploy-test-game.mjs` | `deploy:test-game` | **Every deploy:** creates the `deploy <date>` test game (one mission per check) in the organizer's creator account through the real `importGameFile` callable. Template in `lib/deployTestGame.mjs`, pinned by `test-deploy-test-game.ts`; per-deploy "ידוע" notes in `docs/deploy-checks/<date>.notes.json`. Writes to the LIVE project. |
 | `gen-pwa-icons.mjs` | `icons` | Renders both apps' raster PWA icons from each app's single source SVG. |
 | `gen-play-assets.mjs` · `gen-play-screenshots.mjs` · `check-play-store.ts` · `patch-twa-target-sdk.mjs` · `gen-assetlinks.mjs` | `play:*` | Google Play TWA: listing assets, screenshots, the pre-submission gate, the Android target SDK patch, and Digital Asset Links. See [PLAY_STORE.md](../PLAY_STORE.md). |
 | `build-landing-pages.ts` | `seo:build` | Writes the static SEO landing pages and the participant origin's sitemap. |

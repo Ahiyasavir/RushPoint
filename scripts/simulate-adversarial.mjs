@@ -297,10 +297,15 @@ async function main() {
   };
   const live = await creator.call('refreshLeaderboard', { gameId, runId, publish: false });
   oracle('live board', live.data?.rankings);
+  // fair-final-score: compare two boards computed the same way (both carry the published speed
+  // bonus); the unpublished one must carry none.
+  audit('an unpublished board carries no speed bonus', (live.data?.rankings ?? []).every((r) => (r.speedBonus ?? 0) === 0));
+  const livePublished = await creator.call('refreshLeaderboard', { gameId, runId, publish: true });
+  oracle('live board, published', livePublished.data?.rankings);
   const fin = await creator.call('finalizeRun', { gameId, runId });
   oracle('final board', fin.data?.rankings);
   audit('live/final ordering parity (no drift under chaos)',
-    JSON.stringify((live.data?.rankings ?? []).map((r) => r.teamId)) === JSON.stringify((fin.data?.rankings ?? []).map((r) => r.teamId)));
+    JSON.stringify((livePublished.data?.rankings ?? []).map((r) => r.teamId)) === JSON.stringify((fin.data?.rankings ?? []).map((r) => r.teamId)));
 
   const runDoc = await creator.getDocAt(`users/${ownerUid}/games/${gameId}/runs/${runId}`);
   const counts = runDoc.data?.taskCounts ?? {};
