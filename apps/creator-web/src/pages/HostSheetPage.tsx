@@ -34,7 +34,7 @@ const MAP_CREDIT = MAPTILER_KEY.trim() !== '' ? '© MapTiler © OpenStreetMap' :
  * at most 8 s, then open the print dialog anyway.
  */
 async function printWhenMapReady(): Promise<void> {
-  const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('.hs-map img'));
+  const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('.hs-map img, .hs-overview img'));
   const pending = imgs.filter((img) => !img.complete).map((img) => new Promise<void>((resolve) => {
     img.addEventListener('load', () => resolve(), { once: true });
     img.addEventListener('error', () => resolve(), { once: true });
@@ -389,6 +389,33 @@ export default function HostSheetPage() {
                   ))}
                   <p className="absolute bottom-0 end-0 bg-white/85 px-1.5 text-[9px] text-[#44403c]" dir="ltr">{MAP_CREDIT}</p>
                 </div>
+                {/* Where is this (change: host-sheet-map-context): the same spot three zoom levels
+                    out, the detail frame drawn on it, so a station in open land still names a
+                    town and a road. */}
+                {sheet.overview && (
+                  <figure className="hs-keep mx-auto mt-3 w-full" style={{ maxWidth: sheet.overview.widthPx }}>
+                    <figcaption className="mb-1 text-[12px] font-semibold text-[#44403c]">{h.mapOverview}</figcaption>
+                    <div className="hs-overview relative w-full overflow-hidden rounded-lg border border-[#d6d3d1] bg-[#f5f5f4]"
+                      style={{ aspectRatio: `${sheet.overview.widthPx} / ${sheet.overview.heightPx}` }} role="img" aria-label={h.mapOverview}>
+                      {sheet.overview.tiles.map((tl) => (
+                        <img
+                          key={`o${tl.z}/${tl.x}/${tl.y}/${tl.left}`}
+                          src={printTileUrl(tl.z, tl.x, tl.y, MAPTILER_KEY)}
+                          alt=""
+                          loading="eager"
+                          decoding="async"
+                          draggable={false}
+                          onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                          className="absolute max-w-none select-none"
+                          style={{ left: `${tl.left * 100}%`, top: `${tl.top * 100}%`, width: `${tl.w * 100}%`, height: `${tl.h * 100}%` }}
+                        />
+                      ))}
+                      <span className="absolute rounded-sm border-2 border-[#c2410c] bg-[#c2410c]/10"
+                        style={{ left: `${sheet.overview.detailRect.left * 100}%`, top: `${sheet.overview.detailRect.top * 100}%`, width: `${sheet.overview.detailRect.w * 100}%`, height: `${sheet.overview.detailRect.h * 100}%` }} />
+                      <p className="absolute bottom-0 end-0 bg-white/85 px-1.5 text-[9px] text-[#44403c]" dir="ltr">{MAP_CREDIT}</p>
+                    </div>
+                  </figure>
+                )}
                 <ol className="mt-3 grid gap-x-4 text-[12px] sm:grid-cols-2">
                   {sheet.stages.flatMap((s) => s.cards.filter((c) => c.location.kind === 'point').map((c) => (
                     <li key={c.id} dir="auto"><b>{c.number}</b> · {c.title} · {h.stageHeading(s.number, '')}</li>
@@ -471,6 +498,9 @@ export default function HostSheetPage() {
                     <p className="font-bold break-words" dir="auto">{s.label}</p>
                     <p className="text-[12px]">{s.capabilities.map((c) => (t.runConsole.staffCaps as Record<string, { name: string }>)[c]?.name).filter(Boolean).join(', ')}</p>
                     <p className="text-[12px]">{h.staffCode}: <b className="font-mono text-base" dir="ltr">{s.pin}</b></p>
+                    {/* staff-code-from-join-code: the code alone signs in, so a marshal without a
+                        scanner is told where to type it. */}
+                    <p className="text-[11px] text-[#57534e]">{h.staffNoScan}</p>
                     <p className="text-[10px] text-[#57534e]">{h.staffScan}</p>
                   </div>
                 </div>

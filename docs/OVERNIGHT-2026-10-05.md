@@ -10,13 +10,13 @@ this tree: `.claude/skills/reel-studio/**` is not ours, do not touch or commit i
 coherent batches. Every fix test-first, every UI change seen in a real browser.
 
 ## A. Land what is built
-- [ ] A1 Full gates (`verify` + emulator `e2e`) over the 5.10 fixes: staff code, SOS sheet, now-screen
+- [x] A1 Full gates (`verify` + emulator `e2e`) over the 5.10 fixes: staff code, SOS sheet, now-screen
   picker, invite scroll, print CSS, flag, overlay order, skip without points, contributions,
   publish stamp, fair final score, deploy PDF + test game tooling. Then commit locally.
 
 ## B. Open feedback (docs/ISSUES-2026-10-05.md)
-- [ ] B1 #14 host sheet map shows no streets or text: reproduce in a browser, fix, test.
-- [ ] B2 #12 "שיתוף והגדרות" goes to the wrong place: find the control, decide what it should do.
+- [x] B1 #14 host sheet map shows no streets or text: reproduce in a browser, fix, test.
+- [x] B2 #12 "שיתוף והגדרות" goes to the wrong place: find the control, decide what it should do.
 - [ ] B3 See every 5.10 fix work in a real browser (local stack): staff sign-in with a code only,
   SOS sheet + callback in console/staff, flag only, one-phone contribution, send back + route from
   the team page, skip stage choice, now-screen picker, host sheet print preview, publish reaching the
@@ -39,3 +39,7 @@ coherent batches. Every fix test-first, every UI change seen in a real browser.
 - [ ] E2 Build and verify at 1440 and 1024, without changing the phone layout.
 
 ## Log
+- 22:55 A1 green (verify + e2e ALL PASS, 139 callables) → commit 8eb4d79. B2: tab renamed "שיתוף וצוות" + a jump index on every section of 3+ panels (test-section-index), browser check pending in B3.
+- 23:40 B1: cause found by rendering his point: open fields at z16 = no text. Fix: detail map ≤ z16, retina tiles, "איפה זה" overview 3 levels out with the detail frame (test-print-map). Seen in a browser.
+- 23:55 B3 in a real browser (local stack, run wM52knEOQyXt2UGHmCwj): staff sign-in with name + code typed "mk6u 5fwb" ✓; answering button ✓; SOS sheet, callback reaches staff app as tel:+972527654321 ✓; now-screen picker auto-opens, star adds the card ✓ (fixed: list closed after the first star); section index + goToPanel ✓ (smooth scroll does not animate in a hidden pane, verified the call); send-back picker above the team page ✓; skip stage without points: stage completed, score 0, no ledger ✓.
+- B4 so far: CLAUDE.md scoring section rewritten; speed-bonus line on public board, TV, ceremony; printed staff card says how to sign in without a scanner; SOS service names no longer repeat the number.

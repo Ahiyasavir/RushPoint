@@ -36,6 +36,20 @@ export interface PrintMapLayout {
   tiles: PrintMapTile[];
   /** Marker centres as fractions of the frame (x right, y down, north up). */
   markers: { number: number; stage: number; x: number; y: number }[];
+  /** World pixel of the frame's top-left corner at `zoom` (host-sheet-map-context: the overview
+   *  is centred on the same spot). */
+  originX: number;
+  originY: number;
+}
+
+/** The "where is this" map beside the detail map (change: host-sheet-map-context). */
+export interface PrintOverviewLayout {
+  zoom: number;
+  widthPx: number;
+  heightPx: number;
+  tiles: PrintMapTile[];
+  /** The detail map's frame, as fractions of the overview frame. */
+  detailRect: { left: number; top: number; w: number; h: number };
 }
 
 export const PRINT_MAP_MAX_PX = 680;
@@ -51,6 +65,15 @@ const MIN_W = PRINT_MAP_MAX_PX;
 const MIN_H = 480;
 /** Street level for a game whose stations are all at one spot. */
 const SINGLE_POINT_ZOOM = 16;
+/**
+ * The detail map never goes closer than this (host-sheet-map-context, 2026-10-05). At 17 a tight
+ * cluster showed a few houses and no names; 16 still reads street by street on foot.
+ */
+const MAX_DETAIL_ZOOM = 16;
+/** The overview sits this many levels further out than the detail map, so towns are named. */
+export const OVERVIEW_ZOOM_STEP = 3;
+const OVERVIEW_W = 320;
+const OVERVIEW_H = 240;
 const MAX_LAT = 85.0511;
 
 const worldPx = (z: number) => TILE * 2 ** z;
@@ -58,6 +81,62 @@ const lngToPx = (lng: number, z: number) => ((lng + 180) / 360) * worldPx(z);
 function latToPx(lat: number, z: number): number {
   const r = (lat * Math.PI) / 180;
   return ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * worldPx(z);
+}
+
+/** Every tile that covers the frame, positioned as fractions of it. */
+function tilesForFrame(zoom: number, originX: number, originY: number, widthPx: number, heightPx: number): PrintMapTile[] {
+  const n = 2 ** zoom;
+  const tiles: PrintMapTile[] = [];
+  const firstX = Math.floor(originX / TILE);
+  const lastX = Math.floor((originX + widthPx - 1e-9) / TILE);
+  const firstY = Math.floor(originY / TILE);
+  const lastY = Math.floor((originY + heightPx - 1e-9) / TILE);
+  for (let ty = firstY; ty <= lastY; ty++) {
+    if (ty < 0 || ty >= n) continue;
+    for (let tx = firstX; tx <= lastX; tx++) {
+      tiles.push({
+        z: zoom,
+        x: ((tx % n) + n) % n,
+        y: ty,
+        left: (tx * TILE - originX) / widthPx,
+        top: (ty * TILE - originY) / heightPx,
+        w: TILE / widthPx,
+        h: TILE / heightPx,
+      });
+    }
+  }
+  return tiles;
+}
+
+/**
+ * The "where is this" overview for a detail map (change: host-sheet-map-context). Ahiya,
+ * 2026-10-05: a station in open fields printed as thin lines with no name at all. The overview is
+ * OVERVIEW_ZOOM_STEP levels further out, centred on the same spot, with the detail frame marked,
+ * so the sheet always says which town or road this is. Null when the detail is already a
+ * country-scale map (nothing further out would help) or there is no detail map.
+ */
+export function printOverviewLayout(detail: PrintMapLayout | null | undefined): PrintOverviewLayout | null {
+  try {
+    if (!detail || !Number.isFinite(detail.originX) || !Number.isFinite(detail.originY)) return null;
+    const zoom = detail.zoom - OVERVIEW_ZOOM_STEP;
+    if (zoom < 3) return null;
+    const scale = 2 ** OVERVIEW_ZOOM_STEP;
+    const cx = (detail.originX + detail.widthPx / 2) / scale;
+    const cy = (detail.originY + detail.heightPx / 2) / scale;
+    const originX = cx - OVERVIEW_W / 2;
+    const originY = cy - OVERVIEW_H / 2;
+    const w = detail.widthPx / scale / OVERVIEW_W;
+    const h = detail.heightPx / scale / OVERVIEW_H;
+    return {
+      zoom,
+      widthPx: OVERVIEW_W,
+      heightPx: OVERVIEW_H,
+      tiles: tilesForFrame(zoom, originX, originY, OVERVIEW_W, OVERVIEW_H),
+      detailRect: { left: 0.5 - w / 2, top: 0.5 - h / 2, w, h },
+    };
+  } catch {
+    return null;
+  }
 }
 
 function validPoints(points: readonly PrintMapPoint[] | null | undefined): PrintMapPoint[] {
@@ -81,7 +160,7 @@ export function printMapLayout(
     const pts = validPoints(points);
     if (pts.length === 0) return null;
     const minZoom = Math.max(0, Math.floor(opts?.minZoom ?? 3));
-    const maxZoom = Math.min(17, Math.floor(opts?.maxZoom ?? 17));
+    const maxZoom = Math.min(MAX_DETAIL_ZOOM, Math.floor(opts?.maxZoom ?? MAX_DETAIL_ZOOM));
     if (minZoom > maxZoom) return null;
 
     const lats = pts.map((p) => p.lat);
@@ -110,26 +189,7 @@ export function printMapLayout(
     const originX = (Math.max(...xs) + Math.min(...xs)) / 2 - widthPx / 2;
     const originY = (Math.max(...ys) + Math.min(...ys)) / 2 - heightPx / 2;
 
-    const n = 2 ** zoom;
-    const tiles: PrintMapTile[] = [];
-    const firstX = Math.floor(originX / TILE);
-    const lastX = Math.floor((originX + widthPx - 1e-9) / TILE);
-    const firstY = Math.floor(originY / TILE);
-    const lastY = Math.floor((originY + heightPx - 1e-9) / TILE);
-    for (let ty = firstY; ty <= lastY; ty++) {
-      if (ty < 0 || ty >= n) continue;
-      for (let tx = firstX; tx <= lastX; tx++) {
-        tiles.push({
-          z: zoom,
-          x: ((tx % n) + n) % n,
-          y: ty,
-          left: (tx * TILE - originX) / widthPx,
-          top: (ty * TILE - originY) / heightPx,
-          w: TILE / widthPx,
-          h: TILE / heightPx,
-        });
-      }
-    }
+    const tiles = tilesForFrame(zoom, originX, originY, widthPx, heightPx);
 
     const markers = pts.map((p, i) => ({
       number: p.number,
@@ -137,7 +197,7 @@ export function printMapLayout(
       x: (xs[i] - originX) / widthPx,
       y: (ys[i] - originY) / heightPx,
     }));
-    return { zoom, widthPx, heightPx, tiles, markers };
+    return { zoom, widthPx, heightPx, tiles, markers, originX, originY };
   } catch {
     return null;
   }
@@ -153,7 +213,9 @@ export function printTileUrl(z: number, x: number, y: number, key: string | null
   const n = 2 ** z;
   const col = ((Math.floor(x) % n) + n) % n;
   const k = typeof key === 'string' ? key.trim() : '';
-  if (k) return `https://api.maptiler.com/maps/streets-v2/256/${z}/${col}/${y}.png?key=${encodeURIComponent(k)}`;
+  // @2x: the same 256px layout drawn from 512px images, so street and place names stay sharp on
+  // paper (host-sheet-map-context). OpenTopoMap has no retina tiles.
+  if (k) return `https://api.maptiler.com/maps/streets-v2/256/${z}/${col}/${y}@2x.png?key=${encodeURIComponent(k)}`;
   return `https://${OPENTOPO_HOSTS[(col + y) % 3]}.tile.opentopomap.org/${z}/${col}/${y}.png`;
 }
 

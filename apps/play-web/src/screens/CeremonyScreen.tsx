@@ -199,6 +199,8 @@ export default function CeremonyScreen({ code }: { code: string }) {
                   ) : (
                     <>
                       <div className="text-3xl font-brand font-extrabold" style={{ color: accent }}>{r.score}</div>
+                      {/* fair-final-score: the published speed bonus, shown, never folded in silently. */}
+                      {(r.speedBonus ?? 0) > 0 && <div className="text-sm text-zinc-500">{t.final.scoreWithSpeed({ points: r.points ?? r.score, bonus: r.speedBonus ?? 0 })}</div>}
                       <div className="text-sm text-zinc-500 font-mono">{fmtTime(r)}</div>
                     </>
                   )}
@@ -224,6 +226,7 @@ function Podium({ rankings, phase, accent, championLabel, timeOnly }: {
   championLabel: string;
   timeOnly: boolean;
 }) {
+  const { t } = useT();
   const shown = phase === 'podium3' ? [3] : phase === 'podium2' ? [3, 2] : [3, 2, 1];
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-3xl w-full mx-auto">
@@ -254,6 +257,7 @@ function Podium({ rankings, phase, accent, championLabel, timeOnly }: {
               <div className={`font-brand font-extrabold ${isChampion ? 'text-4xl' : 'text-3xl'} ${timeOnly ? 'font-mono tabular-nums' : ''}`} style={{ color: accent }}>
                 {timeOnly ? (fmtTime(r) || '—') : r.score}
               </div>
+              {!timeOnly && (r.speedBonus ?? 0) > 0 && <div className="text-sm text-zinc-500">{t.final.scoreWithSpeed({ points: r.points ?? r.score, bonus: r.speedBonus ?? 0 })}</div>}
             </div>
           );
         })

@@ -81,7 +81,7 @@ export default function SosSheet({ runId, onSend, onClose }: {
         <ul className="space-y-2" data-testid="sos-services">
           {EMERGENCY_SERVICES.map((s) => (
             <li key={s.id}>
-              <a href={`tel:${s.number}`} data-testid={`sos-call-${s.id}`}
+              <a href={`tel:${s.number}`} data-testid={`sos-call-${s.id}`} aria-label={`${p.sosServices[s.id]} ${s.number}`}
                 className="flex w-full min-h-[52px] items-center justify-between gap-3 rounded-xl bg-ink-alert px-4 text-base font-bold text-white active:scale-[0.98] transition-transform">
                 <span>{p.sosServices[s.id]}</span>
                 <span dir="ltr" className="font-mono text-lg">{s.number}</span>

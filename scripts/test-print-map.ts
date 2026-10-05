@@ -4,7 +4,7 @@
 // prints blank. Plain tile <img>s laid out at fixed positions print like any
 // picture, so the layout (zoom, tiles, marker positions) is computed here, pure,
 // and the page only places what this returns.
-import { mergeMarkers, printMapLayout, printTileUrl, PRINT_MAP_MAX_PX, type PrintMapPoint } from '../apps/creator-web/src/lib/printMap';
+import { mergeMarkers, printMapLayout, printOverviewLayout, printTileUrl, OVERVIEW_ZOOM_STEP, PRINT_MAP_MAX_PX, type PrintMapPoint } from '../apps/creator-web/src/lib/printMap';
 
 let failures = 0;
 const ok = (name: string, cond: boolean, detail?: unknown) => {
@@ -71,10 +71,26 @@ ok('markers apart stay apart', merged.length === 3 && merged.some((g) => g.numbe
 ok('no number is lost or doubled', merged.flatMap((g) => g.numbers).sort((a, b) => a - b).join() === '1,4,5,6,9');
 ok('merge is total on junk', mergeMarkers(null as never, 0, 0).length === 0);
 
-// Tile URLs.
-ok('with a key: MapTiler streets', printTileUrl(15, 19598, 13300, 'KEY') === 'https://api.maptiler.com/maps/streets-v2/256/15/19598/13300.png?key=KEY');
+// Tile URLs. Retina (@2x) for MapTiler, so street and place names stay sharp on paper.
+ok('with a key: MapTiler streets, retina', printTileUrl(15, 19598, 13300, 'KEY') === 'https://api.maptiler.com/maps/streets-v2/256/15/19598/13300@2x.png?key=KEY');
 ok('without a key: OpenTopoMap', /^https:\/\/[abc]\.tile\.opentopomap\.org\/15\/19598\/13300\.png$/.test(printTileUrl(15, 19598, 13300, '')));
-ok('x wraps around the world', printTileUrl(2, 5, 1, 'K').includes('/2/1/1.png') && printTileUrl(2, -1, 1, 'K').includes('/2/3/1.png'));
+ok('x wraps around the world', printTileUrl(2, 5, 1, 'K').includes('/2/1/1@2x.png') && printTileUrl(2, -1, 1, 'K').includes('/2/3/1@2x.png'));
+
+// host-sheet-map-context (Ahiya, 2026-10-05: "אין שום טקסט על המקום, אין רחובות, אין כלום"). His
+// one station was in open fields: at zoom 16 the frame held thin lines and no name at all. The
+// detail map now stops at zoom 16 (not 17), and an OVERVIEW three levels out shows where it is.
+const field = [{ number: 1, stage: 1, lat: 31.769124, lng: 34.946328 }];
+const detail = printMapLayout(field)!;
+ok('the detail map never goes past zoom 16', detail.zoom === 16 && printMapLayout(pts)!.zoom <= 16, [detail.zoom, printMapLayout(pts)!.zoom]);
+const ov = printOverviewLayout(detail);
+ok('an overview is three levels out', ov !== null && ov.zoom === detail.zoom - OVERVIEW_ZOOM_STEP && OVERVIEW_ZOOM_STEP === 3, ov && ov.zoom);
+ok('the overview has tiles covering its frame', !!ov && ov.tiles.length > 0
+  && ov.tiles.some((t) => t.left <= 0 && t.top <= 0) && ov.tiles.some((t) => t.left + t.w >= 1 && t.top + t.h >= 1));
+ok('the detail area is marked, centred, an eighth of its size', !!ov
+  && Math.abs(ov.detailRect.left + ov.detailRect.w / 2 - 0.5) < 1e-9 && Math.abs(ov.detailRect.top + ov.detailRect.h / 2 - 0.5) < 1e-9
+  && Math.abs(ov.detailRect.w - (detail.widthPx / 8) / ov.widthPx) < 1e-9, ov && ov.detailRect);
+ok('a country-wide game gets no overview (its map already is one)', printOverviewLayout(far!) === null || printOverviewLayout(far!)!.zoom >= 3);
+ok('no detail ⇒ no overview, no throw', printOverviewLayout(null) === null && printOverviewLayout(undefined) === null);
 ok('a blank key counts as none', printTileUrl(3, 1, 1, '   ').includes('opentopomap'));
 
 console.log(failures === 0 ? '\n✅ print map: ALL PASS' : `\n❌ print map: ${failures} FAILED`);

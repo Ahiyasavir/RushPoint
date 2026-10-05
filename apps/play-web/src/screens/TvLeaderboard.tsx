@@ -135,6 +135,8 @@ export default function TvLeaderboard({ code }: { code: string }) {
                   return (
                     <>
                       <div className="text-3xl font-brand font-extrabold" style={{ color: accent }}>{r.score}</div>
+                      {/* fair-final-score: the published speed bonus, shown, never folded in silently. */}
+                      {(r.speedBonus ?? 0) > 0 && <div className="text-sm text-zinc-500">{t.final.scoreWithSpeed({ points: r.points ?? r.score, bonus: r.speedBonus ?? 0 })}</div>}
                       {sec != null && (
                         <div
                           title={final ? t.board.finalTime : t.board.elapsed}

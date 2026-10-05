@@ -16,7 +16,7 @@
 //
 // Total: a malformed or empty game yields a sheet with what could be read, never a
 // throw — the page renders whatever the Builder last saved.
-import { printMapLayout, type PrintMapLayout } from './printMap';
+import { printMapLayout, printOverviewLayout, type PrintMapLayout, type PrintOverviewLayout } from './printMap';
 import { isTaskHidden, maxCompletableTasks, type StaffCapability } from '@rushpoint/shared';
 
 export interface HostSheetOptions {
@@ -153,6 +153,9 @@ export interface HostSheet {
   answerRows: { number: number; title: string; completion: HostCompletion; answer: HostAnswer | null }[];
   /** The street map: tiles and numbered markers (change: host-sheet-street-map). Null when off or nothing is located. */
   map: PrintMapLayout | null;
+  /** "Where is this": the same spot three zoom levels out, the detail frame marked
+   *  (change: host-sheet-map-context). Null without a map, or when the map is already wide. */
+  overview: PrintOverviewLayout | null;
   staffPage: { codes: HostStaffCard[] } | null;
 }
 
@@ -469,6 +472,7 @@ export function buildHostSheet(gameIn: unknown, input: BuildHostSheetInput): Hos
     .filter((c) => c.location.kind === 'point')
     .map((c) => ({ number: c.number, stage: s.number, ...(c.location as { lat: number; lng: number }) })));
   const map = options.includeMap ? printMapLayout(located) : null;
+  const overview = printOverviewLayout(map);
 
   const accessCode = str(run?.accessCode);
   const playUrl = str(input?.playUrl).replace(/\/+$/, '');
@@ -511,6 +515,7 @@ export function buildHostSheet(gameIn: unknown, input: BuildHostSheetInput): Hos
     stages,
     answerRows,
     map,
+    overview,
     staffPage,
   };
 }

@@ -30,8 +30,9 @@ ok('three services: medical 101, police 100, fire 102',
   JSON.stringify(EMERGENCY_SERVICES));
 ok('medical comes first (an injury is the most common emergency)', EMERGENCY_SERVICES[0]?.id === 'medical');
 for (const s of EMERGENCY_SERVICES) {
-  ok(`he names ${s.id} with its number`, he.play.sosServices[s.id].includes(s.number), he.play.sosServices[s.id]);
-  ok(`en names ${s.id} with its number`, en.play.sosServices[s.id].includes(s.number), en.play.sosServices[s.id]);
+  // The number is drawn beside the name from EMERGENCY_SERVICES; a name that repeats it read twice.
+  ok(`he names ${s.id} without repeating its number`, !!he.play.sosServices[s.id] && !he.play.sosServices[s.id].includes(s.number), he.play.sosServices[s.id]);
+  ok(`en names ${s.id} without repeating its number`, !!en.play.sosServices[s.id] && !en.play.sosServices[s.id].includes(s.number), en.play.sosServices[s.id]);
 }
 
 console.log('\n— the number to call back —');
@@ -49,6 +50,7 @@ const root = path.resolve(__dirname, '..');
 const sheet = fs.readFileSync(path.join(root, 'apps/play-web/src/components/SosSheet.tsx'), 'utf8').replace(/\r/g, '');
 ok('the sheet lists every service from EMERGENCY_SERVICES', /EMERGENCY_SERVICES\.map/.test(sheet));
 ok('each service is a real tel: link (dials even if the app is stuck)', /href=\{`tel:\$\{s\.number\}`\}/.test(sheet));
+ok('a screen reader hears the name and the number', /aria-label=\{`\$\{p\.sosServices\[s\.id\]\} \$\{s\.number\}`\}/.test(sheet));
 ok('the sheet has the callback phone field', /type="tel"/.test(sheet) && /autoComplete="tel"/.test(sheet));
 ok('the sheet is a dialog', /role="dialog"/.test(sheet) && /aria-modal="true"/.test(sheet));
 const play = fs.readFileSync(path.join(root, 'apps/play-web/src/screens/PlayScreen.tsx'), 'utf8').replace(/\r/g, '');

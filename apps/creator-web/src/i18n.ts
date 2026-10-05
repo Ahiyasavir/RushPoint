@@ -3226,6 +3226,7 @@ const HE = {
     fillEmergency: 'טלפון חירום',
     fillStaff: 'אנשי צוות',
     mapTitle: 'מפת המשחק',
+    mapOverview: 'איפה זה: אותו מקום ממרחק, המסגרת הכתומה היא המפה שלמעלה',
     mapEmpty: 'אין משימות עם נקודה על המפה.',
     routeTitle: 'מסלול המשחק',
     stageHeading: (n: number, title: string) => (title ? `שלב ${n} · ${title}` : `שלב ${n}`),
@@ -3308,6 +3309,7 @@ const HE = {
     staffTitle: 'קודי צוות, לגזור ולחלק',
     staffScan: 'סורקים כדי להיכנס כצוות',
     staffCode: 'קוד',
+    staffNoScan: 'בלי סורק: באפליקציית השחקנים לוחצים "כניסת מארגנים" ומקלידים שם וקוד.',
     printedOn: (title: string, date: string) => `${title} · הודפס ${date}`,
   },
   // MapLibre's own words (change: map-locale). lib/mapLocale.ts.
@@ -6468,6 +6470,7 @@ const EN: typeof HE = {
     fillEmergency: 'Emergency phone',
     fillStaff: 'Staff',
     mapTitle: 'Game map',
+    mapOverview: 'Where this is: the same spot from further out; the orange frame is the map above',
     mapEmpty: 'No mission has a point on the map.',
     routeTitle: 'The route',
     stageHeading: (n: number, title: string) => (title ? `Stage ${n} · ${title}` : `Stage ${n}`),
@@ -6550,6 +6553,7 @@ const EN: typeof HE = {
     staffTitle: 'Staff codes, cut out and hand out',
     staffScan: 'Scan to sign in as staff',
     staffCode: 'Code',
+    staffNoScan: 'No scanner: in the player app tap "Organizer sign in" and type a name and the code.',
     printedOn: (title: string, date: string) => `${title} · printed ${date}`,
   },
   mapUi: {

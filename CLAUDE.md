@@ -461,9 +461,16 @@ strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify vi
 - `time_only` — ranked purely by completion time.
 - `fixed_points_speed` — fixed points per task + a speed bonus.
 - `smart_weighted` — sigmoid time multiplier × difficulty.
-Final ranking (`finalizeRun`): `Σ earned + completion bonus − bonusPenalty`, then a Z-Score time
-normalization. `bonusPenalty` absorbs hints + adjustments. `buildRankings()` is shared by
-`finalizeRun` and `refreshLeaderboard` so live and final standings can't drift.
+Final ranking (change: fair-final-score, 2026-10-05): a board ranks on **points** =
+`Σ earnedScore − bonusPenalty` (what the team's phone shows; no completion bonus, no Z-score, no
+`fixed_points_speed` route bonus at ranking time), plus `finalSpeedBonus` — at most +10% of the
+team's own points, linear from the fastest finisher to the slowest, only with ≥4 finishers, and only
+on a PUBLISHED board or the final one (`buildRankings(…, { speedBonus })`). Every entry carries
+`points` and `speedBonus` beside `score`, and the UI shows the bonus as its own line. The old +500
+and ±200 turned 100/50 on the phones into 800/350 on the organizer's board (run
+pCADVITcbzIZMEPjVqcV); never fold a bonus into a score silently again. `bonusPenalty` absorbs hints +
+adjustments. `buildRankings()` is shared by `finalizeRun` and `refreshLeaderboard` so live and final
+standings can't drift.
 
 ### Smart routing (`routing/assignNextTask.ts`) — **preset-aware**
 `smart_weighted`: `0.5·load − 0.3·transit + 0.2·skill` (load = station availability, transit =

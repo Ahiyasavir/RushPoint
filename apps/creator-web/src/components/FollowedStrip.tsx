@@ -46,7 +46,9 @@ export default function FollowedStrip({ cards, mineOnly, onMineOnly, onOpen, pic
 }) {
   const rc = useT().runConsole;
   const f = rc.follow;
-  // Open by itself while nothing is followed, so the empty state is never a dead end.
+  // Open by itself while nothing is followed, so the empty state is never a dead end. Starring a
+  // team keeps it open (setPickOpen below): before the race an organizer stars several in a row,
+  // and the list closing under the first one made them reopen it every time (found 2026-10-05).
   const [pickOpen, setPickOpen] = useState(false);
   const showPicker = !!picker && picker.total > 0 && (pickOpen || cards.length === 0);
   return (
@@ -80,7 +82,7 @@ export default function FollowedStrip({ cards, mineOnly, onMineOnly, onOpen, pic
             <ul className="mt-1 max-h-72 overflow-y-auto divide-y divide-[--rp-border]">
               {picker.teams.map((tm) => (
                 <li key={tm.id}>
-                  <button type="button" onClick={() => picker.onToggle(tm.id)} aria-pressed={tm.followed}
+                  <button type="button" onClick={() => { setPickOpen(true); picker.onToggle(tm.id); }} aria-pressed={tm.followed}
                     data-testid="followed-pick-row"
                     aria-label={tm.followed ? f.unfollowAria({ team: tm.name }) : f.followAria({ team: tm.name })}
                     className="flex w-full items-center gap-2 min-h-[44px] px-1 text-start hover:bg-[--surface-2] rounded-lg">

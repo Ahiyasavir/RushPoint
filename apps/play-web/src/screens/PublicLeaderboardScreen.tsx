@@ -188,6 +188,8 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                     return (
                       <>
                         <span className="font-brand font-bold text-base" style={{ color: accent }}>{r.score}</span>
+                        {/* fair-final-score: the published speed bonus, shown, never folded in silently. */}
+                        {(r.speedBonus ?? 0) > 0 && <span className="text-[11px] text-zinc-500">{t.final.scoreWithSpeed({ points: r.points ?? r.score, bonus: r.speedBonus ?? 0 })}</span>}
                         {sec != null && (
                           <span
                             title={final ? t.board.finalTime : t.board.elapsed}
