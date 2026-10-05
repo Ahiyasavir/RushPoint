@@ -161,7 +161,7 @@ for (const [name, { file, needsInset, why }] of Object.entries(SHELLS)) {
   ok(/h-\[100dvh\]/.test(gameScreen) && /\boverflow-hidden\b/.test(gameScreen) && /\brp-safe-t\b/.test(gameScreen),
     'GameScreen is one screen tall, never scrolls as a page, and folds in the top inset');
   const play = readFileSync(join(PLAY, 'src', 'screens', 'PlayScreen.tsx'), 'utf8');
-  ok(/<GameScreen>[\s\S]*<StoryInterstitial/.test(play), 'the launched game screen uses GameScreen');
+  ok(/<GameScreen\b[^>]*>[\s\S]*<StoryInterstitial/.test(play), 'the launched game screen uses GameScreen');
   ok(/<MissionSheet\b/.test(play), 'with a map, the mission lives in the sheet');
   ok(!/onClick=\{onLeave\}[^>]*>✕</.test(play), 'no bare ✕ leaves the game');
   ok(/leaveOnThisPhone/.test(play), 'leaving is labelled "leave the game on this phone"');

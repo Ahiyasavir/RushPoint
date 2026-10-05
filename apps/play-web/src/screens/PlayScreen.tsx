@@ -9,6 +9,7 @@ import { shouldSendPing } from '../lib/pingGate';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { useWideLayout } from '../lib/useWideLayout';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { syncErrorVerdict } from '../lib/syncError';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
@@ -65,6 +66,8 @@ import { Icon } from '../components/Icon';
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const { t, lang } = useT();
+  // desktop-layouts-play-staff: on a computer the map and the mission sit side by side.
+  const wide = useWideLayout();
   const [state, setState] = useState<MyTeamState | null>(null);
   const [err, setErr] = useState<'' | 'game-gone' | 'sync-failed'>('');
   // Offline continuity (change: fix-play-offline-continuity): a transient poll
@@ -791,7 +794,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   });
 
   return (
-    <GameScreen>
+    <GameScreen wide={wide}>
       <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
@@ -837,11 +840,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           the rest of ONE screen. With a map, the map fills it and the mission lives in a sheet over
           it (lib/sheetSnap.ts); without one, the mission fills it. The PAGE never scrolls; the
           sheet or the mission area scrolls inside itself when a mission is longer than the phone. */}
-      <div className="relative flex-1 min-h-0 mt-2" data-testid="game-body">
+      <div className={wide ? 'relative flex-1 min-h-0 mt-2 flex gap-4' : 'relative flex-1 min-h-0 mt-2'} data-testid="game-body">
       {locationRelevant && (
-        <div className="absolute inset-0 rounded-2xl overflow-hidden">
+        <div className={wide ? 'relative flex-1 min-w-0 rounded-2xl overflow-hidden' : 'absolute inset-0 rounded-2xl overflow-hidden'}>
           <Suspense fallback={<div className="h-full rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-            <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} pins={state.missionPins ?? []} bottomInset={sheetHeight} className="h-full" />
+            <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} pins={state.missionPins ?? []} bottomInset={wide ? 0 : sheetHeight} className="h-full" />
           </Suspense>
         </div>
       )}
@@ -954,6 +957,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         />
       </div>
         </>);
+        // desktop-layouts-play-staff: on a computer there is room for both, so the mission is its own
+        // scrolling column beside the map (no drawer), or a readable centred column with no map.
+        if (wide) {
+          return locationRelevant
+            ? <div className="order-first w-[440px] shrink-0 h-full overflow-y-auto overscroll-contain pb-4" data-testid="mission-column">{content}</div>
+            : <div className="w-full max-w-2xl mx-auto h-full overflow-y-auto overscroll-contain pb-4" data-testid="mission-area">{content}</div>;
+        }
         return locationRelevant
           // Keyed on the flash mission too: taking one swaps the sheet's content for the flash card
           // while the current mission stays the same, and the sheet must re-fit to show "סיימנו".

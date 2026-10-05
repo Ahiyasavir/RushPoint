@@ -159,15 +159,21 @@ export function Progress({ done, total, label }: { done: number; total: number; 
 // notch. Only the fixed overlays folded that inset in; ordinary content did not,
 // which put the header — team name, score, leave — inside the cutout on every
 // notched phone. The same class also reserves room for a pushing top banner.
-export function Screen({ children }: { children: ReactNode }) {
-  return <div className="min-h-screen flex flex-col px-5 rp-safe-t rp-safe-b max-w-md mx-auto w-full">{children}</div>;
+export function Screen({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  // desktop-layouts-play-staff: `wide` (from useWideLayout) gives a reading screen like the final
+  // standings room to breathe on a computer; forms stay narrow because they read best that way.
+  return <div className={`min-h-screen flex flex-col px-5 rp-safe-t rp-safe-b ${wide ? 'max-w-2xl' : 'max-w-md'} mx-auto w-full`}>{children}</div>;
 }
 
 // The game screen while a team plays (change: play-screen-no-scroll): EXACTLY one screen tall and
 // never scrolling as a page. `100dvh` follows the mobile browser's collapsing toolbar; the body
 // below the header scrolls inside itself (MissionSheet) when a mission is long.
-export function GameScreen({ children }: { children: ReactNode }) {
-  return <div className="h-[100dvh] overflow-hidden flex flex-col px-5 rp-safe-t rp-safe-b max-w-md mx-auto w-full">{children}</div>;
+export function GameScreen({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  // desktop-layouts-play-staff: `wide` comes from useWideLayout (one query, decided in JS), so the
+  // phone layout cannot change by accident through a breakpoint.
+  return <div className={wide
+    ? 'h-[100dvh] overflow-hidden flex flex-col px-6 rp-safe-t rp-safe-b max-w-7xl mx-auto w-full'
+    : 'h-[100dvh] overflow-hidden flex flex-col px-5 rp-safe-t rp-safe-b max-w-md mx-auto w-full'}>{children}</div>;
 }
 
 // Content-shaped loading placeholder. Size via `className` (e.g. "h-4 w-24").

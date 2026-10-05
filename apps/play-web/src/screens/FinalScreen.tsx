@@ -1,3 +1,4 @@
+import { useWideLayout } from '../lib/useWideLayout';
 import { useEffect, useRef, useState } from 'react';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
@@ -38,6 +39,8 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
   runEnded?: boolean;
 }) {
   const { t, lang } = useT();
+  // desktop-layouts-play-staff: the standings get a wider card on a computer.
+  const wide = useWideLayout();
   const { team, run, game } = state;
   const accent = game.branding?.primaryColor ?? '#FF5722';
   // Staged reveal (change: manual-leaderboard-reveal): a game may ask for the
@@ -239,7 +242,7 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
   }
 
   return (
-    <Screen>
+    <Screen wide={wide}>
       <div data-testid="final-screen" className="flex-1 flex flex-col items-center justify-center text-center gap-5">
 
         {/* Trophy + title */}
@@ -277,9 +280,9 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
         <Card className="p-4 w-full">
           <div className="text-sm font-semibold text-zinc-300 mb-3 text-start flex items-center gap-1.5"><Icon name="image" className="w-4 h-4 shrink-0" />{t.final.recapTitle}</div>
           <div className="grid grid-cols-2 gap-2.5">
-            <Stat label={t.final.statTotalTime} value={totalSec != null ? fmtDuration(totalSec) : '?'} accent={accent} />
+            <Stat label={t.final.statTotalTime} value={totalSec != null ? fmtDuration(totalSec) : t.final.statNone} accent={accent} />
             <Stat label={t.final.statStages} value={`${completedStages.length}/${team.stages.length}`} accent={accent} />
-            <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '?'} accent={accent} />
+            <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : t.final.statNone} accent={accent} />
             <Stat label={t.final.statHints} value={String(hintsUsed)} accent={accent} />
           </div>
           <Button className="mt-4" disabled={busy} onClick={() => shareAction.run()}>

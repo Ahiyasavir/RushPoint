@@ -16,5 +16,5 @@
 
 ## 3. Verify
 
-- [ ] 3.1 Browser at 1440×900, 1024×768 and 375×812, staff and player.
-- [ ] 3.2 `npm run verify` (+ i18n strict).
+- [x] 3.1 Browser at 1440×900, 1024×768 and 375×812, staff and player.
+- [x] 3.2 `npm run verify` (+ i18n strict).

@@ -1,4 +1,6 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useWideLayout } from '../lib/useWideLayout';
+import { STAFF_PHONE_ORDER, staffDesktopColumns, type StaffSection } from '../lib/staffLayout';
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db, signInStaff, uid } from '../services/firebase';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
@@ -279,6 +281,8 @@ function StaffSignIn({
 // ─── Dashboard ──────────────────────────────────────────────────────────────
 function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: () => void }) {
   const { t } = useT();
+  // desktop-layouts-play-staff: three columns on a computer, the phone layout below 1024px.
+  const wide = useWideLayout();
   const { ownerUid, gameId, runId } = staff;
   const ctx = useMemo(() => ({ ownerUid, gameId, runId }), [ownerUid, gameId, runId]);
   // What this person's code allows RIGHT NOW (staff-capabilities): listens to their own grant and
@@ -657,8 +661,271 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     return [{ id, name: tm.displayName, status, line, action }];
   });
 
+  // desktop-layouts-play-staff: every section once, placed by lib/staffLayout.ts. On a phone the
+  // order the staff app always had; on a computer three columns. The quick bar is phone only.
+  const sectionEls: Record<StaffSection, ReactNode> = {
+    quickBar: (
+      <>
+          {/* ── Quick bar: a phone's jump list to the sections below (not shown on a computer) ── */}
+          <StaffQuickBar runId={runId} can={(c) => can(c as never)}
+            badges={staffQuickBadges({
+              alerts: can('safety') ? alerts.length : 0,
+              pendingReviews: can('review') ? pending.length : 0,
+              overdueReviews: reviewAlarm.overCount,
+            })} />
+      </>
+    ),
+    followed: (
+      <>
+          <StaffFollowedStrip cards={followedCards} mineOnly={follow.mineOnly} onMineOnly={follow.setMineOnly} onOpen={openFollowed} />
+      </>
+    ),
+    contacts: (
+      <>
+          {contacts.length > 0 && (
+            <section className="mb-6" data-testid="staff-contacts" aria-label={t.staff.contactsTitle}>
+              <h2 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="phone" className="w-4 h-4 shrink-0" />{t.staff.contactsTitle}</h2>
+              <div className="space-y-1.5">
+                {contacts.map((c) => (
+                  <div key={c.id} className="flex flex-wrap items-center gap-2">
+                    <span dir="auto" className="text-sm text-zinc-200 flex-1 min-w-0 truncate">{c.label}</span>
+                    <a href={toTelHref(c.phone) ?? undefined} className={`${TAP_TARGET} inline-flex items-center gap-1 px-2 rounded-lg border border-glass-border text-sm font-semibold text-ink-fire`}>
+                      <Icon name="phone" className="w-4 h-4" /> <span dir="ltr">{c.phone}</span>
+                    </a>
+                    <a href={toWhatsAppHref(c.phone) ?? undefined} target="_blank" rel="noreferrer" aria-label={t.staff.whatsappContact({ label: c.label })}
+                      className={`${TAP_TARGET} inline-flex items-center justify-center rounded-lg border border-glass-border text-sm text-ink-fire`}><Icon name="chat" className="w-5 h-5" /></a>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+      </>
+    ),
+    alerts: (
+      <>
+          {can('safety') && <section className="mb-6 scroll-mt-4" id="staff-alerts">
+            <h2 className="text-sm font-semibold text-zinc-300 mb-2">
+              <Icon name="sos" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
+            </h2>
+            {alerts.length === 0
+              ? <p className="text-zinc-500 text-sm">{t.staff.noAlerts}</p>
+              : alerts.map((a) => (
+                <Card key={a.id} className="p-3 mb-2 border-danger/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-zinc-100">{(t.staff.alertType as Record<string, string>)[a.type] ?? a.type}</div>
+                      <div className="text-xs text-zinc-500 truncate">{t.staff.teamLabel} {nameFor(a.teamId)}</div>
+                      {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
+                      {/* sos-callback-and-authorities: the number the team left to call back. */}
+                      {a.callbackPhone && toTelHref(a.callbackPhone) && (
+                        <a href={toTelHref(a.callbackPhone)!} data-testid="sos-callback"
+                          className="mt-1 inline-flex items-center gap-1 min-h-[44px] rounded-lg bg-ink-alert px-3 text-sm font-bold text-white">
+                          <Icon name="phone" className="w-4 h-4" /> {t.staff.sosCallback({ phone: a.callbackPhone })}
+                        </a>
+                      )}
+                      {a.lat != null && a.lng != null && (
+                        <a
+                          className="inline-flex items-center min-h-[44px] px-2 -ms-2 text-ink-fire text-xs underline"
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lng}&travelmode=walking`}
+                          target="_blank" rel="noreferrer"
+                        >
+                          {t.staff.openLocation}
+                        </a>
+                      )}
+                    </div>
+                    <button
+                      className="shrink-0 inline-flex items-center justify-center min-h-[44px] px-3 rounded-lg bg-app-raised text-zinc-100 text-sm border border-glass-border disabled:opacity-40"
+                      disabled={ackAction.isBusy(a.id)}
+                      onClick={() => void ackAction.run(a)}
+                    >
+                      {t.staff.ack}
+                    </button>
+                  </div>
+                </Card>
+              ))}
+          </section>}
+
+          {access.removed && (
+            <Card className="p-4 mb-4 border border-danger/40" data-testid="staff-removed">
+              <p className="text-sm text-danger font-semibold">{t.staff.removedTitle}</p>
+              <p className="text-xs text-zinc-400 mt-1">{t.staff.removedBody}</p>
+              <button className="mt-3 min-h-[44px] px-4 rounded-lg bg-app-raised border border-glass-border text-sm font-semibold text-zinc-200" onClick={onSignOut}>
+                {t.staff.removedExit}
+              </button>
+            </Card>
+          )}
+      </>
+    ),
+    review: (
+      <>
+          {/* ── Photo review ── */}
+          {can('review') && <section className="mb-6 flex-1 scroll-mt-4" id="staff-review">
+            <h2 className="text-sm font-semibold text-zinc-300 mb-2">
+              <Icon name="camera" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
+            </h2>
+            {reviewAlarm.level === 'alarm' && reviewAlarm.oldest && (
+              <div role="alert" data-testid="staff-review-alarm"
+                className="sticky top-2 z-20 mb-2 rounded-xl bg-ink-alert text-white p-3 shadow-lg motion-safe:animate-pulse">
+                <p className="text-sm font-bold">
+                  {t.staff.reviewAlarm({ n: reviewAlarm.overCount, seconds: Math.floor(reviewAlarm.oldest.waitedMs / 1000) })}
+                </p>
+                <button type="button"
+                  className="mt-2 min-h-[44px] px-3 rounded-lg bg-white/20 text-sm font-semibold disabled:opacity-60"
+                  disabled={!reviewAlarm.playSound}
+                  onClick={() => setAlarmMutedUntil(Date.now() + 5 * 60_000)}>
+                  {reviewAlarm.playSound ? t.staff.reviewAlarmMute : t.staff.reviewAlarmMuted}
+                </button>
+              </div>
+            )}
+            {pending.length === 0
+              ? <p className="text-zinc-500 text-sm">{t.staff.noSubmissions}</p>
+              : pending.map((s) => {
+                const key = `${s.teamId}:${s.taskId}`;
+                const hasUrl = /^https?:\/\//.test(s.photoUrl);
+                // audio-tasks: an audio submission plays inline. Render the <img> ONLY
+                // when the submission is positively an image — a declared 'photo', or a
+                // legacy row (no mediaKind) whose URL carries an image extension. A
+                // missing/malformed mediaKind on an AUDIO doc then routes to <audio> (by
+                // kind) or, failing that, to the 📎 fallback below — never a broken <img>.
+                const isAudio = s.mediaKind === 'audio';
+                const isVideo = s.mediaKind === 'video';
+                const looksLikeImage = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)(\b|\?|%|$)/i.test(s.photoUrl);
+                const isImage = s.mediaKind === 'photo' || (s.mediaKind === undefined && looksLikeImage);
+                // The row carries its own age as colour (fresh / amber 20 s / red 60 s), kitchen-display style.
+                const tone = reviewRowTone(reviewNow - Date.parse(s.submittedAt || ''));
+                const toneClass = tone === 'red' ? 'border-2 border-danger' : tone === 'amber' ? 'border-2 border-amber-500' : '';
+                return (
+                  <Card key={key} className={`p-3 mb-2 ${toneClass}`}>
+                    <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
+                    {s.senderName && <div dir="auto" className="text-xs text-zinc-500">{t.staff.mediaSentBy({ name: s.senderName })}</div>}
+                    <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} <span dir="auto">{titleOf(s.taskId)}</span></div>
+                    {hasUrl && isAudio
+                      ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
+                      : hasUrl && isVideo
+                      ? <video controls src={s.photoUrl} className="w-full rounded-lg mb-2 max-h-64" aria-label={t.staff.videoSubmission} />
+                      : hasUrl && isImage
+                      ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-contain" />
+                      : <div className="text-xs text-zinc-500 italic mb-2 break-all"><Icon name="paperclip" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {s.photoUrl || t.staff.noPhoto}</div>}
+                    <div className="flex gap-2">
+                      <button
+                        className="flex-1 min-h-[44px] py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
+                        disabled={reviewAction.isBusy(key)}
+                        onClick={() => void reviewAction.run(s, true)}
+                      >
+                        {t.staff.approve}
+                      </button>
+                      <button
+                        className="flex-1 min-h-[44px] py-2 rounded-lg bg-transparent border border-danger/50 text-danger font-semibold text-sm disabled:opacity-40"
+                        disabled={reviewAction.isBusy(key)}
+                        onClick={() => void reviewAction.run(s, false)}
+                      >
+                        {t.staff.reject}
+                      </button>
+                    </div>
+                  </Card>
+                );
+              })}
+          </section>}
+      </>
+    ),
+    teams: (
+      <>
+          {/* ── Teams: scores + every per-team field action ──────────────────────
+              One row per team carrying everything a marshal can do to that team, so
+              they never have to find a laptop mid-event (change: staff-console-field-ops).
+              The search box exists because this list is a flat scroll — at 20+ teams,
+              finding one by thumb is the slowest part of the job. */}
+          <section className="mb-6 scroll-mt-4" id="staff-teams">
+            <h2 className="text-sm font-semibold text-zinc-300 mb-2">
+              <Icon name="scale" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
+            </h2>
+            {teams.length > 0 && (
+              <Input
+                value={teamQuery}
+                onChange={(e) => setTeamQuery(e.target.value)}
+                placeholder={t.staff.searchTeams}
+                dir="auto"
+                className="mb-2"
+                aria-label={t.staff.searchTeams}
+              />
+            )}
+            {teams.length === 0
+              ? <p className="text-zinc-500 text-sm">{t.staff.noTeams}</p>
+              : visibleTeams.length === 0
+              ? <p className="text-zinc-500 text-sm">{t.staff.noTeamsMatch}</p>
+              : listedTeams.map((tm) => (
+                <div key={tm.id} id={`staff-team-${tm.id}`} className="scroll-mt-4">
+                <TeamOpsCard
+                  team={tm}
+                  followed={follow.isFollowed(tm.id)}
+                  onToggleFollow={() => toggleFollow(tm.id)}
+                  ack={adjustAck[tm.id]}
+                  busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
+                  can={{ score: can('score'), hold: can('hold'), route: can('route') }}
+                  callTargets={can('contactTeams') ? teamCallTargets(tm.registrationData, outline?.phoneFields) : []}
+                  onAdjust={(delta, reason) => void adjustAction.run(tm, delta, reason)}
+                  onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
+                  onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
+                  onSkipTask={() => void opsAction.run(tm, { kind: 'skipTask' })}
+                  ctx={ctx}
+                  letInTaskId={can('route') ? staffLetInTarget(outline, tm) : null}
+                  onLetIn={(taskId) => void opsAction.run(tm, { kind: 'letIn', taskId })}
+                  onRoute={(taskId, title, accept, when) =>
+                    void opsAction.run(tm, { kind: 'route', taskId, title, accept, when })}
+                  onSendBack={(target, title) => void opsAction.run(tm, { kind: 'sendBack', target, title })}
+                  titleOf={titleOf}
+                  outlineStages={outline?.stages ?? []}
+                />
+                </div>
+              ))}
+          </section>
+      </>
+    ),
+    flash: (
+      <>
+          {/* ── Flash missions: approve what teams sent, end one early (overnight 2026-09-29) ── */}
+          {(can('review') || can('broadcast')) && (
+            <StaffFlashSection ctx={ctx} teams={teams} canReview={can('review')} canEnd={can('broadcast')} />
+          )}
+      </>
+    ),
+    map: (
+      <>
+          {/* ── Live map of every team's last known position ── */}
+          {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} spots={missionSpots(outline)} followed={follow.list} mineOnly={follow.mineOnly} openByDefault={wide} />}
+      </>
+    ),
+    staffChannel: (
+      <>
+          {/* ── Staff ↔ admin channel ── */}
+          {can('staffChannel') && <StaffAdminChannelSection ctx={ctx} senderName={staff.name} />}
+      </>
+    ),
+    chat: (
+      <>
+          {/* ── Team ↔ HQ chat threads ── */}
+          {can('chat') && <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} />}
+      </>
+    ),
+    feed: (
+      <>
+          {/* ── Live photo feed moderation ── */}
+          {can('feed') && <StaffFeedSection ctx={ctx} />}
+      </>
+    ),
+    broadcast: (
+      <>
+          {/* ── Announcement composer ── */}
+          {can('broadcast') && <AnnouncementComposer ctx={ctx} />}
+      </>
+    ),
+  };
+  const desktopColumns = staffDesktopColumns();
+
   return (
-    <div className="min-h-screen max-w-md mx-auto w-full px-5 pb-6 rp-safe-t flex flex-col">
+    <div className={wide
+      ? 'min-h-screen max-w-7xl mx-auto w-full px-6 pb-6 rp-safe-t flex flex-col'
+      : 'min-h-screen max-w-md mx-auto w-full px-5 pb-6 rp-safe-t flex flex-col'}>
       <header className="flex items-center justify-between mb-5">
         <div>
           <h1 className="font-brand text-xl font-extrabold text-ink-fire">{t.staff.title}</h1>
@@ -681,224 +948,15 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         </div>
       )}
 
-      {/* ── SOS alerts ── */}
-      <StaffQuickBar runId={runId} can={(c) => can(c as never)}
-        badges={staffQuickBadges({
-          alerts: can('safety') ? alerts.length : 0,
-          pendingReviews: can('review') ? pending.length : 0,
-          overdueReviews: reviewAlarm.overCount,
-        })} />
-
-      <StaffFollowedStrip cards={followedCards} mineOnly={follow.mineOnly} onMineOnly={follow.setMineOnly} onOpen={openFollowed} />
-
-      {contacts.length > 0 && (
-        <section className="mb-6" data-testid="staff-contacts" aria-label={t.staff.contactsTitle}>
-          <h2 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="phone" className="w-4 h-4 shrink-0" />{t.staff.contactsTitle}</h2>
-          <div className="space-y-1.5">
-            {contacts.map((c) => (
-              <div key={c.id} className="flex flex-wrap items-center gap-2">
-                <span dir="auto" className="text-sm text-zinc-200 flex-1 min-w-0 truncate">{c.label}</span>
-                <a href={toTelHref(c.phone) ?? undefined} className={`${TAP_TARGET} inline-flex items-center gap-1 px-2 rounded-lg border border-glass-border text-sm font-semibold text-ink-fire`}>
-                  <Icon name="phone" className="w-4 h-4" /> <span dir="ltr">{c.phone}</span>
-                </a>
-                <a href={toWhatsAppHref(c.phone) ?? undefined} target="_blank" rel="noreferrer" aria-label={t.staff.whatsappContact({ label: c.label })}
-                  className={`${TAP_TARGET} inline-flex items-center justify-center rounded-lg border border-glass-border text-sm text-ink-fire`}><Icon name="chat" className="w-5 h-5" /></a>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {can('safety') && <section className="mb-6 scroll-mt-4" id="staff-alerts">
-        <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          <Icon name="sos" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
-        </h2>
-        {alerts.length === 0
-          ? <p className="text-zinc-500 text-sm">{t.staff.noAlerts}</p>
-          : alerts.map((a) => (
-            <Card key={a.id} className="p-3 mb-2 border-danger/40">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-zinc-100">{(t.staff.alertType as Record<string, string>)[a.type] ?? a.type}</div>
-                  <div className="text-xs text-zinc-500 truncate">{t.staff.teamLabel} {nameFor(a.teamId)}</div>
-                  {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
-                  {/* sos-callback-and-authorities: the number the team left to call back. */}
-                  {a.callbackPhone && toTelHref(a.callbackPhone) && (
-                    <a href={toTelHref(a.callbackPhone)!} data-testid="sos-callback"
-                      className="mt-1 inline-flex items-center gap-1 min-h-[44px] rounded-lg bg-ink-alert px-3 text-sm font-bold text-white">
-                      <Icon name="phone" className="w-4 h-4" /> {t.staff.sosCallback({ phone: a.callbackPhone })}
-                    </a>
-                  )}
-                  {a.lat != null && a.lng != null && (
-                    <a
-                      className="inline-flex items-center min-h-[44px] px-2 -ms-2 text-ink-fire text-xs underline"
-                      href={`https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lng}&travelmode=walking`}
-                      target="_blank" rel="noreferrer"
-                    >
-                      {t.staff.openLocation}
-                    </a>
-                  )}
-                </div>
-                <button
-                  className="shrink-0 inline-flex items-center justify-center min-h-[44px] px-3 rounded-lg bg-app-raised text-zinc-100 text-sm border border-glass-border disabled:opacity-40"
-                  disabled={ackAction.isBusy(a.id)}
-                  onClick={() => void ackAction.run(a)}
-                >
-                  {t.staff.ack}
-                </button>
-              </div>
-            </Card>
-          ))}
-      </section>}
-
-      {access.removed && (
-        <Card className="p-4 mb-4 border border-danger/40" data-testid="staff-removed">
-          <p className="text-sm text-danger font-semibold">{t.staff.removedTitle}</p>
-          <p className="text-xs text-zinc-400 mt-1">{t.staff.removedBody}</p>
-          <button className="mt-3 min-h-[44px] px-4 rounded-lg bg-app-raised border border-glass-border text-sm font-semibold text-zinc-200" onClick={onSignOut}>
-            {t.staff.removedExit}
-          </button>
-        </Card>
-      )}
-
-      {/* ── Photo review ── */}
-      {can('review') && <section className="mb-6 flex-1 scroll-mt-4" id="staff-review">
-        <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          <Icon name="camera" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
-        </h2>
-        {reviewAlarm.level === 'alarm' && reviewAlarm.oldest && (
-          <div role="alert" data-testid="staff-review-alarm"
-            className="sticky top-2 z-20 mb-2 rounded-xl bg-ink-alert text-white p-3 shadow-lg motion-safe:animate-pulse">
-            <p className="text-sm font-bold">
-              {t.staff.reviewAlarm({ n: reviewAlarm.overCount, seconds: Math.floor(reviewAlarm.oldest.waitedMs / 1000) })}
-            </p>
-            <button type="button"
-              className="mt-2 min-h-[44px] px-3 rounded-lg bg-white/20 text-sm font-semibold disabled:opacity-60"
-              disabled={!reviewAlarm.playSound}
-              onClick={() => setAlarmMutedUntil(Date.now() + 5 * 60_000)}>
-              {reviewAlarm.playSound ? t.staff.reviewAlarmMute : t.staff.reviewAlarmMuted}
-            </button>
-          </div>
-        )}
-        {pending.length === 0
-          ? <p className="text-zinc-500 text-sm">{t.staff.noSubmissions}</p>
-          : pending.map((s) => {
-            const key = `${s.teamId}:${s.taskId}`;
-            const hasUrl = /^https?:\/\//.test(s.photoUrl);
-            // audio-tasks: an audio submission plays inline. Render the <img> ONLY
-            // when the submission is positively an image — a declared 'photo', or a
-            // legacy row (no mediaKind) whose URL carries an image extension. A
-            // missing/malformed mediaKind on an AUDIO doc then routes to <audio> (by
-            // kind) or, failing that, to the 📎 fallback below — never a broken <img>.
-            const isAudio = s.mediaKind === 'audio';
-            const isVideo = s.mediaKind === 'video';
-            const looksLikeImage = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)(\b|\?|%|$)/i.test(s.photoUrl);
-            const isImage = s.mediaKind === 'photo' || (s.mediaKind === undefined && looksLikeImage);
-            // The row carries its own age as colour (fresh / amber 20 s / red 60 s), kitchen-display style.
-            const tone = reviewRowTone(reviewNow - Date.parse(s.submittedAt || ''));
-            const toneClass = tone === 'red' ? 'border-2 border-danger' : tone === 'amber' ? 'border-2 border-amber-500' : '';
-            return (
-              <Card key={key} className={`p-3 mb-2 ${toneClass}`}>
-                <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
-                {s.senderName && <div dir="auto" className="text-xs text-zinc-500">{t.staff.mediaSentBy({ name: s.senderName })}</div>}
-                <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} <span dir="auto">{titleOf(s.taskId)}</span></div>
-                {hasUrl && isAudio
-                  ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
-                  : hasUrl && isVideo
-                  ? <video controls src={s.photoUrl} className="w-full rounded-lg mb-2 max-h-64" aria-label={t.staff.videoSubmission} />
-                  : hasUrl && isImage
-                  ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-contain" />
-                  : <div className="text-xs text-zinc-500 italic mb-2 break-all"><Icon name="paperclip" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {s.photoUrl || t.staff.noPhoto}</div>}
-                <div className="flex gap-2">
-                  <button
-                    className="flex-1 min-h-[44px] py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
-                    disabled={reviewAction.isBusy(key)}
-                    onClick={() => void reviewAction.run(s, true)}
-                  >
-                    {t.staff.approve}
-                  </button>
-                  <button
-                    className="flex-1 min-h-[44px] py-2 rounded-lg bg-transparent border border-danger/50 text-danger font-semibold text-sm disabled:opacity-40"
-                    disabled={reviewAction.isBusy(key)}
-                    onClick={() => void reviewAction.run(s, false)}
-                  >
-                    {t.staff.reject}
-                  </button>
-                </div>
-              </Card>
-            );
-          })}
-      </section>}
-
-      {/* ── Teams: scores + every per-team field action ──────────────────────
-          One row per team carrying everything a marshal can do to that team, so
-          they never have to find a laptop mid-event (change: staff-console-field-ops).
-          The search box exists because this list is a flat scroll — at 20+ teams,
-          finding one by thumb is the slowest part of the job. */}
-      <section className="mb-6 scroll-mt-4" id="staff-teams">
-        <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          <Icon name="scale" className="w-4 h-4 inline-block align-text-bottom" /> {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
-        </h2>
-        {teams.length > 0 && (
-          <Input
-            value={teamQuery}
-            onChange={(e) => setTeamQuery(e.target.value)}
-            placeholder={t.staff.searchTeams}
-            dir="auto"
-            className="mb-2"
-            aria-label={t.staff.searchTeams}
-          />
-        )}
-        {teams.length === 0
-          ? <p className="text-zinc-500 text-sm">{t.staff.noTeams}</p>
-          : visibleTeams.length === 0
-          ? <p className="text-zinc-500 text-sm">{t.staff.noTeamsMatch}</p>
-          : listedTeams.map((tm) => (
-            <div key={tm.id} id={`staff-team-${tm.id}`} className="scroll-mt-4">
-            <TeamOpsCard
-              team={tm}
-              followed={follow.isFollowed(tm.id)}
-              onToggleFollow={() => toggleFollow(tm.id)}
-              ack={adjustAck[tm.id]}
-              busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
-              can={{ score: can('score'), hold: can('hold'), route: can('route') }}
-              callTargets={can('contactTeams') ? teamCallTargets(tm.registrationData, outline?.phoneFields) : []}
-              onAdjust={(delta, reason) => void adjustAction.run(tm, delta, reason)}
-              onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
-              onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
-              onSkipTask={() => void opsAction.run(tm, { kind: 'skipTask' })}
-              ctx={ctx}
-              letInTaskId={can('route') ? staffLetInTarget(outline, tm) : null}
-              onLetIn={(taskId) => void opsAction.run(tm, { kind: 'letIn', taskId })}
-              onRoute={(taskId, title, accept, when) =>
-                void opsAction.run(tm, { kind: 'route', taskId, title, accept, when })}
-              onSendBack={(target, title) => void opsAction.run(tm, { kind: 'sendBack', target, title })}
-              titleOf={titleOf}
-              outlineStages={outline?.stages ?? []}
-            />
+      {wide ? (
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-6 items-start" data-testid="staff-columns">
+          {desktopColumns.map((col, i) => (
+            <div key={i} className="min-w-0 flex flex-col">
+              {col.map((s) => <Fragment key={s}>{sectionEls[s]}</Fragment>)}
             </div>
           ))}
-      </section>
-
-      {/* ── Flash missions: approve what teams sent, end one early (overnight 2026-09-29) ── */}
-      {(can('review') || can('broadcast')) && (
-        <StaffFlashSection ctx={ctx} teams={teams} canReview={can('review')} canEnd={can('broadcast')} />
-      )}
-
-      {/* ── Live map of every team's last known position ── */}
-      {can('locations') && <StaffTeamMapSection ctx={ctx} teams={teams} spots={missionSpots(outline)} followed={follow.list} mineOnly={follow.mineOnly} />}
-
-      {/* ── Staff ↔ admin channel ── */}
-      {can('staffChannel') && <StaffAdminChannelSection ctx={ctx} senderName={staff.name} />}
-
-      {/* ── Team ↔ HQ chat threads ── */}
-      {can('chat') && <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} />}
-
-      {/* ── Live photo feed moderation ── */}
-      {can('feed') && <StaffFeedSection ctx={ctx} />}
-
-      {/* ── Announcement composer ── */}
-      {can('broadcast') && <AnnouncementComposer ctx={ctx} />}
+        </div>
+      ) : STAFF_PHONE_ORDER.map((s) => <Fragment key={s}>{sectionEls[s]}</Fragment>)}
     </div>
   );
 }
@@ -1628,19 +1686,24 @@ function StaffAdminChannelSection({
 const StaffTeamMap = lazyWithRetry('staff-team-map', () => import('../components/StaffTeamMap'));
 
 function StaffTeamMapSection({
-  ctx, teams, spots, followed, mineOnly,
+  ctx, teams, spots, followed, mineOnly, openByDefault = false,
 }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: TeamRow[];
   spots: MissionSpot[];
   followed: readonly string[];
   mineOnly: boolean;
+  /** desktop-layouts-play-staff: on a computer there is room, so the map starts open unless the
+   *  marshal closed it on this device before. */
+  openByDefault?: boolean;
 }) {
   const { t } = useT();
   // staff-event-map: once opened it stays open on this phone for this run, so a marshal who uses
   // the map does not have to unfold it after every reload.
   const openKey = `rp-staff-map-open:${ctx.runId}`;
-  const [open, setOpenState] = useState(() => { try { return localStorage.getItem(openKey) === '1'; } catch { return false; } });
+  const [open, setOpenState] = useState(() => {
+    try { const v = localStorage.getItem(openKey); return v === null ? openByDefault : v === '1'; } catch { return openByDefault; }
+  });
   const setOpen = (fn: (o: boolean) => boolean) => setOpenState((o) => {
     const next = fn(o);
     try { localStorage.setItem(openKey, next ? '1' : '0'); } catch { /* memory only */ }
