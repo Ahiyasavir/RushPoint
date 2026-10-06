@@ -637,6 +637,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           )}
           <p className="text-sm text-zinc-400 max-w-sm">{t.play.removedBody}</p>
         </div>
+        {/* Issue 31 (Ahiya, 2026-10-06): a removed team can still write to HQ. The server never
+            refused it (sendTeamChatMessage has no removed gate); this screen simply had no chat. */}
+        <section className="mb-3 w-full max-w-md mx-auto" data-testid="removed-chat">
+          <h3 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="chat" className="w-4 h-4" />{t.chat.chatTitle}</h3>
+          <ChatPanel ctx={session} teamId={team.id} />
+        </section>
         {(state.contacts ?? []).map((c) => {
           const href = toTelHref(c.phone);
           return href ? (

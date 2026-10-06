@@ -12388,6 +12388,13 @@ async function main() {
       p2.call('completeTask', { taskId: 'lc-a', code: lcode }), { codeIn: ['functions/failed-precondition'] });
     const sos = await p2.call('triggerSOS', { ...L, message: 'still people outside' });
     check('remove: SOS still works for a removed team', !!sos, JSON.stringify(sos));
+    // Issue 31 (Ahiya, 2026-10-06): a removed team can still write to HQ, and HQ can answer.
+    await p2.call('sendTeamChatMessage', { ...L, text: 'why were we removed?' });
+    await creator.call('sendTeamChatMessage', { ...L, teamId: u2, text: 'we will call you' });
+    const rmChat = (await creator.getDocAt(`users/${L.ownerUid}/games/${L.gameId}/runs/${L.runId}/chat/${u2}`)).data?.messages ?? [];
+    check('remove: a removed team and HQ can still write to each other',
+      rmChat.some((m) => m.from === 'team' && m.text === 'why were we removed?') && rmChat.some((m) => m.from === 'hq' && m.text === 'we will call you'),
+      JSON.stringify(rmChat.map((m) => [m.from, m.text])));
     const mine = await p2.call('getMyTeamState', { code: lcode });
     check('remove: the phone is told why (removed + reason, never who)',
       mine?.team?.removed === true && mine?.team?.removedReason === 'test team' && mine?.team?.removedBy === undefined,
