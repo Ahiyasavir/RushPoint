@@ -874,7 +874,7 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
   // HQ path — owner / platform admin / run-scoped staff. Detect via a non-throwing
   // probe, then enforce with assertStaffCan (the capability check IS the authz; the
   // senderName label is display-only). Everyone else is a participant.
-  const token = context.auth!.token as { admin?: boolean; staff?: boolean; ownerUid?: string; runId?: string };
+  const token = context.auth!.token as { admin?: boolean; staff?: boolean; ownerUid?: string; runId?: string; staffName?: string };
   const isHq = uid === ownerUid
     || token.admin === true
     || (token.staff === true && token.ownerUid === ownerUid && token.runId === runId);
@@ -896,7 +896,12 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
     }
     resolvedTeamId = cleanTeamId;
     from = 'hq';
-    senderName = validate(() => optionalString(rawSenderName, 'senderName', 64)) ?? 'HQ';
+    // Issue 45: the team now sees WHO wrote ("המטה · נועה"), so a marshal's line carries the name
+    // from their own token, not one the client chose. The owner's token has none: their client's
+    // label, else the generic 'HQ' that phones show as plain "המטה".
+    const claimName = token.staff === true && typeof token.staffName === 'string' && token.staffName.trim()
+      ? token.staffName.trim().slice(0, 64) : undefined;
+    senderName = claimName ?? validate(() => optionalString(rawSenderName, 'senderName', 64)) ?? 'HQ';
     // deviceUids left undefined on the HQ path — preserve the previously mirrored
     // value from the existing doc inside the transaction below.
   } else {

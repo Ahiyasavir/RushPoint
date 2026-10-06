@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
+import { CHAT_TEXT_MAX_LEN, hqSenderLabel, type ChatMessage } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { Button, Input } from './ui';
 import { runActionVariant } from '../lib/runConsoleActions';
@@ -34,7 +34,7 @@ export default function TeamChatThread({ messages, onSend, maxHeightClass = 'max
         <div className={`${maxHeightClass} overflow-y-auto flex flex-col gap-1.5`}>
           {messages.map((m) => (
             <div key={m.id} className={`flex flex-col ${m.from === 'hq' ? 'items-end' : 'items-start'}`}>
-              <span className="text-[13px] text-[--ink-3]">{m.from === 'hq' ? rc.chatHq : m.senderName}</span>
+              <span className="text-[13px] text-[--ink-3]">{m.from === 'hq' ? hqSenderLabel(m.senderName, rc.chatHq) : m.senderName}</span>
               <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-neon-blue/15 border border-neon-blue/40 text-[--ink-1]' : 'bg-app-card border border-[--rp-border] text-[--ink-2]'}`}>{m.text}</div>
             </div>
           ))}

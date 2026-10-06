@@ -4,7 +4,7 @@
 // and this bundle only mount when the team opens chat. Any attached device may send.
 import { useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, chatSeenMarker, type ChatMessage } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, chatSeenMarker, hqSenderLabel, type ChatMessage } from '@rushpoint/shared';
 import { db, uid } from '../services/firebase';
 import { sendTeamChatMessage } from '../services/calls';
 import { saveChatSeen } from '../store';
@@ -105,7 +105,8 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
             const side = chatMessageSide(m, myUid);
             const mine = side === 'me';
             const label = side === 'me' ? t.devices.youTag
-              : side === 'hq' ? t.chat.chatHq
+              // Issue 45: an HQ line names the staff member who wrote it ("המטה · נועה").
+              : side === 'hq' ? hqSenderLabel(m.senderName, t.chat.chatHq)
               : m.senderName;
             return (
               <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>

@@ -53,6 +53,18 @@ export function chatMessageSide(
   return msg.from === 'hq' ? 'hq' : 'other';
 }
 
+/**
+ * The label over an HQ line (issue 45, Ahiya 2026-10-06: "שלכל איש צוות יהיה את הצאט שלו עם
+ * הקבוצות"). A team used to see every HQ line as "המטה", so it never knew which marshal it was talking
+ * to. A line a staff member wrote carries their name ("המטה · נועה"); the organizer's own lines, and
+ * legacy lines stamped with the generic 'HQ', stay plain "המטה". Display-only, total.
+ */
+export function hqSenderLabel(senderName: unknown, hqWord: string): string {
+  const name = typeof senderName === 'string' ? senderName.trim() : '';
+  if (!name || name === 'HQ' || name === hqWord) return hqWord;
+  return `${hqWord} · ${name}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Staff ↔ admin channel (change: staff-console-field-ops)
 //

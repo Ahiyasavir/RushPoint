@@ -53,6 +53,8 @@ import StaffQuickBar from '../components/StaffQuickBar';
 import StaffFollowedStrip, { type StaffFollowedCard } from '../components/StaffFollowedStrip';
 import { useFollowedTeams } from '../lib/useFollowedTeams';
 import { followedTeamStatus, followedTeamAction, sortFollowedFirst } from '@rushpoint/shared';
+import { hqSenderLabel } from '@rushpoint/shared';
+import { mergeOpenedThreads, isMyThread, pickableTeams } from '../lib/staffChatThreads';
 import StaffRoutePanel from '../components/StaffRoutePanel';
 import { staffLetInTarget } from '../lib/staffRouteList';
 import type { StaffCtx } from '../lib/playRoute';
@@ -925,7 +927,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     chat: (
       <>
           {/* ── Team ↔ HQ chat threads ── */}
-          {can('chat') && <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} focus={chatFocus} />}
+          {can('chat') && <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} focus={chatFocus} followed={follow.list} />}
       </>
     ),
     feed: (
@@ -1393,22 +1395,28 @@ function TeamOpsCard({
 interface ChatThread { teamId: string; messages: ChatMessage[]; updatedAt: string }
 
 function StaffChatSection({
-  ctx, teams, senderName, focus,
+  ctx, teams, senderName, focus, followed = [],
 }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: TeamRow[];
   senderName: string;
   /** Open this team's thread now (issue 25: the chat button on an SOS card). */
   focus?: { teamId: string; nonce: number } | null;
+  /** The teams this staff member follows: part of "my chats" (issue 45). */
+  followed?: string[];
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const [storedThreads, setThreads] = useState<ChatThread[]>([]);
-  // A team that never wrote has no thread document; the one this staffer was sent to still gets an
-  // empty thread to write in (sendTeamChatMessage creates the document).
-  const threads = focus && !storedThreads.some((th) => th.teamId === focus.teamId)
-    ? [{ teamId: focus.teamId, messages: [], updatedAt: '' }, ...storedThreads]
-    : storedThreads;
+  // Issue 45: a staff member starts a conversation with ANY team they pick ("הודעה חדשה"), not only
+  // answer one that wrote. A team that never wrote has no thread document; a picked one (or the one an
+  // SOS card sent them to) gets an empty thread to write in (sendTeamChatMessage creates the document).
+  const [opened, setOpened] = useState<string[]>([]);
+  const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState('');
+  const [mineOnly, setMineOnly] = useState(false);
+  const openedIds = focus ? [focus.teamId, ...opened] : opened;
+  const threads = mergeOpenedThreads(storedThreads, openedIds) as ChatThread[];
   const [openTeam, setOpenTeam] = useState<string | null>(null);
   // Seen markers, PERSISTED per run+team (change: team-chat-unread-accuracy).
   // They used to be React state only, so a console reload re-flagged every
@@ -1466,6 +1474,18 @@ function StaffChatSection({
     window.setTimeout(() => document.getElementById('staff-chat')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 0);
   }, [focus]);
 
+  function startWith(teamId: string) {
+    setOpened((ids) => [teamId, ...ids.filter((id) => id !== teamId)]);
+    setOpenTeam(teamId);
+    setPicking(false);
+    setQuery('');
+    setMineOnly(false);
+    setDraft('');
+    setReplyErr('');
+  }
+  const myUidForFilter = uid();
+  const visibleThreads = mineOnly ? threads.filter((th) => isMyThread(th, myUidForFilter, followed, openedIds)) : threads;
+
   function expand(teamId: string, messages: ChatMessage[]) {
     setOpenTeam((cur) => {
       const next = cur === teamId ? null : teamId;
@@ -1515,10 +1535,46 @@ function StaffChatSection({
           </>
         )}
       >
+        {/* Issue 45: start a chat with any team, and narrow the list to mine. */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button type="button" data-testid="staff-chat-new" onClick={() => setPicking((p) => !p)}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-accent px-4 text-sm font-semibold text-black hover:brightness-105">
+            <Icon name="plus" className="w-4 h-4" aria-hidden />{t.staff.chatNew}
+          </button>
+          <div role="group" className="ms-auto inline-flex rounded-full border border-glass-border p-0.5 text-[13px]">
+            {([[false, t.staff.chatFilterAll], [true, t.staff.chatFilterMine]] as const).map(([mine, label]) => (
+              <button key={String(mine)} type="button" aria-pressed={mineOnly === mine} onClick={() => setMineOnly(mine)}
+                className={`min-h-[36px] rounded-full px-3 font-medium ${mineOnly === mine ? 'bg-app-raised text-zinc-100' : 'text-zinc-500 hover:text-zinc-200'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {picking && (
+          <Card className="p-3 mb-3">
+            <p className="text-sm font-semibold text-zinc-100 mb-2">{t.staff.chatPickTeam}</p>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} dir="auto" autoFocus
+              placeholder={t.staff.chatSearchTeam} aria-label={t.staff.chatSearchTeam}
+              className="w-full min-h-[44px] rounded-lg bg-app-raised border border-glass-border px-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50" />
+            <ul className="mt-2 max-h-56 overflow-y-auto">
+              {pickableTeams(teams, query).map((tm) => (
+                <li key={tm.id}>
+                  <button type="button" onClick={() => startWith(tm.id)} dir="auto"
+                    className="w-full min-h-[44px] rounded-lg px-2 text-start text-sm text-zinc-100 hover:bg-app-raised">
+                    {tm.displayName}
+                  </button>
+                </li>
+              ))}
+              {pickableTeams(teams, query).length === 0 && <li className="px-2 py-2 text-sm text-zinc-500">{t.staff.chatNoTeamMatch}</li>}
+            </ul>
+            <button type="button" onClick={() => { setPicking(false); setQuery(''); }}
+              className="mt-1 min-h-[44px] px-2 text-sm text-zinc-500 hover:text-zinc-200">{t.staff.chatCancel}</button>
+          </Card>
+        )}
         {(
-        threads.length === 0
-          ? <p className="text-zinc-500 text-sm">{t.chat.chatEmpty}</p>
-          : threads.map((th) => {
+        visibleThreads.length === 0
+          ? <p className="text-zinc-500 text-sm">{mineOnly ? t.staff.chatMineEmpty : t.chat.chatEmpty}</p>
+          : visibleThreads.map((th) => {
             const last = th.messages[th.messages.length - 1];
             const unread = countUnreadChatMessages(th.messages, markerFor(th.teamId), myUid) > 0;
             const expanded = openTeam === th.teamId;
@@ -1529,10 +1585,11 @@ function StaffChatSection({
                     <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{nameFor(th.teamId)}</div>
                     {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">{t.chat.chatUnread}</span>}
                   </div>
-                  {last && <div dir="auto" className="text-xs text-zinc-500 truncate mt-0.5">{last.from === 'hq' ? `${t.chat.chatHq}: ` : ''}{last.text}</div>}
+                  {last && <div dir="auto" className="text-xs text-zinc-500 truncate mt-0.5">{last.from === 'hq' ? `${hqSenderLabel(last.senderName, t.chat.chatHq)}: ` : ''}{last.text}</div>}
                 </button>
                 {expanded && (
                   <div className="mt-2 flex flex-col gap-2">
+                    {th.messages.length === 0 && <p className="text-xs text-zinc-500">{t.staff.chatNewThread}</p>}
                     <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
                       {th.messages.map((m) => {
                         // Attribute from THIS staffer's angle: their own replies read
@@ -1541,7 +1598,7 @@ function StaffChatSection({
                         const side = chatMessageSide(m, myUid);
                         const hqSide = side !== 'other'; // 'me' or another HQ member
                         const label = side === 'me' ? t.devices.youTag
-                          : side === 'hq' ? t.chat.chatHq
+                          : side === 'hq' ? hqSenderLabel(m.senderName, t.chat.chatHq)
                           : m.senderName;
                         return (
                           <div key={m.id} className={`flex flex-col ${hqSide ? 'items-end' : 'items-start'}`}>

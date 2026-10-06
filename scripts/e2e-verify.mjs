@@ -7659,9 +7659,13 @@ async function main() {
     await signInAnonymously(chatStaff.auth);
     const cstok = await chatStaff.call('staffSignIn', { ownerUid: OWNER, gameId: cg, runId: cr, pin: chatPin });
     await signInWithCustomToken(chatStaff.auth, cstok.customToken);
-    await chatStaff.call('sendTeamChatMessage', { ...CTX, teamId: founderUid, text: 'Marshal on the way', senderName: 'Chat Marshal' });
+    // Issue 45: the team now sees WHICH staff member wrote, so the name comes from the staff token,
+    // never from what the client claims.
+    await chatStaff.call('sendTeamChatMessage', { ...CTX, teamId: founderUid, text: 'Marshal on the way', senderName: 'Someone Else' });
     chat = (await creator.getDocAt(chatPath)).data;
     check('chat: staff reply appended as hq', chat?.messages?.length === 3 && chat.messages[2].from === 'hq', JSON.stringify(chat?.messages?.length));
+    check('chat: a staff line carries the staff member's own name from the token, not the client's',
+      chat?.messages?.[2]?.senderName === 'Chat Marshal', JSON.stringify(chat?.messages?.[2]?.senderName));
 
     // 4. Validation: 501-char, whitespace-only rejected; control chars stripped.
     await expectError('chat: 501-char text rejected',

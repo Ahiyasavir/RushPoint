@@ -7,7 +7,7 @@
 // whenever the caller uid === ownerUid (the owner playing/test-driving their OWN game),
 // and the client labeled purely by `from` with no way to recover the true author. The
 // fix stamps `senderId` and decides the side by comparing it to the viewer's uid.
-import { chatMessageSide, type ChatMessage } from '../packages/shared/src/chat';
+import { chatMessageSide, hqSenderLabel, type ChatMessage } from '../packages/shared/src/chat';
 
 let passed = 0;
 let failed = 0;
@@ -57,6 +57,12 @@ ok(chatMessageSide({ senderId: ME, from: 'team' }, null) === 'other',
   "no viewer uid → cannot be 'me'");
 ok(chatMessageSide({ senderId: ME, from: 'hq' }, undefined) === 'hq',
   "undefined viewer uid → falls back to `from`");
+
+// ── Issue 45: an HQ line names the staff member who wrote it ───────────────────
+ok(hqSenderLabel('נועה', 'המטה') === 'המטה · נועה', 'a marshal line reads "המטה · נועה"');
+ok(hqSenderLabel('HQ', 'המטה') === 'המטה', 'the generic HQ stamp stays plain "המטה"');
+ok(hqSenderLabel('  ', 'המטה') === 'המטה' && hqSenderLabel(undefined, 'המטה') === 'המטה', 'no name: plain "המטה"');
+ok(hqSenderLabel('המטה', 'המטה') === 'המטה', 'never "המטה · המטה"');
 
 console.log(failed === 0
   ? `\n✅ ALL CHAT ATTRIBUTION TESTS PASSED (${passed})`
