@@ -1,6 +1,6 @@
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useWideLayout } from '../lib/useWideLayout';
-import { STAFF_PHONE_ORDER, staffDesktopColumns, type StaffSection } from '../lib/staffLayout';
+import { STAFF_PHONE_ORDER, staffDesktopLayout, staffDeskCounts, type StaffSection } from '../lib/staffLayout';
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, signInStaff, uid } from '../services/firebase';
@@ -68,7 +68,7 @@ import {
   writeSeenMarker,
   type StaffSession,
 } from '../store';
-import { Button, Card, Collapsible, Input, Screen } from '../components/ui';
+import { Button, Card, Collapsible, CollapsibleEmbedded, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { feedback } from '../lib/sound';
 import { useAsyncAction } from '../hooks/useAsyncAction';
@@ -350,6 +350,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // Team search (staff-console-field-ops). Purely local: the whole roster is already
   // in this snapshot and is bounded by Run.maxParticipants, so no query is needed.
   const [teamQuery, setTeamQuery] = useState('');
+  // Issue 39, computer only: which tool the side panel shows, and which team's window is open.
+  const [sideTab, setSideTab] = useState<StaffSection>('map');
+  const [openTeamId, setOpenTeamId] = useState<string | null>(null);
   const ackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => {
     const timers = ackTimers.current;
@@ -678,6 +681,16 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 
   // desktop-layouts-play-staff: every section once, placed by lib/staffLayout.ts. On a phone the
   // order the staff app always had; on a computer three columns. The quick bar is phone only.
+  // A code the organizer removed: said where the person will look first, on both layouts.
+  const removedCard = access.removed ? (
+            <Card className="p-4 mb-4 border border-danger/40" data-testid="staff-removed">
+              <p className="text-sm text-danger font-semibold">{t.staff.removedTitle}</p>
+              <p className="text-xs text-zinc-400 mt-1">{t.staff.removedBody}</p>
+              <button className="mt-3 min-h-[44px] px-4 rounded-lg bg-app-raised border border-glass-border text-sm font-semibold text-zinc-200" onClick={onSignOut}>
+                {t.staff.removedExit}
+              </button>
+            </Card>
+  ) : null;
   const sectionEls: Record<StaffSection, ReactNode> = {
     quickBar: (
       <>
@@ -768,15 +781,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               ))}
           </section>}
 
-          {access.removed && (
-            <Card className="p-4 mb-4 border border-danger/40" data-testid="staff-removed">
-              <p className="text-sm text-danger font-semibold">{t.staff.removedTitle}</p>
-              <p className="text-xs text-zinc-400 mt-1">{t.staff.removedBody}</p>
-              <button className="mt-3 min-h-[44px] px-4 rounded-lg bg-app-raised border border-glass-border text-sm font-semibold text-zinc-200" onClick={onSignOut}>
-                {t.staff.removedExit}
-              </button>
-            </Card>
-          )}
+          {!wide && removedCard}
       </>
     ),
     review: (
@@ -876,29 +881,43 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               ? <p className="text-zinc-500 text-sm">{t.staff.noTeams}</p>
               : visibleTeams.length === 0
               ? <p className="text-zinc-500 text-sm">{t.staff.noTeamsMatch}</p>
-              : listedTeams.map((tm) => (
+              : wide ? (
+                // Issue 39: on a computer a team is a small tile and its actions open in a window, so
+                // the list stays one screen instead of a long scroll of tall cards.
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-2" data-testid="staff-team-grid">
+                  {listedTeams.map((tm) => {
+                    const state = tm.status === 'finished' ? { text: t.staff.follow.status.finished, cls: 'bg-app-raised text-zinc-300' }
+                      : tm.held ? { text: t.staff.heldBadge, cls: 'bg-accent text-black' }
+                      : tm.outOfBounds ? { text: t.staff.outOfBoundsBadge, cls: 'bg-danger/15 text-danger' }
+                      : !tm.launched ? { text: t.staff.desk.notStarted, cls: 'bg-app-raised text-zinc-500' } : null;
+                    const mission = tm.activeTaskId ? titleOf(tm.activeTaskId) : '';
+                    return (
+                      <div key={tm.id} id={`staff-team-${tm.id}`}
+                        className={`group relative rounded-xl border bg-app-card transition-colors hover:border-accent/60 hover:bg-app-raised ${tm.held ? 'border-accent/60' : tm.outOfBounds ? 'border-danger/50' : 'border-glass-border'}`}>
+                        <button type="button" onClick={() => setOpenTeamId(tm.id)} aria-label={t.staff.desk.openTeam(tm.displayName)}
+                          data-testid="staff-team-tile" className="block w-full rounded-xl px-3 py-2 pe-10 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span dir="auto" className="truncate text-sm font-semibold text-zinc-100">{tm.displayName}</span>
+                            <span className="shrink-0 font-mono text-sm font-bold text-ink-fire">{tm.score}</span>
+                          </div>
+                          <div className="mt-1 flex min-h-[22px] items-center gap-1.5 text-[12px] text-zinc-500">
+                            {state && <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${state.cls}`}>{state.text}</span>}
+                            {mission && <span dir="auto" className="truncate">{t.staff.desk.onMission}: {mission}</span>}
+                          </div>
+                          {adjustAck[tm.id] && <div role="status" className="mt-0.5 truncate text-[11px] font-semibold text-ink-fire">✓ {adjustAck[tm.id]}</div>}
+                        </button>
+                        <button type="button" onClick={() => toggleFollow(tm.id)} aria-pressed={follow.isFollowed(tm.id)}
+                          aria-label={follow.isFollowed(tm.id) ? t.staff.follow.unfollowAria({ team: tm.displayName }) : t.staff.follow.followAria({ team: tm.displayName })}
+                          className={`absolute top-1.5 end-1 inline-flex h-9 w-9 items-center justify-center rounded-lg hover:bg-app-raised ${follow.isFollowed(tm.id) ? 'text-indigo-600' : 'text-zinc-500'}`}>
+                          <Icon name="star" className={follow.isFollowed(tm.id) ? 'w-5 h-5 fill-current' : 'w-5 h-5'} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : listedTeams.map((tm) => (
                 <div key={tm.id} id={`staff-team-${tm.id}`} className="scroll-mt-4">
-                <TeamOpsCard
-                  team={tm}
-                  followed={follow.isFollowed(tm.id)}
-                  onToggleFollow={() => toggleFollow(tm.id)}
-                  ack={adjustAck[tm.id]}
-                  busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
-                  can={{ score: can('score'), hold: can('hold'), route: can('route') }}
-                  callTargets={can('contactTeams') ? teamCallTargets(tm.registrationData, outline?.phoneFields) : []}
-                  onAdjust={(delta, reason) => void adjustAction.run(tm, delta, reason)}
-                  onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
-                  onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
-                  onSkipTask={() => void opsAction.run(tm, { kind: 'skipTask' })}
-                  ctx={ctx}
-                  letInTaskId={can('route') ? staffLetInTarget(outline, tm) : null}
-                  onLetIn={(taskId) => void opsAction.run(tm, { kind: 'letIn', taskId })}
-                  onRoute={(taskId, title, accept, when) =>
-                    void opsAction.run(tm, { kind: 'route', taskId, title, accept, when })}
-                  onSendBack={(target, title) => void opsAction.run(tm, { kind: 'sendBack', target, title })}
-                  titleOf={titleOf}
-                  outlineStages={outline?.stages ?? []}
-                />
+                {opsCardFor(tm)}
                 </div>
               ))}
           </section>
@@ -943,12 +962,146 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       </>
     ),
   };
-  const desktopColumns = staffDesktopColumns();
+  // One team's full action card. The phone list shows it inline; on a computer it opens in a
+  // window from the team's tile (issue 39), so both render the SAME controls.
+  function opsCardFor(tm: TeamRow, inWindow = false) {
+    return (
+      <TeamOpsCard
+        startOpen={inWindow}
+        team={tm}
+        followed={follow.isFollowed(tm.id)}
+        onToggleFollow={() => toggleFollow(tm.id)}
+        ack={adjustAck[tm.id]}
+        busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
+        can={{ score: can('score'), hold: can('hold'), route: can('route') }}
+        callTargets={can('contactTeams') ? teamCallTargets(tm.registrationData, outline?.phoneFields) : []}
+        onAdjust={(delta, reason) => void adjustAction.run(tm, delta, reason)}
+        onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
+        onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
+        onSkipTask={() => void opsAction.run(tm, { kind: 'skipTask' })}
+        ctx={ctx}
+        letInTaskId={can('route') ? staffLetInTarget(outline, tm) : null}
+        onLetIn={(taskId) => void opsAction.run(tm, { kind: 'letIn', taskId })}
+        onRoute={(taskId, title, accept, when) =>
+          void opsAction.run(tm, { kind: 'route', taskId, title, accept, when })}
+        onSendBack={(target, title) => void opsAction.run(tm, { kind: 'sendBack', target, title })}
+        titleOf={titleOf}
+        outlineStages={outline?.stages ?? []}
+      />
+    );
+  }
+  const desk = staffDesktopLayout();
+  const counts = staffDeskCounts(teams, alerts.length, pending.length);
+  const sideTabs = desk.sideTabs.filter((sec) => (
+    sec === 'map' ? can('locations') : sec === 'chat' ? can('chat') : sec === 'staffChannel' ? can('staffChannel')
+      : sec === 'feed' ? can('feed') : sec === 'broadcast' ? can('broadcast') : false));
+  const activeSide: StaffSection | null = sideTabs.includes(sideTab) ? sideTab : (sideTabs[0] ?? null);
+  const tabLabel: Partial<Record<StaffSection, string>> = {
+    map: t.staff.desk.tabMap, chat: t.staff.desk.tabChat, staffChannel: t.staff.desk.tabChannel,
+    feed: t.staff.desk.tabFeed, broadcast: t.staff.desk.tabBroadcast,
+  };
+  const quiet = alerts.length === 0 && pending.length === 0;
+  const openTeam = openTeamId ? teams.find((tm) => tm.id === openTeamId) ?? null : null;
+  const signOut = () => { void dialog.confirm(t.staff.signOutConfirm, { confirmLabel: t.staff.signOut, danger: true }).then((ok) => { if (ok) onSignOut(); }); };
+  const errLine = readErr && (
+    <div role="status" aria-live="polite" className="mb-3">
+      <p className="text-danger text-xs">{t.staff[readErr.sessionExpired && playerHere ? 'signedInAsPlayer' : readErr.key]}</p>
+      {readErr.sessionExpired && (
+        <button className="inline-flex items-center justify-center min-h-[44px] px-2 -ms-2 text-xs font-semibold text-ink-fire underline" onClick={onSignOut}>
+          {t.staff.backToSignIn}
+        </button>
+      )}
+    </div>
+  );
+
+  // ── Computer (issue 39): ONE screen that never scrolls as a page (Ahiya: "שלא יהיה גלילה
+  // בממשקים במחשב" / "תעשה שיפתחו חלונות"). A fixed top bar with the live counts; three panels that
+  // share the height: what needs you, the teams as tiles, and one tool at a time on the side. A
+  // team's actions open in a window. A panel scrolls inside itself only if its content truly
+  // outgrows the screen; the page never does.
+  if (wide) {
+    return (
+      <div className="h-[100dvh] overflow-hidden flex flex-col">
+        <header className="shrink-0 border-b border-glass-border bg-app-card/95 backdrop-blur" data-testid="staff-topbar">
+          <div className="mx-auto flex w-full max-w-[1680px] items-center gap-4 px-5 py-2.5">
+            <div className="min-w-0">
+              <h1 className="font-brand text-lg font-extrabold leading-tight text-ink-fire">{t.staff.title}</h1>
+              <p className="truncate text-xs text-zinc-500">{staff.name}</p>
+            </div>
+            <div className="flex flex-1 flex-wrap items-center justify-center gap-1.5 text-[13px]" aria-live="polite">
+              <span className="rounded-full bg-app-raised px-3 py-1 font-semibold text-zinc-200">{t.staff.desk.teams(counts.teams)}</span>
+              {counts.playing > 0 && <span className="rounded-full bg-accent/15 px-3 py-1 font-semibold text-ink-fire">{t.staff.desk.playing(counts.playing)}</span>}
+              {counts.held > 0 && <span className="rounded-full bg-accent px-3 py-1 font-semibold text-black">{t.staff.desk.held(counts.held)}</span>}
+              {counts.waiting > 0 && <span className="rounded-full bg-app-raised px-3 py-1 text-zinc-400">{t.staff.desk.waiting(counts.waiting)}</span>}
+              {counts.finished > 0 && <span className="rounded-full bg-app-raised px-3 py-1 text-zinc-400">{t.staff.desk.finished(counts.finished)}</span>}
+              {counts.sos > 0 && <span className="rounded-full bg-ink-alert px-3 py-1 font-bold text-white motion-safe:animate-pulse">{t.staff.desk.sos(counts.sos)}</span>}
+              {counts.photos > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 font-semibold text-amber-800">{t.staff.desk.photos(counts.photos)}</span>}
+            </div>
+            <button className="inline-flex min-h-[40px] items-center rounded-lg px-3 text-sm text-zinc-500 hover:bg-app-raised hover:text-zinc-200" onClick={signOut}>
+              {t.staff.signOut}
+            </button>
+          </div>
+        </header>
+
+        <div className="mx-auto grid min-h-0 w-full max-w-[1680px] flex-1 grid-cols-[minmax(260px,310px)_minmax(0,1fr)_minmax(320px,390px)] gap-4 px-5 py-4" data-testid="staff-columns">
+          {/* What needs a person now. Quiet ⇒ one line, not three empty headings. */}
+          <aside className="min-h-0 overflow-y-auto overscroll-contain rounded-2xl border border-glass-border bg-app-card/70 p-3" aria-label={t.staff.desk.needsYou}>
+            <h2 className="mb-2 text-[12px] font-bold uppercase tracking-wider text-zinc-500">{t.staff.desk.needsYou}</h2>
+            {errLine}
+            {removedCard}
+            {quiet
+              ? <p className="mb-4 rounded-xl bg-app-raised px-3 py-3 text-sm text-zinc-400" data-testid="staff-all-quiet">{t.staff.desk.allQuiet}</p>
+              : <>{alerts.length > 0 && sectionEls.alerts}{pending.length > 0 && sectionEls.review}</>}
+            {desk.needsYou.filter((sec) => sec !== 'alerts' && sec !== 'review').map((sec) => <Fragment key={sec}>{sectionEls[sec]}</Fragment>)}
+          </aside>
+
+          {/* The teams: the list a marshal works from. */}
+          <main className="min-h-0 overflow-y-auto overscroll-contain rounded-2xl border border-glass-border bg-app-card/70 p-3">
+            {desk.main.map((sec) => <Fragment key={sec}>{sectionEls[sec]}</Fragment>)}
+          </main>
+
+          {/* One tool at a time, tabbed, instead of five collapsed boxes stacked up. */}
+          <aside className="flex min-h-0 flex-col rounded-2xl border border-glass-border bg-app-card/70">
+            {desk.sideTop.map((sec) => <div key={sec} className="shrink-0 border-b border-glass-border px-3 pt-3 [&_section]:mb-3">{sectionEls[sec]}</div>)}
+            {activeSide && (
+              <>
+                <div role="tablist" aria-label={t.staff.desk.toolsLabel} data-testid="staff-side-tabs" className="flex shrink-0 flex-wrap gap-1 border-b border-glass-border p-2">
+                  {sideTabs.map((sec) => (
+                    <button key={sec} type="button" role="tab" aria-selected={activeSide === sec} onClick={() => setSideTab(sec)}
+                      className={`min-h-[36px] rounded-lg px-3 text-[13px] font-semibold ${activeSide === sec ? 'bg-accent/15 text-ink-fire' : 'text-zinc-500 hover:bg-app-raised hover:text-zinc-200'}`}>
+                      {tabLabel[sec]}
+                    </button>
+                  ))}
+                </div>
+                <div role="tabpanel" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [&_section]:mb-0">
+                  <CollapsibleEmbedded.Provider value>
+                    {sectionEls[activeSide]}
+                  </CollapsibleEmbedded.Provider>
+                </div>
+              </>
+            )}
+          </aside>
+        </div>
+
+        {/* A team's actions, in a window over the board. */}
+        {openTeam && (
+          <StaffWindow title={openTeam.displayName} onClose={() => setOpenTeamId(null)}>
+            {opsCardFor(openTeam, true)}
+            {can('chat') && (
+              <button type="button" data-testid="staff-window-chat"
+                onClick={() => { setChatFocus({ teamId: openTeam.id, nonce: Date.now() }); setSideTab('chat'); setOpenTeamId(null); }}
+                className="mt-2 inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-glass-border px-4 text-sm font-semibold text-ink-fire hover:bg-app-raised">
+                <Icon name="chat" className="w-4 h-4" /> {t.staff.sosChat}
+              </button>
+            )}
+          </StaffWindow>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div className={wide
-      ? 'min-h-screen max-w-7xl mx-auto w-full px-6 pb-6 rp-safe-t flex flex-col'
-      : 'min-h-screen max-w-md mx-auto w-full px-5 pb-6 rp-safe-t flex flex-col'}>
+    <div className="min-h-screen max-w-md mx-auto w-full px-5 pb-6 rp-safe-t flex flex-col">
       <header className="flex items-center justify-between mb-5">
         <div>
           <h1 className="font-brand text-xl font-extrabold text-ink-fire">{t.staff.title}</h1>
@@ -971,15 +1124,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         </div>
       )}
 
-      {wide ? (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-6 items-start" data-testid="staff-columns">
-          {desktopColumns.map((col, i) => (
-            <div key={i} className="min-w-0 flex flex-col">
-              {col.map((s) => <Fragment key={s}>{sectionEls[s]}</Fragment>)}
-            </div>
-          ))}
-        </div>
-      ) : STAFF_PHONE_ORDER.map((s) => <Fragment key={s}>{sectionEls[s]}</Fragment>)}
+      {STAFF_PHONE_ORDER.map((s) => <Fragment key={s}>{sectionEls[s]}</Fragment>)}
     </div>
   );
 }
@@ -997,12 +1142,14 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 // points dozens of times a run and holds a team maybe twice.
 function TeamOpsCard({
   team, ack, busy, can, onAdjust, onHold, onClearOob, onSkipTask, onRoute, onSendBack, titleOf, outlineStages, callTargets = [], ctx, letInTaskId = null, onLetIn,
-  followed = false, onToggleFollow,
+  followed = false, onToggleFollow, startOpen = false,
 }: {
   team: TeamRow;
   /** followed-teams: is this one of my teams, and the star that changes it. */
   followed?: boolean;
   onToggleFollow?: () => void;
+  /** In the computer's team window the actions are the point of opening it: shown at once. */
+  startOpen?: boolean;
   ack?: string;
   busy: boolean;
   /** What this staff member's code allows (staff-capabilities). A control that is not allowed is
@@ -1038,7 +1185,7 @@ function TeamOpsCard({
   // change: staff-team-card-actions. Score steps, a custom amount and routing wait behind one
   // "פעולות" button; hold and the state-driven safety actions stay on the card. A panel that
   // is open keeps them shown, so nothing half-typed can disappear.
-  const [actionsOpen, setActionsOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(startOpen);
   const showMore = actionsOpen || openPanel !== null;
   const parsedAmount = parseAdjustAmount(amountDraft);
   // The reason vocabulary follows the SIGN of the amount being entered, so a
@@ -2000,5 +2147,38 @@ function AnnouncementComposer({ ctx, teams }: { ctx: { ownerUid: string; gameId:
         {sent ? t.staff.sent : target ? t.staff.sendToTeam({ name: teams.find((tm) => tm.id === target)?.displayName ?? '' }) : t.staff.broadcast}
       </Button>
     </section>
+  );
+}
+
+// A window over the staff board (issue 39, computer only; Ahiya: "תעשה שיפתחו חלונות או משהו, הגלילה
+// ממש הורסת"). Escape, the close button and a click on the dimmed board close it; focus goes into it
+// on open and back to what opened it on close.
+function StaffWindow({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const { t } = useT();
+  const titleId = useId();
+  const box = useRef<HTMLDivElement | null>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const back = document.activeElement as HTMLElement | null;
+    box.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); back?.focus?.(); };
+  }, []);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="staff-window"
+        className="flex max-h-[calc(100dvh-3rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-glass-border bg-app-card shadow-2xl outline-none">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-glass-border px-4 py-2.5">
+          <h2 id={titleId} dir="auto" className="truncate text-base font-bold text-zinc-100">{title}</h2>
+          <button type="button" onClick={onClose} aria-label={t.staff.desk.close}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-zinc-400 hover:bg-app-raised hover:text-zinc-100">
+            <Icon name="close" className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-3 [&>div]:mb-0 [&>div]:border-0 [&>div]:shadow-none">{children}</div>
+      </div>
+    </div>
   );
 }

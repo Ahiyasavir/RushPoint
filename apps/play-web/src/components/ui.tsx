@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { createContext, forwardRef, useContext } from 'react';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 import { useT } from '../i18nContext';
 
@@ -219,6 +219,13 @@ export function TagChips({ tags, max = 8, more, className = '' }: {
 //   • a single chevron that rotates on open instead of swapping ▲/▼ glyphs
 // State stays fully controlled by the caller (open/onToggle), so behaviour and
 // any open-time side effects (e.g. marking chat read) are preserved exactly.
+/**
+ * Inside a tabbed panel (the staff app on a computer, issue 39) a section is the whole tab, so its
+ * collapsible header would be a second title over the first: under this context a Collapsible
+ * renders its body only, always open.
+ */
+export const CollapsibleEmbedded = createContext(false);
+
 export function Collapsible({
   header, open, onToggle, children, className = '', bodyClassName = 'px-3 pb-3',
 }: {
@@ -229,6 +236,8 @@ export function Collapsible({
   className?: string;
   bodyClassName?: string;
 }) {
+  const embedded = useContext(CollapsibleEmbedded);
+  if (embedded) return <div>{children}</div>;
   return (
     <div className={`rounded-xl bg-app-card border border-glass-border ${className}`}>
       <button
