@@ -176,11 +176,21 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
   // verdict is a result, so it reads as "sent" (found by playing it: without this the phone that
   // had just sent its flash mission read "another team already took it").
   if (t.flashClaims && typeof t.flashClaims === 'object') {
-    const claims: Record<string, { status: string }> = {};
+    const claims: Record<string, { status: string; retryAllowed?: true; reviewedAt?: string }> = {};
     for (const [flashId, c] of Object.entries(t.flashClaims as Record<string, unknown>)) {
-      const status = (c as { status?: unknown } | null)?.status;
+      const claim = c as { status?: unknown; retryAllowed?: unknown; reviewedAt?: unknown } | null;
+      const status = claim?.status;
       if (typeof status !== 'string') continue;
-      claims[flashId] = { status: sealed && (status === 'approved' || status === 'rejected') ? 'submitted' : status };
+      // flash-reject-choice (issue 26): another try is an instruction the team must act on, so it
+      // reaches the phone even under a sealed score; a rejection carries reviewedAt so the phone
+      // announces each one once. Nothing else (no media url) leaves the server.
+      const retry = status === 'rejected' && claim?.retryAllowed === true;
+      if (sealed && !retry && (status === 'approved' || status === 'rejected')) { claims[flashId] = { status: 'submitted' }; continue; }
+      claims[flashId] = {
+        status,
+        ...(retry ? { retryAllowed: true as const } : {}),
+        ...(status === 'rejected' && typeof claim?.reviewedAt === 'string' ? { reviewedAt: claim.reviewedAt } : {}),
+      };
     }
     out.flashClaims = claims;
   }

@@ -327,6 +327,8 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [teamsLoaded, setTeamsLoaded] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  // Issue 25: the SOS card's chat button opens that team's thread in the chat section.
+  const [chatFocus, setChatFocus] = useState<{ teamId: string; nonce: number } | null>(null);
   // followed-teams: "הקבוצות שלי", per run and per person on this phone (Ahiya, 2026-09-30).
   const follow = useFollowedTeams(runId, uid() ?? undefined, teamsLoaded ? teams.map((tm) => tm.id) : null);
   // Volunteers read this, so it is a CLASSIFICATION, never the server's English
@@ -734,6 +736,14 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                           <Icon name="phone" className="w-4 h-4" /> {t.staff.sosCallback({ phone: a.callbackPhone })}
                         </a>
                       )}
+                      {/* Issue 25 (Ahiya, 2026-10-06): write to the team straight from its SOS. */}
+                      {can('chat') && (
+                        <button type="button" data-testid="sos-chat"
+                          onClick={() => setChatFocus({ teamId: a.teamId, nonce: Date.now() })}
+                          className="mt-1 ms-2 inline-flex items-center gap-1 min-h-[44px] rounded-lg border border-danger px-3 text-sm font-bold text-ink-alert">
+                          <Icon name="chat" className="w-4 h-4" /> {t.staff.sosChat}
+                        </button>
+                      )}
                       {a.lat != null && a.lng != null && (
                         <a
                           className="inline-flex items-center min-h-[44px] px-2 -ms-2 text-ink-fire text-xs underline"
@@ -915,7 +925,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     chat: (
       <>
           {/* ── Team ↔ HQ chat threads ── */}
-          {can('chat') && <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} />}
+          {can('chat') && <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} focus={chatFocus} />}
       </>
     ),
     feed: (
@@ -927,7 +937,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     broadcast: (
       <>
           {/* ── Announcement composer ── */}
-          {can('broadcast') && <AnnouncementComposer ctx={ctx} />}
+          {can('broadcast') && <AnnouncementComposer ctx={ctx} teams={teams} />}
       </>
     ),
   };
@@ -1383,15 +1393,22 @@ function TeamOpsCard({
 interface ChatThread { teamId: string; messages: ChatMessage[]; updatedAt: string }
 
 function StaffChatSection({
-  ctx, teams, senderName,
+  ctx, teams, senderName, focus,
 }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: TeamRow[];
   senderName: string;
+  /** Open this team's thread now (issue 25: the chat button on an SOS card). */
+  focus?: { teamId: string; nonce: number } | null;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
-  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [storedThreads, setThreads] = useState<ChatThread[]>([]);
+  // A team that never wrote has no thread document; the one this staffer was sent to still gets an
+  // empty thread to write in (sendTeamChatMessage creates the document).
+  const threads = focus && !storedThreads.some((th) => th.teamId === focus.teamId)
+    ? [{ teamId: focus.teamId, messages: [], updatedAt: '' }, ...storedThreads]
+    : storedThreads;
   const [openTeam, setOpenTeam] = useState<string | null>(null);
   // Seen markers, PERSISTED per run+team (change: team-chat-unread-accuracy).
   // They used to be React state only, so a console reload re-flagged every
@@ -1440,6 +1457,14 @@ function StaffChatSection({
   // and whenever the staff member switches threads, so it can never outlive the
   // message it describes.
   const [replyErr, setReplyErr] = useState('');
+  useEffect(() => {
+    if (!focus) return;
+    setOpen(true);
+    setOpenTeam(focus.teamId);
+    setDraft('');
+    setReplyErr('');
+    window.setTimeout(() => document.getElementById('staff-chat')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 0);
+  }, [focus]);
 
   function expand(teamId: string, messages: ChatMessage[]) {
     setOpenTeam((cur) => {
@@ -1820,9 +1845,14 @@ function StaffFlashSection({ ctx, teams, canReview, canEnd }: {
                       onClick={() => void act(`${key}:a`, () => reviewFlashMission({ ...ctx, flashId: w.flashId, teamId: w.teamId, action: 'approve' }), f.staffApproved)}>
                       {f.staffApprove}
                     </Button>
-                    <Button variant="ghost" className="w-auto px-4" loading={busy === `${key}:r`} disabled={!!busy}
+                    {/* Issue 26: another try, or no more tries for this team. */}
+                    <Button variant="ghost" className="w-auto px-4" loading={busy === `${key}:rr`} disabled={!!busy} data-testid="flash-reject-retry"
+                      onClick={() => void act(`${key}:rr`, () => reviewFlashMission({ ...ctx, flashId: w.flashId, teamId: w.teamId, action: 'reject', retry: true }), f.staffRejectedRetry)}>
+                      {f.staffRejectRetry}
+                    </Button>
+                    <Button variant="ghost" className="w-auto px-4" loading={busy === `${key}:r`} disabled={!!busy} data-testid="flash-reject-close"
                       onClick={() => void act(`${key}:r`, () => reviewFlashMission({ ...ctx, flashId: w.flashId, teamId: w.teamId, action: 'reject' }), f.staffRejected)}>
-                      {f.staffReject}
+                      {f.staffRejectClose}
                     </Button>
                   </div>
                 </li>
@@ -1853,8 +1883,11 @@ function StaffFlashSection({ ctx, teams, canReview, canEnd }: {
   );
 }
 
-function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+function AnnouncementComposer({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; runId: string }; teams: TeamRow[] }) {
   const { t } = useT();
+  // Issue 33 (Ahiya, 2026-10-06): a marshal allowed to broadcast can also write to ONE team.
+  // pushAnnouncement has taken a teamId since targeted-announcements; only this screen lacked it.
+  const [target, setTarget] = useState('');
   const [msg, setMsg] = useState('');
   const [msgHe, setMsgHe] = useState('');
   const [sent, setSent] = useState(false);
@@ -1873,7 +1906,7 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
     if (!payload) return;
     setSent(false); setErr('');
     try {
-      await pushAnnouncement({ ...ctx, ...payload });
+      await pushAnnouncement({ ...ctx, ...payload, ...(target ? { teamId: target } : {}) });
     } catch {
       setErr(t.staff.broadcastFailed);
       return;
@@ -1892,12 +1925,22 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
       {/* Hebrew is the primary field (this is a Hebrew-first product and the
           volunteers are Hebrew speakers); English is explicitly optional. */}
       <div className="space-y-2">
+        <label className="block">
+          <span className="block text-[13px] text-zinc-400 mb-1">{t.staff.broadcastTo}</span>
+          <select value={target} onChange={(e) => setTarget(e.target.value)} data-testid="broadcast-target"
+            className="w-full min-h-[44px] px-4 rounded-2xl text-base bg-white border border-glass-border text-zinc-100 focus:outline-none focus:ring-2 focus:ring-rp-fire/30">
+            <option value="">{t.staff.broadcastAllTeams}</option>
+            {teams.filter((tm) => tm.removed !== true).map((tm) => (
+              <option key={tm.id} value={tm.id}>{tm.displayName}</option>
+            ))}
+          </select>
+        </label>
         <Input value={msgHe} onChange={(e) => setMsgHe(e.target.value)} placeholder={t.staff.msgHePrimary} dir="rtl" />
         <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.staff.msgEnOptional} dir="ltr" />
       </div>
       {err && <p role="status" aria-live="polite" className="text-danger text-xs mt-2">{err}</p>}
       <Button disabled={busy || (!msg.trim() && !msgHe.trim())} loading={busy} onClick={() => void sendAction.run()} className="mt-3">
-        {sent ? t.staff.sent : t.staff.broadcast}
+        {sent ? t.staff.sent : target ? t.staff.sendToTeam({ name: teams.find((tm) => tm.id === target)?.displayName ?? '' }) : t.staff.broadcast}
       </Button>
     </section>
   );

@@ -1362,9 +1362,12 @@ function flashAward(team: RunTeam & { bonusPenalty?: number; scoreLedger?: unkno
 }
 
 export const reviewFlashMission = loggedCallable('reviewFlashMission', async (data, context) => {
-  const { ownerUid, gameId, runId, flashId, teamId, action } = data as {
+  const { ownerUid, gameId, runId, flashId, teamId, action, retry: rawRetry } = data as {
     ownerUid: string; gameId: string; runId: string; flashId: string; teamId: string; action: 'approve' | 'reject' | 'award';
+    // flash-reject-choice: on a reject, true = "another try for this team", else "open it up".
+    retry?: boolean | null;
   };
+  const retry = rawRetry === true;
   const operatorId = await assertStaffCan(context, ownerUid, runId, 'review');
   await enforceRateLimit(operatorId, 'reviewFlashMission');
   const id = validate(() => requireString(flashId, 'flashId', 128));
@@ -1386,9 +1389,15 @@ export const reviewFlashMission = loggedCallable('reviewFlashMission', async (da
     const points = Math.max(0, Math.round(Number(flash.bonusPoints ?? 0)));
     if (action === 'reject') {
       if (claim?.status !== 'submitted') throw new functions.https.HttpsError('failed-precondition', 'Nothing to reject');
-      tx.update(teamRef, { [`flashClaims.${id}.status`]: 'rejected', [`flashClaims.${id}.reviewedAt`]: nowIso, updatedAt: nowIso });
-      // First team only: a rejected sending frees the mission for the other teams.
-      if (flash.claimMode === 'first' && flash.takenBy === tid) tx.update(ref, { takenBy: admin.firestore.FieldValue.delete() });
+      tx.update(teamRef, {
+        [`flashClaims.${id}.status`]: 'rejected', [`flashClaims.${id}.reviewedAt`]: nowIso,
+        // flash-reject-choice (Ahiya, 2026-10-06): the organizer chooses another try or opening it up.
+        [`flashClaims.${id}.retryAllowed`]: retry ? true : admin.firestore.FieldValue.delete(),
+        updatedAt: nowIso,
+      });
+      // "Open it up" frees a first-team mission for the other teams; "another try" keeps it with
+      // this team, so nobody takes it while they film again.
+      if (!retry && flash.claimMode === 'first' && flash.takenBy === tid) tx.update(ref, { takenBy: admin.firestore.FieldValue.delete() });
       return;
     }
     if (action === 'approve' && claim?.status !== 'submitted') throw new functions.https.HttpsError('failed-precondition', 'Nothing to approve');
@@ -1405,7 +1414,7 @@ export const reviewFlashMission = loggedCallable('reviewFlashMission', async (da
   await writeAuditLog({
     ownerUid, gameId, runId, teamId: tid, operatorId,
     actionType: action === 'reject' ? 'flash_rejected' : 'flash_awarded',
-    previousValue: '', newValue: String(awarded), reason: action, flashId: id,
+    previousValue: '', newValue: String(awarded), reason: action === 'reject' && retry ? 'reject:retry' : action, flashId: id,
   });
   if (awarded > 0) await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId, { force: true });
   return { ok: true, awarded };

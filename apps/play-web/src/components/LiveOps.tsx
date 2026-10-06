@@ -85,7 +85,7 @@ export default function LiveOps({
   /** flash-missions-v2: after a successful "לקחתי", so the screen refreshes into the flash card. */
   onFlashClaimed?: () => void;
   /** flash-missions-v2 D6: this team's own claims (team.flashClaims), keyed by flash mission. */
-  myFlashClaims?: Record<string, { status: FlashClaimStatus } | null | undefined> | null;
+  myFlashClaims?: Record<string, { status: FlashClaimStatus; retryAllowed?: boolean; reviewedAt?: string } | null | undefined> | null;
   // time_only runs never award points, so the peek must show each team's time,
   // not a column of zeros (mirrors the finish/TV/public boards).
   timeOnly?: boolean;
@@ -170,9 +170,38 @@ export default function LiveOps({
     setClaiming(f.id);
     setClaimMsg(null);
     try { await claimFlashMission({ ownerUid, gameId, runId, flashId: f.id }); setMoment(null); onFlashClaimed?.(); }
-    catch (e) { setClaimMsg(/FLASH_TAKEN/.test(String((e as Error)?.message)) ? translations[lang].flash.takenByOther : translations[lang].flash.claimFailed); }
+    catch (e) {
+      const m = String((e as Error)?.message);
+      setClaimMsg(/FLASH_TAKEN/.test(m) ? translations[lang].flash.takenByOther
+        : /FLASH_REJECTED/.test(m) ? translations[lang].flash.myRejectedClosed
+        : translations[lang].flash.claimFailed);
+    }
     finally { setClaiming(null); }
   }
+
+  // flash-reject-choice (issue 26, Ahiya 2026-10-06): a rejected sending used to change one small
+  // line inside the banner, so the team was "told nothing". It is now an EVENT: once per rejection
+  // per phone (keyed on reviewedAt), a notice says so and, when the organizers gave another try,
+  // offers it right there.
+  const [rejectNotice, setRejectNotice] = useState<{ flash: FlashDoc; retry: boolean } | null>(null);
+  const rejectKey = Object.entries(myFlashClaims ?? {})
+    .filter(([, c]) => c?.status === 'rejected')
+    .map(([id, c]) => `${id}@${c?.reviewedAt ?? ''}`).sort().join(',');
+  useEffect(() => {
+    if (!rejectKey) return;
+    const key = `rp.flashRejectSeen.${runId}`;
+    let seen: string[] = [];
+    try { seen = JSON.parse(localStorage.getItem(key) ?? '[]') as string[]; } catch { /* memory only */ }
+    const fresh = rejectKey.split(',').find((k) => !seen.includes(k));
+    if (!fresh) return;
+    try { localStorage.setItem(key, JSON.stringify([...seen, fresh].slice(-50))); } catch { /* memory only */ }
+    const flashId = fresh.split('@')[0];
+    const f = flashes.find((x) => x.id === flashId);
+    if (!f) return;
+    setRejectNotice({ flash: f, retry: myFlashClaims?.[flashId]?.retryAllowed === true });
+    feedback('alert');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rejectKey, flashes.length, runId]);
   // Targeted announcements: only show a doc that is global or addressed to my team
   // (client-side courtesy filter — the field is not secret). Score notices also
   // auto-hide once older than SCORE_NOTICE_TTL_MS.
@@ -282,8 +311,21 @@ export default function LiveOps({
               const state = flashMissionState(f, now);
               // What happened to OUR claim: taken, sent and waiting, won, or not approved.
               const line = flashMyClaimLine(mine);
+              if (line === 'retry' && state !== 'ended' && state !== 'expired') {
+                return (
+                  <>
+                    <p role="status" className="mt-2 text-[13px] text-purple-800">{fl.myRejectedRetry}</p>
+                    <button type="button" data-testid="flash-retry" disabled={!!claiming || !!teamFlashId}
+                      onClick={() => void claim(f)}
+                      className="mt-2 w-full min-h-[44px] rounded-xl bg-purple-500 text-white font-bold text-sm disabled:opacity-50">
+                      {claiming === f.id ? fl.claiming : fl.retry}
+                    </button>
+                  </>
+                );
+              }
               if (line) {
-                const text = line === 'waiting' ? fl.myWaiting : line === 'won' ? fl.myWon({ points: f.bonusPoints ?? 0 }) : line === 'rejected' ? fl.myRejected : fl.alreadyYours;
+                const text = line === 'waiting' ? fl.myWaiting : line === 'won' ? fl.myWon({ points: f.bonusPoints ?? 0 })
+                  : line === 'rejected' ? fl.myRejectedClosed : line === 'retry' ? fl.myRejected : fl.alreadyYours;
                 return <p role="status" className={`mt-2 text-[13px] ${line === 'won' ? 'font-bold text-purple-900' : 'text-purple-800'}`}>{text}</p>;
               }
               if (state === 'taken') return <p className="mt-2 text-[13px] text-zinc-400">{fl.takenByOther}</p>;
@@ -310,6 +352,30 @@ export default function LiveOps({
             <p className="text-sm font-bold uppercase tracking-widest mb-2">{translations[lang].flash.momentLabel}</p>
             <h2 id="rp-flash-moment" dir="auto" className="text-3xl font-extrabold mb-2">{lang === 'he' && moment.titleHe ? moment.titleHe : moment.title}</h2>
             {moment.bonusPoints ? <p className="text-2xl font-bold text-amber-300">+{moment.bonusPoints}</p> : null}
+          </div>
+        </div>
+      )}
+
+      {rejectNotice && (
+        <div role="alertdialog" aria-labelledby="rp-flash-rejected" data-testid="flash-rejected-notice"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6">
+          <div className="w-full max-w-sm rounded-2xl bg-app-card border border-rp-alert/40 p-5 text-start space-y-3">
+            <h2 id="rp-flash-rejected" className="text-lg font-bold text-ink-alert">{translations[lang].flash.rejectedTitle}</h2>
+            <p dir="auto" className="text-sm font-semibold text-zinc-200">{lang === 'he' && rejectNotice.flash.titleHe ? rejectNotice.flash.titleHe : rejectNotice.flash.title}</p>
+            <p className="text-sm text-zinc-300">{rejectNotice.retry ? translations[lang].flash.myRejectedRetry : translations[lang].flash.myRejectedClosed}</p>
+            <div className="flex gap-2">
+              {rejectNotice.retry && !teamFlashId && (
+                <button type="button" data-testid="flash-retry-notice"
+                  onClick={() => { const f = rejectNotice.flash; setRejectNotice(null); void claim(f); }}
+                  className="flex-1 min-h-[44px] rounded-xl bg-purple-500 text-white font-bold text-sm">
+                  {translations[lang].flash.retry}
+                </button>
+              )}
+              <button type="button" onClick={() => setRejectNotice(null)}
+                className="flex-1 min-h-[44px] rounded-xl border border-glass-border text-sm font-semibold text-zinc-200">
+                {translations[lang].flash.rejectedOk}
+              </button>
+            </div>
           </div>
         </div>
       )}

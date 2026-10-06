@@ -18,6 +18,12 @@ export interface FlashClaim {
   /** When the team sent it (the console's inbox ages a waiting approval from here). */
   submittedAt?: string;
   reviewedAt?: string;
+  /**
+   * flash-reject-choice (Ahiya, 2026-10-06): the organizer rejected the sending but gave the team
+   * another try. A first-team mission stays with this team meanwhile (`takenBy` kept). Absent on a
+   * rejection that opened the mission up again, which closes it for this team.
+   */
+  retryAllowed?: boolean;
 }
 
 export interface FlashMissionDoc {
@@ -51,7 +57,8 @@ export function flashMissionState(doc: FlashMissionDoc | null | undefined, nowMs
 }
 
 export type FlashClaimVerdict =
-  | 'ok' | 'ended' | 'expired' | 'taken' | 'alreadyClaimed' | 'announceOnly' | 'busyWithFlash' | 'teamCannotPlay';
+  | 'ok' | 'ended' | 'expired' | 'taken' | 'alreadyClaimed' | 'announceOnly' | 'busyWithFlash' | 'teamCannotPlay'
+  | 'rejected';
 
 export function flashClaimVerdict(input: {
   flash: FlashMissionDoc | null | undefined;
@@ -69,11 +76,14 @@ export function flashClaimVerdict(input: {
   if (!flash.claimMode || !flash.doneBy || flash.doneBy === 'announce') return 'announceOnly';
   const mine = typeof flashId === 'string' ? team?.flashClaims?.[flashId] : undefined;
   if (holds(mine)) return 'alreadyClaimed';
+  const retry = mine?.status === 'rejected' && mine.retryAllowed === true;
   const state = flashMissionState(flash, nowMs);
   if (state === 'ended' || state === 'expired') return state;
+  if (mine?.status === 'rejected' && !retry) return 'rejected';
   if (team?.removed === true || team?.held === true) return 'teamCannotPlay';
   if (team?.flashSuspension?.flashId) return 'busyWithFlash';
-  if (state === 'taken') return 'taken';
+  // A retry keeps a first-team mission with THIS team: its own hold is not "taken".
+  if (state === 'taken' && !(retry && flash.takenBy === input.teamId)) return 'taken';
   return 'ok';
 }
 
@@ -96,12 +106,12 @@ export function resumedStartedAt(startedAt: unknown, suspendedAt: unknown, nowMs
  * question nobody asked. `released` (the team gave it back) and anything unknown say nothing, so
  * the claim button logic decides. Pure and total.
  */
-export function flashMyClaimLine(claim: { status?: unknown } | null | undefined): 'claimed' | 'waiting' | 'won' | 'rejected' | null {
+export function flashMyClaimLine(claim: { status?: unknown; retryAllowed?: unknown } | null | undefined): 'claimed' | 'waiting' | 'won' | 'rejected' | 'retry' | null {
   switch (claim?.status) {
     case 'claimed': return 'claimed';
     case 'submitted': return 'waiting';
     case 'approved': return 'won';
-    case 'rejected': return 'rejected';
+    case 'rejected': return claim.retryAllowed === true ? 'retry' : 'rejected';
     default: return null;
   }
 }

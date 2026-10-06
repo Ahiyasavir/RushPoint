@@ -403,7 +403,7 @@ export const sendStaffChannelMessage = callable<{ ownerUid: string; gameId: stri
 export const pushFlashMission      = callable<{ ownerUid: string; gameId: string; runId: string; title: string; description?: string; bonusPoints: number; ttlSeconds: number;
   doneBy?: 'button' | 'photo' | 'video'; claimMode?: 'first' | 'many'; requiresApproval?: boolean }, { id: string; expiresAt: string }>('pushFlashMission');
 export const deactivateFlashMission = callable<{ ownerUid: string; gameId: string; runId: string; flashId: string }, { ok: boolean }>('deactivateFlashMission');
-export const reviewFlashMission = callable<{ ownerUid: string; gameId: string; runId: string; flashId: string; teamId: string; action: 'approve' | 'reject' | 'award' }, { ok: boolean; awarded: number }>('reviewFlashMission');
+export const reviewFlashMission = callable<{ ownerUid: string; gameId: string; runId: string; flashId: string; teamId: string; action: 'approve' | 'reject' | 'award'; retry?: boolean }, { ok: boolean; awarded: number }>('reviewFlashMission');
 export const acknowledgeAlert      = callable<{ ownerUid: string; gameId: string; runId: string; alertId: string }, { ok: boolean }>('acknowledgeAlert');
 // Out-of-bounds recovery: release a team the safe-zone latch is holding. The server
 // keeps a short grace window so a broken phone's next bad fix can't re-latch them.

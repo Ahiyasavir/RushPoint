@@ -3625,6 +3625,20 @@ async function finalizeRunCore(
   // Firestore read if something does read the run again.
   docCachePolicy.dropPrefix(runPath(ownerUid, gameId, runId));
 
+  // The end reaches every phone NOW (issue 35, Ahiya 2026-10-06: "it tells the players nothing, and
+  // the end itself is really delayed"). Same reason and same cure as publishing the standings: a
+  // phone listens to its OWN team document and reads the run only on its poll, so each team
+  // document gets one stamp, once, when the run ends. Best effort: the run IS finished either way.
+  try {
+    for (const part of chunk(teamsSnap.docs, MAX_BATCH_OPS)) {
+      const batch = db.batch();
+      for (const d of part) batch.update(d.ref, { runFinishedAt: now });
+      await batch.commit();
+    }
+  } catch (e) {
+    logBestEffort('finalizeRunCore.stampTeams', { runId }, e);
+  }
+
   // Post-finalize consolidation, INLINE (change: run-email-scope-and-digest).
   // The `onRunFinalized` trigger below is not invoked at all on a callable-only
   // host, which is why the summary email, the player-profile folds and the

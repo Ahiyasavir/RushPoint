@@ -1460,6 +1460,14 @@ async function main() {
   check('finalizeRun returns rankings', Array.isArray(fin?.rankings) && fin.rankings.length === 1);
   check('our team is ranked #1', fin?.rankings?.[0]?.teamId === playerCred.user.uid, JSON.stringify(fin?.rankings?.[0]));
   check('final score is positive', (fin?.rankings?.[0]?.score ?? 0) > 0, String(fin?.rankings?.[0]?.score));
+  // Issue 35 (Ahiya, 2026-10-06): "when I end the game it tells the players nothing; they find out
+  // when a submission says the game already ended". Phones listen to their OWN team document, so the
+  // end of the run stamps each one, exactly like publishing the standings.
+  {
+    const ended = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/teams/${playerCred.user.uid}`)).data ?? {};
+    check('ending the run stamps the team document, so a phone listening to it shows the end at once',
+      typeof ended.runFinishedAt === 'string', JSON.stringify(ended.runFinishedAt));
+  }
 
   // ── 10a. Platform benchmark contribution (platform-benchmark) ───────────────
   // Finalizing the main run marks the run doc's status:'finished', which fires
@@ -12751,6 +12759,36 @@ async function main() {
     const bBefore = (await teamDoc(ub)).score ?? 0;
     const award = await creator.call('reviewFlashMission', { ...F, flashId: f4, teamId: ub, action: 'award' });
     check('flash: the organizer awards an announcement to the winner', award?.awarded === 10 && ((await teamDoc(ub)).score ?? 0) === bBefore + 10);
+
+    // ── flash-reject-choice (Ahiya, 2026-10-06): reject with "another try" or "open it up" ───
+    {
+      const f6 = (await creator.call('pushFlashMission', { ...F, title: 'Retry me', bonusPoints: 5, ttlSeconds: 600,
+        claimMode: 'first', doneBy: 'photo', requiresApproval: true }))?.id;
+      await pa.call('claimFlashMission', { flashId: f6, code: fcode });
+      await pa.call('submitFlashMission', { flashId: f6, code: fcode, mediaUrl: media(ua, 6) });
+      await creator.call('reviewFlashMission', { ...F, flashId: f6, teamId: ua, action: 'reject', retry: true });
+      const c1 = (await teamDoc(ua)).flashClaims?.[f6];
+      check('flash retry: "another try" marks the claim retryable', c1?.status === 'rejected' && c1?.retryAllowed === true, JSON.stringify(c1));
+      check('flash retry: a first-team mission stays with that team', (await flashDoc(f6)).takenBy === ua, JSON.stringify(await flashDoc(f6)));
+      const seen = (await pa.call('getMyTeamState', { code: fcode }))?.team?.flashClaims?.[f6];
+      check('flash retry: the PHONE is told it has another try (participant projection)',
+        seen?.status === 'rejected' && seen?.retryAllowed === true && typeof seen?.reviewedAt === 'string', JSON.stringify(seen));
+      await expectError('flash retry: another team still cannot take it', pb.call('claimFlashMission', { flashId: f6, code: fcode }),
+        { codeIn: ['functions/failed-precondition'], match: /FLASH_TAKEN/ });
+      await pa.call('claimFlashMission', { flashId: f6, code: fcode });
+      check('flash retry: the team takes it again and is back on it',
+        (await teamDoc(ua)).flashClaims?.[f6]?.status === 'claimed' && (await teamDoc(ua)).flashSuspension?.flashId === f6);
+      await pa.call('submitFlashMission', { flashId: f6, code: fcode, mediaUrl: media(ua, 7) });
+      await creator.call('reviewFlashMission', { ...F, flashId: f6, teamId: ua, action: 'reject' });
+      const c2 = (await teamDoc(ua)).flashClaims?.[f6];
+      check('flash retry: "open it up" closes it for the team', c2?.status === 'rejected' && !c2?.retryAllowed, JSON.stringify(c2));
+      check('flash retry: and frees it for the others', !(await flashDoc(f6)).takenBy, JSON.stringify(await flashDoc(f6)));
+      await expectError('flash retry: the rejected team cannot take it again', pa.call('claimFlashMission', { flashId: f6, code: fcode }),
+        { codeIn: ['functions/failed-precondition'], match: /FLASH_REJECTED/ });
+      await pb.call('claimFlashMission', { flashId: f6, code: fcode });
+      check('flash retry: another team can take it now', (await flashDoc(f6)).takenBy === ub);
+      await pb.call('releaseFlashMission', { flashId: f6, code: fcode });
+    }
 
     // ── removing a team gives back the flash mission it holds (overnight 2026-09-29) ─────────
     // Found by reading: a removed team's 'claimed' first-team claim kept the mission "taken" for

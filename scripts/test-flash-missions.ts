@@ -41,7 +41,13 @@ eq('"many": B may take it too', v({ ...base, claimMode: 'many' }, 'B', team), 'o
 eq('the same team cannot take it twice (its own claim, on its own doc)', v({ ...base, takenBy: 'A' }, 'A', { flashClaims: { f1: { status: 'claimed' } } }), 'alreadyClaimed');
 eq('a claim on ANOTHER flash mission does not count', v(base, 'A', { flashClaims: { f2: { status: 'claimed' } } }), 'ok');
 eq('a team that gave it up may take it again', v(base, 'A', { flashClaims: { f1: { status: 'released' } } }), 'ok');
-eq('a team whose sending was not approved may try again', v(base, 'A', { flashClaims: { f1: { status: 'rejected' } } }), 'ok');
+// flash-reject-choice (Ahiya, 2026-10-06): the organizer decides. "Another try" marks the claim
+// retryAllowed and keeps a first-team mission with this team; "open it up" closes it for this team.
+eq('rejected WITHOUT a retry: this team may not take it again', v(base, 'A', { flashClaims: { f1: { status: 'rejected' } } }), 'rejected');
+eq('rejected WITH a retry: the team may take it again', v({ ...base, claimMode: 'many' }, 'A', { flashClaims: { f1: { status: 'rejected', retryAllowed: true } } }), 'ok');
+eq('rejected with a retry, first-team: its OWN hold does not count as taken', v({ ...base, takenBy: 'A' }, 'A', { flashClaims: { f1: { status: 'rejected', retryAllowed: true } } }), 'ok');
+eq('rejected with a retry, but another team holds it: taken', v({ ...base, takenBy: 'B' }, 'A', { flashClaims: { f1: { status: 'rejected', retryAllowed: true } } }), 'taken');
+eq('rejected with a retry, but it ended: ended', v({ ...base, isActive: false }, 'A', { flashClaims: { f1: { status: 'rejected', retryAllowed: true } } }), 'ended');
 eq('a team that already won it cannot take it again', v({ ...base, claimMode: 'many' }, 'A', { flashClaims: { f1: { status: 'approved' } } }), 'alreadyClaimed');
 eq('ended', v({ ...base, isActive: false }, 'B', team), 'ended');
 eq('expired', v({ ...base, expiresAt: later(-1) }, 'B', team), 'expired');
@@ -73,6 +79,7 @@ eq('my claim: claimed', flashMyClaimLine({ status: 'claimed' }), 'claimed');
 eq('my claim: sent, waiting for approval', flashMyClaimLine({ status: 'submitted' }), 'waiting');
 eq('my claim: approved', flashMyClaimLine({ status: 'approved' }), 'won');
 eq('my claim: rejected', flashMyClaimLine({ status: 'rejected' }), 'rejected');
+eq('my claim: rejected with another try', flashMyClaimLine({ status: 'rejected', retryAllowed: true }), 'retry');
 eq('my claim: released (gave it back) says nothing', flashMyClaimLine({ status: 'released' }), null);
 eq('my claim: none', flashMyClaimLine(undefined), null);
 eq('my claim: junk', flashMyClaimLine({ status: 'weird' } as never), null);

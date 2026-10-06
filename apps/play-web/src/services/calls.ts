@@ -262,7 +262,7 @@ export const releaseFlashMission = callable<Ctx & { flashId: string }, { ok: boo
 export const submitFlashMission = callable<Ctx & { flashId: string; mediaUrl?: string; posterUrl?: string }, { ok: boolean; approved: boolean }>('submitFlashMission');
 // Staff app (overnight 2026-09-29): approve/reject a sent flash mission (capability `review`) and end
 // one early (capability `broadcast`), the same callables the console uses.
-export const reviewFlashMission = callable<Ctx & { flashId: string; teamId: string; action: 'approve' | 'reject' }, { ok: boolean; awarded: number }>('reviewFlashMission');
+export const reviewFlashMission = callable<Ctx & { flashId: string; teamId: string; action: 'approve' | 'reject'; retry?: boolean }, { ok: boolean; awarded: number }>('reviewFlashMission');
 export const deactivateFlashMission = callable<Ctx & { flashId: string }, { ok: boolean }>('deactivateFlashMission');
 export const reportArrival = callable<
   // accuracyMeters: the fix's own error radius. Without it the server reads the fix as precise and

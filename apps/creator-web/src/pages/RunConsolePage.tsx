@@ -587,6 +587,8 @@ export default function RunConsolePage() {
   }, [gameId, runId, ownerUid, runLive]);
 
   const [chatThreads, setChatThreads] = useState<ChatThreadRow[]>([]);
+  // Issue 25: the SOS card's chat button opens that team's thread in the chat panel.
+  const [chatFocus, setChatFocus] = useState<{ teamId: string; nonce: number } | null>(null);
   // Seen markers, PERSISTED per run+team (change: team-chat-unread-accuracy).
   // They used to live in React state alone, so reloading the console (or simply
   // remounting this page) reset them to {} and re-flagged EVERY non-empty
@@ -1590,6 +1592,12 @@ export default function RunConsolePage() {
                       <Icon name="phone" className="w-3.5 h-3.5" /> {rc.sosCallback({ phone: a.callbackPhone })}
                     </a>
                   )}
+                  {/* Issue 25 (Ahiya, 2026-10-06): write to the team straight from its SOS. */}
+                  <button type="button" data-testid="sos-chat"
+                    onClick={() => { setChatFocus({ teamId: a.teamId, nonce: Date.now() }); goToPanel('chat'); }}
+                    className="inline-flex items-center gap-1 min-h-[44px] rounded-lg border border-ink-alert px-3 text-xs font-bold text-ink-alert">
+                    <Icon name="chat" className="w-3.5 h-3.5" /> {rc.sosChat}
+                  </button>
                   <Button
                     variant={runActionVariant('acknowledgeAlert')}
                     className="min-h-0 px-2.5 py-1 text-xs rounded-lg ms-auto"
@@ -2135,6 +2143,7 @@ export default function RunConsolePage() {
             selfUid={ownerUid}
             markerFor={chatMarkerFor}
             onRead={markChatRead}
+            focus={chatFocus}
           />
         );
       case 'staffChannel':
@@ -2949,8 +2958,11 @@ function FlashMissionCard({ ctx, teams, claimsByFlash }: {
                             <>
                               <Button className="min-h-0 px-3 py-1 text-xs rounded-lg"
                                 onClick={() => void act(() => reviewFlashMission({ ...ctx, flashId: f.id, teamId, action: 'approve' }), fm.approved)}>{fm.approve}</Button>
-                              <Button variant="subtle" className="min-h-0 px-3 py-1 text-xs rounded-lg"
-                                onClick={() => void act(() => reviewFlashMission({ ...ctx, flashId: f.id, teamId, action: 'reject' }), fm.rejected)}>{fm.reject}</Button>
+                              {/* Issue 26: the organizer chooses another try or no more tries. */}
+                              <Button variant="subtle" className="min-h-0 px-3 py-1 text-xs rounded-lg" data-testid="flash-reject-retry"
+                                onClick={() => void act(() => reviewFlashMission({ ...ctx, flashId: f.id, teamId, action: 'reject', retry: true }), fm.rejectedRetry)}>{fm.rejectRetry}</Button>
+                              <Button variant="subtle" className="min-h-0 px-3 py-1 text-xs rounded-lg" data-testid="flash-reject-close"
+                                onClick={() => void act(() => reviewFlashMission({ ...ctx, flashId: f.id, teamId, action: 'reject' }), fm.rejected)}>{fm.rejectClose}</Button>
                             </>
                           )}
                         </li>
@@ -3943,16 +3955,24 @@ interface ChatThreadRow { teamId: string; messages: ChatMessage[]; updatedAt: st
 
 // The thread listener and the read/unread bookkeeping moved to the page, which
 // needs the unread count for the folded moderation badge.
-function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
+function ChatConsole({ ctx, teams, threads: storedThreads, selfUid, markerFor, onRead, focus }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: RunTeamRow[];
   threads: ChatThreadRow[];
   selfUid: string;
   markerFor: (teamId: string) => ChatSeenMarker;
   onRead: (teamId: string, messages: ChatMessage[]) => void;
+  /** Open this team's thread now (issue 25: the chat button on an SOS card). */
+  focus?: { teamId: string; nonce: number } | null;
 }) {
   const rc = useT().runConsole;
   const [openTeam, setOpenTeam] = useState<string | null>(null);
+  // A team that has never written has no thread document yet; the one HQ was sent to still gets an
+  // empty thread to write in (sendTeamChatMessage creates the document).
+  const threads = focus && !storedThreads.some((th) => th.teamId === focus.teamId)
+    ? [{ teamId: focus.teamId, messages: [], updatedAt: '' } as ChatThreadRow, ...storedThreads]
+    : storedThreads;
+  useEffect(() => { if (focus) setOpenTeam(focus.teamId); }, [focus]);
   const reportFailure = useCallFailureToast();
 
   // Keep the currently-open thread marked read as its message count grows — an HQ

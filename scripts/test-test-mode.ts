@@ -267,6 +267,22 @@ check('empty / whitespace-only yields undefined', boundStoredAnswer('   ') === u
     && Object.keys(o.flashClaims?.f2 ?? {}).join() === 'status');
   check('flashClaims: a sealed score hides the verdict (approved/rejected read as sent)',
     s.flashClaims?.f2?.status === 'submitted' && s.flashClaims?.f3?.status === 'submitted' && s.flashClaims?.f4?.status === 'claimed');
+  // flash-reject-choice (issue 26, 2026-10-06): a rejection with another try must REACH the phone,
+  // or it shows "closed for you" and no retry button (found by playing it). A rejection also carries
+  // its reviewedAt, so the phone announces each rejection once. Approvals stay status only.
+  const withRetry = { ...fullTeam, flashClaims: {
+    r1: { status: 'rejected', at: 'a', reviewedAt: 'r', retryAllowed: true, mediaUrl: 'https://x/s.jpg' },
+    r2: { status: 'rejected', at: 'a', reviewedAt: 'q' },
+  } } as never;
+  const ro = sanitizeTeamForParticipant(withRetry, false) as unknown as { flashClaims?: Record<string, Record<string, unknown>> };
+  const rs = sanitizeTeamForParticipant(withRetry, true) as unknown as { flashClaims?: Record<string, Record<string, unknown>> };
+  check('flashClaims: a retryable rejection reaches the phone with its reviewedAt',
+    ro.flashClaims?.r1?.status === 'rejected' && ro.flashClaims?.r1?.retryAllowed === true && ro.flashClaims?.r1?.reviewedAt === 'r'
+    && ro.flashClaims?.r1?.mediaUrl === undefined, JSON.stringify(ro.flashClaims?.r1));
+  check('flashClaims: a final rejection carries its reviewedAt, no retry', ro.flashClaims?.r2?.reviewedAt === 'q' && ro.flashClaims?.r2?.retryAllowed === undefined);
+  check('flashClaims: under a sealed score a retry still reaches the team (it must act on it)',
+    rs.flashClaims?.r1?.status === 'rejected' && rs.flashClaims?.r1?.retryAllowed === true);
+  check('flashClaims: under a sealed score a final rejection still reads as sent', rs.flashClaims?.r2?.status === 'submitted' && rs.flashClaims?.r2?.reviewedAt === undefined);
   check('flashClaims: absent stays absent', (sanitizeTeamForParticipant(fullTeam, false) as unknown as { flashClaims?: unknown }).flashClaims === undefined);
 }
 
