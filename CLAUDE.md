@@ -239,6 +239,15 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   on a `--port` outside the block being swept. The playtest's own default-block emulators carry
   `--port 8080`/`9099`, no marker and no running session, so they still die exactly as before. An
   unfinished session record expires after 6 h so a crashed gate can't make its debris immortal.
+  **The port carve-out could never spare a helper that has no `--port`** (found 2026-10-06): an
+  OFFSET gate's own sweep (emulator-exec runs it when one of its ports is still busy) killed the
+  live default stack's Storage rules runtime JVM and functions workers, and the next photo upload
+  crashed the whole dev emulator with *"rules runtime not available"*; it also targeted the live
+  backup loop. Beside a live playtest that is photo missions failing mid-event. When an offset block
+  is swept, a match whose live ancestor is the default `emulators:start` is now kept
+  (`foreign-live-stack`), as is any default-stack-only helper (`DEFAULT_STACK_HELPER_PATTERNS`:
+  backup, tunnels, proxy, browser sim). The default sweep (free-ports) is unchanged. Proved with a
+  dry run of the planner on the REAL process table, not only the synthetic one.
   `scripts/test-emulator-gate-isolation.ts` covers both modules.
 - **`scripts/lib/callableHardening.mjs`** — pure static analysis of the callable surface: every
   `loggedCallable` must carry an auth marker (unless in the declared public allowlist) and every
@@ -839,6 +848,18 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   Fewer reads means shorter functions means fewer timeouts, so this signal gets BETTER as the
   read cost drops: the pre-optimisation control timed out 21 times where the optimised build
   timed out 5.
+- **The browser sim (`npm run simulate:browser`) needs a FRESH dev stack, and a failure there is
+  usually the machine** (2026-10-06, three failed runs before a clean pass, none of them the
+  product). The Functions emulator's worker pool grows and never shrinks: 4 workers at boot, 38
+  after one 1-team run, 55 after a 3-team run, ~100 MB each. At 52 workers with 171 MB of RAM free,
+  every NEW worker failed with *"Failed to load function"* while warm ones kept answering, and the
+  teams sat on a sealed mission forever. Restart `dev:all` before a browser run and read the worker
+  count before blaming the app. Three harness bugs were fixed alongside: it probed `127.0.0.1` while
+  Vite listens on `localhost` (::1), so it booted a SECOND play-web every run and leaked it
+  (`child.kill()` with `shell: true` on Windows ends only the shell); it raced the Functions
+  emulator's registration window (`not-found` on the first setup call, now `waitForFunctions`); and
+  it read the last card's attributes after the Final screen had replaced it, failing a team the
+  server audit said had finished every mission.
 - **The most expensive read in the product was invisible, because it was billed to someone else.**
   `maybeRefreshLeaderboardSnapshot` runs INSIDE player callables on a 20 s throttle and used to
   do an uncached `db.collection(teamsCol(...)).get()` — every team document, 225 times over a

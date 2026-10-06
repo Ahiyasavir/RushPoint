@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { enumerateProcesses, readExecSessions } from './reapEmulatorExec.mjs';
 import { planStaleHelperSweep, STALE_HELPER_PATTERNS } from './staleHelperSweep.mjs';
+import { BASE_EMULATOR_PORTS } from './emulatorPorts.mjs';
 
 const isWin = process.platform === 'win32';
 
@@ -27,11 +28,13 @@ export function sweepStaleHelpers({ sweptPorts, label = 'sweep' }) {
       sessions: readExecSessions(),
       nowMs: Date.now(),
       sweptPorts,
+      // foreign-live-stack: lets an OFFSET sweep recognise the live default stack's port-less helpers.
+      defaultBlockPorts: Object.values(BASE_EMULATOR_PORTS),
       selfPid: process.pid,
       protectedPids: [process.ppid].filter((p) => Number.isFinite(Number(p))),
     });
     const spared = plan.keep.filter((k) => k.reason === 'live-exec-session'
-      || k.reason === 'offset-port-block' || k.reason === 'foreign-port-block');
+      || k.reason === 'offset-port-block' || k.reason === 'foreign-port-block' || k.reason === 'foreign-live-stack' || k.reason === 'default-stack-helper');
     if (spared.length > 0) {
       console.log(`[${label}] Spared ${spared.length} process(es) belonging to a different live emulator block.`);
     }

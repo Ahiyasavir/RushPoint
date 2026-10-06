@@ -27,7 +27,6 @@ import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
 import { spawn } from 'node:child_process';
-import net from 'node:net';
 import http from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -155,13 +154,6 @@ async function waitUntil(fn, { timeout = 30_000, interval = 400, label = 'condit
   }
 }
 
-function portOpen(port) {
-  return new Promise((resolve) => {
-    const s = net.connect(port, '127.0.0.1');
-    s.on('connect', () => { s.destroy(); resolve(true); });
-    s.on('error', () => resolve(false));
-  });
-}
 function httpOk(url) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => { res.resume(); resolve(res.statusCode > 0); });
@@ -172,12 +164,22 @@ function httpOk(url) {
 
 // Ensure the play-web dev server is up; spawn it if not. Returns a cleanup fn.
 async function ensurePlayServer() {
-  if (await portOpen(PLAY_PORT)) { console.log(`play-web already serving on :${PLAY_PORT}`); return () => {}; }
+  // Probe the URL the browser will use, not 127.0.0.1: Vite listens on `localhost`, which is ::1 on
+  // Windows, so the old 127.0.0.1 probe read a live dev:all as "down" and booted a SECOND server
+  // (it landed on 5182, the browser kept using 5181) that cleanup then failed to stop (2026-10-06).
+  if (await httpOk(PLAY_URL)) { console.log(`play-web already serving on ${PLAY_URL}`); return () => {}; }
   console.log(`booting play-web dev server on :${PLAY_PORT} …`);
   const child = spawn('npm', ['run', 'play'], { shell: true, stdio: 'ignore', detached: false });
   await waitUntil(() => httpOk(PLAY_URL), { timeout: 120_000, interval: 1000, label: 'play-web dev server' });
   console.log('play-web dev server ready.');
-  return () => { try { child.kill(); } catch { /* already gone */ } };
+  // With `shell: true` on Windows, child.kill() ends only the cmd shell and leaves Vite running, so
+  // every run leaked a dev server. Kill the whole tree.
+  return () => {
+    try {
+      if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      else child.kill();
+    } catch { /* already gone */ }
+  };
 }
 
 // ── One virtual team: an isolated mobile context with a SYNTHETIC GPS position ──
@@ -348,8 +350,15 @@ async function runTeam(team) {
       if (await tid(page, 'final-screen').count()) return true;
       continue; // routing spinner / lobby — re-poll
     }
-    const type = await card.getAttribute('data-task-type');
-    const taskId = await card.getAttribute('data-task-id');
+    // The card can leave between waitFor and these reads: the LAST mission's card is replaced by the
+    // Final screen. A bare getAttribute then waits 30 s for an element that no longer exists and
+    // throws out of the whole loop, failing a team that had finished (seen 2026-10-06 with the
+    // server audit reporting every task type done). Read briefly; a vanished card means re-poll.
+    const GONE = Symbol('gone');
+    const read = (name) => card.getAttribute(name, { timeout: 3_000 }).catch(() => GONE);
+    const type = await read('data-task-type');
+    const taskId = await read('data-task-id');
+    if (type === GONE || taskId === GONE) continue;
     const plan = planFor(taskId);
     if (process.env.BSIM_DEBUG) console.log(`  [team ${team.index + 1}] turn ${turn}: type=${type} id=${taskId}`);
 
@@ -412,10 +421,28 @@ async function runTeam(team) {
   return (await tid(page, 'final-screen').count()) > 0;
 }
 
+// The Functions emulator answers on its port well before it has REGISTERED any function, and in
+// that window every callable is `not-found`: a run started right after `dev:all` died on its first
+// setup call (2026-10-06). Wait until a real callable answers with something other than 404.
+async function waitForFunctions(timeoutMs = 180_000) {
+  const url = `http://127.0.0.1:${EMU.functions}/${PROJECT}/us-central1/getJoinInfo`;
+  const probe = () => new Promise((resolve) => {
+    const req = http.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {
+      res.resume(); resolve(res.statusCode !== 404);
+    });
+    req.on('error', () => resolve(false));
+    req.end(JSON.stringify({ data: { code: 'ZZZZZZ' } }));
+  });
+  if (await probe()) return;
+  console.log('waiting for the Functions emulator to register its functions …');
+  await waitUntil(probe, { timeout: timeoutMs, interval: 2000, label: 'functions registered' });
+}
+
 async function main() {
   const t0 = Date.now();
   console.log(`── RushPoint browser-fidelity simulation — ${TEAMS} team(s) ──\n`);
   const stopPlay = await ensurePlayServer();
+  await waitForFunctions();
 
   // ── Creator/ops setup via callables (not a participant action) ──────────────
   const creator = makeParty('creator');

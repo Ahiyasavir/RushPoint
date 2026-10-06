@@ -73,6 +73,25 @@ export const STALE_HELPER_PATTERNS = Object.freeze([
   'scripts\\simulate-browser-run.mjs',
 ]);
 
+/**
+ * Helpers that only the DEFAULT stack (dev:all / playtest) ever starts: the backup loop, the
+ * tunnels, the single-origin proxy and the browser sim (which refuses an offset block outright).
+ * An offset gate never launches one, so when an OFFSET block is swept none of them can be that
+ * gate's own leftover, and killing one hits a live stack: the backup loop is a live playtest's
+ * protection against losing its data (2026-10-06).
+ */
+export const DEFAULT_STACK_HELPER_PATTERNS = Object.freeze([
+  'scripts/emulator-backup.mjs',
+  'scripts\\emulator-backup.mjs',
+  'scripts/ngrok-tunnel.mjs',
+  'scripts\\ngrok-tunnel.mjs',
+  'scripts/proxy.mjs',
+  'scripts\\proxy.mjs',
+  'cloudflared tunnel',
+  'scripts/simulate-browser-run.mjs',
+  'scripts\\simulate-browser-run.mjs',
+]);
+
 function lower(value) {
   return typeof value === 'string' ? value.toLowerCase() : '';
 }
@@ -157,6 +176,8 @@ function matchesAny(commandLine, patterns) {
  *   → lineage reaches a RUNNING exec session (root, ancestor of a root, or descendant)
  *   → command line carries an offset marker
  *   → bound to a --port outside the block being swept
+ *   → lineage reaches a LIVE default-block emulator CLI while an OFFSET block is swept
+ *   → a default-stack-only helper while an OFFSET block is swept
  *   → KILL
  *
  * Descendants of protected pids are deliberately NOT protected (unlike
@@ -178,6 +199,15 @@ export function planStaleHelperSweep(input) {
     (Array.isArray(args.sweptPorts) ? args.sweptPorts : []).map(Number).filter(Number.isFinite),
   );
   const sessionAgeOpts = { nowMs: args.nowMs, maxAgeMs: args.maxRunningSessionAgeMs ?? MAX_RUNNING_SESSION_AGE_MS };
+  // foreign-live-stack (2026-10-06): the default block's ports, named by the caller. When an OFFSET
+  // block is swept, a helper whose live parent is the DEFAULT stack's `emulators:start` belongs to
+  // that live stack even though its own command line carries no --port (the Storage rules runtime
+  // JVM and every functions worker look exactly like stale debris otherwise). Inert unless given.
+  const defaultBlock = new Set(
+    (Array.isArray(args.defaultBlockPorts) ? args.defaultBlockPorts : []).map(Number).filter(Number.isFinite),
+  );
+  const sweepingOffsetBlock = defaultBlock.size > 0 && sweptPorts.size > 0
+    && ![...sweptPorts].some((p) => defaultBlock.has(p));
   const runningRootPids = new Set(
     (Array.isArray(args.sessions) ? args.sessions : [])
       .filter((s) => isRunningSession(s, sessionAgeOpts))
@@ -241,6 +271,24 @@ export function planStaleHelperSweep(input) {
     return false;
   }
 
+  /**
+   * Is a STRICT ancestor of this process a running default-block emulator CLI (`emulators:start` or
+   * `emulators:exec` with no offset marker)? Only processes in the snapshot count, so the debris of a
+   * CLI that has exited (an orphan naming a dead parent) is never shielded.
+   */
+  function reachesLiveDefaultCli(proc) {
+    const seen = new Set([proc.pid]);
+    let cur = byPid.get(Number(proc.ppid));
+    for (let depth = 0; cur && depth < MAX_LINEAGE_DEPTH; depth++) {
+      if (seen.has(cur.pid)) return false;
+      seen.add(cur.pid);
+      const cmd = lower(cur.commandLine);
+      if (/emulators:(start|exec)\b/.test(cmd) && !matchesAny(cur.commandLine, OFFSET_MARKER_PATTERNS)) return true;
+      cur = byPid.get(Number(cur.ppid));
+    }
+    return false;
+  }
+
   for (const proc of list) {
     const { pid } = proc;
     const keep = (reason) => plan.keep.push({ pid, reason });
@@ -259,6 +307,9 @@ export function planStaleHelperSweep(input) {
 
     const port = commandLinePort(proc.commandLine);
     if (port !== null && sweptPorts.size > 0 && !sweptPorts.has(port)) { keep('foreign-port-block'); continue; }
+
+    if (sweepingOffsetBlock && reachesLiveDefaultCli(proc)) { keep('foreign-live-stack'); continue; }
+    if (sweepingOffsetBlock && matchesAny(proc.commandLine, DEFAULT_STACK_HELPER_PATTERNS)) { keep('default-stack-helper'); continue; }
 
     plan.kill.push({ pid, commandLine: proc.commandLine });
   }

@@ -29,6 +29,7 @@ import {
   commandLinePort,
   isRunningSession,
   planStaleHelperSweep,
+  STALE_HELPER_PATTERNS,
 } from './lib/staleHelperSweep.mjs';
 
 let passed = 0;
@@ -382,6 +383,92 @@ for (const name of ['emulatorIsolation.mjs', 'staleHelperSweep.mjs']) {
   ok(!/process\.(env|pid|platform)/.test(src), `${name} never reads the process object`);
   ok(!/Date\.now\s*\(/.test(src), `${name} never reads the clock`);
   ok(/export function/.test(src), `${name} still has real code after comment stripping`);
+}
+
+// 2.9 (2026-10-06, found overnight): an OFFSET gate's own sweep must not touch the LIVE DEFAULT
+// stack's helpers that carry no --port. The Storage rules runtime JVM and the functions workers
+// match a sweep pattern and have no port on their command line, so the port carve-out could never
+// spare them: a gate run beside dev:all killed the dev stack's Storage rules runtime, the next
+// photo upload crashed the whole emulator ("rules runtime not available"), and a live playtest
+// would have lost photo missions mid-event. Their LIVE `emulators:start` parent is the proof.
+{
+  const DEFAULT_BLOCK = [4000, 4400, 4500, 5001, 5002, 8080, 9150, 9099, 9199];
+  const OFFSET_SWEPT = [9080, 10099, 6001, 10199];
+  const procs: Proc[] = [
+    { pid: 500, ppid: 1, commandLine: 'node firebase.js emulators:start --project rushpoint-pwa-7daaa --export-on-exit ".firebase/emulator-data"' },
+    { pid: 501, ppid: 500, commandLine: 'java -jar C:\\Users\\me\\.cache\\firebase\\emulators\\firebase-storage-rules-runtime-v1.1.3.jar serve' },
+    { pid: 502, ppid: 500, commandLine: 'node C:\\npm\\firebase-tools\\lib\\emulator\\functionsEmulatorRuntime' },
+    { pid: 503, ppid: 500, commandLine: 'java -jar C:\\Users\\me\\.cache\\firebase\\emulators\\cloud-firestore-emulator.jar --port 8080' },
+    // debris of a DEAD gate: its CLI is gone (ppid 777 is absent), no port, no marker
+    { pid: 601, ppid: 777, commandLine: 'java -jar C:\\Users\\me\\.cache\\firebase\\emulators\\firebase-storage-rules-runtime-v1.1.3.jar serve' },
+    { pid: 900, ppid: 2, commandLine: 'node scripts/emulator-exec.mjs "node -e 0"' },
+  ];
+  const plan = planStaleHelperSweep({
+    processes: procs, patterns: PATTERNS, sessions: [], sweptPorts: OFFSET_SWEPT,
+    defaultBlockPorts: DEFAULT_BLOCK, selfPid: 900,
+  });
+  const v = verdicts(plan);
+  ok(v.get(501) === 'keep:foreign-live-stack', "an offset sweep spares the live default stack's Storage rules runtime");
+  ok(v.get(502) === 'keep:foreign-live-stack', "an offset sweep spares the live default stack's functions worker");
+  ok(v.get(503) === 'keep:foreign-port-block', 'the default Firestore JVM is still spared by its port');
+  ok(v.get(601) === 'kill', 'debris whose CLI is gone is still swept');
+  assertTotal(plan, procs, 'offset sweep beside a live default stack');
+
+  // The default sweep (free-ports before dev:all) must still clear the default stack's helpers.
+  const own = planStaleHelperSweep({
+    processes: procs, patterns: PATTERNS, sessions: [], sweptPorts: DEFAULT_BLOCK,
+    defaultBlockPorts: DEFAULT_BLOCK, selfPid: 900,
+  });
+  const w = verdicts(own);
+  ok(w.get(501) === 'kill' && w.get(502) === 'kill', 'sweeping the DEFAULT block still clears its own helpers');
+  assertTotal(own, procs, 'default sweep');
+
+  // A live OFFSET CLI does not shield its children through THIS rule (keeping a live gate alive is
+  // the live-exec-session rule's job, keyed on the session record).
+  const offsetCli: Proc[] = [
+    { pid: 700, ppid: 1, commandLine: 'npx firebase-tools emulators:exec --config firebase.emulator-offset.json "x"' },
+    { pid: 701, ppid: 700, commandLine: 'node C:\\npm\\firebase-tools\\lib\\emulator\\functionsEmulatorRuntime' },
+  ];
+  const off = planStaleHelperSweep({
+    processes: offsetCli, patterns: PATTERNS, sessions: [], sweptPorts: OFFSET_SWEPT,
+    defaultBlockPorts: DEFAULT_BLOCK, selfPid: 900,
+  });
+  ok(verdicts(off).get(701) === 'kill', 'a child of an offset CLI is not shielded by the foreign-stack rule');
+
+  // Without defaultBlockPorts the rule is inert: a caller that did not opt in sees the old verdicts.
+  const legacy = planStaleHelperSweep({ processes: procs, patterns: PATTERNS, sessions: [], sweptPorts: OFFSET_SWEPT, selfPid: 900 });
+  ok(verdicts(legacy).get(501) === 'kill', 'the rule needs the caller to name the default block');
+}
+
+// 2.10 Same night, same dry run on the REAL process table: after 2.9 the offset sweep still
+// targeted the live stack's backup loop (`scripts/emulator-backup.mjs`), a SIBLING of the CLI, not
+// its child. Backups, tunnels, the proxy and the browser sim are DEFAULT-stack helpers only: an
+// offset gate never starts one, so an offset sweep has nothing of its own to clear among them.
+{
+  const DEFAULT_BLOCK = [4000, 4400, 4500, 5001, 5002, 8080, 9150, 9099, 9199];
+  const OFFSET_SWEPT = [9080, 10099, 6001, 10199];
+  const procs: Proc[] = [
+    { pid: 810, ppid: 800, commandLine: 'node C:\\Rushpoint\\scripts\\emulator-backup.mjs' },
+    { pid: 811, ppid: 800, commandLine: 'node scripts/ngrok-tunnel.mjs' },
+    { pid: 812, ppid: 800, commandLine: 'cloudflared tunnel run rushpoint' },
+    { pid: 813, ppid: 800, commandLine: 'node scripts/proxy.mjs' },
+    { pid: 814, ppid: 800, commandLine: 'node scripts/simulate-browser-run.mjs' },
+    { pid: 900, ppid: 2, commandLine: 'node scripts/emulator-exec.mjs "node -e 0"' },
+  ];
+  const plan = planStaleHelperSweep({
+    processes: procs, patterns: [...STALE_HELPER_PATTERNS], sessions: [], sweptPorts: OFFSET_SWEPT,
+    defaultBlockPorts: DEFAULT_BLOCK, selfPid: 900,
+  });
+  const v = verdicts(plan);
+  for (const pid of [810, 811, 812, 813, 814]) {
+    ok(v.get(pid) === 'keep:default-stack-helper', `an offset sweep leaves the default stack's helper ${pid} alone`);
+  }
+  assertTotal(plan, procs, 'offset sweep vs default-stack helpers');
+  const own = planStaleHelperSweep({
+    processes: procs, patterns: [...STALE_HELPER_PATTERNS], sessions: [], sweptPorts: DEFAULT_BLOCK,
+    defaultBlockPorts: DEFAULT_BLOCK, selfPid: 900,
+  });
+  ok([810, 811, 812, 813, 814].every((pid) => verdicts(own).get(pid) === 'kill'), 'free-ports (default sweep) still clears them');
 }
 
 console.log(`\nemulator-gate-isolation: ${passed} passed, ${failed} failed`);
