@@ -1351,6 +1351,15 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   `tel:` links for every service in `EMERGENCY_SERVICES` (101, 100, 102), and the alert carries an
   optional `callbackPhone` (`sosCallbackVerdict`, same rule client and server). An empty number
   never blocks an SOS.
+- **A client shortcut that SKIPS a server precondition must use the server's rule, not a nearby
+  one** (issue 46, 2026-10-07). To stop "mark complete" waiting up to 5 s for GPS, the phone was
+  made to skip the fix whenever `canCompleteWithoutLocation` said so (any `self_report`). That
+  predicate was written for the AFTER-GPS-FAILED fallback, where a refusal is acceptable; as a
+  skip it would have broken every PINNED self_report, because `completeTask` proximity-checks
+  trigger modes `radius`/`exact` and a pinned task defaults to `radius` ("Location required").
+  Every gate was green: the browser sim's self_report is locationless. Caught only by reading the
+  server path. `checkInNeedsNoFix` (`apps/play-web/src/lib/stuckGuards.ts`) opens for exactly
+  what the server waives: the `locationless` flag or trigger mode `locationless`/`instant`.
 - **Hebrew sentences speak in the plural; short labels keep their form** (Ahiya, 2026-10-04;
   change: hebrew-one-voice). A Hebrew string of four words or more addresses the reader as
   "אתם" ("הקלידו", "שלכם", "בדקו") or impersonally, never one man ("הקלד", "שלך", "שמחקת"); a short
