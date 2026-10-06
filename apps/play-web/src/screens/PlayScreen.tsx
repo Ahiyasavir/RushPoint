@@ -961,8 +961,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         // scrolling column beside the map (no drawer), or a readable centred column with no map.
         if (wide) {
           return locationRelevant
-            ? <div className="order-first w-[440px] shrink-0 h-full overflow-y-auto overscroll-contain pb-4" data-testid="mission-column">{content}</div>
-            : <div className="w-full max-w-2xl mx-auto h-full overflow-y-auto overscroll-contain pb-4" data-testid="mission-area">{content}</div>;
+            ? <div className="order-first w-[440px] shrink-0 h-full overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-4" data-testid="mission-column">{content}</div>
+            : <div className="w-full max-w-2xl mx-auto h-full overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-4" data-testid="mission-area">{content}</div>;
         }
         return locationRelevant
           // Keyed on the flash mission too: taking one swaps the sheet's content for the flash card

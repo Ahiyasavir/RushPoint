@@ -18,6 +18,13 @@ ok('wide: the mission is a plain scrolling column, not the drawer', /if \(wide\)
 // The mission is what the player reads first, so it sits at the START of the reading direction
 // (right in Hebrew, left in English) even though the map pane comes first in the DOM.
 ok('wide: the mission column leads the reading direction', /className="order-first [^"]*" data-testid="mission-column"/.test(play));
+// A column that scrolls vertically turns overflow-x into `auto` too, so a child with a negative
+// margin (`-mx-1 px-1`, room for a focus ring) opened a HORIZONTAL scrollbar under the mission on a
+// computer (seen 2026-10-06 at 1440: scrollWidth 676 in a 672 column). The phone's sheet hid it.
+for (const id of ['mission-column', 'mission-area']) {
+  const cls = play.match(new RegExp(`className="([^"]*)" data-testid="${id}"`))?.[1] ?? '';
+  ok(`wide: ${id} never scrolls sideways and leaves room for a focus ring`, /\boverflow-x-hidden\b/.test(cls) && /\bpx-1\b/.test(cls));
+}
 ok('wide: the map reserves no space for a sheet', /bottomInset=\{wide \? 0 : sheetHeight\}/.test(play));
 ok('the game screen is told it is wide', /<GameScreen wide=\{wide\}>/.test(play));
 
