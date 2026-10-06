@@ -29,8 +29,10 @@ check('PhotoEntry was found', body.length > 1000);
 // One line per opening tag; `=>` inside the props rules out a `[^>]*` match.
 const takes = [...body.matchAll(/<Button[^\n]*data-testid="photo-take"[^\n]*/g)].map((m) => m[0]);
 check(`the take buttons were found (${takes.length})`, takes.length >= 2);
-check('each take button is primary until a photo exists',
-  takes.every((t) => /variant=\{file \? 'ghost' : 'primary'\}/.test(t)));
+// rejected-photo-resend (issue 24, 2026-10-06): primary until a photo exists, AND again when the photo
+// on screen is the one the organizers rejected (retake is then the next action).
+check('each take button is primary until a photo exists (or while the photo on screen was rejected)',
+  takes.every((t) => /variant=\{file && !retakeFirst \? 'ghost' : 'primary'\}/.test(t)));
 // The send button exists only once there is a file.
 check('the send button renders only once a photo exists',
   /\{file && \(\s*<Button[\s\S]{0,900}data-testid="photo-submit"/.test(body));
@@ -38,8 +40,11 @@ check('the send button renders only once a photo exists',
 // With a photo, send comes BEFORE the retake controls: on a 375px phone the
 // preview pushed a send placed last below the fold, under two retake buttons.
 const sendAt = body.indexOf('data-testid="photo-submit"');
-const lateCapture = body.indexOf('{file && captureControls}');
+const lateCapture = body.indexOf('{file && !retakeFirst && captureControls}');
 check('with a photo, the retake controls come after send', sendAt > 0 && lateCapture > sendAt);
+// ...except after a rejection, when retake comes FIRST and send is the secondary button.
+const earlyRetake = body.indexOf('{retakeFirst && captureControls}');
+check('after a rejection, retake comes before send', earlyRetake > 0 && earlyRetake < sendAt);
 check('without a photo, the capture controls lead', /\{!file && captureControls\}/.test(body));
 
 console.log(failures === 0 ? '\n✅ photo entry: ALL PASS' : `\n❌ photo entry: ${failures} FAILED`);

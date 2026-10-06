@@ -4649,7 +4649,7 @@ const EN: typeof HE = {
       rejectRetry: 'Reject, another try',
       rejectClose: 'Reject, no more tries',
       approved: 'Approved, the points were added.',
-      rejected: 'Rejected. The team cannot try again, and a first-team mission is open to the others again.',
+      rejected: 'Rejected. The team cannot try again, and a mission for the first team only is open to the others again.',
       rejectedRetry: 'Rejected. The team got another try, and the mission stays with it.',
       awardTo: ({ points }: { points: number }) => `Give ${points} points to:`,
       pastSummary: ({ n }: { n: number }) => (n === 1 ? '1 earlier flash mission' : `${n} earlier flash missions`),
