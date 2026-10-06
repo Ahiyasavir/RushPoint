@@ -7681,7 +7681,7 @@ async function main() {
     await chatStaff.call('sendTeamChatMessage', { ...CTX, teamId: founderUid, text: 'Marshal on the way', senderName: 'Someone Else' });
     chat = (await creator.getDocAt(chatPath)).data;
     check('chat: staff reply appended as hq', chat?.messages?.length === 3 && chat.messages[2].from === 'hq', JSON.stringify(chat?.messages?.length));
-    check('chat: a staff line carries the staff member's own name from the token, not the client's',
+    check('chat: a staff line carries the name of the staff member from the token, not the one the client sent',
       chat?.messages?.[2]?.senderName === 'Chat Marshal', JSON.stringify(chat?.messages?.[2]?.senderName));
 
     // 4. Validation: 501-char, whitespace-only rejected; control chars stripped.
