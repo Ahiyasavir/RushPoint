@@ -5,6 +5,7 @@ import { useT } from '../i18nContext';
 import { Spinner } from '../components/Spinner';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 import { Icon, medalFor } from '../components/Icon';
+import { boardStateKey } from '../lib/boardState';
 
 const REFRESH_MS = 12_000; // ≤ 15s per spec
 
@@ -83,7 +84,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
   return (
     <div className="min-h-screen bg-app-bg p-6 sm:p-10 flex flex-col">
       <div className="text-center mb-8">
-        <div className="text-sm uppercase tracking-[0.3em] text-zinc-500 mb-1">{t.tv.liveStandings}</div>
+        <div className="text-sm uppercase tracking-[0.3em] text-zinc-500 mb-1">{boardStateKey(data) === 'live' ? t.tv.liveStandings : t.board[boardStateKey(data)]}</div>
         <h1 dir="auto" className="font-brand text-5xl sm:text-6xl font-extrabold" style={{ color: accent }}>
           {data!.title}
         </h1>

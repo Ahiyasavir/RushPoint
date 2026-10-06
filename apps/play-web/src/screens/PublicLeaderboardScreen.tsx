@@ -6,6 +6,7 @@ import { useT } from '../i18nContext';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 import { creatorUrl } from '../lib/creatorUrl';
 import { Icon, medalFor } from '../components/Icon';
+import { boardStateKey } from '../lib/boardState';
 
 
 
@@ -104,7 +105,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         <div className="flex items-center justify-center gap-1.5 mb-2">
           <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-rp-go animate-pulse' : 'bg-zinc-500'}`} />
           <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-            {data.runStatus === 'finished' ? t.board.finalResults : data.frozen ? t.board.frozen : t.board.live}
+            {t.board[boardStateKey(data)]}
           </span>
         </div>
         <h1 dir="auto" className="font-brand text-2xl font-extrabold" style={{ color: accent }}>{data.title}</h1>
