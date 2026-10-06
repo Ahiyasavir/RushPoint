@@ -287,7 +287,7 @@ async function satisfyTask(team, type, plan, taskId) {
       for (let guard = 0; guard < plan.steps.length + 3; guard++) {
         if (await tid(page, 'final-screen').count()) return;
         const card = tid(page, 'task-card').first();
-        if (!(await card.count()) || (await card.getAttribute('data-task-id')) !== taskId) return;
+        if (!(await card.count()) || (await card.getAttribute('data-task-id', { timeout: 3_000 }).catch(() => null)) !== taskId) return;
         const prompt = (await tid(page, 'sequence-prompt').innerText().catch(() => '')).trim();
         const step = plan.steps.find((s) => s.prompt === prompt);
         if (!step) { await sleep(400); continue; }
@@ -296,7 +296,7 @@ async function satisfyTask(team, type, plan, taskId) {
         await waitUntil(async () => {
           if (await tid(page, 'final-screen').count()) return true;
           const c = tid(page, 'task-card').first();
-          if (!(await c.count()) || (await c.getAttribute('data-task-id')) !== taskId) return true;
+          if (!(await c.count()) || (await c.getAttribute('data-task-id', { timeout: 3_000 }).catch(() => null)) !== taskId) return true;
           return (await tid(page, 'sequence-prompt').innerText().catch(() => '')).trim() !== prompt;
         }, { timeout: 15_000, label: `sequence step progressed (${step.id})` });
       }
@@ -307,7 +307,12 @@ async function satisfyTask(team, type, plan, taskId) {
       // GeofenceAuto auto-checks-in via watchPosition (no getCurrentPosition).
       team.setTarget(plan.gps);
       team.walking = true;
-      audit(`geofence status rendered for team ${team.index + 1}`, (await tid(page, 'geofence-status').count()) > 0);
+      // The sealed-arrival step before it already walked the team INTO the radius, so on a fast
+      // machine the auto check-in can land before this count: the Final screen (or the next card) is
+      // then the proof the geofence card rendered and worked (seen 2026-10-07, 2 of 3 teams).
+      audit(`geofence status rendered for team ${team.index + 1}`,
+        (await tid(page, 'geofence-status').count()) > 0 || (await tid(page, 'final-screen').count()) > 0
+          || (await tid(page, 'task-card').first().getAttribute('data-task-id', { timeout: 1_000 }).catch(() => null)) !== taskId);
       return;
     default: {
       // photo (and any future capture type): PhotoEntry is camera-capture only now
@@ -370,14 +375,15 @@ async function runTeam(team) {
     // turn plays its real type. NOTE: the current PLAN ships no hidden-location
     // task, so this branch is defensive — it lets the sim gain one without a driver
     // rewrite (add a task with `hideLocation` + a `gps` in PLAN).
-    if ((await card.getAttribute('data-task-sealed')) === 'true') {
+    // Short reads (2026-10-07): the card can be replaced by the Final screen between any two reads.
+    if ((await card.getAttribute('data-task-sealed', { timeout: 3_000 }).catch(() => null)) === 'true') {
       team.pushFix(plan?.gps ?? BASE);
       await tid(page, 'task-check-arrival').click().catch(() => {});
       await waitUntil(async () => {
         if (await tid(page, 'final-screen').count()) return true;
         const c = tid(page, 'task-card').first();
         if (!(await c.count())) return false;
-        return (await c.getAttribute('data-task-sealed')) !== 'true';
+        return (await c.getAttribute('data-task-sealed', { timeout: 3_000 }).catch(() => null)) !== 'true';
       }, { timeout: 20_000, label: `arrival unseals ${taskId}` }).catch(() => {});
       continue;
     }
