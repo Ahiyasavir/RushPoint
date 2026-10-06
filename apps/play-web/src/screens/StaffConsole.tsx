@@ -556,7 +556,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     | { kind: 'skipTask' }
     | { kind: 'route'; taskId: string; title: string; accept: WaivableKind[]; when: 'now' | 'after' }
     | { kind: 'letIn'; taskId: string }
-    | { kind: 'sendBack'; target: SendBackTarget; title: string };
+    | { kind: 'sendBack'; target: SendBackTarget; title: string; scope?: 'only' | 'fromHere' };
 
   async function runTeamOp(team: TeamRow, op: TeamOp) {
     try {
@@ -584,15 +584,21 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         // send-team-back: the server's own preview, then the plain confirm, then the real call.
         let message = op.target.kind === 'task' ? t.staff.sendBackToTask({ title: op.title }) : t.staff.sendBackToStage({ stage: op.title });
         try {
-          const dry = await returnTeamTo({ ...ctx, teamId: team.id, target: op.target, dryRun: true });
+          // The handoff's open gap (2026-10-06): the staff app offered only "this mission"; the console
+          // also had "from this mission on". Same callable, same preview, same scope.
+          const fromHere = op.target.kind === 'task' && op.scope === 'fromHere';
+          const dry = await returnTeamTo({ ...ctx, teamId: team.id, target: op.target, dryRun: true, ...(fromHere ? { scope: 'fromHere' as const } : {}) });
           const lines = [message];
+          const also = fromHere ? (dry.reopened ?? []).filter((r) => r.id !== (op.target.kind === 'task' ? op.target.taskId : '')).map((r) => r.title).filter(Boolean) : [];
+          if (also.length > 0) lines.push(t.staff.sendBackReopens(also.join(', ')));
           if ((dry.pointsRemoved ?? 0) > 0) lines.push(t.staff.sendBackPoints({ n: dry.pointsRemoved }));
           if ((dry.relockedStages ?? []).length > 0) lines.push(t.staff.sendBackRelocks({ stages: dry.relockedStages.join(', ') }));
           message = lines.join(String.fromCharCode(10));
         } catch { /* keep the plain sentence */ }
         // The button names the action (the confirm-button-says-what-it-does rule), never a bare "OK".
         if (!(await dialog.confirm(message, { confirmLabel: t.staff.sendBack }))) return;
-        await returnTeamTo({ ...ctx, teamId: team.id, target: op.target, reason: 'staff send back' });
+        await returnTeamTo({ ...ctx, teamId: team.id, target: op.target, reason: 'staff send back',
+          ...(op.target.kind === 'task' && op.scope === 'fromHere' ? { scope: 'fromHere' as const } : {}) });
         setAdjustAck((a) => ({ ...a, [team.id]: t.staff.sendBackDone }));
       } else if (op.kind === 'letIn') {
         // located-mission-arrival: the team is at the door and GPS will not say so.
@@ -1007,7 +1013,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         onLetIn={(taskId) => void opsAction.run(tm, { kind: 'letIn', taskId })}
         onRoute={(taskId, title, accept, when) =>
           void opsAction.run(tm, { kind: 'route', taskId, title, accept, when })}
-        onSendBack={(target, title) => void opsAction.run(tm, { kind: 'sendBack', target, title })}
+        onSendBack={(target, title, scope) => void opsAction.run(tm, { kind: 'sendBack', target, title, scope })}
         titleOf={titleOf}
         outlineStages={outline?.stages ?? []}
       />
@@ -1201,7 +1207,7 @@ function TeamOpsCard({
   letInTaskId?: string | null;
   onLetIn?: (taskId: string) => void;
   // send-team-back
-  onSendBack: (target: SendBackTarget, title: string) => void;
+  onSendBack: (target: SendBackTarget, title: string, scope?: 'only' | 'fromHere') => void;
   titleOf: (taskId: string) => string;
   outlineStages: { id: string; title: string; tasks: { id: string; title: string }[] }[];
   /** Numbers to call this team on; empty when the code lacks contactTeams or the team gave none. */
@@ -1209,6 +1215,8 @@ function TeamOpsCard({
 }) {
   const { t } = useT();
   const [openPanel, setOpenPanel] = useState<null | 'amount' | 'assign' | 'hold' | 'sendBack'>(null);
+  // A mission picked to send the team back to, waiting for "only it" or "from it on".
+  const [backPick, setBackPick] = useState<{ taskId: string; title: string } | null>(null);
   const backTargets = sendBackTargets(team.stages as never, outlineStages);
   const [amountDraft, setAmountDraft] = useState('');
   const [reasonId, setReasonId] = useState<ScoreReasonId | null>(null);
@@ -1529,6 +1537,19 @@ function TeamOpsCard({
       {openPanel === 'sendBack' && (
         <div className="mt-2.5 pt-2.5 border-t border-glass-border">
           <div className="text-[13px] text-zinc-500 mb-1.5">{t.staff.sendBackPick}</div>
+          {backPick && (
+            <div className="mb-2 flex flex-col gap-1.5 rounded-lg border border-accent/40 bg-accent/5 p-2" data-testid="staff-sendback-scope">
+              <p dir="auto" className="text-xs font-semibold text-zinc-100">{t.staff.sendBackHow(backPick.title)}</p>
+              {(['only', 'fromHere'] as const).map((scope) => (
+                <button key={scope} type="button" disabled={busy}
+                  onClick={() => { onSendBack({ kind: 'task', taskId: backPick.taskId }, backPick.title, scope); setBackPick(null); setOpenPanel(null); }}
+                  className="min-h-[44px] px-3 rounded-lg text-start bg-app-raised border border-glass-border hover:border-accent/50 disabled:opacity-40">
+                  <span className="block text-xs font-semibold text-zinc-100">{scope === 'only' ? t.staff.sendBackOnly : t.staff.sendBackFromHere}</span>
+                  <span className="block text-[12px] text-zinc-500">{scope === 'only' ? t.staff.sendBackOnlyHelp : t.staff.sendBackFromHereHelp}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {backTargets.every((s) => !s.stageSelectable && s.missions.every((m) => !m.selectable)) ? (
             <p className="text-zinc-500 text-xs">{t.staff.sendBackNothing}</p>
           ) : (
@@ -1549,7 +1570,7 @@ function TeamOpsCard({
                       key={m.taskId}
                       className="min-h-[44px] ms-3 px-3 rounded-lg text-xs font-medium bg-app-raised border border-glass-border text-zinc-200 flex items-center justify-between gap-2 disabled:opacity-40"
                       disabled={busy}
-                      onClick={() => { onSendBack({ kind: 'task', taskId: m.taskId }, m.title === m.taskId ? titleOf(m.taskId) : m.title); setOpenPanel(null); }}
+                      onClick={() => setBackPick({ taskId: m.taskId, title: m.title === m.taskId ? titleOf(m.taskId) : m.title })}
                     >
                       <span dir="auto" className="truncate">{m.title === m.taskId ? titleOf(m.taskId) : m.title}</span>
                       <span className="shrink-0 text-[13px] text-zinc-500">

@@ -510,7 +510,7 @@ export const routeTeam = callable<
 // Send ONE team back to a skipped/completed mission or an earlier stage (change: send-team-back).
 export type SendBackTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
 export const returnTeamTo = callable<
-  Ctx & { teamId: string; target: SendBackTarget; reason?: string; dryRun?: boolean },
+  Ctx & { teamId: string; target: SendBackTarget; reason?: string; dryRun?: boolean; scope?: 'only' | 'fromHere' },
   {
     ok: boolean; dryRun?: boolean; targetKind: 'task' | 'stage'; stageTitle: string; taskTitle: string;
     reopened: { id: string; title: string }[]; relockedStages: string[]; pointsRemoved: number;
