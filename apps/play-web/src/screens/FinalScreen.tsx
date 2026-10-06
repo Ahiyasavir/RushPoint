@@ -243,10 +243,14 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
 
   return (
     <Screen wide={wide}>
-      <div data-testid="final-screen" className="flex-1 flex flex-col items-center justify-center text-center gap-5">
+      {/* Computer (issue 47): the trophy across the top, the cards in two columns, so the finish
+          is one screen instead of a long column. */}
+      <div data-testid="final-screen" className={wide
+        ? 'flex-1 columns-2 gap-5 text-center py-6 [&>*]:break-inside-avoid [&>*]:mb-5 [&>*]:w-full'
+        : 'flex-1 flex flex-col items-center justify-center text-center gap-5'}>
 
         {/* Trophy + title */}
-        <div className="animate-score-pop">
+        <div className={`animate-score-pop ${wide ? '[column-span:all]' : ''}`}>
           <div
             className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mx-auto mb-3"
             style={{ background: `radial-gradient(circle at 40% 35%, ${accent}30, ${accent}08)`, boxShadow: `0 0 40px ${accent}40` }}

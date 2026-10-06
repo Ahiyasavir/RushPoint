@@ -162,7 +162,7 @@ export function Progress({ done, total, label }: { done: number; total: number; 
 export function Screen({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   // desktop-layouts-play-staff: `wide` (from useWideLayout) gives a reading screen like the final
   // standings room to breathe on a computer; forms stay narrow because they read best that way.
-  return <div className={`min-h-screen flex flex-col px-5 rp-safe-t rp-safe-b ${wide ? 'max-w-2xl' : 'max-w-md'} mx-auto w-full`}>{children}</div>;
+  return <div className={`min-h-screen flex flex-col px-5 rp-safe-t rp-safe-b ${wide ? 'max-w-5xl' : 'max-w-md'} mx-auto w-full`}>{children}</div>;
 }
 
 // The game screen while a team plays (change: play-screen-no-scroll): EXACTLY one screen tall and
