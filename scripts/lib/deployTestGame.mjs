@@ -64,6 +64,13 @@ export function buildDeployTestGame(date, notes = {}) {
             'יש ספירה לאחור. בזמן העצירה מופיע "הצוות עצר אתכם לרגע", והספירה ממשיכה מאותו מקום אחרי השחרור. בסוף "הזמן נגמר" והמשחק ממשיך לבד.'),
           timeLimitMinutes: 2,
         }),
+        // Issue 46 (2026-10-06): the clocks stop at the TAP, not when the next mission arrives.
+        anywhere({
+          id: 'dt-tap-stops', title: 'השעון עוצר בלחיצה', type: 'self_report',
+          description: say('חכו כמה שניות ולחצו "סמן כהושלם".',
+            'הספירה לאחור עוצרת ברגע הלחיצה, בלי לקפוץ למעלה, לא מופיעה בקשת מיקום, והמשימה הבאה מגיעה מיד.'),
+          timeLimitMinutes: 3,
+        }),
         anywhere({
           id: 'dt-everyone', title: 'משימה לכל הטלפונים', type: 'self_report',
           description: say('צרפו טלפון שני לקבוצה (תפריט ⋯, "הוספת טלפון"). בטלפון השני לחצו "עשיתי את החלק שלי", ואז סיימו מהטלפון ששולח.',
@@ -130,6 +137,12 @@ export function buildDeployTestGame(date, notes = {}) {
     description: `משחק בדיקות אוטומטי לדיפלויי של ${date}. כל משימה היא בדיקה: בתיאור כתוב מה עושים ומה אמור לקרות. נבנה על ידי npm run deploy:test-game.`,
     mode: 'team',
     scoringPreset: 'fixed_points_speed',
+    // Issue 48 (2026-10-06): a YouTube video in the instructions, watched on the waiting screen.
+    instructions: {
+      title: 'איך משחקים',
+      bodyHe: 'בדיקה: לפני ההזנקה רואים את הסרטון למעלה, ואותו סרטון נמצא גם בכפתור הספר במהלך המשחק.',
+      videoUrl: 'https://youtu.be/jNQXAC9IVRw', // the first video ever on YouTube: public, short, stable
+    },
     stages,
     // Quick Setup participates only when the game carries an authored step; this one asks for the
     // walking point, which is the check of Quick Setup on a phone as well.
