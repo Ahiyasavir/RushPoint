@@ -337,7 +337,7 @@ export const submitStationPhoto = callable<
   // video-upload-speed D7: posterUrl + mediaDurationSec are OMITTED when absent, never null.
   // background-media-upload D1: `mediaDeferred` with NO photoUrl asks the server to approve first;
   // `deferred: true` in the reply means it did and the file follows via attachSubmissionMedia.
-  Ctx & { teamId: string; taskId: string; photoUrl?: string; mediaDeferred?: boolean; contentType?: string; posterUrl?: string; mediaDurationSec?: number },
+  Ctx & { teamId: string; taskId: string; photoUrl?: string; mediaDeferred?: boolean; contentType?: string; posterUrl?: string; mediaDurationSec?: number; mediaHash?: string },
   // lengthHold: an auto-approved clip outside the mission's length range waits for the organizers.
   { submitted: boolean; autoApproved: boolean; deferred?: boolean; lengthHold?: 'short' | 'long' | 'unknown' }
 >('submitStationPhoto');

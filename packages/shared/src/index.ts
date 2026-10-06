@@ -193,3 +193,5 @@ export * from './mediaDownloadUrl';
 export * from './staffCapabilities';
 // Has the team's sending phone gone quiet? (change: team-phones-simple)
 export * from './senderQuiet';
+// Sending a rejected photo again (change: rejected-photo-resend)
+export * from './mediaResend';

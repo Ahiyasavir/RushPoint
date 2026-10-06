@@ -26,6 +26,7 @@ import { computeLocationRelevant } from '../lib/locationRelevance';
 import { Button, Progress, Screen, GameScreen } from '../components/ui';
 import MissionSheet from '../components/MissionSheet';
 import FlashRunner from '../components/FlashRunner';
+import { listenWithRetry } from '../lib/liveListen';
 import { useOrientationIntent } from '../lib/orientation';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
@@ -216,7 +217,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       const teamId = session.teamId ?? uid();
       if (!teamId) return;
       const ref = doc(db, FIRESTORE_PATHS.team(session.ownerUid, session.gameId, session.runId, teamId));
-      unsubDoc = onSnapshot(ref, () => { void refresh(); }, () => undefined);
+      // Comes back after an error (issue 27): a dropped trigger would leave only the 12s poll.
+      unsubDoc = listenWithRetry('team', (h) => onSnapshot(ref, () => { h.healthy(); void refresh(); }, h.failed));
     }).catch(() => undefined);
     // ensureAuth() deliberately rejects (and clears its cached promise) on a
     // transient first-auth failure, so a reload on flaky signal would otherwise throw

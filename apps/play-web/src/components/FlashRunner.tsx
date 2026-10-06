@@ -12,6 +12,7 @@ import { useT } from '../i18nContext';
 import { Button, Card } from './ui';
 import type { FlashMissionDoc } from '@rushpoint/shared';
 import { Icon } from './Icon';
+import { listenWithRetry } from '../lib/liveListen';
 
 type Ctx = { ownerUid: string; gameId: string; runId: string };
 
@@ -36,11 +37,12 @@ export default function FlashRunner({ ctx, flashId, lang, onChanged, readOnly }:
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => onSnapshot(
+  // Comes back after an error (issue 27): a dropped listener left the flash card frozen.
+  useEffect(() => listenWithRetry('flashMission', (h) => onSnapshot(
     doc(db, `users/${ctx.ownerUid}/games/${ctx.gameId}/runs/${ctx.runId}/flashMissions/${flashId}`),
-    (snap) => setFlash(snap.exists() ? (snap.data() as FlashMissionDoc) : null),
-    () => setFlash(null),
-  ), [ctx.ownerUid, ctx.gameId, ctx.runId, flashId]);
+    (snap) => { h.healthy(); setFlash(snap.exists() ? (snap.data() as FlashMissionDoc) : null); },
+    h.failed,
+  )), [ctx.ownerUid, ctx.gameId, ctx.runId, flashId]);
 
   const title = flash ? (lang === 'he' && flash.titleHe ? flash.titleHe : flash.title) : '';
   const desc = flash ? (lang === 'he' && flash.descriptionHe ? flash.descriptionHe : flash.description) : '';

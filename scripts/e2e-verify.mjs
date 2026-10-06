@@ -3101,6 +3101,38 @@ async function main() {
     check('queue reject: a rejected task stays re-submittable (status returns to pending)',
       resub?.status === 'pending' && resub?.photoUrl === rqUrl('r2.jpg'), JSON.stringify(resub));
 
+    // [rejected-photo-resend] (issues 23-24, 2026-10-06): the same picture, recognised by the hash the
+    // phone sends, is counted per rejection; the third send of a twice-rejected picture is refused.
+    {
+      const H = 'ab'.repeat(32);
+      const H2 = 'cd'.repeat(32);
+      const send = (name, mediaHash) => rqP.call('submitStationPhoto', { ...RQCTX, teamId: rqUid, taskId: 'rq-rej', photoUrl: rqUrl(name), ...(mediaHash !== undefined ? { mediaHash } : {}) });
+      const reject = () => creator.call('reviewStationSubmission', { ...RQCTX, teamId: rqUid, taskId: 'rq-rej', approved: false });
+      const sub = async () => (await creator.getDocAt(rqTeamPath)).data?.taskSubmissions?.['rq-rej'];
+      await reject(); // r2 carried no hash: nothing is counted
+      check('resend: a rejection without a hash counts nothing', !(await sub())?.rejectedHashes, JSON.stringify(await sub()));
+      await send('r3.jpg', H);
+      check('resend: the submission stores the picture hash', (await sub())?.mediaHash === H, JSON.stringify(await sub()));
+      await reject();
+      check('resend: a rejection counts that picture once', (await sub())?.rejectedHashes?.[H] === 1, JSON.stringify((await sub())?.rejectedHashes));
+      await reject(); // the same, already rejected submission again
+      check('resend: rejecting an already-rejected submission does not count it twice', (await sub())?.rejectedHashes?.[H] === 1);
+      const mine = await rqP.call('getMyTeamState', { code: rqCode });
+      check('resend: the phone sees the count (to warn before resending)', mine?.team?.taskSubmissions?.['rq-rej']?.rejectedHashes?.[H] === 1, JSON.stringify(mine?.team?.taskSubmissions?.['rq-rej']));
+      await send('r3.jpg', H);
+      check('resend: a once-rejected picture may still be sent', (await sub())?.status === 'pending');
+      await reject();
+      check('resend: the second rejection makes it two', (await sub())?.rejectedHashes?.[H] === 2);
+      await expectError('resend: a twice-rejected picture is refused', send('r3.jpg', H),
+        { codeIn: ['failed-precondition', 'functions/failed-precondition'], match: /same-media-rejected-twice/ });
+      await send('r4.jpg', H2);
+      check('resend: a different picture is accepted', (await sub())?.status === 'pending' && (await sub())?.mediaHash === H2);
+      await reject();
+      await send('r5.jpg', 'not-a-hash');
+      const junk = await sub();
+      check('resend: a junk hash is ignored, never refused', junk?.status === 'pending' && junk?.mediaHash === undefined, JSON.stringify(junk));
+    }
+
     // CONCURRENT REVIEWERS: the owner and run-scoped staff hit Approve on the SAME
     // submission at the same moment. Exactly one completion may take effect.
     const { pin: rqPin } = await creator.call('inviteStaff', {
@@ -11247,6 +11279,33 @@ async function main() {
       (await ap.call('getMyTeamState', { code: ac }))?.team?.activeTaskId === 'ac-open');
     await expectError('absolute close: completing it by hand is refused',
       ap.call('completeTask', { ...A, taskId: 'ac-closed' }), { codeIn: ['functions/failed-precondition'] });
+
+    // D. A HOLD freezes the countdown (Ahiya, 2026-10-06: "השעון לא עוצר כשאני עוצר קבוצה... זה
+    // פשוט מוסיף לי זמן כשאני ממשיך"). The server already moved the mission's start forward on
+    // resume, so the TOTAL was fair, but while held the phone kept being told less and less time,
+    // and on resume the countdown jumped back UP. Held, the time left must not move at all, and
+    // resuming must continue from the same value.
+    const { gameId: hg } = await creator.call('createGame', { title: 'Hold Freezes Clock', mode: 'individual' });
+    await creator.call('updateGame', { gameId: hg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'hc-s1', order: 0, title: 'Held', isFinal: true, tasks: [base('hc-quiz', { type: 'quiz', choices: ['yes', 'no'], answers: ['yes'], timeLimitMinutes: 1 })] },
+    ] });
+    const { runId: hr, accessCode: hcode } = await creator.call('launchRun', { gameId: hg });
+    const H = { ownerUid: OWNER, gameId: hg, runId: hr };
+    const hp = makeParty('holdClock');
+    const hUid = (await signInAnonymously(hp.auth)).user.uid;
+    await hp.call('joinRun', { code: hcode, displayName: 'Paused' });
+    await creator.call('startTeams', { gameId: hg, runId: hr });
+    await creator.call('setTeamHold', { ...H, teamId: hUid, held: true, reason: 'clock check' });
+    const h1 = (await hp.call('getMyTeamState', { code: hcode }))?.activeTaskTimeLeftMs;
+    await sleep(1500);
+    const h2 = (await hp.call('getMyTeamState', { code: hcode }))?.activeTaskTimeLeftMs;
+    check('hold: the countdown does not move while the team is held',
+      typeof h1 === 'number' && h1 > 0 && h1 === h2, JSON.stringify({ h1, h2 }));
+    await sleep(1000);
+    await creator.call('setTeamHold', { ...H, teamId: hUid, held: false });
+    const h3 = (await hp.call('getMyTeamState', { code: hcode }))?.activeTaskTimeLeftMs;
+    check('hold: resuming continues from the same time left (no jump up, no jump down)',
+      typeof h3 === 'number' && typeof h2 === 'number' && Math.abs(h3 - h2) <= 1500, JSON.stringify({ h2, h3 }));
   }); // scenario: mission time limits
 
   // ═══ Single-task skip (change: skip-single-task) ════════════════════════════

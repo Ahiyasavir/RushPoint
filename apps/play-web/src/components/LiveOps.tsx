@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { announcementVisibleTo, routeNoticeStillCurrent, newestRouteNoticeId, formatScoreNotice, flashMissionState, flashMyClaimLine, type RunLeaderboard, type FlashClaimStatus } from '@rushpoint/shared';
+import { listenWithRetry } from '../lib/liveListen';
 import { claimFlashMission } from '../services/calls';
 import { feedback } from '../lib/sound';
 import { db } from '../services/firebase';
@@ -110,9 +111,12 @@ export default function LiveOps({
       orderBy('createdAt', 'desc'),
       limit(ANNOUNCEMENT_WINDOW),
     );
-    return onSnapshot(ref, (snap) => {
+    // Through listenWithRetry (issue 27): Firestore drops a listener on its first error, and this
+    // effect never re-runs mid-race, so a silent handler meant no broadcast for the rest of the run.
+    return listenWithRetry('announcements', (h) => onSnapshot(ref, (snap) => {
+      h.healthy();
       setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnnouncementDoc, 'id'>) })));
-    }, () => undefined);
+    }, h.failed));
   }, [ownerUid, gameId, runId]);
 
   useEffect(() => {
@@ -124,9 +128,10 @@ export default function LiveOps({
       orderBy('createdAt', 'desc'),
       limit(FLASH_WINDOW),
     );
-    return onSnapshot(ref, (snap) => {
+    return listenWithRetry('flashMissions', (h) => onSnapshot(ref, (snap) => {
+      h.healthy();
       setFlashes(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FlashDoc, 'id'>) })));
-    }, () => undefined);
+    }, h.failed));
   }, [ownerUid, gameId, runId]);
 
   // Tick so flash-mission countdowns expire on their own.

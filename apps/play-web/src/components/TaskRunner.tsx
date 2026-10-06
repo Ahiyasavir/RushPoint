@@ -9,7 +9,7 @@ import {
 // Reduced to the devices this team actually has, the same way the server reduces it at
 // submit time, so the two never disagree about what the team is waiting for
 // (change: every-member-plays).
-import { contributionView, effectiveContributorRequirement, normalizeContentType, autoApproveLengthVerdict } from '@rushpoint/shared';
+import { contributionView, effectiveContributorRequirement, normalizeContentType, autoApproveLengthVerdict, resendVerdict } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
@@ -82,6 +82,7 @@ import {
   videoTypeFromName, pickedClipVerdict,
   recordedClipVerdict, CLIP_SHORT_FRACTION,
 } from '../lib/videoCapture';
+import { mediaHashOf } from '../lib/mediaHash';
 import { Icon, type IconName } from './Icon';
 
 // A media mission with nothing in flight on this device (change: submission-status-truth).
@@ -519,7 +520,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   //
   // Keyed by task id, like PhotoEntry's own `key`, so a photo can never cross into the
   // next mission - the failure that `key` was added to prevent. Cleared on success.
-  const capturedRef = useRef<Map<string, { file: File }>>(new Map());
+  const capturedRef = useRef<Map<string, { file: File; sent?: boolean }>>(new Map());
 
   // The capture-time upload (change: media-upload-reliability, D1/D4). Every kind starts uploading
   // the moment its capture exists, so the transfer overlaps the player looking at their own photo
@@ -650,6 +651,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       return { text: t.task.uploadNotAllowedHere, tone: 'error' };
     }
     if (raw.includes('not-controller')) return { text: t.devices.controlMoved, tone: 'error' };
+    if (raw.includes('same-media-rejected-twice')) return { text: t.task.resendSamePhotoRefused, tone: 'error' };
     // The common server rejections are stable English `failed-precondition`
     // messages — localize them (keeping the distance number) instead of leaking
     // untranslated text to the player.
@@ -1053,7 +1055,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // No pasted-URL path any more, so the "own team folder" storage-path rejection
   // can't be reached by a normal player; the guard maps any residual storage-path
   // error to plain "retake" copy instead of the developer-oriented message.
-  async function photo(file: File) {
+  async function photo(file: File, mediaHash?: string | null) {
     if (blockedOffline()) return;
     if (!begin()) return;
     clearMsg();
@@ -1065,11 +1067,15 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       if (!pending.ready(taskId, file)) setMediaStage({ taskId, stage: 'uploading', failed: null });
       const { url } = await pending.take(taskId, file, 'image/jpeg');
       setMediaStage({ taskId, stage: 'saving', failed: null });
-      const res = await submitStationPhoto({ ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url });
+      const res = await submitStationPhoto({
+        ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url,
+        // rejected-photo-resend: lets the server recognise a picture it already rejected.
+        ...(mediaHash ? { mediaHash } : {}),
+      });
       // Landed. Keep the picture, forget its upload: a rejection then shows the player what
       // they sent, and a new send can never quietly re-submit the rejected file.
       pending.forget(taskId);
-      capturedRef.current.set(task!.id, { file });
+      capturedRef.current.set(task!.id, { file, sent: true });
       setJustSent({ taskId: task!.id, status: res.autoApproved ? 'approved' : 'pending', submittedAt: new Date().toISOString(), photoUrl: url });
       setMediaStage({ taskId, stage: 'idle', failed: null });
       setReplacingFor(null);
@@ -1673,6 +1679,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
             // Keyed by task id on BOTH sides, so mission B can never be handed
             // mission A's picture - the failure the `key` above exists to prevent.
             restored={capturedRef.current.get(task.id)?.file ?? null}
+            // rejected-photo-resend: the picture on screen is the one the organizers rejected.
+            rejectedFile={verdict.rejected && capturedRef.current.get(task.id)?.sent ? capturedRef.current.get(task.id)!.file : null}
+            rejectedHashes={(state.team as { taskSubmissions?: Record<string, { rejectedHashes?: unknown } | undefined> }).taskSubmissions?.[task.id]?.rejectedHashes}
             onCaptured={(f) => {
               if (f) { capturedRef.current.set(task.id, { file: f }); pending.begin(task.id, f, 'image/jpeg'); }
               else { capturedRef.current.delete(task.id); pending.forget(task.id); }
@@ -2605,7 +2614,11 @@ function SubmissionWaitingCard({ phase, mediaKind, canReplace, onReplace, onOpen
   );
 }
 
-function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = false, runId = '' }: {
+function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = false, runId = '', rejectedFile = null, rejectedHashes }: {
+  /** The file last sent for this mission, when the organizers rejected it (rejected-photo-resend). */
+  rejectedFile?: File | null;
+  /** How many times each picture was rejected for this mission, keyed by its hash. */
+  rejectedHashes?: unknown;
   /** Keys the remembered camera side to this run (camera-switch D4). */
   runId?: string;
   /** A "selfie" mission (smart.preferredCamera 'front'): ask the phone camera to open
@@ -2615,7 +2628,7 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
   busy: boolean;
   /** Something is really in flight (not merely a disabled viewer). Drives the "working" label. */
   working: boolean;
-  onSubmit: (file: File) => void;
+  onSubmit: (file: File, mediaHash?: string | null) => void;
   /**
    * A photo already captured for THIS mission, handed back after a remount.
    *
@@ -2639,6 +2652,20 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
   // A full-size fallback (compression failed) is the difference between a 400 KB
   // and a 5 MB upload — tell the player instead of letting it look like a freeze.
   const [warn, setWarn] = useState('');
+  // rejected-photo-resend (issues 23 + 24, Ahiya 2026-10-06). The picture on screen is hashed so the
+  // phone knows whether the organizers already rejected it: once, it asks before sending it again;
+  // twice, it does not send it (the server refuses it too). And a rejected picture puts RETAKE first.
+  const [fileHash, setFileHash] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setFileHash(null);
+    void mediaHashOf(file).then((h) => { if (live) setFileHash(h); });
+    return () => { live = false; };
+  }, [file]);
+  const resend = resendVerdict(rejectedHashes, fileHash);
+  const retakeFirst = !!file && (resend !== 'new' || (!!rejectedFile && file === rejectedFile));
+  const [confirmResend, setConfirmResend] = useState(false);
+  useEffect(() => { setConfirmResend(false); }, [file]);
   // Track the live object URL so we can revoke the previous one (and clean up on
   // unmount) — otherwise each re-pick leaks a blob URL.
   const prevPreviewRef = useRef<string | null>(null);
@@ -2759,7 +2786,7 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
   const captureControls = (
     nativeOnly || !canUseInAppCamera() ? (
       <>
-        <Button variant={file ? 'ghost' : 'primary'} disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
+        <Button variant={file && !retakeFirst ? 'ghost' : 'primary'} disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
           {file ? t.task.retakePhoto : t.task.takePhoto}
         </Button>
         {nativeOnly && <p className="text-xs text-zinc-400" data-testid="photo-native-note">{t.task.inAppCameraUnavailable}</p>}
@@ -2768,7 +2795,7 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
       // ONE capture button (issue 20, Ahiya 2026-10-06): a second "use the phone's camera" link
       // read as two buttons doing the same thing. The phone's camera is the automatic fallback
       // when the in-app one cannot open (onFallback -> nativeOnly), so nobody loses it.
-      <Button variant={file ? 'ghost' : 'primary'} disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
+      <Button variant={file && !retakeFirst ? 'ghost' : 'primary'} disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
         {file ? t.task.retakePhoto : t.task.takePhoto}
       </Button>
     )
@@ -2812,10 +2839,23 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
           button above is the primary one and there is nothing to send, so no send
           button exists. Once there is a photo, send is primary and still ANSWERS
           rather than going dead if something is in the way. */}
+      {/* After a rejection RETAKE is the next action (issue 24), so it comes first and is primary. */}
+      {retakeFirst && captureControls}
+      {file && confirmResend && resend !== 'rejectedTwice' && (
+        <p role="alert" className="text-sm text-ink-amber" data-testid="photo-resend-confirm">{t.task.resendSamePhotoConfirm}</p>
+      )}
+      {file && resend === 'rejectedTwice' && confirmResend && (
+        <p role="alert" className="text-ink-alert text-sm" data-testid="photo-resend-refused">{t.task.resendSamePhotoRefused}</p>
+      )}
       {file && (
         <Button
+          variant={retakeFirst ? 'ghost' : 'primary'}
           onClick={() => {
-            if (submitBlocker === '') { onSubmit(file); return; }
+            // The same rejected picture (issue 23): twice rejected is not sent at all; once
+            // rejected asks first, and the second press sends it.
+            if (resend === 'rejectedTwice') { setConfirmResend(true); return; }
+            if (retakeFirst && !confirmResend) { setConfirmResend(true); return; }
+            if (submitBlocker === '') { onSubmit(file, fileHash); return; }
             // Name the obstacle instead of doing nothing. `fileErr` is already on
             // screen above, so that case just re-points at it.
             if (submitBlocker === 'busy') setWarn(t.task.photoStillWorking);
@@ -2823,10 +2863,13 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
           }}
           data-testid="photo-submit"
         >
-          {working ? t.task.working : t.task.submitPhoto}
+          {working ? t.task.working
+            : confirmResend && resend !== 'rejectedTwice' ? t.task.resendSamePhotoAnyway
+            : retakeFirst ? t.task.resendRejectedPhoto
+            : t.task.submitPhoto}
         </Button>
       )}
-      {file && captureControls}
+      {file && !retakeFirst && captureControls}
     </div>
   );
 }

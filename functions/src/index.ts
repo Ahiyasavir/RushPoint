@@ -24,6 +24,7 @@ import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/s
 // approval-can-be-undone). Total, and refuses to act on an unreadable award rather
 // than guessing at an amount to subtract from a live scoreboard.
 import { sosCallbackVerdict } from '@rushpoint/shared';
+import { isMediaHash, resendVerdict } from '@rushpoint/shared';
 import { planApprovalReversal, appendScoreLedger, validateRunContacts, contactsFor, matchAnswerOutcome, mediaDurationForRecord, autoApproveLengthVerdict, type AnswerOutcome } from '@rushpoint/shared';
 import { defaultCodeCapabilities, normalizeStaffCapabilities, normalizeStaffCode, resolveStaffAccess, STAFF_REFUSAL_REASON, type StaffCapability, type Game } from '@rushpoint/shared';
 import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
@@ -1973,7 +1974,7 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
 export const submitStationPhoto = loggedCallable('submitStationPhoto', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'submitStationPhoto');
-  const { ownerUid, gameId, runId, teamId, taskId, photoUrl: rawPhotoUrl, contentType, posterUrl: rawPosterUrl, mediaDurationSec: rawDuration, mediaDeferred: rawDeferred } = data as {
+  const { ownerUid, gameId, runId, teamId, taskId, photoUrl: rawPhotoUrl, contentType, posterUrl: rawPosterUrl, mediaDurationSec: rawDuration, mediaDeferred: rawDeferred, mediaHash: rawMediaHash } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
@@ -1984,6 +1985,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     // Honoured only when the submission would be auto-approved anyway; otherwise nothing is
     // written and the phone uploads first.
     mediaDeferred?: boolean | null;
+    // rejected-photo-resend: SHA-256 of the file, hex. Anything else is ignored, never refused.
+    mediaHash?: string | null;
     // video-upload-speed D7: a poster frame + the clip's length, both optional. null (an older
     // client, or the callable transport's undefined) is ABSENT, never a refusal.
     posterUrl?: string | null;
@@ -2149,13 +2152,19 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
       throw new functions.https.HttpsError('failed-precondition', 'This task has expired');
     }
   }
-  const priorSubmission = (team as { taskSubmissions?: Record<string, { status?: string }> })
+  const priorSubmission = (team as { taskSubmissions?: Record<string, { status?: string; rejectedHashes?: Record<string, number> }> })
     .taskSubmissions?.[taskId];
   const taskAlreadyCompleted = team.stages.some((s) =>
     s.tasks.some((t) => t.taskId === taskId && t.status === 'completed'),
   );
   if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
     return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), already: true };
+  }
+  // rejected-photo-resend (Ahiya, 2026-10-06): the same picture rejected twice is not taken a
+  // third time. A new photo is different bytes; a missing or junk hash is never a refusal.
+  const mediaHash = isMediaHash(rawMediaHash) ? rawMediaHash : undefined;
+  if (resendVerdict(priorSubmission?.rejectedHashes, mediaHash) === 'rejectedTwice') {
+    throw new functions.https.HttpsError('failed-precondition', 'same-media-rejected-twice');
   }
   // background-media-upload D1: a deferral the server would not auto-approve writes NOTHING. The
   // phone then uploads and submits the ordinary way, so the review path never sees a fileless row.
@@ -2187,6 +2196,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
           // without a poster must not keep the previous clip's frame, so the key is deleted.
           posterUrl: kind === 'video' && posterUrl && !deferred ? posterUrl : admin.firestore.FieldValue.delete(),
           mediaDurationSec: kind !== 'photo' && mediaDurationSec !== undefined ? mediaDurationSec : admin.firestore.FieldValue.delete(),
+          mediaHash: mediaHash ?? admin.firestore.FieldValue.delete(),
         },
       },
     },
@@ -2353,6 +2363,12 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   if (!teamSnap.exists) {
     throw new functions.https.HttpsError('not-found', 'Team not found');
   }
+  // rejected-photo-resend: a rejection counts the picture it rejects, once per submission (a second
+  // reject of an already-rejected submission must not count it twice).
+  const reviewedSub = (teamSnap.data() as { taskSubmissions?: Record<string, { status?: string; mediaHash?: unknown }> } | undefined)
+    ?.taskSubmissions?.[taskId];
+  const countRejectedHash = !approved && reviewedSub?.status !== 'rejected' && isMediaHash(reviewedSub?.mediaHash)
+    ? reviewedSub!.mediaHash as string : undefined;
   // ── Reversing an approval (change: approval-can-be-undone) ────────────────
   //
   // `approved + reject` used to be refused outright, because there was no way to take
@@ -2422,6 +2438,8 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
           reviewedAt: now,
           reviewedBy: context.auth!.uid,
           reviewNote: validate(() => optionalString(note, 'note', MAX_MESSAGE_LEN)) ?? '',
+          // A nested object, not a dotted key: this is a .set({merge}) (CLAUDE.md footgun).
+          ...(countRejectedHash ? { rejectedHashes: { [countRejectedHash]: admin.firestore.FieldValue.increment(1) } } : {}),
         },
       },
     },
