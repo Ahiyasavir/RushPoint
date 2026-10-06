@@ -1756,7 +1756,7 @@ function StaffChatSection({
         )}
         {(
         visibleThreads.length === 0
-          ? <p className="text-zinc-500 text-sm">{mineOnly ? t.staff.chatMineEmpty : t.chat.chatEmpty}</p>
+          ? <p className="text-zinc-500 text-sm">{mineOnly ? t.staff.chatMineEmpty : t.staff.chatAllEmpty}</p>
           : visibleThreads.map((th) => {
             const last = th.messages[th.messages.length - 1];
             const unread = countUnreadChatMessages(th.messages, markerFor(th.teamId), myUid) > 0;
