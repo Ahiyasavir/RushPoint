@@ -12225,6 +12225,51 @@ async function main() {
       creator.call('returnTeamTo', { ...B, teamId: bpUid, target: { kind: 'stage', stageId: 'sb-s1' } }), { codeIn: ['functions/failed-precondition'] });
   });
 
+  // send-back-from-here (issue 32, Ahiya 2026-10-06): sending a team back to a mission it did can
+  // reopen only that mission, or that mission and everything it finished after it.
+  await scenario('send back from here (only this mission vs from this mission on)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const sr = (id, title, pts) => ({ id, title, type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 },
+      difficulty: 1, estimatedMinutes: 1, pointValue: pts, maxConcurrentTeams: 3 });
+    const { gameId: g } = await creator.call('createGame', { title: 'From Here', mode: 'individual' });
+    await creator.call('updateGame', { gameId: g, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'fh-s1', order: 0, title: 'One', tasks: [sr('fh-a', 'A', 10), sr('fh-b', 'B', 20)] },
+      { id: 'fh-s2', order: 1, title: 'Two', isFinal: true, tasks: [sr('fh-x', 'X', 30), sr('fh-y', 'Y', 40)] },
+    ] });
+    const { runId: r, accessCode: code } = await creator.call('launchRun', { gameId: g });
+    const C = { ownerUid: OWNER, gameId: g, runId: r };
+    const pl = makeParty('fromHerePlayer');
+    await signInAnonymously(pl.auth);
+    await pl.call('joinRun', { code, displayName: 'Rewinders' });
+    await creator.call('startTeams', { gameId: g, runId: r });
+    const uidP = pl.auth.currentUser.uid;
+    const doc = async () => (await creator.getDocAt(`users/${OWNER}/games/${g}/runs/${r}/teams/${uidP}`)).data ?? {};
+    const st = (t, id) => (t.stages ?? []).flatMap((s) => s.tasks ?? []).find((x) => x.taskId === id)?.status;
+    const order = [];
+    for (let i = 0; i < 3; i++) {
+      const active = (await pl.call('getMyTeamState', { code }))?.team?.activeTaskId;
+      if (!active) break;
+      order.push(active);
+      await pl.call('completeTask', { taskId: active, code });
+      await new Promise((res) => setTimeout(res, 30));
+    }
+    check('from-here setup: three missions done in order', order.length === 3, JSON.stringify(order));
+    const [m1, m2, m3] = order;
+    const before = await doc();
+    const dry = await creator.call('returnTeamTo', { ...C, teamId: uidP, target: { kind: 'task', taskId: m1 }, dryRun: true, scope: 'fromHere' });
+    check('from-here dry run: names the mission and everything done after it',
+      JSON.stringify((dry?.reopened ?? []).map((x) => x.id).sort()) === JSON.stringify([m1, m2, m3].sort()), JSON.stringify(dry?.reopened));
+    const onlyDry = await creator.call('returnTeamTo', { ...C, teamId: uidP, target: { kind: 'task', taskId: m1 }, dryRun: true });
+    check('only-this-mission dry run: names only that mission', JSON.stringify((onlyDry?.reopened ?? []).map((x) => x.id)) === JSON.stringify([m1]), JSON.stringify(onlyDry?.reopened));
+    await creator.call('returnTeamTo', { ...C, teamId: uidP, target: { kind: 'task', taskId: m1 }, scope: 'fromHere', reason: 'redo from here' });
+    const after = await doc();
+    check('from here: the mission is the one to do now', after.activeTaskId === m1 && st(after, m1) === 'assigned', JSON.stringify(after.activeTaskId));
+    check('from here: everything done after it is open again', st(after, m2) === 'unassigned' && st(after, m3) === 'unassigned',
+      JSON.stringify([st(after, m2), st(after, m3)]));
+    check('from here: their points came off', (after.score ?? 0) < (before.score ?? 0) && (after.score ?? 0) >= 0,
+      JSON.stringify([before.score, after.score]));
+  });
+
   // staff-console-field-ops: setTeamHold (pause/resume a team's race clock) and
   // forceAssignTask (send ONE team to a specific mission instead of waiting on
   // routing). Denials live in the authz matrix above; this is the ALLOWED path.

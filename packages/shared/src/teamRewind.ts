@@ -43,6 +43,11 @@ export interface TeamRewindInput {
   target: RewindTarget;
   teamScore: number;
   teamStatus?: string;
+  /**
+   * A mission target only (send-back-from-here): `only` (default) reopens that mission alone;
+   * `fromHere` also reopens every mission the team finished after it. Anything else is `only`.
+   */
+  scope?: 'only' | 'fromHere';
 }
 
 export interface TeamRewindPlan {
@@ -165,9 +170,29 @@ export function planTeamRewind(input: TeamRewindInput): TeamRewindPlan {
         t.status = 'unassigned'; delete t.startedAt; releaseTaskIds.push(t.taskId);
       }
     }
+    const targetDoneAt = Date.parse(typeof rec.completedAt === 'string' ? rec.completedAt : '');
     const award = reopenRecord(rec);
     reopenedTaskIds.push(rec.taskId);
     if (award > 0) { removed += award; ledger.push({ taskId: rec.taskId, delta: -award }); }
+    // send-back-from-here (issue 32, Ahiya 2026-10-06): "from this mission on" also reopens what the
+    // team finished AFTER it, as if it had not: in its stage by completion time (an unknown time is
+    // never guessed, it stays done), and everything in the later stages. An authored loss stays shut.
+    if (input.scope === 'fromHere') {
+      for (let i = targetStageIdx; i < stages.length; i++) {
+        for (const t of stages[i].tasks) {
+          if (t === rec) continue;
+          const closedByUs = t.status === 'completed' || (t.status === 'skipped' && REOPENABLE_BY_STAGE.has(t.skipCause));
+          if (!closedByUs) continue;
+          if (i === targetStageIdx) {
+            const at = Date.parse(typeof t.completedAt === 'string' ? t.completedAt : '');
+            if (!Number.isFinite(at) || !Number.isFinite(targetDoneAt) || at <= targetDoneAt) continue;
+          }
+          const a = reopenRecord(t);
+          reopenedTaskIds.push(t.taskId);
+          if (a > 0) { removed += a; ledger.push({ taskId: t.taskId, delta: -a }); }
+        }
+      }
+    }
     // In a stage whose requirement is ALREADY met by the other completions (a partial stage, a
     // leftover being sent back to), the stage would complete again the moment it is evaluated and
     // auto-skip the very mission the operator chose. The operator's intent wins: this team's

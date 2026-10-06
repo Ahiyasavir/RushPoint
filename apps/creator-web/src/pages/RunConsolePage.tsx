@@ -1513,26 +1513,31 @@ export default function RunConsolePage() {
   }
   // send-team-back: the picker hands back a target; the server's dry run says what it will do; the
   // organizer confirms; the real call runs. A failed preview falls back to the generic consequence.
-  async function sendTeamBack(team: RunTeamRow, choice: SendBackChoice) {
+  async function sendTeamBack(team: RunTeamRow, choice: SendBackChoice, scope: 'only' | 'fromHere' = 'only') {
     setSendBackFor(null);
+    setRouteFor(null);
     const target = choice.kind === 'task' ? { kind: 'task' as const, taskId: choice.taskId } : { kind: 'stage' as const, stageId: choice.stageId };
+    const fromHere = choice.kind === 'task' && scope === 'fromHere';
     let message = rc.consequence.sendBack;
     try {
-      const dry = await returnTeamTo({ ...ctx, teamId: team.id, target, dryRun: true });
+      const dry = await returnTeamTo({ ...ctx, teamId: team.id, target, dryRun: true, ...(fromHere ? { scope } : {}) });
       const pv = rc.sendBackPreview;
       const lines = [
         choice.kind === 'task' ? pv.toTask({ title: dry.taskTitle || choice.title }) : pv.toStage({ stage: dry.stageTitle || choice.title }),
       ];
       const reopened = (dry.reopened ?? []).map((r) => r.title).filter(Boolean);
       if (choice.kind === 'stage' && reopened.length > 0) lines.push(pv.reopens({ titles: reopened.join(', ') }));
+      // "From this mission on": name everything that reopens besides the mission itself.
+      const alsoReopened = (dry.reopened ?? []).filter((r) => r.id !== (choice.kind === 'task' ? choice.taskId : '')).map((r) => r.title).filter(Boolean);
+      if (fromHere && alsoReopened.length > 0) lines.push(pv.reopens({ titles: alsoReopened.join(', ') }));
       if ((dry.pointsRemoved ?? 0) > 0) lines.push(pv.points({ n: dry.pointsRemoved }));
-      if ((dry.relockedStages ?? []).length > 0) lines.push(pv.relocks({ stages: dry.relockedStages.join(', ') }));
+      if ((dry.relockedStages ?? []).length > 0) lines.push((fromHere ? pv.relocksFromHere : pv.relocks)({ stages: dry.relockedStages.join(', ') }));
       if (dry.reactivatesTeam) lines.push(pv.reactivates);
       message = lines.join('\n');
     } catch { /* keep the generic consequence */ }
     if (!(await dialog.confirm(message, rc.confirmCta.sendBack, false, { title: rc.confirmTitle }))) return;
     try {
-      const res = await returnTeamTo({ ...ctx, teamId: team.id, target, reason: 'console send back' });
+      const res = await returnTeamTo({ ...ctx, teamId: team.id, target, reason: 'console send back', ...(fromHere ? { scope } : {}) });
       await loadTeams();
       toast.success(res.queued ? rc.sendBackQueued({ team: team.displayName }) : rc.sendBackDone({ team: team.displayName }));
     } catch { await dialog.alert(rc.sendBackFailed); }
@@ -2507,6 +2512,7 @@ export default function RunConsolePage() {
           })}
           teamBusy={((teamStages.get(routeFor.id) as { tasks?: { status?: string }[] }[] | undefined) ?? []).some((s) => (s.tasks ?? []).some((tk) => tk.status === 'assigned'))}
           onRoute={(taskId, accept, when) => void routeOneTeam(routeFor, taskId, accept, when)}
+          onSendBack={(taskId, title, scope) => void sendTeamBack(routeFor, { kind: 'task', taskId, title }, scope)}
           onClose={() => setRouteFor(null)}
         />
       )}

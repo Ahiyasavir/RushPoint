@@ -147,7 +147,7 @@ export const skipTaskForTeam = callable<
 // `dryRun` returns the plan the confirm shows, writing nothing.
 export type SendBackTarget = { kind: 'task'; taskId: string } | { kind: 'stage'; stageId: string };
 export const returnTeamTo = callable<
-  { ownerUid?: string; gameId: string; runId: string; teamId: string; target: SendBackTarget; reason?: string; dryRun?: boolean },
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; target: SendBackTarget; reason?: string; dryRun?: boolean; scope?: 'only' | 'fromHere' },
   {
     ok: boolean; dryRun?: boolean; targetKind: 'task' | 'stage'; stageTitle: string; taskTitle: string;
     reopened: { id: string; title: string }[]; relockedStages: string[]; pointsRemoved: number;

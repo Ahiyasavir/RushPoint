@@ -2836,11 +2836,14 @@ export const forceAssignTask = loggedCallable('forceAssignTask', async (data, co
 //   • The claimed slot is given back if the team write fails (the forceAssignTask rule).
 export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context) => {
   const {
-    ownerUid: ownerUidIn, gameId, runId, teamId, target: targetIn, reason, dryRun: dryRunIn,
+    ownerUid: ownerUidIn, gameId, runId, teamId, target: targetIn, reason, dryRun: dryRunIn, scope: scopeIn,
   } = data as {
     ownerUid?: string; gameId: string; runId: string; teamId: string;
     target?: { kind?: unknown; taskId?: unknown; stageId?: unknown }; reason?: string; dryRun?: unknown;
+    // send-back-from-here: 'fromHere' also reopens what the team finished after the mission.
+    scope?: unknown;
   };
+  const scope = scopeIn === 'fromHere' ? 'fromHere' as const : 'only' as const;
   const ownerUid = ownerUidIn ?? context.auth?.uid ?? '';
   const operatorId = await assertStaffCan(context, ownerUid, runId, 'route');
   await enforceRateLimit(operatorId, 'returnTeamTo');
@@ -2879,6 +2882,7 @@ export const returnTeamTo = loggedCallable('returnTeamTo', async (data, context)
     target,
     teamScore: team.score ?? 0,
     teamStatus: team.status,
+    scope,
   });
   const refusal = (reasonCode: string | undefined): never => {
     const msg = reasonCode === 'targetNotTerminal'

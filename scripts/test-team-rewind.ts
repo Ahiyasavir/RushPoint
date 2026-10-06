@@ -153,6 +153,48 @@ console.log('\n— refusals —');
   ok('garbage is refused, never thrown', planTeamRewind(null as never).ok === false && planTeamRewind({} as never).ok === false);
 }
 
+console.log('\n— send-back-from-here (issue 32): "only this mission" or "from this mission on" —');
+{
+  const T = (m: number) => `2026-10-06T10:${String(m).padStart(2, '0')}:00.000Z`;
+  const mk = () => [
+    st('s1', 'completed', [
+      { taskId: 'a', status: 'completed', earnedScore: 10, completedAt: T(1) },
+      { taskId: 'b', status: 'completed', earnedScore: 20, completedAt: T(2) },
+      { taskId: 'c', status: 'completed', earnedScore: 30, completedAt: T(3) },
+    ]),
+    st('s2', 'active', [
+      { taskId: 'x', status: 'completed', earnedScore: 40, completedAt: T(4) },
+      { taskId: 'y', status: 'assigned' },
+    ], { requiredTaskCount: 1 }),
+    st('s3', 'locked', [{ taskId: 'z', status: 'unassigned' }]),
+  ];
+  const base = { gameStages: G, target: { kind: 'task' as const, taskId: 'b' }, teamScore: 100, teamStatus: 'active' };
+  const only = planTeamRewind({ ...base, stages: mk() });
+  const onlyNamed = planTeamRewind({ ...base, stages: mk(), scope: 'only' });
+  ok('"only" is today\'s behaviour and the default', j(only) === j(onlyNamed));
+  ok('"only" reopens that mission alone', j(only.reopenedTaskIds) === j(['b']) && statusOf(only.stages, 'c') === 'completed' && statusOf(only.stages, 'x') === 'completed', j(only.reopenedTaskIds));
+  const here = planTeamRewind({ ...base, stages: mk(), scope: 'fromHere' });
+  ok('"from here" reopens the mission and everything finished after it', j([...here.reopenedTaskIds].sort()) === j(['b', 'c', 'x']), j(here.reopenedTaskIds));
+  ok('"from here" keeps what was finished BEFORE it', statusOf(here.stages, 'a') === 'completed' && recOf(here.stages, 'a')?.earnedScore === 10);
+  ok('"from here" takes the points of every reopened mission off', here.scoreDelta === -90 && here.nextTeamScore === 10, j([here.scoreDelta, here.nextTeamScore]));
+  ok('"from here" writes one ledger line per reopened mission',
+    j([...here.ledger].sort((p, q) => p.taskId.localeCompare(q.taskId))) === j([{ taskId: 'b', delta: -20 }, { taskId: 'c', delta: -30 }, { taskId: 'x', delta: -40 }]), j(here.ledger));
+  ok('"from here" still makes the target the mission to do now', here.assignTaskId === 'b' && statusOf(here.stages, 'y') === 'unassigned', j(here.assignTaskId));
+  // A mission in the target's stage with no completion time is not guessed "after": it stays done.
+  const unknown = mk(); delete (unknown[0].tasks[2] as { completedAt?: string }).completedAt;
+  const u = planTeamRewind({ ...base, stages: unknown, scope: 'fromHere' });
+  ok('an unknown completion time in the same stage stays done (never guessed)', statusOf(u.stages, 'c') === 'completed');
+  // An authored loss (exclusive group) after it stays closed; an organizer's skip reopens.
+  const losses = mk();
+  Object.assign(losses[1].tasks[1], { status: 'skipped', skipCause: 'exclusive' });
+  ok('an authored loss after it stays closed', statusOf(planTeamRewind({ ...base, stages: losses, scope: 'fromHere' }).stages, 'y') === 'skipped');
+  const opSkip = mk();
+  Object.assign(opSkip[1].tasks[1], { status: 'skipped', skipCause: 'operator' });
+  ok('an organizer skip after it reopens', statusOf(planTeamRewind({ ...base, stages: opSkip, scope: 'fromHere' }).stages, 'y') === 'unassigned');
+  const junk = planTeamRewind({ ...base, stages: mk(), scope: 'whatever' as never });
+  ok('an unknown scope is "only"', j(junk.reopenedTaskIds) === j(['b']));
+}
+
 console.log('\n— the score never goes below zero —');
 {
   const stages = [

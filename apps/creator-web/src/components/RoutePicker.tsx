@@ -12,17 +12,23 @@ import { TAP_TARGET } from '../lib/interaction';
 import type { RouteMission, RouteStage } from '../lib/routePicker';
 import type { WaivableKind } from '@rushpoint/shared';
 
-export default function RoutePicker({ teamName, stages, teamBusy, onRoute, onClose }: {
+export default function RoutePicker({ teamName, stages, teamBusy, onRoute, onSendBack, onClose }: {
   teamName: string;
   stages: RouteStage[];
   /** The team holds a mission now: offer "now" and "after this mission". */
   teamBusy: boolean;
   onRoute: (taskId: string, accept: WaivableKind[], when: 'now' | 'after') => void;
+  /**
+   * send-back-from-here (issue 32, Ahiya 2026-10-06): a mission the team has DONE is a place to send
+   * it BACK to, with "only this mission" or "from this mission on".
+   */
+  onSendBack?: (taskId: string, title: string, scope: 'only' | 'fromHere') => void;
   onClose: () => void;
 }) {
   const t = useT();
   const p = t.runConsole.routePicker;
   const [chosen, setChosen] = useState<RouteMission | null>(null);
+  const goingBack = !!onSendBack && chosen?.state === 'done';
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -63,7 +69,20 @@ export default function RoutePicker({ teamName, stages, teamBusy, onRoute, onClo
           </button>
         </div>
 
-        {chosen ? (
+        {chosen && goingBack ? (
+          <div className="space-y-3" data-testid="route-back">
+            <p dir="auto" className="text-sm font-semibold text-[--ink-1]">{p.backTo({ title: chosen.title })}</p>
+            <ul className="list-disc ps-5 space-y-1 text-sm text-[--ink-3]">
+              <li>{p.backOnlyHelp}</li>
+              <li>{p.backFromHereHelp}</li>
+            </ul>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button onClick={() => onSendBack!(chosen.taskId, chosen.title, 'only')} data-testid="route-back-only">{p.backOnly}</Button>
+              <Button variant="ghost" onClick={() => onSendBack!(chosen.taskId, chosen.title, 'fromHere')} data-testid="route-back-from-here">{p.backFromHere}</Button>
+              <Button variant="subtle" onClick={() => setChosen(null)}>{p.back}</Button>
+            </div>
+          </div>
+        ) : chosen ? (
           <div className="space-y-3" data-testid="route-confirm">
             <p dir="auto" className="text-sm font-semibold text-[--ink-1]">{p.sendTo({ title: chosen.title })}</p>
             {accept.length === 0 ? (
@@ -98,7 +117,7 @@ export default function RoutePicker({ teamName, stages, teamBusy, onRoute, onClo
                 <ul className="mt-2 space-y-1">
                   {s.missions.map((m) => (
                     <li key={m.taskId}>
-                      {m.selectable ? (
+                      {m.selectable || (onSendBack && m.state === 'done') ? (
                         <button type="button" onClick={() => setChosen(m)}
                           className="w-full min-h-[44px] flex items-center justify-between gap-3 rounded-lg px-3 text-start text-sm hover:bg-[--surface-2]"
                           data-testid={`route-task-${m.taskId}`}>
