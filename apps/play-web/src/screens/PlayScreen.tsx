@@ -807,6 +807,46 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     hasTeammateDevices: hasTeammateDevices && !!myUid,
   });
 
+  // The "more" drawer (standings, feed, chat...). On a phone it is a closed drawer under the
+  // mission; on a computer (issue 47) it is DOCKED: always open, in the space beside or under the
+  // mission, so nothing hides behind a button and the page still never scrolls.
+  const moreDrawer = (docked: boolean) => (
+      <MoreDrawer
+        docked={docked}
+        plan={drawerPlan}
+          onActiveTabChange={setViewingTab}
+          openRequest={drawerRequest}
+          renderTab={(id) => {
+            if (id === 'board') {
+              return state.run.leaderboard
+                ? <LeaderboardPeek leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
+                : null;
+            }
+            if (id === 'feed') {
+              return myUid ? (
+                <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+                  <FeedPanel ctx={session} myUid={myUid} />
+                </Suspense>
+              ) : null;
+            }
+            if (id === 'chat') {
+              return (
+                <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+                  <ChatPanel ctx={session} teamId={team.id} />
+                </Suspense>
+              );
+            }
+            if (id === 'trackables') {
+              return <TrackablesPanel ctx={session} items={trackables} myTeamId={team.id} isController={isController} onChanged={() => { void reloadTrackables(); }} />;
+            }
+            if (id === 'zones') {
+              return <ZonesPanel zones={zones} myTeamId={team.id} isController={isController} me={me} ctx={session} onCaptured={reloadZones} />;
+            }
+            return myUid ? <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} /> : null;
+          }}
+        />
+  );
+
   return (
     <GameScreen wide={wide}>
       <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
@@ -835,6 +875,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           storyCard bakes score and rank into the image pixels, and a sealed run
           has neither, so the button would draw blanks. */}
       {sosSheet}
+      {/* Issue 47: on a computer the header is a framed top bar, not two loose ends of a wide window. */}
+      <div className={wide ? 'shrink-0 rounded-2xl border border-glass-border bg-app-card/80 px-4 pt-3 mt-3' : 'contents'}>
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team} clockFrozenAtMs={raceFrozenAt}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
@@ -850,6 +892,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         howToPlay={<HowToPlayButton instructions={game.instructions} lang={lang} />}
         onShare={game.testMode === true ? undefined : () => void shareAction.run()} sharing={sharing}
       />
+      </div>
       {/* play-screen-no-scroll (field report 2026-09-27: "no scrolling at all"): the game body is
           the rest of ONE screen. With a map, the map fills it and the mission lives in a sheet over
           it (lib/sheetSnap.ts); without one, the mission fills it. The PAGE never scrolls; the
@@ -937,48 +980,33 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           still announces itself).
           A tab exists only when its feature is actually in play, so folding them
           together did not resurrect the empty sections that used to self-hide. */}
-      <div className="mt-1 -mx-1 px-1">
-        <MoreDrawer
-          plan={drawerPlan}
-          onActiveTabChange={setViewingTab}
-          openRequest={drawerRequest}
-          renderTab={(id) => {
-            if (id === 'board') {
-              return state.run.leaderboard
-                ? <LeaderboardPeek leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
-                : null;
-            }
-            if (id === 'feed') {
-              return myUid ? (
-                <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
-                  <FeedPanel ctx={session} myUid={myUid} />
-                </Suspense>
-              ) : null;
-            }
-            if (id === 'chat') {
-              return (
-                <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
-                  <ChatPanel ctx={session} teamId={team.id} />
-                </Suspense>
-              );
-            }
-            if (id === 'trackables') {
-              return <TrackablesPanel ctx={session} items={trackables} myTeamId={team.id} isController={isController} onChanged={() => { void reloadTrackables(); }} />;
-            }
-            if (id === 'zones') {
-              return <ZonesPanel zones={zones} myTeamId={team.id} isController={isController} me={me} ctx={session} onCaptured={reloadZones} />;
-            }
-            return myUid ? <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} /> : null;
-          }}
-        />
-      </div>
+      {!wide && <div className="mt-1 -mx-1 px-1">{moreDrawer(false)}</div>}
         </>);
         // desktop-layouts-play-staff: on a computer there is room for both, so the mission is its own
         // scrolling column beside the map (no drawer), or a readable centred column with no map.
         if (wide) {
+          // Issue 47: the mission on top of its column, the docked drawer filling what is left under
+          // it (with a map), or beside it (without one). Each part scrolls inside itself if it must.
+          const docked = drawerPlan.empty ? null : (
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl border border-glass-border bg-app-card/80 p-3" data-testid="docked-drawer">
+              {moreDrawer(true)}
+            </div>
+          );
           return locationRelevant
-            ? <div className="order-first w-[440px] shrink-0 h-full overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-4" data-testid="mission-column">{content}</div>
-            : <div className="w-full max-w-2xl mx-auto h-full overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-4" data-testid="mission-area">{content}</div>;
+            ? (
+              <div className="order-first flex w-[min(500px,40%)] shrink-0 flex-col gap-3 h-full min-h-0" data-testid="mission-column">
+                <div className="max-h-[68%] shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain px-1" data-testid="mission-scroll">{content}</div>
+                {docked}
+              </div>
+            )
+            : (
+              <div className="flex h-full min-h-0 w-full gap-4">
+                <div className="min-w-0 flex-1 h-full overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-4" data-testid="mission-area">
+                  <div className="mx-auto max-w-2xl">{content}</div>
+                </div>
+                {docked && <div className="flex w-[380px] shrink-0 flex-col h-full min-h-0">{docked}</div>}
+              </div>
+            );
         }
         return locationRelevant
           // Keyed on the flash mission too: taking one swaps the sheet's content for the flash card
@@ -1241,8 +1269,10 @@ function useTeamChat(ctx: Session, teamId: string, viewing: boolean) {
 //
 // Closed by default: during a race the mission is the screen, and everything in
 // here is something you go looking for. The badge is what keeps that honest.
-function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest }: {
+function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest, docked = false }: {
   plan: ReturnType<typeof planMoreDrawer>;
+  /** Computer (issue 47): always open, no toggle, never scrolls the page into view. */
+  docked?: boolean;
   /** Open the drawer on this tab and bring it into view. A new nonce re-opens. */
   openRequest?: { tab: DrawerTabId; nonce: number } | null;
   renderTab: (id: DrawerTabId) => ReactNode;
@@ -1256,21 +1286,22 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest }: {
   onActiveTabChange?: (id: DrawerTabId | null) => void;
 }) {
   const { t } = useT();
-  const [open, setOpen] = useState(false);
+  const [openState, setOpen] = useState(false);
+  const open = docked || openState;
   const [picked, setPicked] = useState<DrawerTabId | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!openRequest) return;
     setPicked(openRequest.tab);
     setOpen(true);
-    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [openRequest]);
+    if (!docked) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [openRequest, docked]);
   // Opening it by its own button brings it into view too (overnight 2026-09-29): on a 375x667 phone
   // the chat opened with its input at y=632-676, cut by the bottom of the screen, inside a mission
   // area that scrolls on its own and gave no sign that there was more below.
   useEffect(() => {
-    if (open) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [open]);
+    if (open && !docked) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [open, docked]);
 
   const label: Record<DrawerTabId, string> = {
     board: t.more.board, feed: t.more.feed, chat: t.more.chat,
@@ -1291,7 +1322,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest }: {
 
   return (
     <div className="mt-1" ref={rootRef}>
-      <button
+      {!docked && <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -1310,7 +1341,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange, openRequest }: {
           )}
         </span>
         <span aria-hidden="true" className="text-zinc-400">{open ? '▲' : '▼'}</span>
-      </button>
+      </button>}
 
       {open && (
         <div className="mt-2" data-testid="more-drawer-body">

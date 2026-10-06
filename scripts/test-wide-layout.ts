@@ -14,14 +14,17 @@ ok('one hook, one query', /export const WIDE_LAYOUT_QUERY = '\(min-width: 1024px
 
 const play = read('apps/play-web/src/screens/PlayScreen.tsx');
 ok('the game screen asks the hook', /const wide = useWideLayout\(\)/.test(play));
-ok('wide: the mission is a plain scrolling column, not the drawer', /if \(wide\) \{[\s\S]{0,500}data-testid="mission-column"[\s\S]{0,300}\}\s*return locationRelevant/.test(play));
+ok('wide: the mission is a plain column, not the drawer', /if \(wide\) \{[\s\S]{0,1500}data-testid="mission-column"[\s\S]{0,1500}\}\s*return locationRelevant/.test(play));
+// Issue 47 (2026-10-06): on a computer the "more" drawer is DOCKED open in the space the mission
+// leaves, instead of a closed drawer under it: nothing behind a button, and the page never scrolls.
+ok('wide: the more drawer is docked, the phone keeps the drawer', /moreDrawer\(true\)/.test(play) && /!wide && <div className="mt-1 -mx-1 px-1">\{moreDrawer\(false\)\}/.test(play));
 // The mission is what the player reads first, so it sits at the START of the reading direction
 // (right in Hebrew, left in English) even though the map pane comes first in the DOM.
 ok('wide: the mission column leads the reading direction', /className="order-first [^"]*" data-testid="mission-column"/.test(play));
 // A column that scrolls vertically turns overflow-x into `auto` too, so a child with a negative
 // margin (`-mx-1 px-1`, room for a focus ring) opened a HORIZONTAL scrollbar under the mission on a
 // computer (seen 2026-10-06 at 1440: scrollWidth 676 in a 672 column). The phone's sheet hid it.
-for (const id of ['mission-column', 'mission-area']) {
+for (const id of ['mission-scroll', 'mission-area']) {
   const cls = play.match(new RegExp(`className="([^"]*)" data-testid="${id}"`))?.[1] ?? '';
   ok(`wide: ${id} never scrolls sideways and leaves room for a focus ring`, /\boverflow-x-hidden\b/.test(cls) && /\bpx-1\b/.test(cls));
 }
