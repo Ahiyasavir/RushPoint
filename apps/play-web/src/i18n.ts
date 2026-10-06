@@ -253,7 +253,6 @@ const HE = {
     // Upload ETA (change: video-upload-speed, D5): stable buckets, never a countdown.
     videoAlreadyUp: 'הסרטון כבר עלה בזמן הצילום. אפשר לשלוח.',
     choicePoints: ({ n }: { n: number }) => `${n} נק׳`,
-    usePhoneCamera: 'או צלמו במצלמה של הטלפון',
     inAppCameraUnavailable: 'המצלמה באפליקציה לא נפתחה בטלפון הזה, אז נצלם במצלמה של הטלפון.',
     shutter: 'צילום',
     videoTooShortForAuto: ({ sec }: { sec: number }) => `הסרטון לא מגיע ל ${sec} שניות, אז הוא לא יאושר אוטומטית: הוא יישלח למארגנים לבדיקה. אפשר לצלם שוב.`,
@@ -312,6 +311,8 @@ const HE = {
     // לחרוג. "צלמו קצר יותר" פשוט לא יעזור שם, וההקלטה מתוך האפליקציה כן.
     videoTooLargeUseRecorder: ({ mb }: { mb: number }) => `הסרטון גדול מדי (עד ${mb} מ"ב). הקליטו דרך האפליקציה במקום, ככה הסרטון יוצא קטן ומהיר.`,
     videoTooShort: ({ sec }: { sec: number }) => `הסרטון קצר מדי. צריך לפחות ${sec} שניות.`,
+    // תקלה 22: כפתור השליחה כבר לא אפור. לחיצה על סרטון קצר מדי מסבירה למה, עם המספרים.
+    videoTooShortWhy: ({ have, need, from }: { have: number; need: number; from: number }) => `אי אפשר לשלוח את הסרטון הזה: הוא באורך ${have} שניות, והמשימה מבקשת לפחות ${need}. אפשר לשלוח סרטון מ ${from} שניות ומעלה, אז צלמו שוב קצת יותר ארוך.`,
     videoShortButOk: ({ sec }: { sec: number }) => `הסרטון קצר מהזמן שביקשנו (${sec} שניות), אבל אפשר לשלוח אותו.`,
     videoSaveToPhone: 'שמרו את הסרטון לטלפון',
     photoSaveToPhone: 'שמרו את התמונה לטלפון',
@@ -1307,7 +1308,6 @@ const EN: typeof HE = {
     uploadRetrying: 'Slow network. Retrying…',
     videoAlreadyUp: 'The clip already went up while you filmed. Ready to send.',
     choicePoints: ({ n }: { n: number }) => `${n} pts`,
-    usePhoneCamera: 'Or use the phone\'s camera',
     inAppCameraUnavailable: 'The camera inside the app would not open on this phone, so the phone\'s own camera takes the picture.',
     shutter: 'Take the picture',
     videoTooShortForAuto: ({ sec }: { sec: number }) => `The clip is under ${sec} seconds, so it will not be approved automatically: the organizers will review it. You can film it again.`,
@@ -1363,6 +1363,7 @@ const EN: typeof HE = {
     // even a ten second clip can exceed the cap and filming shorter will not help.
     videoTooLargeUseRecorder: ({ mb }: { mb: number }) => `That video is too large (max ${mb} MB). Record it in the app instead, which keeps the clip small and quick.`,
     videoTooShort: ({ sec }: { sec: number }) => `That clip is too short. It needs at least ${sec} seconds.`,
+    videoTooShortWhy: ({ have, need, from }: { have: number; need: number; from: number }) => `This clip can't be sent: it is ${have} seconds long and the mission asks for at least ${need}. A clip of ${from} seconds or more can be sent, so film it again a little longer.`,
     videoShortButOk: ({ sec }: { sec: number }) => `Shorter than the ${sec} seconds asked for, but you can still send it.`,
     videoSaveToPhone: 'Save the video to your phone',
     photoSaveToPhone: 'Save the photo to your phone',

@@ -80,7 +80,7 @@ import {
   CAMERA_OPEN_DEADLINE_MS, withCameraDeadline, captureProfileFor, type CaptureProfile,
   MAX_PARTICIPANT_VIDEO_BYTES, recorderTimesliceFor, recorderEngineFromUserAgent,
   videoTypeFromName, pickedClipVerdict,
-  recordedClipVerdict,
+  recordedClipVerdict, CLIP_SHORT_FRACTION,
 } from '../lib/videoCapture';
 import { Icon, type IconName } from './Icon';
 
@@ -2765,16 +2765,12 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
         {nativeOnly && <p className="text-xs text-zinc-400" data-testid="photo-native-note">{t.task.inAppCameraUnavailable}</p>}
       </>
     ) : (
-      <>
-        <Button variant={file ? 'ghost' : 'primary'} disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
-          {file ? t.task.retakePhoto : t.task.takePhoto}
-        </Button>
-        {/* The phone's own camera stays one tap away (camera-switch D1). */}
-        <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-native"
-          className={`${TAP_TARGET} w-full text-center text-[13px] font-medium text-zinc-400 underline underline-offset-2`}>
-          {t.task.usePhoneCamera}
-        </button>
-      </>
+      // ONE capture button (issue 20, Ahiya 2026-10-06): a second "use the phone's camera" link
+      // read as two buttons doing the same thing. The phone's camera is the automatic fallback
+      // when the in-app one cannot open (onFallback -> nativeOnly), so nobody loses it.
+      <Button variant={file ? 'ghost' : 'primary'} disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
+        {file ? t.task.retakePhoto : t.task.takePhoto}
+      </Button>
     )
   );
   return (
@@ -3289,8 +3285,9 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
     // 'short' is not an error - it is sendable, and saying so in the alert colour
     // would read as a refusal. Only a far miss blocks.
     setErr(recordedClipVerdict(seconds, minSeconds) === 'too-short'
-      ? t.task.videoTooShort({ sec: minSeconds })
+      ? tooShortWhy(seconds)
       : '');
+    setSendRefusal('');
     setBlob(out);
     setPreview(URL.createObjectURL(out));
     setMode('review');
@@ -3620,6 +3617,17 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
     onCapturedRef.current?.(ready, mimeRef.current);
   }, [blob, clipTooShort]);
   const canSubmit = !!blob && !busy && !clipTooShort;
+  // Issue 22 (Ahiya, 2026-10-06): a too-short clip used to grey the send button out, so a press
+  // did nothing and said nothing. The button stays pressable and ANSWERS with the numbers: how long
+  // the clip is, what the mission asks, and from what length a clip can still be sent.
+  const [sendRefusal, setSendRefusal] = useState('');
+  function tooShortWhy(seconds: number | undefined): string {
+    return t.task.videoTooShortWhy({
+      have: Math.max(0, Math.round(seconds ?? 0)),
+      need: minSeconds,
+      from: Math.ceil(minSeconds * CLIP_SHORT_FRACTION),
+    });
+  }
   const autoLength = autoApproveLengthVerdict(lengthSeconds, smart);
   const shortBy = Math.max(0, minSeconds - elapsed);
 
@@ -3788,10 +3796,15 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
           ) : (
             <Button variant="ghost" disabled={busy || opening} onClick={() => void openCamera()}>{t.task.reRecord}</Button>
           )}
-          <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current, lengthSeconds)}>
+          <Button disabled={!blob || busy} data-testid="video-submit" onClick={() => {
+            if (!blob) return;
+            if (clipTooShort) { setSendRefusal(tooShortWhy(clipSeconds)); return; }
+            if (canSubmit) onSubmit(blob, mimeRef.current, lengthSeconds);
+          }}>
             {working ? t.task.working : t.task.submitVideo}
           </Button>
         </div>
+        {sendRefusal && <p role="alert" className="text-ink-alert text-sm" data-testid="video-too-short-why">{sendRefusal}</p>}
         {isUploaded?.(blob)
           ? <p className="text-xs text-zinc-400" data-testid="video-already-up">{t.task.videoAlreadyUp}</p>
           : <SendEstimate bytes={blob.size} />}

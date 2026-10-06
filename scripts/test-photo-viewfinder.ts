@@ -28,7 +28,10 @@ check('the selfie preview is mirrored, the saved still is not', /shouldMirror\(f
 check('the photo opens on choice > mission default > rear', /initialFacing\(\{ explicit: readCameraChoice\(/.test(vf));
 check('a switch remembers the choice for the run', /writeCameraChoice\(/.test(vf));
 check('the still goes through the SAME pipeline as a native capture', /acceptPhoto\(file\)/.test(tr) && /async function acceptPhoto\(/.test(tr));
-check('the native camera stays reachable from the photo mission', /data-testid="photo-native"/.test(tr));
+// Issue 20 (Ahiya, 2026-10-06): a second "use the phone's camera" link beside "take a photo" read
+// as two buttons doing the same thing. The phone camera is now ONLY the automatic fallback.
+check('one capture button: no separate phone-camera link', !/data-testid="photo-native"/.test(tr));
+check('the phone camera is still the fallback when the in-app camera fails', /onFallback=\{\(\) => \{[^}]*setNativeOnly\(true\)/.test(tr));
 
 console.log(failures === 0 ? '\nphoto viewfinder: all passed' : `\nphoto viewfinder: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);
