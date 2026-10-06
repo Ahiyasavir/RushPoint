@@ -544,8 +544,12 @@ const HE = {
     },
     photoReview: 'בדיקת תמונות',
     noSubmissions: 'אין הגשות ממתינות.',
-    reviewAlarm: ({ n, seconds }: { n: number; seconds: number }) =>
-      (n > 1 ? `${n} הגשות מחכות לבדיקה, הוותיקה כבר ${seconds} שניות` : `הגשה מחכה לבדיקה כבר ${seconds} שניות`),
+    // Past 90 seconds the wait reads in minutes: "1877 שניות" was a number nobody can read at a glance.
+    reviewAlarm: ({ n, seconds }: { n: number; seconds: number }) => {
+      const m = Math.round(seconds / 60);
+      const wait = seconds < 90 ? `${seconds} שניות` : (m === 1 ? 'דקה' : `${m} דקות`);
+      return n > 1 ? `${n} הגשות מחכות לבדיקה, הוותיקה כבר ${wait}` : `הגשה מחכה לבדיקה כבר ${wait}`;
+    },
     reviewAlarmMute: 'השתקה לחמש דקות',
     reviewAlarmMuted: 'מושתק',
     taskLabel: 'משימה',
@@ -1643,8 +1647,11 @@ const EN: typeof HE = {
     },
     photoReview: 'Photo review',
     noSubmissions: 'No submissions waiting.',
-    reviewAlarm: ({ n, seconds }: { n: number; seconds: number }) =>
-      (n > 1 ? `${n} submissions waiting for review, the oldest for ${seconds}s` : `A submission has waited ${seconds}s for review`),
+    reviewAlarm: ({ n, seconds }: { n: number; seconds: number }) => {
+      const m = Math.round(seconds / 60);
+      const wait = seconds < 90 ? `${seconds}s` : (m === 1 ? 'a minute' : `${m} minutes`);
+      return n > 1 ? `${n} submissions waiting for review, the oldest for ${wait}` : `A submission has waited ${wait} for review`;
+    },
     reviewAlarmMute: 'Mute for 5 minutes',
     reviewAlarmMuted: 'Muted',
     taskLabel: 'mission',
