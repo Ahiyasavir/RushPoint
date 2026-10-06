@@ -158,6 +158,9 @@ export const DELIBERATELY_EXCLUDED_GAME_KEYS = [
   // game-share-link: the "run only" lock of a shared launch copy. Written only by launchSharedRun;
   // a file must neither carry nor strip it (exportGameFile already refuses a locked copy).
   'sharedLaunch',
+  // Issue 42: the host sheet's fill-ins (an emergency phone, staff names, notes) are the owner's
+  // paperwork for one day, and a game file is made to be handed to someone else.
+  'hostSheetFields',
 ] as const satisfies readonly (keyof Game)[];
 
 export const EXPORTED_STAGE_KEYS = [

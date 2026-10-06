@@ -150,7 +150,7 @@ export interface HostSheet {
    * all (arrival, self report, a photo judged by approval); the page says how it
    * counts instead. `{ kind: 'missing' }` is kept for a key that should exist.
    */
-  answerRows: { number: number; title: string; completion: HostCompletion; answer: HostAnswer | null }[];
+  answerRows: { number: number; title: string; completion: HostCompletion; mediaKind: HostTaskCard['mediaKind']; answer: HostAnswer | null }[];
   /** The street map: tiles and numbered markers (change: host-sheet-street-map). Null when off or nothing is located. */
   map: PrintMapLayout | null;
   /** "Where is this": the same spot three zoom levels out, the detail frame marked
@@ -464,7 +464,9 @@ export function buildHostSheet(gameIn: unknown, input: BuildHostSheetInput): Hos
   const cards = stages.flatMap((s) => s.cards);
 
   const answerRows = answersOn
-    ? cards.map((c) => ({ number: c.number, title: c.title, completion: c.completion, answer: c.answer }))
+    // mediaKind rides along so a video mission reads "film a video" in the table, not "take a photo"
+    // (found printing the 6.10 sheet: every media row said photo).
+    ? cards.map((c) => ({ number: c.number, title: c.title, completion: c.completion, mediaKind: c.mediaKind, answer: c.answer }))
     : [];
 
   // The street map: every located station, framed, north up (change: host-sheet-street-map).

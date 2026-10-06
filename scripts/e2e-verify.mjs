@@ -1985,6 +1985,23 @@ async function main() {
     JSON.stringify(ins));
   check('non-https primer image is stripped on echo', ins?.imageUrl === undefined, JSON.stringify(ins?.imageUrl));
 
+  // Issues 42/43: the host sheet's fill-ins are stored on the game, cleaned, and never reach a player.
+  await creator.call('updateGame', { gameId: gGI, hostSheetFields: {
+    date: '  14.10  ', emergency: '050-0000000', evil: 'dropped', scheduleOn: true,
+    schedule: [{ time: '09:00', what: 'Gathering' }, { time: '', what: '' }],
+  } });
+  const { game: gHS } = await creator.call('getGame', { gameId: gGI });
+  check('updateGame stores the host sheet fill-ins cleaned',
+    gHS?.hostSheetFields?.date === '14.10' && gHS?.hostSheetFields?.evil === undefined
+      && gHS?.hostSheetFields?.scheduleOn === true && gHS?.hostSheetFields?.schedule?.length === 1,
+    JSON.stringify(gHS?.hostSheetFields));
+  const sHS = await playerGI.call('getMyTeamState', { code: cGI });
+  check('the host sheet fill-ins never reach a player', sHS?.game?.hostSheetFields === undefined
+    && !JSON.stringify(sHS).includes('050-0000000'), 'leaked');
+  await creator.call('updateGame', { gameId: gGI, hostSheetFields: { date: '' } });
+  const { game: gHS2 } = await creator.call('getGame', { gameId: gGI });
+  check('an all-blank host sheet clears the field', gHS2?.hostSheetFields === undefined, JSON.stringify(gHS2?.hostSheetFields));
+
   // A game with NO primer echoes instructions === null.
   const { gameId: gGI2 } = await creator.call('createGame', { title: 'No Primer Game', mode: 'individual' });
   await creator.call('updateGame', {

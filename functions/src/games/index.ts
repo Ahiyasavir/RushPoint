@@ -51,6 +51,7 @@ import {
   normalizeTags,
   propagateGameTagsToTasks,
   cleanGameInstructions,
+  cleanHostSheetFields,
   FIRESTORE_PATHS,
   // Game trash / tombstone lifecycle (change: recoverable-game-deletion).
   type Run,
@@ -428,6 +429,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // Test mode (change: test-mode-hidden-scoring). Destructured the same way for the
   // same reason: a plain optional boolean the Builder owns.
   const { testMode } = data as { testMode?: boolean };
+  const { hostSheetFields } = data as { hostSheetFields?: unknown };
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
 
@@ -567,6 +569,12 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // Test mode (change: test-mode-hidden-scoring): a play-behaviour flag, NOT gallery
   // data — deliberately not mirrored into publicGames, like the reveal flag above.
   if (testMode !== undefined) updates.testMode = testMode === true;
+  // Host sheet fill-ins (issues 42, 43): clean-or-clear, like the primer below. Owner paperwork:
+  // deliberately NOT mirrored into publicGames.
+  if (hostSheetFields !== undefined) {
+    const cleaned = cleanHostSheetFields(hostSheetFields);
+    updates.hostSheetFields = cleaned ?? (admin.firestore.FieldValue.delete() as unknown as undefined);
+  }
   // Game intro primer (change: game-intro-instructions): clean-or-clear, mirroring
   // integrationWebhookUrl. A defined primer with content is stored cleaned (https
   // image guard lives in cleanGameInstructions); defined + empty ⇒ delete the field.
@@ -920,7 +928,9 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
   // the copy (esp. when duplicating ANOTHER creator's public game). Also reset
   // marketplace opt-in so a copy isn't silently exposed. (change: chat-integrations /
   // marketplace-instant-play).
-  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, ...safeSource } = sourceGame;
+  // Same for the host sheet fill-ins (issue 42): an emergency phone, staff names and notes are the
+  // source owner's paperwork, and a share link or a public game can be duplicated by anyone.
+  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, hostSheetFields: _hs, ...safeSource } = sourceGame;
   // Re-host the creator-authored media (change: task-media-durability). Copying the
   // DOCUMENT alone left the copy's tasks addressing `gameMedia/{srcOwner}/games/{srcGame}/…`
   // — the SOURCE game's folder. It rendered fine until the source was purged, at which

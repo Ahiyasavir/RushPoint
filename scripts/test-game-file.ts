@@ -511,6 +511,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     autoApproveAllMedia: true, autoStartLateJoiners: true, requireAllMembersOnline: true,
     sharedLaunch: true, isTemplate: true, pinnedFirst: true, templateEmoji: true, templateGenre: true,
     templateGroupKey: true, templateHidden: true, templateLang: true, templateOrder: true,
+    // Issue 42: the host sheet fill-ins (EXCLUDED: one day's paperwork, not part of the game).
+    hostSheetFields: true,
   };
 
   const classify = (

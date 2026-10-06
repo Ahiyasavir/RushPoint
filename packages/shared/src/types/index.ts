@@ -1,5 +1,6 @@
 import type { StaffCapability } from '../staffCapabilities';
 import type { MediaKind } from '../mediaKinds';
+import type { HostSheetFields } from '../hostSheetFields';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // @rushpoint/shared — v2 Platform types
@@ -704,6 +705,10 @@ export interface Game {
   // Optional: absent games render no primer. Not secret — echoed to participants
   // and, when public, denormalized into publicGames. Cosmetic; never gates play.
   instructions?: GameInstructions;
+  // What the organizer typed into the host sheet (issues 42, 43): the day's details, notes and a
+  // schedule, printed filled. Owner-only paperwork: written by updateGame through
+  // cleanHostSheetFields, never by the Builder's autosave, never published or sent to players.
+  hostSheetFields?: HostSheetFields;
   // Staged leaderboard reveal (change: manual-leaderboard-reveal): when true,
   // finalizeRun leaves the final board UNPUBLISHED so players cannot see who won
   // the moment the run ends — the creator reveals it explicitly via
@@ -1802,6 +1807,8 @@ export interface CreateGamePayload {
 
 export interface UpdateGamePayload {
   gameId: string;
+  /** The host sheet's fill-ins (issues 42, 43); written from the host sheet page only. */
+  hostSheetFields?: HostSheetFields;
   title?: string;
   description?: string;
   mode?: GameMode;

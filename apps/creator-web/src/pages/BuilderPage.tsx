@@ -18,6 +18,7 @@ import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWeb
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
 import { defaultCodeCapabilities } from '@rushpoint/shared';
 import { instructionsVideoUrl } from '@rushpoint/shared';
+import { printsUrl } from '../lib/printDocs';
 import { CapabilityChecklist } from '../components/StaffCodesPanel';
 import { resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import {
@@ -1290,6 +1291,19 @@ export default function BuilderPage() {
           </button>
         )}
 
+        {/* Prints (issue 44, Ahiya 2026-10-06: "אני רוצה שהאפשרות להוציא דף מארח תהיה יותר בולטת ולא
+            מוחבאת כל כך, כנל גם להוציא QR קודים"). A visible button, not an item in the File menu:
+            the host sheet, the station QR cards and the join sign are one page with a switch. */}
+        {!isMobile && (
+          <button
+            onClick={() => nav(printsUrl(game.id))}
+            data-testid="builder-prints"
+            className="shrink-0 min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-semibold border border-[--rp-border] text-[--ink-1] hover:bg-[--surface-2] transition-colors inline-flex items-center gap-1.5"
+          >
+            <Icon name="printer" className="w-4 h-4" aria-hidden /> {t.hostSheet.printsButton}
+          </button>
+        )}
+
         {/* Undo / redo — also bound to Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.
             Desktop only: at phone width these live in the header overflow menu
             below (change: builder-simplification-round-3). */}
@@ -1353,13 +1367,6 @@ export default function BuilderPage() {
               className={HEADER_MENU_ITEM_CLASS}
             >
               {t.share.menuLabel}
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => nav(`/host-sheet/${game.id}`)}
-              className={HEADER_MENU_ITEM_CLASS}
-            >
-              {t.hostSheet.menuItem}
             </button>
           </OverflowMenu>
         </div>
@@ -1555,10 +1562,10 @@ export default function BuilderPage() {
               </button>
               <button
                 role="menuitem"
-                onClick={() => nav(`/host-sheet/${game.id}`)}
+                onClick={() => nav(printsUrl(game.id))}
                 className={HEADER_MENU_ITEM_CLASS}
               >
-                {t.hostSheet.menuItem}
+                {t.hostSheet.printsButton}
               </button>
               {/* Quick Setup on a phone (change: quick-setup-reachable). The
                   header pill is desktop-only, so without this entry the flow had

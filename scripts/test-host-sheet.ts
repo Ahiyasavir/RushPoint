@@ -125,6 +125,7 @@ check('the answer table has a row per mission', sheet.answerRows.length === card
 // approval, so the answer table must not call it "missing".
 const photoRow = sheet.answerRows.find((r) => r.number === card('t-photo').number);
 check('a photo mission has no answer key, not a missing one', photoRow?.answer === null && photoRow?.completion === 'media', photoRow);
+check('the answer row knows the kind of a media mission (a video row must not say "take a photo")', photoRow?.mediaKind === card('t-photo').mediaKind && photoRow?.mediaKind !== undefined, photoRow);
 check('an arrival mission has no answer key', sheet.answerRows.find((r) => r.number === card('t-field').number)?.answer === null);
 check('a real missing key is still called missing',
   buildHostSheet({ stages: [{ tasks: [{ id: 'q', title: 'Q', type: 'quiz' }] }] }, { options: ON, ...ctx }).answerRows[0]?.answer?.kind === 'missing');

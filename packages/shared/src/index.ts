@@ -69,6 +69,7 @@ export * from './appCheck';
 export * from './webhookPayload';
 export * from './narrative';
 export * from './gameInstructions';
+export * from './hostSheetFields';
 export * from './movementHeatmap';
 export * from './playerProfile';
 export * from './trackable';

@@ -4,7 +4,7 @@ import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } fr
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, approvedAutomatically, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage, mediaDownloadUrl, approvedAutomatically, skipPreviewLines, type SkipPreviewLine } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -54,7 +54,7 @@ import { buildTeamDossier } from '../lib/teamDossier';
 import TeamPage from '../components/TeamPage';
 import ClipTile from '../components/ClipTile';
 import TeamChatThread from '../components/TeamChatThread';
-import { stationQrCards } from '../lib/stationQrSheet';
+import { printsUrl } from '../lib/printDocs';
 import RunContactsEditor from '../components/RunContactsEditor';
 import QuickActionsBar from '../components/QuickActionsBar';
 import StaffCodesPanel from '../components/StaffCodesPanel';
@@ -2236,6 +2236,14 @@ export default function RunConsolePage() {
             </span>
           </div>
         </div>
+        {/* Prints (issue 44): the host sheet with this run's join code and staff codes, the station QR
+            cards and the join sign, one visible button in the header instead of the last card of
+            "sharing and staff". */}
+        {gameId && runId && (
+          <Button variant="ghost" onClick={() => nav(printsUrl(gameId, runId))} data-testid="console-prints" className="border border-[--rp-border]">
+            <span className="inline-flex items-center gap-2"><Icon name="printer" className="w-4 h-4" aria-hidden />{t.hostSheet.printsButton}</span>
+          </Button>
+        )}
       </div>
 
       {/* ── WHAT NEEDS YOU RIGHT NOW ────────────────────────────────────────────
@@ -2716,80 +2724,16 @@ function StaffInviteCard({ ctx, children }: { ctx: { ownerUid: string; gameId: s
 function StationQrPrint({ gameId, runId }: { gameId: string; runId: string }) {
   const navigate = useNavigate();
   const t = useT();
-  const [busy, setBusy] = useState(false);
-
-  function escapeHtml(s: string): string {
-    return s.replace(/[&<>"']/g, (c) => (
-      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
-    ));
-  }
-
-  async function print() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const { game } = await getGame({ gameId });
-      // One card per code: a station scored BY CODE prints a card for each of its codes, with its
-      // points (lib/stationQrSheet.ts). It used to be left off the sheet entirely.
-      const stations = stationQrCards(game.stages ?? []);
-      if (stations.length === 0) {
-        await dialog.alert(t.runConsole.printQrEmpty);
-        return;
-      }
-      const cards = await Promise.all(stations.map(async (card) => {
-        const code = card.code;
-        const img = await QRCode.toDataURL(buildStationQrPayload(code), { margin: 1, width: 256 });
-        return `
-          <section class="station">
-            <h2 dir="auto">${escapeHtml(card.title)}</h2>
-            ${card.points !== undefined ? `<p class="worth" dir="auto">${escapeHtml(t.runConsole.printQrWorth({ code, n: card.points }))}</p>` : ''}
-            <img src="${img}" alt="" />
-            <p class="fallback">${escapeHtml(t.runConsole.printQrCodeFallback)}</p>
-            <p class="code">${escapeHtml(code)}</p>
-          </section>`;
-      }));
-      const win = window.open('', '_blank');
-      if (!win) {
-        await dialog.alert(t.runConsole.printQrBlocked);
-        return;
-      }
-      win.document.write(`<!doctype html><html><head><meta charset="utf-8" />
-        <title>${escapeHtml(t.runConsole.printQrHeading)}</title>
-        <style>
-          body { font-family: system-ui, sans-serif; margin: 24px; color: #111; }
-          h1 { font-size: 20px; text-align: center; margin-bottom: 24px; }
-          .station { text-align: center; page-break-inside: avoid; margin-bottom: 40px; }
-          .station h2 { font-size: 18px; margin: 0 0 12px; }
-          .station img { width: 256px; height: 256px; }
-          .fallback { font-size: 11px; color: #666; margin: 8px 0 2px; text-transform: uppercase; letter-spacing: 0.1em; }
-          .code { font-family: monospace; font-size: 18px; font-weight: bold; margin: 0; }
-          .worth { font-size: 14px; margin: -6px 0 10px; color: #333; }
-        </style></head><body>
-        <h1>${escapeHtml(t.runConsole.printQrHeading)}</h1>
-        ${cards.join('')}
-      </body></html>`);
-      win.document.close();
-      // Print after the images have loaded.
-      win.focus();
-      win.onload = () => win.print();
-      // onload may already have fired for a fast data: URL sheet.
-      if (win.document.readyState === 'complete') win.print();
-    } catch {
-      await dialog.alert(t.runConsole.printQrBlocked);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  // Both open the prints page (issue 44): the station QR cards are one of its documents now, laid
+  // out for A4 two to a row, instead of a pop-up window a blocker could stop.
   return (
     <PanelShell panel="stationQr">
       <div className="flex flex-wrap gap-2">
-        <Button variant={runActionVariant('printStationQr')} onClick={print} loading={busy}>
+        <Button variant={runActionVariant('printStationQr')} onClick={() => navigate(printsUrl(gameId, runId, 'stations'))}>
           {t.runConsole.printQr}
         </Button>
-        {/* The whole briefing for this run, answers and staff codes included (change: host-sheet). */}
-        <Button variant="ghost" onClick={() => navigate(`/host-sheet/${gameId}?run=${runId}`)}>
-          {t.hostSheet.menuItem}
+        <Button variant="ghost" onClick={() => navigate(printsUrl(gameId, runId))}>
+          {t.hostSheet.printsButton}
         </Button>
       </div>
     </PanelShell>
