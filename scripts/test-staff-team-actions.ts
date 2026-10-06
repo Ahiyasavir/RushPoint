@@ -40,7 +40,7 @@ check('hasMoreActions: routing alone is enough', hasMoreActions(staffTeamActions
 check('hasMoreActions: hold alone is not', hasMoreActions(staffTeamActions({ status: 'started' }, { score: false, hold: true, route: false })) === false);
 check('hasMoreActions: junk is not', hasMoreActions(null as never) === false);
 const card = src.slice(src.indexOf('function TeamOpsCard('), src.indexOf('\nfunction StaffChatSection('));
-check('the card keeps a per-card actionsOpen state', /const \[actionsOpen, setActionsOpen\] = useState\(false\)/.test(card));
+check('the card keeps a per-card actionsOpen state (closed on a phone, open in the computer team window)', /const \[actionsOpen, setActionsOpen\] = useState\(startOpen\)/.test(card) && /startOpen = false/.test(card));
 check('an open panel keeps the actions shown', /const showMore = actionsOpen \|\| openPanel !== null/.test(card));
 check('the score steps render only when the actions are shown', /\{showMore && acts\.score && <div className="flex items-center gap-4/.test(card));
 check('send to, skip, send back and custom amount sit behind showMore',

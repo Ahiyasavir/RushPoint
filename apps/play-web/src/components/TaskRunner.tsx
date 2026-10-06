@@ -1871,8 +1871,18 @@ function TimeLimitCountdown({ leftMs, totalMs, onTimeUp, paused = false }: {
   // Re-anchored every time a fresh value arrives (each poll) AND when a hold starts or ends, which
   // keeps the display honest. Derived state, adjusted during render (React's documented pattern for
   // "reset on prop change").
-  const [anchor, setAnchor] = useState(() => ({ leftMs, at: Date.now(), paused }));
-  if (anchor.leftMs !== leftMs || anchor.paused !== paused) setAnchor({ leftMs, at: Date.now(), paused });
+  // `src` is the server value the anchor was taken from; `leftMs` on the anchor is what to count
+  // down FROM. They differ only when a pause starts: then the anchor keeps the value ON SCREEN, not the
+  // last server value, which is up to one poll older and made the clock jump UP at the tap (issue 46,
+  // measured in a browser: 4:53 on screen became 4:55 frozen).
+  const [anchor, setAnchor] = useState(() => ({ leftMs, src: leftMs, at: Date.now(), paused }));
+  if (anchor.paused !== paused) {
+    const nowMs = Date.now();
+    setAnchor({
+      leftMs: paused && !anchor.paused ? countdownLeftMs(anchor.leftMs, anchor.at, nowMs) : leftMs,
+      src: leftMs, at: nowMs, paused,
+    });
+  } else if (anchor.src !== leftMs) setAnchor({ leftMs, src: leftMs, at: Date.now(), paused });
   const [now, setNow] = useState(() => Date.now());
   const fired = useRef(false);
   const left = paused
