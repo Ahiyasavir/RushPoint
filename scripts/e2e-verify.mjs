@@ -1956,6 +1956,8 @@ async function main() {
       body: 'Walk to each pin and check in.',
       bodyHe: 'לכו לכל נקודה ובצעו צ׳ק־אין.',
       imageUrl: 'http://insecure.example.com/diagram.png', // non-https → must be stripped
+      // Issue 48: a YouTube video as the instructions, given as a share link.
+      videoUrl: 'https://youtu.be/dQw4w9WgXcQ?si=abc',
     },
     stages: [{
       id: 'st-gi', order: 0, title: 'Go', isFinal: true,
@@ -1969,6 +1971,11 @@ async function main() {
   const playerGI = makeParty('playerGI');
   await signInAnonymously(playerGI.auth);
   await playerGI.call('joinRun', { code: cGI, displayName: 'Primer Player' });
+  // Issue 48: the video is there BEFORE the start, which is when players watch it.
+  const sPre = await playerGI.call('getMyTeamState', { code: cGI });
+  check('the instructions video reaches the phone before the start, as the canonical embed URL',
+    sPre?.game?.instructions?.videoUrl === 'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    JSON.stringify(sPre?.game?.instructions));
   await creator.call('startTeams', { gameId: gGI, runId: rGI });
 
   const sGI = await playerGI.call('getMyTeamState', { code: cGI });

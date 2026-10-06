@@ -9,6 +9,7 @@ import { Button, Card, Screen, Skeleton, TagChips } from '../components/ui';
 import { useT } from '../i18nContext';
 import { creatorUrl } from '../lib/creatorUrl';
 import { Icon, type IconName } from '../components/Icon';
+import { InstructionsVideo } from '../components/InstructionsVideo';
 
 
 export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gameId: string; onPlay: () => void; onInstantPlay: (s: Session) => void }) {
@@ -153,6 +154,8 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             <div className="text-xs font-bold text-ink-fire uppercase tracking-wide mb-1">
               {game.instructions!.title ?? t.play.howToPlayTitle}
             </div>
+            {/* Issue 48: the explainer video, when the game has one. */}
+            <InstructionsVideo instructions={game.instructions} className="rounded-lg mb-2" />
             {localizedInstructionsBody(game.instructions, lang) && (
               <p dir="auto" className="text-sm text-zinc-400 whitespace-pre-line leading-relaxed">
                 {localizedInstructionsBody(game.instructions, lang)}

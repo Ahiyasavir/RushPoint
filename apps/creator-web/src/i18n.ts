@@ -2627,6 +2627,10 @@ const HE = {
     instructionsBodyLabel: 'הסבר (אנגלית)',
     instructionsBodyHeLabel: 'הסבר (עברית)',
     instructionsImageLabel: 'תמונה (קישור מאובטח בלבד)',
+    instructionsVideoLabel: 'סרטון הסבר מיוטיוב',
+    instructionsVideoHint: 'הדביקו קישור ליוטיוב. השחקנים יוכלו לצפות בו במסך ההמתנה לפני ההזנקה ובכל רגע במשחק.',
+    instructionsVideoInvalid: 'זה לא נראה כמו קישור לסרטון ביוטיוב. העתיקו את הקישור מכפתור "שיתוף" ביוטיוב.',
+    instructionsVideoRemove: 'הסרה',
     // Presentation (change: surface-invisible-fields): תמונת נושא ומיתוג היו מוצגים
     // לשחקנים אבל לא היה שום מקום להזין אותם.
     presentationSectionTitle: 'מראה ומיתוג',
@@ -5892,6 +5896,10 @@ const EN: typeof HE = {
     instructionsBodyLabel: 'Body (English)',
     instructionsBodyHeLabel: 'Body (Hebrew)',
     instructionsImageLabel: 'Image (https link only)',
+    instructionsVideoLabel: 'Explainer video from YouTube',
+    instructionsVideoHint: 'Paste a YouTube link. Players can watch it on the waiting screen before the start, and any time during the game.',
+    instructionsVideoInvalid: 'That does not look like a YouTube video link. Copy the link from the "Share" button on YouTube.',
+    instructionsVideoRemove: 'Remove',
     // Presentation (change: surface-invisible-fields): the cover image and the brand
     // were rendered to players and had nowhere to be entered.
     presentationSectionTitle: 'Look and branding',

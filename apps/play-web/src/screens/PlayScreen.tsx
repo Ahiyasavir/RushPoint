@@ -11,6 +11,7 @@ import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useWideLayout } from '../lib/useWideLayout';
 import { completionFinishesRace } from '../lib/finishLine';
+import { InstructionsVideo, instructionsEmbedSrc } from '../components/InstructionsVideo';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { syncErrorVerdict } from '../lib/syncError';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
@@ -1129,7 +1130,16 @@ function HowToPlayCard({ instructions, lang }: { instructions?: GameInstructions
   const body = localizedInstructionsBody(ins, lang);
   return (
     <div className="w-full max-w-md mt-4 rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden text-start">
-      {ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-40 object-cover" />}
+      {/* Issue 48: the video leads, with a line that says why it is there, because the waiting
+          screen is exactly when players should watch it. */}
+      {instructionsEmbedSrc(ins) ? (
+        <>
+          <p className="px-4 pt-3 pb-2 text-sm font-bold text-ink-fire inline-flex items-center gap-1.5">
+            <Icon name="play" className="w-4 h-4" aria-hidden />{t.play.howToPlayWatchFirst}
+          </p>
+          <InstructionsVideo instructions={ins} />
+        </>
+      ) : ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-40 object-cover" />}
       <div className="p-4 space-y-2">
         <h3 className="text-base font-bold text-zinc-100" dir="auto">{ins.title ?? t.play.howToPlayTitle}</h3>
         {body && <p className="text-sm text-zinc-300 whitespace-pre-line" dir="auto">{body}</p>}
@@ -1169,7 +1179,9 @@ function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructio
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
           <EscapeKey onEscape={() => setOpen(false)} />
           <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
-            {ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-48 object-cover" />}
+            {instructionsEmbedSrc(ins)
+              ? <InstructionsVideo instructions={ins} />
+              : ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-48 object-cover" />}
             <div className="p-5 space-y-3">
               <h2 id={titleId} className="text-lg font-bold text-zinc-100" dir="auto">{ins.title ?? t.play.howToPlayTitle}</h2>
               {body && <p className="text-sm text-zinc-300 whitespace-pre-line" dir="auto">{body}</p>}

@@ -864,6 +864,8 @@ const HE = {
     storyContinue: 'להמשיך',
     howToPlay: 'איך משחקים',
     howToPlayTitle: 'איך משחקים',
+    howToPlayVideo: 'סרטון הסבר',
+    howToPlayWatchFirst: 'צפו בסרטון לפני שמתחילים',
     howToPlayClose: 'הבנתי',
     score: 'ניקוד',
     // Test mode (change: test-mode-hidden-scoring): replaces the score counter.
@@ -1913,6 +1915,8 @@ const EN: typeof HE = {
     storyContinue: 'Continue',
     howToPlay: 'How to play',
     howToPlayTitle: 'How to play',
+    howToPlayVideo: 'Explainer video',
+    howToPlayWatchFirst: 'Watch the video before you start',
     howToPlayClose: 'Got it',
     score: 'Score',
     // Test mode (change: test-mode-hidden-scoring): replaces the score counter.

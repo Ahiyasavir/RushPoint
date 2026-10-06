@@ -17,6 +17,7 @@ import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWeb
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
 import { defaultCodeCapabilities } from '@rushpoint/shared';
+import { instructionsVideoUrl } from '@rushpoint/shared';
 import { CapabilityChecklist } from '../components/StaffCodesPanel';
 import { resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import {
@@ -2248,8 +2249,61 @@ function InstructionsField({ game, patch, qsAnchor }: {
             dir="ltr"
           />
         </div>
+        <InstructionsVideoField value={ins.videoUrl ?? ''} onCommit={(videoUrl) => set({ videoUrl: videoUrl || undefined })} />
       </div>
     </Advanced>
+  );
+}
+
+// A YouTube video as the instructions (issue 48, Ahiya 2026-10-06: "שאני אוכל להכניס לינק מיוטיוב והם
+// ממש יוכלו לצפות בסרטון לפני ההזנקה"). The field keeps what the creator typed; only a link that is
+// really a YouTube video (any share form) or an empty field is committed, as the canonical embed URL,
+// so autosave never sends a link the server would drop. The preview shows the exact player view.
+function InstructionsVideoField({ value, onCommit }: { value: string; onCommit: (embedUrl: string) => void }) {
+  const b = useT().builder;
+  const [raw, setRaw] = useState(value);
+  // Resync only when the stored value moves from outside (undo, load), never on the creator's own
+  // keystrokes: what this field last committed is remembered, and only a different value replaces raw.
+  const committed = useRef(value);
+  useEffect(() => { if (value !== committed.current) { committed.current = value; setRaw(value); } }, [value]);
+  const embed = instructionsVideoUrl({ videoUrl: raw });
+  const invalid = raw.trim() !== '' && !embed;
+  function change(next: string) {
+    setRaw(next);
+    const e = instructionsVideoUrl({ videoUrl: next });
+    if (next.trim() === '') { committed.current = ''; onCommit(''); }
+    else if (e) { committed.current = e; onCommit(e); }
+  }
+  return (
+    <div>
+      <Label>{b.instructionsVideoLabel}</Label>
+      <p className="mb-1.5 text-xs text-[--ink-3]">{b.instructionsVideoHint}</p>
+      <div className="flex items-center gap-2">
+        <Input
+          type="url"
+          value={raw}
+          onChange={(e) => change(e.target.value)}
+          placeholder="https://youtu.be/…" // i18n-ignore — a sample link, not translatable copy
+          dir="ltr"
+          aria-invalid={invalid || undefined}
+          data-testid="instructions-video"
+        />
+        {raw.trim() !== '' && (
+          <button type="button" onClick={() => change('')}
+            className="shrink-0 min-h-[44px] px-3 rounded-lg text-sm text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2]">
+            {b.instructionsVideoRemove}
+          </button>
+        )}
+      </div>
+      {invalid && <p role="alert" className="mt-1.5 text-xs text-ink-alert">{b.instructionsVideoInvalid}</p>}
+      {embed && (
+        <div className="mt-2 relative w-full max-w-md overflow-hidden rounded-xl border border-[--rp-border] bg-black" style={{ aspectRatio: '16 / 9' }}>
+          <iframe src={embed} title={b.instructionsVideoLabel} loading="lazy"
+            allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+            allowFullScreen className="absolute inset-0 h-full w-full" />
+        </div>
+      )}
+    </div>
   );
 }
 

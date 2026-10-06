@@ -61,6 +61,19 @@ const full: GameInstructions = {
 };
 eq(cleanGameInstructions(full), full, 'a full valid primer is preserved verbatim');
 
+// ── videoUrl (issue 48, Ahiya 2026-10-06: a YouTube video as the instructions, watched before the
+// start). Every common link form is stored as the canonical embed URL; anything else is dropped.
+const EMBED = 'https://www.youtube.com/embed/dQw4w9WgXcQ';
+eq(cleanGameInstructions({ videoUrl: 'https://youtu.be/dQw4w9WgXcQ' })?.videoUrl, EMBED, 'youtu.be link → embed');
+eq(cleanGameInstructions({ videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5s' })?.videoUrl, EMBED, 'watch?v= link → embed');
+eq(cleanGameInstructions({ videoUrl: 'https://youtube.com/shorts/dQw4w9WgXcQ' })?.videoUrl, EMBED, 'shorts link → embed');
+eq(cleanGameInstructions({ videoUrl: EMBED })?.videoUrl, EMBED, 'a stored embed URL survives a re-save unchanged');
+eq(cleanGameInstructions({ title: 'T', videoUrl: 'https://vimeo.com/1234' }), { title: 'T' }, 'a non-YouTube link is dropped');
+eq(cleanGameInstructions({ videoUrl: '   ' }), undefined, 'an empty link clears');
+eq(cleanGameInstructions({ videoUrl: 'https://youtu.be/dQw4w9WgXcQ' }), { videoUrl: EMBED }, 'a video alone is a primer');
+ok(gameInstructionsHasContent({ videoUrl: EMBED }), 'video present → true');
+ok(!gameInstructionsHasContent({ videoUrl: 'nope' }), 'an unusable video alone → false');
+
 // ── gameInstructionsHasContent ────────────────────────────────────────────────
 ok(!gameInstructionsHasContent(undefined), 'undefined → false');
 ok(!gameInstructionsHasContent({}), 'empty → false');

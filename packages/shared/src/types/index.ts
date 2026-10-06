@@ -549,6 +549,9 @@ export interface GameInstructions {
   body?: string;     // English / default primer text (multiline)
   bodyHe?: string;   // Hebrew primer (falls back to `body`)
   imageUrl?: string; // https-only cosmetic image (a mechanics diagram, etc.)
+  /** A YouTube video players watch before the start (issue 48, 2026-10-06). Stored as the canonical
+   *  `https://www.youtube.com/embed/<id>`; any other link is dropped by cleanGameInstructions. */
+  videoUrl?: string;
 }
 
 export interface Stage {
