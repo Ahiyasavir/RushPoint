@@ -545,10 +545,11 @@ describe('consoleColumnCount / sectionColumnCount', () => {
     expect(consoleColumnCount({ medium: true, wide: true })).toBe(3);
   });
 
-  it('gives the section pane one lane less than the full width zone, never zero', () => {
+  // The pane is full width since the rail moved to the top: it gets every lane (2026-10-07).
+  it('gives the section pane the same lanes as the page', () => {
     expect(sectionColumnCount(1)).toBe(1);
-    expect(sectionColumnCount(2)).toBe(1);
-    expect(sectionColumnCount(3)).toBe(2);
+    expect(sectionColumnCount(2)).toBe(2);
+    expect(sectionColumnCount(3)).toBe(3);
   });
 });
 

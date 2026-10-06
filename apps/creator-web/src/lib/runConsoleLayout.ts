@@ -607,9 +607,15 @@ export function consoleColumnCount(o: { medium: boolean; wide: boolean }): Colum
   return o.wide ? 3 : 2;
 }
 
-/** The section pane sits beside the rail, so it carries one lane less. */
+/**
+ * The section pane's lanes. It used to carry one lane less because it sat BESIDE a vertical rail;
+ * the rail moved above the pinned zone (run-console-tabs-up-front) and the pane is full width, but
+ * the subtraction stayed, so at 1440px every section was ONE column of full-width panels and the
+ * console measured 2,805px tall (2026-10-07, Ahiya: no scrolling on a computer). Same lanes as the
+ * page now.
+ */
 export function sectionColumnCount(columns: ColumnCount): ColumnCount {
-  return Math.max(1, columns - 1) as ColumnCount;
+  return columns;
 }
 
 // Static class strings only: Tailwind cannot see `grid-cols-${n}`. Every lookup

@@ -37,7 +37,7 @@ import {
 import { buildRunMediaGallery } from '../lib/runMediaGallery';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
-import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
+import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 // send-team-back: the "where to?" picker and what it may offer.
 import SendBackPicker, { type SendBackChoice } from '../components/SendBackPicker';
 import RoutePicker from '../components/RoutePicker';
@@ -2631,9 +2631,17 @@ function PanelShell({ panel, badge, actions, tone, children }: {
 }
 
 /** The one empty state. "Nothing here" must never look like "this broke". */
+// One quiet line (2026-10-07): the panel's own header already says what the panel is, so a big icon,
+// the title AGAIN and 64px of padding above and below made every empty panel ~330px tall and pushed
+// the console into a long scroll on a computer.
 function PanelEmpty({ panel }: { panel: PanelId }) {
   const { meta, copy } = usePanelCopy(panel);
-  return <EmptyState icon={meta.icon} title={copy.title} body={copy.empty} />;
+  return (
+    <p className="flex items-center gap-2 rounded-xl bg-[--surface-2] px-3 py-3 text-sm text-[--ink-3]" data-testid="panel-empty">
+      <Icon name={meta.icon} className="w-4 h-4 shrink-0" aria-hidden />
+      <span>{copy.empty}</span>
+    </p>
+  );
 }
 
 // Access code + shareable join link + QR — participants scan to land in the app
