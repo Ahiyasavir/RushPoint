@@ -88,6 +88,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   // Issue 46: the instant the race-ending mission was sent; the race clock stands still from it.
   const [raceFrozenAt, setRaceFrozenAt] = useState<number | null>(null);
+  // Fail open: a race clock frozen at the tap that is NOT followed by the finish (an unexpected server
+  // answer, a mission that turned out not to be the last) runs again after 15 s instead of standing
+  // still for the rest of the game.
+  const finishedNow = state?.team?.status === 'finished';
+  useEffect(() => {
+    if (raceFrozenAt === null || finishedNow) return undefined;
+    const id = window.setTimeout(() => setRaceFrozenAt(null), 15_000);
+    return () => window.clearTimeout(id);
+  }, [raceFrozenAt, finishedNow]);
   const timer = useRef<number>();
   // Territory zones (change: fix-territory-map-visibility): fetched once here so the
   // SAME list feeds both the NavMap circles and the ZonesPanel list, and both
