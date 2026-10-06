@@ -129,3 +129,40 @@ export function adjustedElapsedSeconds(rawSeconds: number, excludedMs: number): 
   const exc = Number.isFinite(excludedMs) && excludedMs > 0 ? excludedMs : 0;
   return Math.max(0, rawSeconds - exc / 1000);
 }
+
+/** The fields of a team document the "is its clock stopped?" rule reads. */
+export interface HeldClockRecord {
+  held?: boolean;
+  heldAt?: string;
+}
+
+/**
+ * The team's clock "now": the real now while it plays, the instant it was HELD while held
+ * (Ahiya, 2026-10-06: "השעון לא עוצר כשאני עוצר קבוצה"). Every clock a person sees (a mission's
+ * countdown, the race clock, "on this mission for N minutes") reads this instead of `now`, so a held
+ * team's clocks stand still and resume from where they stopped; the server already moves a mission's
+ * start forward by the hold on resume, so nothing jumps.
+ *
+ * Total and fail OPEN: an unreadable stamp means "not frozen" (never freeze a clock on garbage), and
+ * a hold stamped after `now` never runs a clock forward.
+ */
+export function teamClockNowMs(team: HeldClockRecord | null | undefined, nowMs: number): number {
+  if (!team || team.held !== true) return nowMs;
+  const at = typeof team.heldAt === 'string' ? Date.parse(team.heldAt) : NaN;
+  if (!Number.isFinite(at)) return nowMs;
+  return Math.min(nowMs, at);
+}
+
+/**
+ * The race clock a player sees: time since the start, minus every finished hold (`heldMs`), standing
+ * still while held. Never negative; 0 before the start.
+ */
+export function raceElapsedMs(
+  team: HeldClockRecord & HeldTimingRecord & { startedAt?: string | null },
+  nowMs: number,
+): number {
+  const start = typeof team?.startedAt === 'string' ? Date.parse(team.startedAt) : NaN;
+  if (!Number.isFinite(start)) return 0;
+  const raw = teamClockNowMs(team, nowMs) - start;
+  return Math.max(0, raw - teamHeldExclusionMs(team));
+}

@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
-import { gateSatisfiedTaskIds, senderQuiet, toTelHref } from '@rushpoint/shared';
+import { gateSatisfiedTaskIds, senderQuiet, toTelHref, raceElapsedMs } from '@rushpoint/shared';
 import { claimController } from '../services/calls';
 import { haptic } from '../lib/haptics';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
@@ -626,7 +626,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <Screen>
         <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
         <Header game={game} score={team.score} accent={accent} onLeave={leave}
-          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
+          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3" data-testid="team-removed">
           <div className="flex justify-center text-ink-alert" aria-hidden><Icon name="lock" className="w-12 h-12" /></div>
           <h2 className="text-xl font-bold">{t.play.removedTitle}</h2>
@@ -673,7 +673,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <Screen>
         <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
         <Header game={game} score={team.score} accent={accent} onLeave={leave}
-          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
+          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team} />
         <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={game.testMode !== true} activeTaskId={team.activeTaskId ?? null} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="flex justify-center text-ink-amber"><Icon name={hold.held ? 'pause' : 'hourglass'} className="w-12 h-12" /></div>
@@ -824,7 +824,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           has neither, so the button would draw blanks. */}
       {sosSheet}
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
-        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
+        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
         callContact={state.contacts?.[0]}
         isTestDrive={session.isTestDrive}
@@ -1564,7 +1564,7 @@ function LeaveMenu({ onLeave }: { onLeave: () => void }) {
 }
 
 function Header({
-  game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy,
+  game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, hold, onSos, sosBusy,
   isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing, phones, callContact,
 }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
@@ -1572,6 +1572,8 @@ function Header({
   // in-run "score" is a permanent 0 that misreads as a total — show a live
   // elapsed clock instead (mirrors the finish/TV/public boards).
   timeOnly?: boolean; startedAt?: string;
+  // The team's hold state, so the race clock subtracts finished holds and stands still during one.
+  hold?: { held?: boolean; heldAt?: string; heldMs?: number };
   // Always-reachable SOS entry point (active-race branch only). Drives the same
   // shared sosAction as the bottom SOS button, so sosBusy loads/disables both.
   onSos?: () => void; sosBusy?: boolean;
@@ -1606,7 +1608,7 @@ function Header({
             {sealed
               ? <span data-testid="test-mode-chip">{t.play.testModeChip}</span>
               : timeOnly
-                ? <span aria-label={t.board.elapsed} className="inline-flex items-center gap-1"><Icon name="stopwatch" className="w-4 h-4" /><ElapsedClock startedAt={startedAt} /></span>
+                ? <span aria-label={t.board.elapsed} className="inline-flex items-center gap-1"><Icon name="stopwatch" className="w-4 h-4" /><ElapsedClock startedAt={startedAt} hold={hold} /></span>
                 : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
             {!sealed && streak >= 2 && (
               <span
@@ -1722,13 +1724,15 @@ function MissionProgressRow({ progress, beat, accent }: {
 // A live m:ss elapsed clock for time_only runs, ticking on its own so only this
 // node re-renders each second (not the whole header/screen). Before the race is
 // stamped (startedAt absent) it reads 0:00.
-function ElapsedClock({ startedAt }: { startedAt?: string }) {
+function ElapsedClock({ startedAt, hold }: { startedAt?: string; hold?: { held?: boolean; heldAt?: string; heldMs?: number } }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
-  const sec = startedAt ? Math.max(0, (now - new Date(startedAt).getTime()) / 1000) : 0;
+  // A hold stops this clock and finished holds are not counted (Ahiya, 2026-10-06): the same rule
+  // the standings use, so the clock a player watches agrees with the time they are ranked on.
+  const sec = raceElapsedMs({ startedAt, ...hold }, now) / 1000;
   return <span className="text-ink-fire font-mono">{formatDuration(sec)}</span>;
 }
 

@@ -1481,7 +1481,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           among SIBLINGS, so a per-component prefix keeps the remount and removes
           the collision. */}
       <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
-      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs}
+      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} paused={state.team.held === true}
         totalMs={typeof task.timeLimitMinutes === 'number' && task.timeLimitMinutes > 0 ? task.timeLimitMinutes * 60_000 : null}
         onTimeUp={onChanged} />
 
@@ -1840,17 +1840,24 @@ const FUSE_ICON: Record<FusePhase, (p: { className?: string }) => JSX.Element> =
   calm: StopwatchIcon, hurry: FlameIcon, critical: BoltIcon, final: FlameIcon,
 };
 
-function TimeLimitCountdown({ leftMs, totalMs, onTimeUp }: {
+function TimeLimitCountdown({ leftMs, totalMs, onTimeUp, paused = false }: {
   leftMs?: number | null; totalMs?: number | null; onTimeUp: () => void;
+  /** The team is held: the countdown stands still (Ahiya, 2026-10-06). The server sends the time
+   *  left as of the hold, and on resume moves the mission's start forward, so it carries on from
+   *  the same value instead of having run down meanwhile and then jumping back up. */
+  paused?: boolean;
 }) {
   const { t } = useT();
-  // Re-anchored every time a fresh value arrives (each poll), which keeps the display honest.
-  // Derived state, adjusted during render (React's documented pattern for "reset on prop change").
-  const [anchor, setAnchor] = useState(() => ({ leftMs, at: Date.now() }));
-  if (anchor.leftMs !== leftMs) setAnchor({ leftMs, at: Date.now() });
+  // Re-anchored every time a fresh value arrives (each poll) AND when a hold starts or ends, which
+  // keeps the display honest. Derived state, adjusted during render (React's documented pattern for
+  // "reset on prop change").
+  const [anchor, setAnchor] = useState(() => ({ leftMs, at: Date.now(), paused }));
+  if (anchor.leftMs !== leftMs || anchor.paused !== paused) setAnchor({ leftMs, at: Date.now(), paused });
   const [now, setNow] = useState(() => Date.now());
   const fired = useRef(false);
-  const left = countdownLeftMs(anchor.leftMs, anchor.at, now);
+  const left = paused
+    ? countdownLeftMs(anchor.leftMs, anchor.at, anchor.at)
+    : countdownLeftMs(anchor.leftMs, anchor.at, now);
   const running = left !== null && left > 0;
   const phase: CountdownPhase = left === null ? 'calm' : countdownPhase(left, totalMs);
   // The moments, once each. `prevLeft` is what the previous tick showed; a re-anchor upward is not a
@@ -1859,10 +1866,10 @@ function TimeLimitCountdown({ leftMs, totalMs, onTimeUp }: {
   const lastSecond = useRef<number | null>(null);
   const [announce, setAnnounce] = useState('');
   useEffect(() => {
-    if (!running) return;
+    if (!running || paused) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [running]);
+  }, [running, paused]);
   useEffect(() => {
     if (left === null) return;
     const moment = countdownMilestone(prevLeft.current, left, totalMs);

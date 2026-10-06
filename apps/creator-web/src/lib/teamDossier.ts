@@ -8,7 +8,7 @@
 // galleryTaskDetail.ts pattern), so a field added to the team document tomorrow can never reach
 // the organizer's screen by accident, and a malformed value is dropped rather than rendered.
 
-import { isRenderableMedia, submissionSenderName, teamCallTargets } from '@rushpoint/shared';
+import { isRenderableMedia, submissionSenderName, teamCallTargets, teamClockNowMs } from '@rushpoint/shared';
 
 export interface DossierPhone { uid: string; name: string; sending: boolean }
 export interface DossierAnswer { answer: string; correct?: boolean }
@@ -145,7 +145,9 @@ export function buildTeamDossier(input: TeamDossierInput): TeamDossier | null {
         if (isObj(r) && r.taskId === activeId) started = ms(r.startedAt);
       }
     }
-    const minutes = wholeMinutes(started, input.nowMs);
+    // A held team's mission clock stands still (issue 18, 2026-10-06): read the TEAM's clock, frozen
+    // at the hold, so "on this mission for N minutes" stops climbing while the organizers pause it.
+    const minutes = wholeMinutes(started, teamClockNowMs({ held: t.held === true, heldAt: str(t.heldAt) }, input.nowMs));
     current = { taskId: activeId, title: title(activeId), minutes: minutes ?? null };
   }
 

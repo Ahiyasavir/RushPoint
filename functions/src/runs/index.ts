@@ -151,7 +151,7 @@ import {
   FIRESTORE_PATHS,
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
-import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSeconds } from '@rushpoint/shared';
+import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSeconds, teamClockNowMs } from '@rushpoint/shared';
 import { teamAdvanceRefusal, rankableTeams } from '@rushpoint/shared';
 import { routeBlockers, acceptsAll, type RouteBlockers, type HardBlocker, type WaivableKind } from '@rushpoint/shared';
 import { arrivalGateApplies, missionPins, resumedStartedAt } from '@rushpoint/shared';
@@ -6252,7 +6252,9 @@ function activeTaskTimeLeftMs(team: RunTeam, game: Game, nowMs: number): number 
   const stage = (team.stages ?? []).find((st) => st.status === 'active');
   const rec = stage?.tasks?.find((r) => r.status === 'assigned');
   if (!rec) return null;
-  return timeLimitRemainingMs(findGameTask(game, rec.taskId), rec.startedAt, nowMs);
+  // A held team's countdown stands still (teamClockNowMs); resume moves startedAt forward by the
+  // hold, so the value carries on from where it stopped instead of jumping back up.
+  return timeLimitRemainingMs(findGameTask(game, rec.taskId), rec.startedAt, teamClockNowMs(team, nowMs));
 }
 
 // mission-time-limit: this team's own countdown for the mission. Judged at SUBMISSION (a photo
