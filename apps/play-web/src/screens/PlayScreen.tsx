@@ -690,13 +690,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // — nothing here can grant, request or bypass the hold. The server releases
     // teams, via the organizer's start path, or nothing does.
     const hold = heldNotice({ launched: team.launched, holdReason: state.holdReason });
-    return (
-      <Screen>
-        <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
-        <Header game={game} score={team.score} accent={accent} onLeave={leave}
-          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team} />
-        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={game.testMode !== true} activeTaskId={team.activeTaskId ?? null} />
-        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+    const waitStatus = (<>
           <div className="flex justify-center text-ink-amber"><Icon name={hold.held ? 'pause' : 'hourglass'} className="w-12 h-12" /></div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
           {hold.held ? (
@@ -716,8 +710,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           ) : (
             <p className="text-zinc-500">{t.play.waitingStart}</p>
           )}
-          <HowToPlayCard instructions={game.instructions} lang={lang} />
-        </div>
+    </>);
+    const waitExtras = (<>
         {hasTeammateDevices && myUid && (
           <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} defaultOpen />
         )}
@@ -731,6 +725,44 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
             </a>
           ) : null;
         })}
+    </>);
+    const waitHeader = (<>
+        <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
+        <Header game={game} score={team.score} accent={accent} onLeave={leave}
+          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team} />
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={game.testMode !== true} activeTaskId={team.activeTaskId ?? null} />
+    </>);
+    // Issue 47, computer: the waiting screen was one 448px column (the video, then the phones panel)
+    // that scrolled. Side by side instead: the instructions and video large, the status, phones,
+    // numbers and SOS beside them.
+    if (wide) {
+      return (
+        <div className="min-h-[100dvh] mx-auto w-full max-w-6xl px-6 rp-safe-t rp-safe-b flex flex-col" data-testid="waiting-wide">
+          {waitHeader}
+          <div className={`flex-1 grid gap-6 py-4 items-start ${gameInstructionsHasContent(game.instructions ?? undefined) ? 'grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]' : 'grid-cols-1 max-w-md w-full mx-auto'}`}>
+            {gameInstructionsHasContent(game.instructions ?? undefined) && (
+              <HowToPlayCard instructions={game.instructions} lang={lang} wide />
+            )}
+            <aside className="flex flex-col gap-3">
+              <div className="flex flex-col items-center text-center gap-3 rounded-2xl border border-glass-border bg-app-card px-5 py-6">
+                {waitStatus}
+              </div>
+              {waitExtras}
+              <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
+            </aside>
+          </div>
+          {sosSheet}
+        </div>
+      );
+    }
+    return (
+      <Screen>
+        {waitHeader}
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+          {waitStatus}
+          <HowToPlayCard instructions={game.instructions} lang={lang} />
+        </div>
+        {waitExtras}
         <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
         {sosSheet}
       </Screen>
@@ -1160,13 +1192,13 @@ function useDialogReturnFocus(active: boolean) {
 
 // Waiting/pre-start card: a joined player reading the lobby learns the mechanics
 // before the run goes live. Static (not an overlay) — it lives inline on the page.
-function HowToPlayCard({ instructions, lang }: { instructions?: GameInstructions | null; lang: 'he' | 'en' }) {
+function HowToPlayCard({ instructions, lang, wide = false }: { instructions?: GameInstructions | null; lang: 'he' | 'en'; wide?: boolean }) {
   const { t } = useT();
   if (!gameInstructionsHasContent(instructions ?? undefined)) return null;
   const ins = instructions!;
   const body = localizedInstructionsBody(ins, lang);
   return (
-    <div className="w-full max-w-md mt-4 rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden text-start">
+    <div className={`w-full ${wide ? '' : 'max-w-md mt-4'} rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden text-start`}>
       {/* Issue 48: the video leads, with a line that says why it is there, because the waiting
           screen is exactly when players should watch it. */}
       {instructionsEmbedSrc(ins) ? (
