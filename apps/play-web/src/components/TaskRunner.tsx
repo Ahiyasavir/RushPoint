@@ -75,6 +75,7 @@ import { resolveCardExit } from '../lib/cardExit';
 import {
   gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance, BLOCKED_HELP_KEY,
   canCompleteWithoutLocation,
+  checkInNeedsNoFix,
 } from '../lib/stuckGuards';
 import {
   CAMERA_OPEN_DEADLINE_MS, withCameraDeadline, captureProfileFor, type CaptureProfile,
@@ -905,10 +906,11 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     if (!begin()) return;
     clearMsg();
     stopClocks(task?.id);
-    // Issue 46: a mission that needs no location (self_report, locationless) is sent AT ONCE. It used
-    // to wait for a GPS fix first (up to 5 s, or a permission prompt indoors), and the server stamps
-    // completion when the call arrives, so that wait was counted in the team's real time.
-    if (canCompleteWithoutLocation(task)) { void submitCheckIn(); return; }
+    // Issue 46: a mission the server checks WITHOUT a location is sent AT ONCE. It used to wait for a
+    // GPS fix first (up to 5 s, or a permission prompt indoors), and the server stamps completion
+    // when the call arrives, so that wait was counted in the team's real time. Only an explicitly
+    // location-free mission: a PINNED "mark complete" is proximity-checked and still needs its fix.
+    if (checkInNeedsNoFix(task)) { void submitCheckIn(); return; }
     withLocation(
       // The accuracy rides along so the server can judge whether this fix is good
       // enough to PROVE arrival (change: arrival-needs-a-usable-fix).

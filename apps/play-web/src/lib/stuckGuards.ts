@@ -126,6 +126,23 @@ export function canCompleteWithoutLocation(
   return task?.type === 'self_report' || task?.locationless === true;
 }
 
+/**
+ * May a check-in be sent AT ONCE, without even asking for a GPS fix (issue 46, 2026-10-06)?
+ * Narrower than `canCompleteWithoutLocation` on purpose: that one is the fallback after GPS FAILED;
+ * this one skips GPS entirely, so it must be certain the server will not demand proximity.
+ * `completeTask` checks proximity for trigger modes `radius`/`exact` (the default for a pinned
+ * mission, self_report included), so only an explicitly location-free mission qualifies: the
+ * `locationless` flag, or trigger mode `locationless` / `instant`. Anything else asks for a fix as
+ * before: a pinned "mark complete" sent without one is refused ("Location required").
+ * Total, never throws; unknown input ⇒ false (ask for a fix).
+ */
+export function checkInNeedsNoFix(
+  task: { locationless?: boolean; triggerMode?: string } | null | undefined,
+): boolean {
+  if (!task || typeof task !== 'object') return false;
+  return task.locationless === true || task.triggerMode === 'locationless' || task.triggerMode === 'instant';
+}
+
 // ─── 5. Blocked-player guidance — say WHICH block, and offer a human ──────────
 //
 // The server has always known more than the card said. `evaluateSafeZoneStatus`

@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { completionFinishesRace } from '../apps/play-web/src/lib/finishLine';
+import { checkInNeedsNoFix } from '../apps/play-web/src/lib/stuckGuards';
 
 let failures = 0;
 const ok = (label: string, cond: boolean) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`); if (!cond) failures++; };
@@ -30,9 +31,15 @@ ok('total on junk', !completionFinishesRace(undefined) && !completionFinishesRac
 
 const runner = readFileSync(join(process.cwd(), 'apps/play-web/src/components/TaskRunner.tsx'), 'utf8');
 const field = runner.slice(runner.indexOf('async function field()'), runner.indexOf('async function field()') + 900);
-ok('a mission that needs no location is sent at once, before any GPS request',
-  /canCompleteWithoutLocation\(task\)[\s\S]{0,200}submitCheckIn\(\)/.test(field)
-  && field.indexOf('canCompleteWithoutLocation(task)') < field.indexOf('withLocation('));
+ok('a location-free mission is sent at once, before any GPS request',
+  /checkInNeedsNoFix\(task\)[\s\S]{0,200}submitCheckIn\(\)/.test(field)
+  && field.indexOf('checkInNeedsNoFix(task)') < field.indexOf('withLocation('));
+// Found reviewing the night's work (2026-10-07): skipping GPS for EVERY self_report broke a PINNED
+// "mark complete" (default trigger radius), which the server proximity-checks ("Location required").
+ok('a pinned self_report still asks for a fix', checkInNeedsNoFix({ triggerMode: undefined, locationless: false } as never) === false
+  && checkInNeedsNoFix({ triggerMode: 'radius' }) === false && checkInNeedsNoFix({ triggerMode: 'exact' }) === false);
+ok('location-free missions skip the fix', checkInNeedsNoFix({ locationless: true }) && checkInNeedsNoFix({ triggerMode: 'locationless' }) && checkInNeedsNoFix({ triggerMode: 'instant' }));
+ok('unknown input asks for a fix', checkInNeedsNoFix(null) === false && checkInNeedsNoFix('x' as never) === false);
 ok('the mission countdown is paused from the tap (stoppedFor), not only while held',
   /<TimeLimitCountdown[^>]*paused=\{[^}]*stoppedFor/.test(runner.replace(/\n\s*/g, ' ')));
 ok('a failed send lets the countdown run again', /setStoppedFor\(null\)/.test(runner));
