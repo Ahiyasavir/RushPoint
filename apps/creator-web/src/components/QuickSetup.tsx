@@ -25,6 +25,7 @@ import { useT } from './LanguageContext';
 import { Button } from './ui';
 import ConfettiBurst from './ConfettiBurst';
 import { finishVerdict, isShortNote, type QuickSetupCopyKey } from '../lib/quickSetup';
+import { splitAsk, pickSupportLine } from '../lib/quickSetupAsk';
 import { TAP_TARGET, TAP_TEXT } from '../lib/interaction';
 import { Icon } from './Icon';
 
@@ -124,29 +125,30 @@ export function useQuickSetupFocus(anchor: string | null, nonce: number): void {
 const GLASS_CARD = 'rp-qs-glass rounded-2xl border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.25)]';
 
 /** A slim, capped progress trail — a bar past a handful of steps, dots below it. */
-function QuickSetupProgressTrail({ index, total }: { index: number; total: number }) {
+/**
+ * ONE progress indicator (change: quick-setup-card-clarity). The card used to show "2 מתוך 2", a
+ * bar AND a row of dots for the same fact; three signals for one number is noise. Dots while the flow
+ * is short enough to count at a glance, a thin bar beyond that, never both.
+ */
+function QuickSetupProgress({ index, total }: { index: number; total: number }) {
+  if (total > 1 && total <= 8) {
+    return (
+      <span className="flex items-center gap-1" aria-hidden>
+        {Array.from({ length: total }, (_, i) => (
+          <span
+            key={i}
+            className={`h-1.5 rounded-full transition-all duration-300 ${
+              i === index ? 'w-4 bg-rp-fire' : i < index ? 'w-1.5 bg-rp-fire/50' : 'w-1.5 bg-[--surface-2]'}`}
+          />
+        ))}
+      </span>
+    );
+  }
   const pct = total > 0 ? Math.round(((index + 1) / total) * 100) : 0;
-  const showDots = total > 1 && total <= 8;
   return (
-    <div className="mt-1.5">
-      <div className="h-1 rounded-full bg-[--surface-2] overflow-hidden">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-rp-fire to-rp-amber transition-[width] duration-500 ease-out"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {showDots && (
-        <div className="flex items-center gap-1 mt-1.5" aria-hidden>
-          {Array.from({ length: total }, (_, i) => (
-            <span
-              key={i}
-              className={`h-1.5 rounded-full transition-all duration-300 ${
-                i === index ? 'w-4 bg-rp-fire' : i < index ? 'w-1.5 bg-rp-fire/50' : 'w-1.5 bg-[--surface-2]'}`}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+    <span className="block w-16 h-1 rounded-full bg-[--surface-2] overflow-hidden" aria-hidden>
+      <span className="block h-full rounded-full bg-rp-fire transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
+    </span>
   );
 }
 
@@ -270,201 +272,105 @@ export function QuickSetupBar({
   beside?: boolean;
 }) {
   const q = useT().quickSetup;
-  /**
-   * Is the template author's note expanded? (change: quick-setup-card-height)
-   *
-   * Collapsed by default, and reset HERE on every step rather than by a `key` at
-   * the call site. This component is NOT remounted between steps — neither call
-   * site keys it, and the flow advances by swapping the `step` prop — so without
-   * this the note stayed open from one mission into the next and the card arrived
-   * at its tallest on a mission the creator had not asked to see a note about.
-   * That is the failure CLAUDE.md already records for TaskRunner's entry
-   * components; the reset lives inside the component because a third call site
-   * cannot forget it.
-   */
-  const [noteOpen, setNoteOpen] = useState(false);
-  useEffect(() => { setNoteOpen(false); }, [step.id]);
-  const headline = copyLine(q.copy, copyKey);
+  // The "פרטים" disclosure, reset on every step: this component is NOT remounted between steps
+  // (the flow swaps the `step` prop), so without the reset it stayed open into the next mission.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  useEffect(() => { setDetailsOpen(false); }, [step.id]);
+  // READING ORDER (change: quick-setup-card-clarity). Ahiya, 2026-10-06: the card was "מפוזר" and
+  // its side text "מתיש". It glued four pieces of prose into one paragraph with the request LAST,
+  // and readers take in the first two words of a line, so the first thing read was never the thing
+  // to do. Now: the action is the title (the copy line's first sentence, written verb first), ONE
+  // supporting line under it, and everything else behind "פרטים".
+  const ask = splitAsk(copyLine(q.copy, copyKey));
+  const note = step.instructionPrompt && step.instructionPrompt.trim() !== '' && step.instructionPrompt !== ask.title
+    ? step.instructionPrompt.trim() : '';
+  const shortNote = note !== '' && isShortNote(note) ? note : '';
+  const longNote = note !== '' && shortNote === '' ? note : '';
+  const support = pickSupportLine({ rest: ask.rest, shortNote });
   const isTask = scope === 'task' && typeof taskTitle === 'string';
-  const where = isTask ? q.introTaskLabel(taskTitle as string) : scope ? q.introGameLabel : '';
-  // The mission's own words, when it has any. NO generic fallback here: the
-  // sentence this joins already names the mission and already asks for something,
-  // so "בואו נשלים פרט קטן במשימה X" would only repeat the title back and push the
-  // ask further down the line.
-  const context = isTask && summary && summary.trim() !== '' ? summary : '';
+  // The mission's own words, only behind the disclosure: it names WHAT the mission is, which the
+  // creator needs on demand, not before every request.
+  const description = isTask && summary && summary.trim() !== '' ? summary.trim() : '';
+  const hasDetails = description !== '' || longNote !== '';
   return (
     <div
       role="region"
       aria-label={q.title}
-      // Logical inset (not left/right) so the card centres identically in RTL and
-      // LTR; the inline style carries it because Tailwind has no logical-inset
-      // utility and a template-string class would not exist at build time.
-      // FLOATING: stacked on a phone, side-by-side from `sm` up. As one row it was
-      // unreadable on a narrow screen: the action cluster below is `shrink-0` and
-      // holds a full Hebrew sentence ("חזור לזה מאוחר יותר") plus a button and a
-      // close box, so on a ~390px viewport it claimed almost the whole width and
-      // left the text column — `flex-1 min-w-0`, which is allowed to shrink to
-      // nothing — about two words per line, turning three sentences into a tall
-      // ribbon down one edge. The viewport breakpoint is right HERE, where the
-      // card really does span the viewport, and wrong inline (see below).
-      // THE CARD MAY NOT EAT THE COLUMN IT INSTRUCTS ABOUT
-      // (change: quick-setup-card-height). Inline, this sits at the top of the
-      // mission editor's own column, `shrink-0`, above the mission it is talking
-      // about — and it carries two pieces of prose nobody here wrote: the
-      // mission's description and the template author's note. Measured in the
-      // editor's 500px column at a 620px viewport: the card was 387px of the
-      // column's 510px, 76%, leaving 113px for the mission itself. The creator's
-      // words for it were "it completely hides the whole mission", and they were
-      // describing the arithmetic exactly.
-      //
-      // Collapsing the template note (below) and stacking (next paragraph) are
-      // what make the card short in practice — measured on the same step, same
-      // window: 387px down to 201px, 76% of the column down to 39%. This cap is
-      // what makes "it can never take the column" TRUE for content nobody has
-      // written yet, in a language whose lines are longer, on a shorter window.
-      // 45% leaves the mission the majority of its own column by construction,
-      // and `overflow-y-auto` is the honest way to hold a note that still will
-      // not fit, because the alternative is pushing the ask off the card.
-      // INLINE ALWAYS STACKS. `sm:flex-row` is a VIEWPORT query, and inline this
-      // card's width is its COLUMN's — the mission editor pane, `min(500px, …)`.
-      // On a 1400px viewport the row applied to a 482px card: the action cluster
-      // is `shrink-0` and holds a full Hebrew sentence plus two buttons and a
-      // close box, so it took ~250px and left the text column ~230px, wrapping
-      // three short sentences into six lines. The breakpoint was answering a
-      // question about the window when the constraint was the panel.
+      // INLINE: in flow at the top of (or beside) the mission editor. The height cap matters only
+      // where the card is stacked ABOVE the mission it instructs about (below `lg`, and always when
+      // not `beside`): it must never eat that column. Beside, it has its own column and never
+      // scrolls. FLOATING: one column always (the old `sm:flex-row` squeezed the text into a ribbon
+      // beside a sentence-long action cluster), narrow enough that a line stays readable.
       className={inline
-        ? `shrink-0 m-2 mb-0 px-4 py-3 flex flex-col gap-2 ${GLASS_CARD} ${
-            // The cap lifts EXACTLY where the parent stops stacking. `beside` means
-            // the guided layout, which is `lg:flex-row` — so below `lg` this card is
-            // still above the mission and the cap is load-bearing, and from `lg` up
-            // it has its own column, competes with nothing, and must not scroll.
-            // Below `lg` the cap is a share of the SCREEN (`dvh`): this card's
-            // wrapper takes its height from its own content, so a percentage
-            // resolved against it came to 113px of a 242px card on a 375px phone
-            // and hid the step's buttons (scripts/test-quick-setup-flow.ts).
+        ? `shrink-0 m-2 mb-0 px-4 py-3 flex flex-col gap-2.5 ${GLASS_CARD} ${
             beside
               ? 'max-h-[45dvh] overflow-y-auto lg:max-h-none lg:overflow-visible'
               : 'max-h-[45%] overflow-y-auto'}`
-        : `fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] max-h-[60vh] overflow-y-auto px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
-      // The logical insets only mean anything for the floating variant; in flow the
-      // element is already laid out by its parent.
-      //
-      // This used to reserve the mission editor pane's width on the end side, via a
-      // `besidePanel` prop. That prop was DEAD and had been since the card moved
-      // inline: the floating variant renders only when the editor is CLOSED
-      // (`!qsCardInline`), and the prop was passed `missionEditorOpen`, so it was
-      // provably always false. It is deleted rather than left as a documented
-      // maybe — a prop that cannot fire is a claim about the layout that no longer
-      // holds, and the next reader has to prove it dead all over again.
+        : `fixed z-50 top-2 mx-auto w-[min(30rem,calc(100%-1rem))] max-h-[60vh] overflow-y-auto px-4 py-3 flex flex-col gap-2.5 ${GLASS_CARD}`}
       style={inline ? undefined : { insetInlineStart: 0, insetInlineEnd: 0 }}
     >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-fire">
-          <span>{q.introEyebrow(index + 1, total)}</span>
-          <span className={`rounded px-1.5 py-0.5 ${step.isRequired ? 'bg-rp-fire/10 text-ink-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
-            {step.isRequired ? q.requiredBadge : q.optionalBadge}
-          </span>
-        </div>
-        {/* ONE SENTENCE: which mission, what it is, and what to do — in that order,
-            in a single paragraph (change: quick-setup-one-card).
- 
-            Merging the two CARDS was not enough. The card still opened with the
-            mission's name on its own line, the mission's description on a second,
-            and only then the ask — which reads as an explanation followed by an
-            instruction, and the creator's verdict is the one every product person
-            eventually learns: *"people skip explanations when you are not asking
-            them to do anything."* An explanation nobody reads is worse than none,
-            because it pushes the ask below the fold of attention.
- 
-            So the explanation stops being a preamble and becomes the opening of
-            the instruction itself. The mission is named in bold INSIDE the
-            sentence, its own description follows in the same flow, and the ask
-            closes it. Every step therefore explains its mission — which is the
-            other half of what was asked — without ever being a block that can be
-            skipped separately from the request. */}
-        <p className="text-sm text-[--ink-1] leading-snug mt-1.5">
-          {where !== '' && (
-            <span className="font-semibold" dir="auto">{where} </span>
-          )}
-          {/* The creator's own words about the mission: CONTENT, hence dir="auto"
-              even mid-sentence, so a Hebrew description inside an English UI (and
-              the reverse) still reads in its own direction. */}
-          {context !== '' && <span className="text-[--ink-2]" dir="auto">{context} </span>}
-          <span className="font-medium">{headline}</span>
-        </p>
-        {/* The template author's own note — a QUOTATION, marked as one, and
-            COLLAPSED (change: quick-setup-card-height).
- 
-            It is the single longest thing on this card and the least urgent: prose
-            somebody else wrote, about a mission the sentence above already names,
-            frequently in the other language. Open by default it was most of the
-            card's height — a paragraph of English under a Hebrew instruction, sat
-            between the ask and the mission the creator came here to edit.
- 
-            A disclosure, not a deletion: the note is often the only place a
-            template says WHY a stop matters, and a creator who wants it must be
-            able to have it without leaving the flow. The toggle names what is
-            behind it rather than saying "more", so the choice can be made without
-            opening it. */}
-        {/* A one-line note is cheap: shown open. Only a paragraph hides behind
-            the disclosure below (change: composer-siting-by-station). */}
-        {step.instructionPrompt && step.instructionPrompt !== headline && isShortNote(step.instructionPrompt) && (
-          <p className="mt-1 text-xs text-[--ink-2] leading-snug ps-2 border-s-2 border-[--rp-border]" dir="auto">
-            {step.instructionPrompt}
-          </p>
-        )}
-        {step.instructionPrompt && step.instructionPrompt !== headline && !isShortNote(step.instructionPrompt) && (
-          <div className="mt-1">
-            <button
-              type="button"
-              onClick={() => setNoteOpen((v) => !v)}
-              aria-expanded={noteOpen}
-              /* A text-styled button's width comes from its copy, so only the
-                 height needs declaring; `-my-2` keeps a 44px target from shoving
-                 the card's own rows apart. Same shape as the front door's links
-                 (commit b69e20f) — the rule travels or it is not a rule. */
-              className={`${TAP_TEXT} -my-2 text-xs text-[--ink-3] underline underline-offset-2 hover:text-[--ink-1]`}
-            >
-              {noteOpen ? q.templateNoteHide : q.templateNoteShow}
-            </button>
-            {noteOpen && (
-              <p className="text-xs text-[--ink-2] leading-snug mt-1 ps-2 border-s-2 border-[--rp-border]" dir="auto">
-                <span className="text-[--ink-3]">{q.templateNote} </span>
-                {step.instructionPrompt}
-              </p>
-            )}
-          </div>
-        )}
-        <QuickSetupProgressTrail index={index} total={total} />
-      </div>
-      {/* Its own full-width row on a phone (wrapping if the defer sentence is long),
-          a fixed-size cluster beside the text from `sm` up. */}
-      <div className="flex items-center flex-wrap gap-1.5 justify-end shrink-0 sm:flex-nowrap sm:pt-0.5">
-        <button
-          type="button"
-          onClick={onDefer}
-          className="text-xs text-[--ink-1] underline underline-offset-2"
-        >
-          {q.defer}
-        </button>
-        {/* BACK. Arrowed like the mission editor's own footer so the pair reads as
-            navigation rather than as two unrelated buttons, and rendered only when
-            there IS a previous step — see the reducer's `back` case. The arrow is
-            a logical direction: `←` points backwards in RTL, which is the language
-            this console is used in, and the editor beside it has spelled it that
-            way since it was written. */}
-        {onBack && (
-          <Button variant="ghost" onClick={onBack}>← {q.back}</Button>
-        )}
-        <Button onClick={onNext}>{q.next} →</Button>
+      {/* HEADER: where you are, and the way out. One indicator, one counter, one badge, ✕. */}
+      <div className="flex items-center gap-2" data-testid="qs-header">
+        <QuickSetupProgress index={index} total={total} />
+        <span className="text-[13px] font-semibold text-ink-fire">{q.introEyebrow(index + 1, total)}</span>
+        <span className={`rounded px-1.5 py-0.5 text-[12px] font-semibold ${step.isRequired ? 'bg-rp-fire/10 text-ink-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
+          {step.isRequired ? q.requiredBadge : q.optionalBadge}
+        </span>
         <button
           type="button"
           onClick={onClose}
           aria-label={q.close}
           title={q.close}
-          className={`${TAP_TARGET} -me-2 shrink-0 rounded-lg text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}
+          className={`${TAP_TARGET} -my-2 -me-2 ms-auto shrink-0 rounded-lg text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none`}
         >
           ✕
+        </button>
+      </div>
+      {/* TITLE: the action itself, first, large. */}
+      <p className="text-base font-bold leading-snug text-[--ink-1]" data-testid="qs-title">{ask.title}</p>
+      {/* ONE supporting line: the template's short note (specific to this game) or the rest of the
+          copy line. Never both, never a side-ruled quote. */}
+      {support !== '' && (
+        <p className="-mt-1.5 text-sm leading-snug text-[--ink-2]" dir="auto" data-testid="qs-support">{support}</p>
+      )}
+      {/* CONTEXT: which mission, and its details on demand. */}
+      {(isTask || hasDetails) && (
+        <div className="text-xs text-[--ink-3]">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isTask && <span dir="auto">{q.introTaskLabel(taskTitle as string)}</span>}
+            {hasDetails && (
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((v) => !v)}
+                aria-expanded={detailsOpen}
+                className={`${TAP_TEXT} -my-2 underline underline-offset-2 hover:text-[--ink-1]`}
+              >
+                {detailsOpen ? q.detailsHide : q.detailsShow}
+              </button>
+            )}
+          </div>
+          {detailsOpen && (
+            <div className="mt-1 space-y-1 text-sm leading-snug text-[--ink-2]">
+              {description !== '' && <p dir="auto">{description}</p>}
+              {longNote !== '' && (
+                <p dir="auto"><span className="text-[--ink-3]">{q.templateNote} </span>{longNote}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {/* ACTIONS: the primary first in reading order, then back, then a short "later". */}
+      <div className="flex items-center gap-2 flex-wrap pt-0.5">
+        <Button onClick={onNext}>{q.next} →</Button>
+        {onBack && (
+          <Button variant="ghost" onClick={onBack}>← {q.back}</Button>
+        )}
+        <button
+          type="button"
+          onClick={onDefer}
+          className={`${TAP_TEXT} ms-auto text-sm text-[--ink-2] underline underline-offset-2 hover:text-[--ink-1]`}
+        >
+          {q.defer}
         </button>
       </div>
     </div>

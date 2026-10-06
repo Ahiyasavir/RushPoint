@@ -474,7 +474,8 @@ console.log('\nthe Builder wiring');
   ok('a paragraph is not short', isShortNote('א'.repeat(141)) === false);
   ok('a multi-line note is not short', isShortNote('one\ntwo') === false);
   ok('junk is not short', isShortNote(undefined as never) === false && isShortNote('   ') === false);
-  ok('QuickSetup shows a short note without the disclosure', /isShortNote\(step\.instructionPrompt\)/.test(qsSrc));
+  // quick-setup-card-clarity: the short note is now the card's ONE support line (pickSupportLine).
+ok('QuickSetup shows a short note without the disclosure', /isShortNote\(note\)/.test(qsSrc) && /pickSupportLine\(\{ rest: ask\.rest, shortNote \}\)/.test(qsSrc));
   // Found at 375px: walking off the end with "next" over required steps that were
   // never filled showed "that's it, your game is ready to launch" while launch
   // still listed 3 missing points. The finish line must tell the truth.
