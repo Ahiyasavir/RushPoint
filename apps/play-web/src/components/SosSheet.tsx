@@ -14,7 +14,7 @@
 // Rendered through a portal: PlayScreen has several screens that carry an SOS button.
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { EMERGENCY_SERVICES, sosCallbackVerdict } from '@rushpoint/shared';
+import { EMERGENCY_SERVICES, sosCallbackVerdict, MAX_MESSAGE_LEN } from '@rushpoint/shared';
 import { Button, Card, Input } from './ui';
 import { Icon } from './Icon';
 import { useT } from '../i18nContext';
@@ -33,12 +33,15 @@ type Phase = 'compose' | 'sending' | 'sent' | 'failed';
 export default function SosSheet({ runId, onSend, onClose }: {
   runId: string;
   /** Sends the alert; resolves on success, rejects on failure. */
-  onSend: (callbackPhone: string | undefined) => Promise<void>;
+  onSend: (callbackPhone: string | undefined, message: string | undefined) => Promise<void>;
   onClose: () => void;
 }) {
   const { t } = useT();
   const p = t.play;
   const [phone, setPhone] = useState(() => readPhone(runId));
+  // Issue 34 (Ahiya, 2026-10-06): what is wrong, in the team's words. Optional: an empty field never
+  // holds an SOS back.
+  const [message, setMessage] = useState('');
   const [phoneErr, setPhoneErr] = useState(false);
   const [showServices, setShowServices] = useState(false);
   const [phase, setPhase] = useState<Phase>('compose');
@@ -61,7 +64,7 @@ export default function SosSheet({ runId, onSend, onClose }: {
     setPhoneErr(false);
     setPhase('sending');
     try {
-      await onSend(v.phone);
+      await onSend(v.phone, message.trim() || undefined);
       if (v.phone) writePhone(runId, v.phone);
       setSentPhone(v.phone);
       setPhase('sent');
@@ -110,6 +113,11 @@ export default function SosSheet({ runId, onSend, onClose }: {
 
         {phase !== 'sent' && (
           <div className="space-y-2 border-t border-glass-border pt-4">
+            <label className="block text-sm font-semibold text-zinc-100" htmlFor={`${titleId}-message`}>{p.sosMessageLabel}</label>
+            <textarea id={`${titleId}-message`} dir="auto" rows={2} maxLength={MAX_MESSAGE_LEN}
+              value={message} placeholder={p.sosMessagePlaceholder} data-testid="sos-message"
+              onChange={(e) => setMessage(e.target.value)}
+              className="w-full px-4 py-3 rounded-2xl text-base bg-white border border-glass-border text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-rp-fire/30" />
             <label className="block text-sm font-semibold text-zinc-100" htmlFor={`${titleId}-phone`}>{p.sosCallbackLabel}</label>
             <Input id={`${titleId}-phone`} type="tel" inputMode="tel" autoComplete="tel" dir="ltr"
               value={phone} placeholder="0501234567"

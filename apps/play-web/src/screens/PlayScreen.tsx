@@ -482,7 +482,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // offered 101 only (sos-points-to-101); emergency services still come first on the sheet.
   const [sosOpen, setSosOpen] = useState(false);
   async function sos() { setSosOpen(true); }
-  async function sendSos(callbackPhone: string | undefined) {
+  async function sendSos(callbackPhone: string | undefined, message?: string) {
     // Resolve a best-effort location first, THEN actually send, and only report "sent" once
     // triggerSOS resolves (the sheet waits on this promise). Reporting success before the call on
     // a SAFETY feature could leave a team in trouble believing the organizers know.
@@ -497,6 +497,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     await triggerSOS({
       ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId,
       ...(coords ?? {}), ...(callbackPhone ? { callbackPhone } : {}),
+      // Issue 34: what is wrong, in the team's words (optional).
+      ...(message ? { message } : {}),
     });
     feedback('alert');
   }

@@ -56,6 +56,11 @@ ok('the sheet is a dialog', /role="dialog"/.test(sheet) && /aria-modal="true"/.t
 const play = fs.readFileSync(path.join(root, 'apps/play-web/src/screens/PlayScreen.tsx'), 'utf8').replace(/\r/g, '');
 ok('the SOS button opens the sheet', /<SosSheet\b/.test(play));
 ok('PlayScreen sends the callback number with the alert', /callbackPhone/.test(play));
+// Issue 34 (Ahiya, 2026-10-06): the team can say what is wrong. Optional, never blocks sending, and
+// bounded by the server's MAX_MESSAGE_LEN (triggerSOS has stored `message` all along).
+ok('the sheet has a "what happened" field', /data-testid="sos-message"/.test(sheet) && /maxLength=\{MAX_MESSAGE_LEN\}/.test(sheet));
+ok('PlayScreen sends the message with the alert', /\{ message \}/.test(play.slice(play.indexOf('await triggerSOS('), play.indexOf('await triggerSOS(') + 300)));
+ok('he and en name the field', !!he.play.sosMessageLabel && !!en.play.sosMessageLabel);
 
 console.log('\n— the copy never promises help is coming —');
 ok('he sosSent does not say "עזרה בדרך"', !he.play.sosSent.includes('עזרה בדרך'), he.play.sosSent);
