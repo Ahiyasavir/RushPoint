@@ -63,7 +63,11 @@ const PLAY_POLICY = {
   // and BOTH dictionaries. The English one is ~17.8 KB gzip of source shipped to every Hebrew
   // participant on first load, and splitting it out is the real lever: it buys back ~15x this bump.
   // That touches every reader of `translations` and the i18n gates, so it is its own change.
-  maxInitialGzipBytes: 263_000,
+  // 263_000 → 265_000 (2026-10-07): issues 39, 45, 46, 48 (the staff app on a computer, staff
+  // chat with any team, the video in the instructions) added their Hebrew and English copy, 1,332 B
+  // over. Looked again: every lazy boundary still holds (maplibre, jsqr, qrcode absent from the
+  // entry); the growth is dictionary text. The English-dictionary split above is still the lever.
+  maxInitialGzipBytes: 265_000,
   // Size alone is not enough: the smallest deferred heavy dependency (qrcode,
   // 10,118 gzip bytes) is smaller than any useful headroom, so it could drift
   // into the entry chunk unnoticed. These markers are matched case-insensitively

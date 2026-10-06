@@ -803,7 +803,8 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                       {/* Issue 25 (Ahiya, 2026-10-06): write to the team straight from its SOS. */}
                       {can('chat') && (
                         <button type="button" data-testid="sos-chat"
-                          onClick={() => setChatFocus({ teamId: a.teamId, nonce: Date.now() })}
+                          // On a computer the chat is a side tab: open it too, or nothing visible happens.
+                          onClick={() => { setChatFocus({ teamId: a.teamId, nonce: Date.now() }); setSideTab('chat'); }}
                           className="mt-1 ms-2 inline-flex items-center gap-1 min-h-[44px] rounded-lg border border-danger px-3 text-sm font-bold text-ink-alert">
                           <Icon name="chat" className="w-4 h-4" /> {t.staff.sosChat}
                         </button>
@@ -1096,11 +1097,17 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                     </button>
                   ))}
                 </div>
-                <div role="tabpanel" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [&_section]:mb-0">
-                  <CollapsibleEmbedded.Provider value>
-                    {sectionEls[activeSide]}
-                  </CollapsibleEmbedded.Provider>
-                </div>
+                {/* Every tool stays MOUNTED and only the chosen one shows: remounting on each switch
+                    re-opened the chat listener (a Firestore read per thread, every time) and rebuilt
+                    the map from nothing. */}
+                <CollapsibleEmbedded.Provider value>
+                  {sideTabs.map((sec) => (
+                    <div key={sec} role="tabpanel" hidden={activeSide !== sec}
+                      className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [&_section]:mb-0">
+                      {sectionEls[sec]}
+                    </div>
+                  ))}
+                </CollapsibleEmbedded.Provider>
               </>
             )}
           </aside>
