@@ -373,7 +373,7 @@ export default function HostSheetPage() {
     <>
       {/* ── Page one: everything about the day ── */}
       <section className="hs-keep">
-        <div className="flex items-start justify-between gap-3 border-b-[3px] border-[#1c1917] pb-2">
+        <div className="flex flex-col gap-2 border-b-[3px] border-[#1c1917] pb-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#c2410c]">{h.title}</p>
             <h1 className="font-brand text-[24px] font-bold leading-tight break-words" dir="auto">{sheet.cover.title}</h1>
@@ -384,7 +384,7 @@ export default function HostSheetPage() {
                 sheet.cover.minAge ? h.minAge(sheet.cover.minAge) : ''].filter(Boolean).join(' · ')}
             </p>
           </div>
-          <p className={`shrink-0 rounded-md border-2 px-2 py-1 text-[11px] font-bold ${options.includeAnswers ? 'border-[#b91c1c] text-[#b91c1c]' : 'border-[#1c1917]'}`}>
+          <p className={`shrink-0 self-start rounded-md border-2 px-2 py-1 text-[11px] font-bold ${options.includeAnswers ? 'border-[#b91c1c] text-[#b91c1c]' : 'border-[#1c1917]'}`}>
             <Icon name={options.includeAnswers ? 'lock' : 'eye'} className="inline w-3.5 h-3.5 me-1" aria-hidden />
             {options.includeAnswers ? h.hostOnly : h.noAnswers}
           </p>
