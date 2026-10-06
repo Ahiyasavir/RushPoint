@@ -353,6 +353,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // Issue 39, computer only: which tool the side panel shows, and which team's window is open.
   const [sideTab, setSideTab] = useState<StaffSection>('map');
   const [openTeamId, setOpenTeamId] = useState<string | null>(null);
+  const [openReviewKey, setOpenReviewKey] = useState<string | null>(null);
   const ackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => {
     const timers = ackTimers.current;
@@ -681,6 +682,54 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 
   // desktop-layouts-play-staff: every section once, placed by lib/staffLayout.ts. On a phone the
   // order the staff app always had; on a computer three columns. The quick bar is phone only.
+  // One submission to approve or reject. The phone lists these inline; on a computer one opens in a
+  // window from the short list (issue 39), so both use the SAME card and buttons.
+  function reviewCardFor(s: PendingSubmission) {
+                const key = `${s.teamId}:${s.taskId}`;
+                const hasUrl = /^https?:\/\//.test(s.photoUrl);
+                // audio-tasks: an audio submission plays inline. Render the <img> ONLY
+                // when the submission is positively an image — a declared 'photo', or a
+                // legacy row (no mediaKind) whose URL carries an image extension. A
+                // missing/malformed mediaKind on an AUDIO doc then routes to <audio> (by
+                // kind) or, failing that, to the 📎 fallback below — never a broken <img>.
+                const isAudio = s.mediaKind === 'audio';
+                const isVideo = s.mediaKind === 'video';
+                const looksLikeImage = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)(\b|\?|%|$)/i.test(s.photoUrl);
+                const isImage = s.mediaKind === 'photo' || (s.mediaKind === undefined && looksLikeImage);
+                // The row carries its own age as colour (fresh / amber 20 s / red 60 s), kitchen-display style.
+                const tone = reviewRowTone(reviewNow - Date.parse(s.submittedAt || ''));
+                const toneClass = tone === 'red' ? 'border-2 border-danger' : tone === 'amber' ? 'border-2 border-amber-500' : '';
+                return (
+                  <Card key={key} className={`p-3 mb-2 ${toneClass}`}>
+                    <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
+                    {s.senderName && <div dir="auto" className="text-xs text-zinc-500">{t.staff.mediaSentBy({ name: s.senderName })}</div>}
+                    <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} <span dir="auto">{titleOf(s.taskId)}</span></div>
+                    {hasUrl && isAudio
+                      ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
+                      : hasUrl && isVideo
+                      ? <video controls src={s.photoUrl} className="w-full rounded-lg mb-2 max-h-64" aria-label={t.staff.videoSubmission} />
+                      : hasUrl && isImage
+                      ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-contain" />
+                      : <div className="text-xs text-zinc-500 italic mb-2 break-all"><Icon name="paperclip" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {s.photoUrl || t.staff.noPhoto}</div>}
+                    <div className="flex gap-2">
+                      <button
+                        className="flex-1 min-h-[44px] py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
+                        disabled={reviewAction.isBusy(key)}
+                        onClick={() => void reviewAction.run(s, true)}
+                      >
+                        {t.staff.approve}
+                      </button>
+                      <button
+                        className="flex-1 min-h-[44px] py-2 rounded-lg bg-transparent border border-danger/50 text-danger font-semibold text-sm disabled:opacity-40"
+                        disabled={reviewAction.isBusy(key)}
+                        onClick={() => void reviewAction.run(s, false)}
+                      >
+                        {t.staff.reject}
+                      </button>
+                    </div>
+                  </Card>
+                );
+  }
   // A code the organizer removed: said where the person will look first, on both layouts.
   const removedCard = access.removed ? (
             <Card className="p-4 mb-4 border border-danger/40" data-testid="staff-removed">
@@ -807,52 +856,24 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
             )}
             {pending.length === 0
               ? <p className="text-zinc-500 text-sm">{t.staff.noSubmissions}</p>
-              : pending.map((s) => {
-                const key = `${s.teamId}:${s.taskId}`;
-                const hasUrl = /^https?:\/\//.test(s.photoUrl);
-                // audio-tasks: an audio submission plays inline. Render the <img> ONLY
-                // when the submission is positively an image — a declared 'photo', or a
-                // legacy row (no mediaKind) whose URL carries an image extension. A
-                // missing/malformed mediaKind on an AUDIO doc then routes to <audio> (by
-                // kind) or, failing that, to the 📎 fallback below — never a broken <img>.
-                const isAudio = s.mediaKind === 'audio';
-                const isVideo = s.mediaKind === 'video';
-                const looksLikeImage = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)(\b|\?|%|$)/i.test(s.photoUrl);
-                const isImage = s.mediaKind === 'photo' || (s.mediaKind === undefined && looksLikeImage);
-                // The row carries its own age as colour (fresh / amber 20 s / red 60 s), kitchen-display style.
-                const tone = reviewRowTone(reviewNow - Date.parse(s.submittedAt || ''));
-                const toneClass = tone === 'red' ? 'border-2 border-danger' : tone === 'amber' ? 'border-2 border-amber-500' : '';
-                return (
-                  <Card key={key} className={`p-3 mb-2 ${toneClass}`}>
-                    <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
-                    {s.senderName && <div dir="auto" className="text-xs text-zinc-500">{t.staff.mediaSentBy({ name: s.senderName })}</div>}
-                    <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} <span dir="auto">{titleOf(s.taskId)}</span></div>
-                    {hasUrl && isAudio
-                      ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
-                      : hasUrl && isVideo
-                      ? <video controls src={s.photoUrl} className="w-full rounded-lg mb-2 max-h-64" aria-label={t.staff.videoSubmission} />
-                      : hasUrl && isImage
-                      ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-contain" />
-                      : <div className="text-xs text-zinc-500 italic mb-2 break-all"><Icon name="paperclip" className="w-3.5 h-3.5 inline-block align-text-bottom" /> {s.photoUrl || t.staff.noPhoto}</div>}
-                    <div className="flex gap-2">
-                      <button
-                        className="flex-1 min-h-[44px] py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
-                        disabled={reviewAction.isBusy(key)}
-                        onClick={() => void reviewAction.run(s, true)}
-                      >
-                        {t.staff.approve}
-                      </button>
-                      <button
-                        className="flex-1 min-h-[44px] py-2 rounded-lg bg-transparent border border-danger/50 text-danger font-semibold text-sm disabled:opacity-40"
-                        disabled={reviewAction.isBusy(key)}
-                        onClick={() => void reviewAction.run(s, false)}
-                      >
-                        {t.staff.reject}
-                      </button>
-                    </div>
-                  </Card>
-                );
-              })}
+              : wide ? (
+                // Issue 39, computer: a short list; the photo and the verdict open in a window.
+                <ul className="space-y-1.5" data-testid="staff-review-list">
+                  {pending.map((s) => {
+                    const key = `${s.teamId}:${s.taskId}`;
+                    const tone = reviewRowTone(reviewNow - Date.parse(s.submittedAt || ''));
+                    return (
+                      <li key={key}>
+                        <button type="button" onClick={() => setOpenReviewKey(key)} data-testid="staff-review-row"
+                          className={`w-full rounded-xl border bg-app-card px-3 py-2 text-start hover:bg-app-raised ${tone === 'red' ? 'border-2 border-danger' : tone === 'amber' ? 'border-2 border-amber-500' : 'border-glass-border'}`}>
+                          <span dir="auto" className="block truncate text-sm font-semibold text-zinc-100">{s.displayName}</span>
+                          <span dir="auto" className="block truncate text-xs text-zinc-500">{titleOf(s.taskId)}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : pending.map((s) => reviewCardFor(s))}
           </section>}
       </>
     ),
@@ -890,7 +911,8 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                       : tm.held ? { text: t.staff.heldBadge, cls: 'bg-accent text-black' }
                       : tm.outOfBounds ? { text: t.staff.outOfBoundsBadge, cls: 'bg-danger/15 text-danger' }
                       : !tm.launched ? { text: t.staff.desk.notStarted, cls: 'bg-app-raised text-zinc-500' } : null;
-                    const mission = tm.activeTaskId ? titleOf(tm.activeTaskId) : '';
+                    // Only once the outline (mission names) has loaded: never a raw mission id on a tile.
+                    const mission = tm.activeTaskId && outline ? titleOf(tm.activeTaskId) : '';
                     return (
                       <div key={tm.id} id={`staff-team-${tm.id}`}
                         className={`group relative rounded-xl border bg-app-card transition-colors hover:border-accent/60 hover:bg-app-raised ${tm.held ? 'border-accent/60' : tm.outOfBounds ? 'border-danger/50' : 'border-glass-border'}`}>
@@ -1002,6 +1024,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   };
   const quiet = alerts.length === 0 && pending.length === 0;
   const openTeam = openTeamId ? teams.find((tm) => tm.id === openTeamId) ?? null : null;
+  const openReview = openReviewKey ? pending.find((x) => `${x.teamId}:${x.taskId}` === openReviewKey) ?? null : null;
   const signOut = () => { void dialog.confirm(t.staff.signOutConfirm, { confirmLabel: t.staff.signOut, danger: true }).then((ok) => { if (ok) onSignOut(); }); };
   const errLine = readErr && (
     <div role="status" aria-live="polite" className="mb-3">
@@ -1083,6 +1106,12 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           </aside>
         </div>
 
+        {/* A photo to check, in a window; it closes itself once the verdict is in (the row leaves). */}
+        {openReview && (
+          <StaffWindow title={t.staff.photoReview} onClose={() => setOpenReviewKey(null)}>
+            {reviewCardFor(openReview)}
+          </StaffWindow>
+        )}
         {/* A team's actions, in a window over the board. */}
         {openTeam && (
           <StaffWindow title={openTeam.displayName} onClose={() => setOpenTeamId(null)}>
