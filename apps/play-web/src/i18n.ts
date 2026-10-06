@@ -81,6 +81,8 @@ const HE = {
     needRequiredFields: 'נשארו כמה שדות חובה לסמן. הם מודגשים למעלה.',
     // כל הודעת כישלון בהצטרפות אומרת מה לעשות עכשיו (change: join-flow-resilience).
     finished: 'המירוץ הזה כבר הסתיים. אם זו הפתעה, בקשו מהמארגן את הקוד העדכני.',
+    staffSession: 'הדפדפן הזה מחובר כצוות. כדי לשחק, הצטרפו מדפדפן אחר או מחלון גלישה בסתר, או החליפו כאן לשחקן.',
+    staffSessionSwitch: 'החליפו לשחקן (הצוות כאן יתנתק)',
     invalidCode: 'הקוד לא נמצא. בדקו את הקוד מול המארגן ונסו שוב.',
     codeRevoked: 'הקוד הזה כבר לא פעיל. בקשו מהמארגן קוד חדש.',
     joinFailed: 'ההצטרפות לא עברה. נסו שוב, ואם זה חוזר פנו למארגן.',
@@ -692,6 +694,7 @@ const HE = {
     broadcastFailed: 'השידור לא נשלח. הטקסט נשמר, נסו שוב.',
     replyFailed: 'התשובה לא נשלחה. הטקסט נשמר, נסו שוב.',
     sessionExpired: 'ההתחברות שלכם לקונסולה פגה. התחברו שוב עם קוד הצוות.',
+    signedInAsPlayer: 'הדפדפן הזה הצטרף כשחקן בלשונית אחרת, וזה ניתק את הקונסולה. לצוות צריך דפדפן נפרד או חלון גלישה בסתר.',
     notFound: 'הפריט הזה כבר לא קיים. רעננו את המסך.',
     rateLimited: 'יותר מדי פעולות ברצף. המתינו רגע ונסו שוב.',
     dailyCapacity: 'אנחנו משפרים את האפליקציה היום. שום דבר לא אבד, נסו שוב מחר.',
@@ -1144,6 +1147,8 @@ const EN: typeof HE = {
     needRequiredFields: 'A couple of required fields are still empty. They are highlighted above.',
     // Every join failure says what to do next (change: join-flow-resilience).
     finished: 'This race has already finished. If that is a surprise, ask your host for the current code.',
+    staffSession: 'This browser is signed in as staff. To play, join from another browser or a private window, or switch here.',
+    staffSessionSwitch: 'Switch to a player (staff here signs out)',
     invalidCode: 'We could not find that code. Check it with your host and try again.',
     codeRevoked: 'This code is no longer active. Ask your host for a new one.',
     joinFailed: 'The join did not go through. Try again, and if it keeps happening ask your host.',
@@ -1730,6 +1735,7 @@ const EN: typeof HE = {
     broadcastFailed: 'The broadcast did not go out. Your text was kept, try again.',
     replyFailed: 'The reply did not go out. Your text was kept, try again.',
     sessionExpired: 'Your console sign in expired. Sign in again with your staff PIN.',
+    signedInAsPlayer: 'This browser joined as a player in another tab, which signed the console out. Staff need a separate browser or a private window.',
     notFound: 'That item no longer exists. Refresh the screen.',
     rateLimited: 'Too many actions in a row. Wait a moment and try again.',
     dailyCapacity: 'We are improving the app today. Nothing was lost, please try again tomorrow.',

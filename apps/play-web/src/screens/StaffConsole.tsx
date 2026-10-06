@@ -2,7 +2,8 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, 
 import { useWideLayout } from '../lib/useWideLayout';
 import { STAFF_PHONE_ORDER, staffDesktopColumns, type StaffSection } from '../lib/staffLayout';
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { db, signInStaff, uid } from '../services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, db, signInStaff, uid } from '../services/firebase';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { useStaffAccess } from '../hooks/useStaffAccess';
 // Live photo feed moderation (live-photo-feed): lazy, loads on first open.
@@ -70,6 +71,12 @@ import { useT } from '../i18nContext';
 import { feedback } from '../lib/sound';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { classifyStaffError, announcementPayload, type StaffFailure } from '../lib/failureCopy';
+
+// Issue #16: an anonymous user here means a player joined in another tab of this browser and
+// replaced the staff identity (the console's custom-token user is never anonymous).
+function staffIdentityHint() {
+  return { signedInAsPlayer: auth.currentUser?.isAnonymous === true };
+}
 import { missionSpots, type MissionSpot } from '../lib/staffMap';
 import { hasMoreActions, staffTeamActions } from '../lib/staffTeamActions';
 import { dialog } from '../components/dialog';
@@ -326,6 +333,10 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // text (change: play-no-silent-failures). `sessionExpired` also unlocks the way
   // back to the PIN screen, which an expired token otherwise had no path to.
   const [readErr, setReadErr] = useState<StaffFailure | null>(null);
+  // Issue #16: the identity can change AFTER the error arrived (switching a browser to a player signs
+  // out first, so the listeners fail while nobody is signed in). Decide the wording when it is shown.
+  const [playerHere, setPlayerHere] = useState(false);
+  useEffect(() => onAuthStateChanged(auth, (u) => setPlayerHere(u?.isAnonymous === true)), []);
   // A score adjustment used to land with NO feedback at all: the buttons sat ~4px
   // apart with no confirm and no undo, so a mis-tapped -5 was indistinguishable
   // from nothing happening. Confirm AFTER the callable resolves (never before —
@@ -426,7 +437,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       setPending(rows);
       setTeams(teamRows);
       setTeamsLoaded(true);
-    }, (e) => setReadErr(classifyStaffError(e)));
+    }, (e) => setReadErr(classifyStaffError(e, staffIdentityHint())));
   }, [ownerUid, gameId, runId]);
 
   // Live unacknowledged SOS / alerts.
@@ -464,7 +475,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         if (isNew) feedback('alert');
       }
       setAlerts(rows);
-    }, (e) => setReadErr(classifyStaffError(e)));
+    }, (e) => setReadErr(classifyStaffError(e, staffIdentityHint())));
   }, [ownerUid, gameId, runId]);
 
   // ── The review-wait alarm (change: review-wait-alarm) ─────────────────────────
@@ -494,7 +505,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     try {
       await reviewStationSubmission({ ...ctx, teamId: s.teamId, taskId: s.taskId, approved });
     } catch (e) {
-      setReadErr(classifyStaffError(e));
+      setReadErr(classifyStaffError(e, staffIdentityHint()));
     }
   }
 
@@ -502,7 +513,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     try {
       await acknowledgeAlert({ ...ctx, alertId: a.id });
     } catch (e) {
-      setReadErr(classifyStaffError(e));
+      setReadErr(classifyStaffError(e, staffIdentityHint()));
     }
   }
 
@@ -523,7 +534,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         setAdjustAck((a) => { const next = { ...a }; delete next[team.id]; return next; });
       }, 3000);
     } catch (e) {
-      setReadErr(classifyStaffError(e));
+      setReadErr(classifyStaffError(e, staffIdentityHint()));
     }
   }
 
@@ -589,7 +600,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       // source of truth for these flags, so the row re-renders from the server's
       // verdict rather than from what we hoped happened.
     } catch (e) {
-      setReadErr(classifyStaffError(e));
+      setReadErr(classifyStaffError(e, staffIdentityHint()));
     }
   }
 
@@ -614,7 +625,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     try {
       await reviewFlashMission({ ...ctx, flashId, teamId, action: 'approve' });
       setAdjustAck((a) => ({ ...a, [teamId]: t.flash.staffApproved }));
-    } catch (e) { setReadErr(classifyStaffError(e)); }
+    } catch (e) { setReadErr(classifyStaffError(e, staffIdentityHint())); }
   }
   const followFlashAction = useAsyncAction<[string, string], void>(approveFlash, (teamId) => teamId);
 
@@ -939,7 +950,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 
       {readErr && (
         <div role="status" aria-live="polite" className="mb-3">
-          <p className="text-danger text-xs">{t.staff[readErr.key]}</p>
+          <p className="text-danger text-xs">{t.staff[readErr.sessionExpired && playerHere ? 'signedInAsPlayer' : readErr.key]}</p>
           {readErr.sessionExpired && (
             <button className="inline-flex items-center justify-center min-h-[44px] px-2 -ms-2 text-xs font-semibold text-ink-fire underline" onClick={onSignOut}>
               {t.staff.backToSignIn}

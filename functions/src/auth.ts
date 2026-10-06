@@ -1,5 +1,5 @@
 import * as functions from 'firebase-functions';
-import { FIRESTORE_PATHS, resolveStaffAccess, staffCan, STAFF_REFUSAL_REASON, type StaffCapability } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, resolveStaffAccess, staffCan, STAFF_IDENTITY_REASON, STAFF_REFUSAL_REASON, type StaffCapability } from '@rushpoint/shared';
 import { db, docCachePolicy } from './firebase';
 import { cachedGetDoc } from './docCache';
 
@@ -128,4 +128,17 @@ export async function assertStaffCan(
       { reason: STAFF_REFUSAL_REASON.missing, capability });
   }
   return uid;
+}
+
+/**
+ * A staff identity is never a team (issue #16). Called by the callables that make the CALLER's uid a
+ * team or a team device. Firebase keeps one user per browser origin, and the staff console lives on
+ * the player origin, so without this a marshal who opened the player app joined as themselves.
+ */
+export function assertNotStaffIdentity(context: functions.https.CallableContext): void {
+  if (context.auth?.token?.staff === true) {
+    throw new functions.https.HttpsError('failed-precondition',
+      'This browser is signed in as staff; join from another browser or a private window.',
+      { reason: STAFF_IDENTITY_REASON });
+  }
 }

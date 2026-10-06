@@ -19,6 +19,8 @@ import {
 import { translations as playT } from '../apps/play-web/src/i18n';
 import { classifyBillingError, classifyCallError } from '../apps/creator-web/src/lib/callErrors';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -60,6 +62,25 @@ check('unavailable maps to offline',
 check('deadline-exceeded maps to offline',
   classifyStaffError({ code: 'deadline-exceeded' }).key === 'offline');
 
+// Issue #16 (2026-10-05): a player joining in ANOTHER TAB of the same browser replaces the staff
+// identity everywhere (Firebase keeps one signed-in user per origin), and the console then said
+// "your sign in expired", which sends the volunteer to retype a code that will be knocked out
+// again. When the identity now on this browser is a player's, say THAT.
+check('a refusal while signed in as a player names the real cause',
+  classifyStaffError({ code: 'permission-denied' }, { signedInAsPlayer: true }).key === 'signedInAsPlayer');
+check('... and still offers the way back to sign in',
+  classifyStaffError({ code: 'permission-denied' }, { signedInAsPlayer: true }).sessionExpired === true);
+check('the hint changes nothing for a refusal that is not about identity',
+  classifyStaffError({ code: 'unavailable' }, { signedInAsPlayer: true }).key === 'offline'
+  && classifyStaffError({ code: 'permission-denied', details: { reason: 'staff-capability-missing' } }, { signedInAsPlayer: true }).key === 'notAllowed');
+check('without the hint an identity refusal is still an expired session',
+  classifyStaffError({ code: 'permission-denied' }, { signedInAsPlayer: false }).key === 'sessionExpired');
+const staffSrc = readFileSync(join(__dirname, '..', 'apps', 'play-web', 'src', 'screens', 'StaffConsole.tsx'), 'utf8');
+check('the staff console tells the classifier who is signed in, at every call site',
+  !/classifyStaffError\(e\)/.test(staffSrc) && /signedInAsPlayer:/.test(staffSrc));
+check('... and re-decides the wording from the LIVE identity (the switch signs out first, so the error arrives while nobody is signed in)',
+  /onAuthStateChanged\(auth/.test(staffSrc) && /readErr\.sessionExpired && playerHere \? 'signedInAsPlayer'/.test(staffSrc));
+
 // LEAK GUARD: message text is never classified, so it can never be echoed.
 check('a raw English message with NO code is generic (never classified by text)',
   classifyStaffError(new Error('Missing or insufficient permissions')).key === 'generic');
@@ -74,7 +95,7 @@ for (const junk of [undefined, null, 'a string', {}, 0, [], { code: 42 }]) {
 }
 
 // Copy parity: a mapper key with no dictionary entry would render blank.
-const staffKeys = ['sessionExpired', 'notFound', 'rateLimited', 'offline', 'generic'] as const;
+const staffKeys = ['sessionExpired', 'signedInAsPlayer', 'notFound', 'rateLimited', 'offline', 'generic'] as const;
 for (const k of staffKeys) {
   check(`t.staff.${k} exists in HE`, typeof playT.he.staff[k] === 'string' && playT.he.staff[k].length > 0);
   check(`t.staff.${k} exists in EN`, typeof playT.en.staff[k] === 'string' && playT.en.staff[k].length > 0);

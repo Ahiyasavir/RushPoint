@@ -165,5 +165,27 @@ check('codeRevoked exists in BOTH dictionaries', revoked.length === 2, `${revoke
 check('the Hebrew codeRevoked copy is Hebrew', /[֐-׿]/.test(revoked[0] ?? ''));
 check('no em-dash in the new copy', !revoked.some((r) => r.includes('—')));
 
+// ── issue #16: a staff identity is refused by joinRun, and the screen must say so ──
+console.log('\n── staff identity on the join screen ──');
+check('the staff-identity refusal is NOT read as "the game is over"',
+  joinErrorKey({ code: 'functions/failed-precondition', details: { reason: 'staff-identity' } }) === 'staffSession');
+check('a plain failed-precondition is still a finished run',
+  joinErrorKey({ code: 'functions/failed-precondition' }) === 'finished');
+{
+  const screen16 = readFileSync(join(process.cwd(), 'apps/play-web/src/screens/JoinScreen.tsx'), 'utf8');
+  check('the join screen offers to switch this browser to a player',
+    /switchToPlayer\(/.test(screen16) && /t\.join\.staffSessionSwitch/.test(screen16));
+  check('the attach path recognises it too', /async function attach\(\)[\s\S]{0,1600}staffSession/.test(screen16));
+  // Every callable that makes the CALLER's uid a team refuses a staff token. Declared, not inferred:
+  // a new team-creating path must be added here AND guarded.
+  const runsSrc = readFileSync(join(process.cwd(), 'functions/src/runs/index.ts'), 'utf8');
+  for (const name of ['joinRun', 'joinTeamAsDevice', 'startInstantPlay']) {
+    const body = runsSrc.split(`export const ${name} = loggedCallable(`)[1]?.slice(0, 600) ?? '';
+    check(`${name} refuses a staff identity`, /assertNotStaffIdentity\(context\)/.test(body));
+  }
+  check('staffSession copy exists in both languages',
+    (i18n.match(/\bstaffSession: '/g) ?? []).length === 2 && (i18n.match(/\bstaffSessionSwitch: '/g) ?? []).length === 2);
+}
+
 console.log(`\n${failures === 0 ? 'ALL JOIN-CODE TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

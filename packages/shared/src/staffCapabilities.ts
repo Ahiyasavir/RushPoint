@@ -159,6 +159,20 @@ export const STAFF_REFUSAL_REASON = {
   removed: 'staff-removed',
 } as const;
 
+/**
+ * Issue #16 (2026-10-05): the player app keeps whatever user its browser already holds, so opening
+ * it where a marshal is signed in would join the game AS the marshal (the staff uid becoming a team,
+ * carrying staff claims). `joinRun`/`joinTeamAsDevice` refuse that with `failed-precondition` and
+ * this reason in `details`, and the join screen offers to switch this browser to a player.
+ */
+export const STAFF_IDENTITY_REASON = 'staff-identity' as const;
+
+export function isStaffIdentityRefusal(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const details = (e as { details?: unknown }).details;
+  return !!details && typeof details === 'object' && (details as { reason?: unknown }).reason === STAFF_IDENTITY_REASON;
+}
+
 export function staffRefusal(e: unknown): 'missing' | 'removed' | null {
   if (!e || typeof e !== 'object') return null;
   const details = (e as { details?: unknown }).details;

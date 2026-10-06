@@ -19,6 +19,8 @@
  * truncate a pasted join link before onChange could read it, so pasting
  * `https://…/?code=ABC123` produced `HTTPS://` and then "invalid code".
  */
+import { isStaffIdentityRefusal } from '@rushpoint/shared';
+
 export const MAX_JOIN_CODE_LEN = 12;
 
 /** The code carried by a join link, wherever it sits in the pasted string. */
@@ -64,6 +66,7 @@ export type JoinErrorKey =
   | 'invalidCode'   // no such code, or one the validator refused
   | 'revoked'       // the code exists but is no longer active
   | 'finished'      // the run is over
+  | 'staffSession'  // this browser is signed in as staff (issue #16): offer to switch to a player
   | 'full'          // the run hit its participant / device ceiling
   | 'connection'    // transport, cold start, or anonymous sign-in not settled
   | 'unknown';      // anything else — never a raw server sentence
@@ -91,6 +94,9 @@ export function joinErrorKey(e: unknown): JoinErrorKey {
 
   if (code === 'not-found' || code === 'invalid-argument') return 'invalidCode';
   if (code === 'permission-denied') return 'revoked';
+  // Before 'finished': the staff-identity refusal is also failed-precondition, and reading it as
+  // "this race has already finished" would send a host to look for a newer code that does not exist.
+  if (isStaffIdentityRefusal(e)) return 'staffSession';
   if (code === 'failed-precondition') return 'finished';
   if (code === 'resource-exhausted') return 'full';
   if (CONNECTION_CODES.has(code)) return 'connection';

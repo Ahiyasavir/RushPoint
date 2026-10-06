@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { FIRESTORE_PATHS, resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type PublicGame, type RegistrationField } from '@rushpoint/shared';
-import { db } from '../services/firebase';
+import { db, switchToPlayer } from '../services/firebase';
 import { DEMO_GAME_ID } from '../lib/demoEntry';
 import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
-import { saveSession, loadSound, saveSound, type Session } from '../store';
+import { saveSession, clearStaffSession, loadSound, saveSound, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { unlockAudio } from '../lib/sound';
@@ -60,6 +60,10 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
   const [values, setValues] = useState<Record<string, string>>({});
   const [members, setMembers] = useState<string[]>(['']);
   const [err, setErr] = useState('');
+  // Issue #16: which action the server refused because this browser is signed in as staff, so the
+  // switch button can rerun exactly that action once the browser is a player.
+  const [staffBlocked, setStaffBlocked] = useState<false | 'join' | 'attach'>(false);
+  const [switching, setSwitching] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
   // Shared team devices: team-mode games offer "my team is already in" — this
   // phone attaches to an existing team via its device join code.
@@ -138,6 +142,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       case 'invalidCode': return t.join.invalidCode;
       case 'revoked': return t.join.codeRevoked;
       case 'finished': return t.join.finished;
+      case 'staffSession': return t.join.staffSession;
       case 'full': return t.join.gameFull;
       case 'connection': return t.join.connectionError;
       default: return t.join.joinFailed;
@@ -234,6 +239,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       onJoined(session);
     } catch (e) {
       setErr(joinError(e));
+      setStaffBlocked(joinErrorKey(e) === 'staffSession' ? 'join' : false);
     }
   }
 
@@ -259,9 +265,34 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
     } catch (e) {
       // A network blip here used to read as a wrong team code. Everything else
       // keeps the attach-specific copy, which already says what to check.
-      setErr(joinErrorKey(e) === 'connection' ? t.join.connectionError : t.devices.attachFailed);
+      const key = joinErrorKey(e);
+      setStaffBlocked(key === 'staffSession' ? 'attach' : false);
+      setErr(key === 'connection' ? t.join.connectionError : key === 'staffSession' ? t.join.staffSession : t.devices.attachFailed);
     }
   }
+
+  async function switchAndRetry() {
+    const retry = staffBlocked;
+    setSwitching(true);
+    try {
+      await switchToPlayer();
+      clearStaffSession();
+      setStaffBlocked(false);
+      setErr('');
+      if (retry === 'join') await submit();
+      else if (retry === 'attach') await attach();
+    } catch (e) {
+      setErr(joinError(e));
+    } finally {
+      setSwitching(false);
+    }
+  }
+  const staffSwitch = staffBlocked ? (
+    <button type="button" onClick={switchAndRetry} disabled={switching}
+      className="block w-full min-h-[44px] px-3 -mt-1 mb-3 text-sm font-semibold text-ink-fire underline">
+      {t.join.staffSessionSwitch}
+    </button>
+  ) : null;
 
   // In-flight guards (change: wave-b/async-action-guard). The old shared `busy`
   // useState could not stop a second tap landing in the same React batch — a real
@@ -619,6 +650,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
             </Card>
           </div>
           {err && <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+          {staffSwitch}
           <Button
             disabled={busy || teamCode.trim().length < 6}
             loading={attachAction.busy}
@@ -711,6 +743,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       </div>
 
       {err && <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+          {staffSwitch}
 
       <Button
         // Disabled ONLY while a join is genuinely in flight. An incomplete form

@@ -31,6 +31,7 @@ export function taskMessageClass(tone: MessageTone): string {
 // ─── 2. Staff-console rejections ─────────────────────────────────────────────
 export type StaffFailureKey =
   | 'sessionExpired'
+  | 'signedInAsPlayer'
   | 'notFound'
   | 'rateLimited'
   | 'dailyCapacity'
@@ -62,7 +63,16 @@ function bareCode(e: unknown): string {
   return raw.replace(/^functions\//, '');
 }
 
-export function classifyStaffError(e: unknown): StaffFailure {
+/**
+ * Who is signed in on this browser right now. Firebase keeps ONE user per origin, shared by every
+ * tab, so joining the game as a player in another tab replaces the staff identity here too (issue
+ * #16, 2026-10-05). Optional: without it an identity refusal reads as an expired session, as before.
+ */
+export interface StaffIdentityHint {
+  signedInAsPlayer?: boolean;
+}
+
+export function classifyStaffError(e: unknown, hint: StaffIdentityHint = {}): StaffFailure {
   // Before the code switch: the daily-quota refusal arrives AS a
   // `resource-exhausted`, so the switch would tell a volunteer to "wait a moment"
   // during an outage that lasts until the quota resets. Structured marker only.
@@ -78,7 +88,9 @@ export function classifyStaffError(e: unknown): StaffFailure {
     // for a transient hiccup — so mapping them to "session expired" is safe.
     case 'permission-denied':
     case 'unauthenticated':
-      return { key: 'sessionExpired', sessionExpired: true };
+      // Same way back to the sign-in screen either way, but the player case names the cause, so the
+      // volunteer knows retyping the code here will hold only once the other tab stops playing.
+      return { key: hint.signedInAsPlayer ? 'signedInAsPlayer' : 'sessionExpired', sessionExpired: true };
     case 'not-found':
       return { key: 'notFound', sessionExpired: false };
     case 'resource-exhausted':

@@ -1244,6 +1244,18 @@ async function main() {
   check('staffSignIn mints a custom token', !!staffTok?.customToken && staffTok?.name === 'E2E Marshal');
   await signInWithCustomToken(staff.auth, staffTok.customToken);
 
+  // Issue #16 (2026-10-05): the player app keeps whatever user this browser already has, so opening
+  // it where a marshal is signed in used to JOIN THE GAME AS THE MARSHAL: the staff uid became a
+  // team, carrying staff claims. A staff identity is never a team.
+  {
+    let e = null;
+    try { await staff.call('joinRun', { code: accessCode, displayName: 'Marshal as a team' }); } catch (err) { e = err; }
+    check('joinRun refuses a staff identity (a marshal is never a team)',
+      e?.code === 'functions/failed-precondition' && e?.details?.reason === 'staff-identity', JSON.stringify({ code: e?.code, details: e?.details }));
+    const ghost = await staff.getDocAt(`users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/teams/${staff.auth.currentUser.uid}`).catch(() => null);
+    check('no team was created for the staff identity', !ghost || ghost.exists === false);
+  }
+
   // A bogus/typo'd teamId must fail loud (not-found), never silently create a
   // phantom team doc with just a `taskSubmissions` field (data-integrity guard).
   let bogusTeamErr = null;
@@ -1528,9 +1540,13 @@ async function main() {
     prune2?.ok === true && prune2?.photoUrlsCleared === 0, JSON.stringify(prune2));
 
   // ── 11. A late participant cannot join a finished run ───────────────────────
+  // A fresh anonymous player, not the staff client: since issue #16 a staff identity is refused
+  // for BEING staff, which would pass or fail this check for the wrong reason.
   let lateRejected = false;
+  const latecomer = makeParty('latecomer');
+  await signInAnonymously(latecomer.auth);
   try {
-    await staff.call('joinRun', { code: accessCode, displayName: 'Latecomers' });
+    await latecomer.call('joinRun', { code: accessCode, displayName: 'Latecomers' });
   } catch (e) {
     lateRejected = /already finished/i.test(e.message);
   }

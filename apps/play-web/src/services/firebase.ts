@@ -153,6 +153,19 @@ if (emulatorBuild && !emuFlag.__rpPlayEmu) {
 // reloads, so we only mint a *new* anonymous user when none is restored —
 // otherwise a reload would clobber a restored staff (or anonymous) session.
 let authReady: Promise<void> | null = null;
+
+/**
+ * Issue #16: this browser holds a staff sign-in and the person wants to PLAY. Firebase keeps one user
+ * per origin, so this signs the staff identity out (any staff console open in another tab of this
+ * browser loses its session, which is unavoidable and why the button says so) and starts a fresh
+ * anonymous player.
+ */
+export async function switchToPlayer(): Promise<void> {
+  await auth.signOut();
+  authReady = null;
+  await ensureAuth();
+}
+
 export function ensureAuth(): Promise<void> {
   if (!authReady) {
     authReady = new Promise<void>((resolve, reject) => {

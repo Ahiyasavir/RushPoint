@@ -57,7 +57,13 @@ const PLAY_POLICY = {
   // at what is in the entry chunk before touching these constants — the remaining
   // candidate is the i18n dictionaries, which ship BOTH languages to everyone.
   maxEntryRawBytes: 975_000,
-  maxInitialGzipBytes: 262_000,
+  // 262_000 → 263_000 (2026-10-06): issue #16 (a staff identity can no longer join as a team; the
+  // join screen explains and offers "switch to a player") landed 106 B over after its copy was
+  // already trimmed. Looked first, as the note above asks: the entry is the Firebase SDK, JoinScreen
+  // and BOTH dictionaries. The English one is ~17.8 KB gzip of source shipped to every Hebrew
+  // participant on first load, and splitting it out is the real lever: it buys back ~15x this bump.
+  // That touches every reader of `translations` and the i18n gates, so it is its own change.
+  maxInitialGzipBytes: 263_000,
   // Size alone is not enough: the smallest deferred heavy dependency (qrcode,
   // 10,118 gzip bytes) is smaller than any useful headroom, so it could drift
   // into the entry chunk unnoticed. These markers are matched case-insensitively

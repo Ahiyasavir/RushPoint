@@ -1317,6 +1317,15 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   purpose: the join code is public, one character is ~250 codes (a player can try them all
   within an event), two are 27,157 (measured), and a wrong guess built on a join code counts
   against THAT run's lockout. Never shorten it, and never put the code in a link or QR.
+- **One browser holds ONE Firebase user for the whole origin, and the staff console lives on the
+  player origin** (issue #16, 2026-10-05). `ensureAuth` keeps whatever user is restored, so opening
+  the player app where a marshal had signed in JOINED THE GAME AS THE MARSHAL: the staff uid became a
+  team, carrying staff claims; the other order (staff signing in after a player) silently replaced
+  the player and the console then blamed an "expired" session. `joinRun`/`joinTeamAsDevice` now
+  refuse a staff token (`assertNotStaffIdentity`, `failed-precondition` + `details.reason
+  'staff-identity'`), the join screen maps that BEFORE the generic failed-precondition (which reads
+  "this race has already finished") and offers `switchToPlayer`, and the console names the cause
+  (`signedInAsPlayer`). Any new callable that makes the CALLER's uid a team ⇒ call the guard.
 - **SOS is a sheet, not a confirm** (change: sos-callback-and-authorities): "פנייה לרשויות" opens
   `tel:` links for every service in `EMERGENCY_SERVICES` (101, 100, 102), and the alert carries an
   optional `callbackPhone` (`sosCallbackVerdict`, same rule client and server). An empty number

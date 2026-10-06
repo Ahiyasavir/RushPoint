@@ -196,7 +196,7 @@ import { validate, parseStored } from '../validation';
 import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
 import { isSoloSelfGuidedRun, soloRunReadyToAutoFinalize } from './soloAutoFinalize';
 
-import { requireAuth, assertStaffCan, assertOwnerOrPlatformAdmin } from '../auth';
+import { requireAuth, assertStaffCan, assertOwnerOrPlatformAdmin, assertNotStaffIdentity } from '../auth';
 import { devicePresence } from '../devicePresenceStore';
 import { shouldFeedTask } from '../feedVisibility';
 import { applyStageCompletion } from './helpers';
@@ -688,6 +688,7 @@ export const getJoinInfo = loggedCallable('getJoinInfo', async (data, context) =
 
 export const joinRun = loggedCallable('joinRun', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  assertNotStaffIdentity(context);
   const teamId = context.auth.uid;
   await enforceRateLimit(teamId, 'joinRun');
 
@@ -4394,6 +4395,7 @@ export const getMyProfile = loggedCallable('getMyProfile', async (_data, context
 // the caller as the sole team, starts it, and returns the run context. No organizer needed.
 export const startInstantPlay = loggedCallable('startInstantPlay', async (data, context) => {
   const uid = requireAuth(context);
+  assertNotStaffIdentity(context);
   await enforceRateLimit(uid, 'startInstantPlay');
   const { gameId, displayName } = data as { gameId: string; displayName?: string };
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -5054,6 +5056,7 @@ export const contributeToTask = loggedCallable('contributeToTask', async (data, 
 
 export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  assertNotStaffIdentity(context);
   const uid = context.auth.uid;
   await enforceRateLimit(uid, 'joinTeamAsDevice');
 
