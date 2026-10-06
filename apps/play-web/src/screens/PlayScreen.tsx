@@ -10,6 +10,7 @@ import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useWideLayout } from '../lib/useWideLayout';
+import { completionFinishesRace } from '../lib/finishLine';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { syncErrorVerdict } from '../lib/syncError';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
@@ -84,6 +85,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // on any success and by the manual "try again" button.
   const firstLoadFails = useRef(0);
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
+  // Issue 46: the instant the race-ending mission was sent; the race clock stands still from it.
+  const [raceFrozenAt, setRaceFrozenAt] = useState<number | null>(null);
   const timer = useRef<number>();
   // Territory zones (change: fix-territory-map-visibility): fetched once here so the
   // SAME list feeds both the NavMap circles and the ZonesPanel list, and both
@@ -832,7 +835,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           has neither, so the button would draw blanks. */}
       {sosSheet}
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
-        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team}
+        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} hold={team} clockFrozenAtMs={raceFrozenAt}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
         callContact={state.contacts?.[0]}
         isTestDrive={session.isTestDrive}
@@ -900,6 +903,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
               session={session} state={state} stage={activeStage} onChanged={refresh}
               role={isController ? 'sender' : 'viewer'} senderName={controllerName}
               onTakeOver={() => void takeOver()}
+              onCompletionPending={(pending) => setRaceFrozenAt((prev) =>
+                (pending && completionFinishesRace(team.stages) ? (prev ?? Date.now()) : null))}
               onOpenChat={drawerPlan.tabs.some((tab) => tab.id === 'chat')
                 ? () => setDrawerRequest({ tab: 'chat', nonce: Date.now() })
                 : undefined}
@@ -1572,7 +1577,7 @@ function LeaveMenu({ onLeave }: { onLeave: () => void }) {
 }
 
 function Header({
-  game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, hold, onSos, sosBusy,
+  game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, hold, clockFrozenAtMs, onSos, sosBusy,
   isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing, phones, callContact,
 }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
@@ -1582,6 +1587,8 @@ function Header({
   timeOnly?: boolean; startedAt?: string;
   // The team's hold state, so the race clock subtracts finished holds and stands still during one.
   hold?: { held?: boolean; heldAt?: string; heldMs?: number };
+  /** The race clock stands still from this instant: the finishing mission was sent (issue 46). */
+  clockFrozenAtMs?: number | null;
   // Always-reachable SOS entry point (active-race branch only). Drives the same
   // shared sosAction as the bottom SOS button, so sosBusy loads/disables both.
   onSos?: () => void; sosBusy?: boolean;
@@ -1616,7 +1623,7 @@ function Header({
             {sealed
               ? <span data-testid="test-mode-chip">{t.play.testModeChip}</span>
               : timeOnly
-                ? <span aria-label={t.board.elapsed} className="inline-flex items-center gap-1"><Icon name="stopwatch" className="w-4 h-4" /><ElapsedClock startedAt={startedAt} hold={hold} /></span>
+                ? <span aria-label={t.board.elapsed} className="inline-flex items-center gap-1"><Icon name="stopwatch" className="w-4 h-4" /><ElapsedClock startedAt={startedAt} hold={hold} frozenAtMs={clockFrozenAtMs} /></span>
                 : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
             {!sealed && streak >= 2 && (
               <span
@@ -1732,7 +1739,7 @@ function MissionProgressRow({ progress, beat, accent }: {
 // A live m:ss elapsed clock for time_only runs, ticking on its own so only this
 // node re-renders each second (not the whole header/screen). Before the race is
 // stamped (startedAt absent) it reads 0:00.
-function ElapsedClock({ startedAt, hold }: { startedAt?: string; hold?: { held?: boolean; heldAt?: string; heldMs?: number } }) {
+function ElapsedClock({ startedAt, hold, frozenAtMs }: { startedAt?: string; hold?: { held?: boolean; heldAt?: string; heldMs?: number }; frozenAtMs?: number | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -1740,7 +1747,8 @@ function ElapsedClock({ startedAt, hold }: { startedAt?: string; hold?: { held?:
   }, []);
   // A hold stops this clock and finished holds are not counted (Ahiya, 2026-10-06): the same rule
   // the standings use, so the clock a player watches agrees with the time they are ranked on.
-  const sec = raceElapsedMs({ startedAt, ...hold }, now) / 1000;
+  // Issue 46: the finishing mission was sent, so the clock stops at the tap, not at the reply.
+  const sec = raceElapsedMs({ startedAt, ...hold }, typeof frozenAtMs === 'number' ? Math.min(now, frozenAtMs) : now) / 1000;
   return <span className="text-ink-fire font-mono">{formatDuration(sec)}</span>;
 }
 

@@ -122,8 +122,11 @@ function TaskMediaGallery({ media }: { media: TaskMedia[] }) {
   );
 }
 
-export default function TaskRunner({ session, state, stage, onChanged, role = 'sender', senderName, onTakeOver, onOpenChat }: {
+export default function TaskRunner({ session, state, stage, onChanged, role = 'sender', senderName, onTakeOver, onOpenChat, onCompletionPending }: {
   session: Session; state: MyTeamState; stage: RunStageRecord; onChanged: () => void;
+  /** A completion of the mission in hand was sent (true) or refused (false), so the screen can stop
+   *  the race clock at the TAP when this mission ends the race (issue 46). */
+  onCompletionPending?: (pending: boolean) => void;
   /** Opens the team↔organizer chat, when the run has one (change: submission-status-truth). */
   onOpenChat?: () => void;
   // Shared team devices (change: team-phones-simple, D3). ONE phone answers for the team; the
@@ -191,6 +194,13 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // task and surfaces the SAME requestHelp affordance the geofence/blocked cards
   // use. Reset whenever the task changes (below, with hint/msg).
   const [fieldGpsFailed, setFieldGpsFailed] = useState(false);
+  // Issue 46 (Ahiya, 2026-10-06): "ברגע שאני לוחץ סמן כהושלם הטיימר חייב להפסיק". The mission whose
+  // completion is on its way: its countdown stands still from the TAP until the next mission replaces
+  // the card, and runs again only if the send is refused. Keyed by task id, so it can never freeze
+  // the next mission's clock.
+  const [stoppedFor, setStoppedFor] = useState<string | null>(null);
+  function stopClocks(taskId: string | undefined) { if (taskId) setStoppedFor(taskId); onCompletionPending?.(true); }
+  function resumeClocks() { setStoppedFor(null); onCompletionPending?.(false); }
   // Blocked-player guidance (change: blocked-player-guidance): the server's own
   // verdict for the safe-zone soft-pause, straight off the routing response. The
   // out-of-bounds card used to render from the `team.outOfBounds` BOOLEAN alone and
@@ -219,6 +229,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // (a component-level ref would strand a later task in the same stage). Resetting
   // `exiting` on advance keeps the next card/Working from inheriting the fade.
   function advanceWithCardExit() {
+    // Every success path that moves the team on comes through here: the clocks stop now, not when
+    // the next mission arrives (issue 46).
+    stopClocks(task?.id);
     let fired = false;
     const runOnChanged = () => { if (fired) return; fired = true; exitTimer.current = null; setExiting(false); onChanged(); };
     const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -845,6 +858,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   async function submitCheckIn(coords?: { lat: number; lng: number; accuracyMeters?: number }) {
     try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); feedback('task'); advanceWithCardExit(); }
     catch (e) {
+      resumeClocks();
       // A fix too coarse to prove arrival comes back as `unavailable`, NOT as
       // `failed-precondition` (change: arrival-needs-a-usable-fix). The two need
       // different advice: "you are not there" means walk, "we cannot see you well
@@ -890,6 +904,11 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
     if (blockedOffline()) return;
     if (!begin()) return;
     clearMsg();
+    stopClocks(task?.id);
+    // Issue 46: a mission that needs no location (self_report, locationless) is sent AT ONCE. It used
+    // to wait for a GPS fix first (up to 5 s, or a permission prompt indoors), and the server stamps
+    // completion when the call arrives, so that wait was counted in the team's real time.
+    if (canCompleteWithoutLocation(task)) { void submitCheckIn(); return; }
     withLocation(
       // The accuracy rides along so the server can judge whether this fix is good
       // enough to PROVE arrival (change: arrival-needs-a-usable-fix).
@@ -909,6 +928,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
         // "request help" escape hatch the geofence/blocked cards use so a player
         // who permanently denied location still has an in-card route to a human.
         setFieldGpsFailed(true);
+        resumeClocks();
         showError(t.task.gpsWarning); end();
       },
     );
@@ -1481,7 +1501,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           among SIBLINGS, so a per-component prefix keeps the remount and removes
           the collision. */}
       <ExpiryCountdown key={`expiry-${task.id}`} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
-      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} paused={state.team.held === true}
+      <TimeLimitCountdown key={`limit-${task.id}`} leftMs={state.activeTaskTimeLeftMs} paused={state.team.held === true || stoppedFor === task.id}
         totalMs={typeof task.timeLimitMinutes === 'number' && task.timeLimitMinutes > 0 ? task.timeLimitMinutes * 60_000 : null}
         onTimeUp={onChanged} />
 
