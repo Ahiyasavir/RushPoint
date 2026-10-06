@@ -16,6 +16,10 @@ const SING_VERB = /(^|[\s"'(])(גלה|העתק|לחץ|בחר|הוסף|צור|ש�
 // A singular second person: a possessive or object suffix, or a second-person past. ("הוספת" is
 // in SING_VERB instead: on a short button it is the noun "adding", in a sentence it is "you added".)
 // Checked at every length, see walk().
+// A singular imperative that is never other grammar, so it is address even on a two-word button
+// (issue 38, Ahiya 2026-10-06: "נסה שוב" under "לא ניתן לטעון את המשחק"). Kept tiny on purpose:
+// "שמור"/"מחק" stay allowed as short labels because they are also adjectives and nouns.
+const SING_ALWAYS = /(^|[\s"'(])(נסה)(\s|$|[.,:!?])/;
 const SING_YOU = /(^|[\s"'(])(שלך|עליך|אותך|ממך|בשבילך|חשבונך|שמך|אתה|לך|שכחת|שמחקת|התחברת|הוזמנת|יצרת|בחרת)(\s|$|[.,:!?])/;
 
 /** Hits that are other grammar, by `<app>.<path>`, each with its reason. */
@@ -50,7 +54,7 @@ function walk(node: unknown, path: string, app: string): void {
   // length: "אין לך חשבון?" and "התגים שלך" are three and two words (found live 2026-10-05).
   const sentence = s.trim().split(/\s+/).length >= 4;
   if (sentence) examined++;
-  if (!SING_YOU.test(s) && !(sentence && SING_VERB.test(s))) return;
+  if (!SING_YOU.test(s) && !SING_ALWAYS.test(s) && !(sentence && SING_VERB.test(s))) return;
   const id = `${app}.${path}`;
   if (id in OTHER_GRAMMAR) { seen.add(id); return; }
   hits.push(`${id} → ${s.slice(0, 90)}`);

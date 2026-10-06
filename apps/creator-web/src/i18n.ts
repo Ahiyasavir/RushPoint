@@ -25,7 +25,7 @@ const HE = {
     alerts: ({ n }: { n: number }) => (n === 1 ? 'התראה אחת' : `${n} התראות`),
     open: 'פתיחה',
     loadError: 'טעינת הריצות נכשלה. נסו שוב.',
-    retry: 'נסה שוב',
+    retry: 'נסו שוב',
     copyCode: 'העתק קוד גישה',
     copied: 'הקוד הועתק',
     loading: [
@@ -61,7 +61,7 @@ const HE = {
     submit:    'שליחה',
     errorTitle:    'משהו השתבש',
     errorBody:     'הדאשבורד נתקל בשגיאה לא צפויה. הנתונים שלכם בטוחים. נסו שוב, ואם זה ממשיך לקרות רעננו את העמוד.',
-    tryAgain:      'נסה שוב',
+    tryAgain:      'נסו שוב',
     reload:        'רענון',
     referralBonusApplied: 'בונוס הפניה הוחל! קיבלת ריצה חינמית נוספת.',
     privacyLink: 'מדיניות פרטיות',
@@ -191,7 +191,7 @@ const HE = {
     empty: 'ברגע שתשיקו משחק, הריצה שלו תופיע כאן, עם הניקוד, התשובות והתמונות של כל המשתתפים.',
     emptyCta: 'למשחקים שלי',
     loadError: 'טעינת ההיסטוריה נכשלה. נסו שוב.',
-    retry: 'נסה שוב',
+    retry: 'נסו שוב',
     untitled: 'משחק ללא שם',
     statusLive: 'משחקים עכשיו',
     // A live run launched more than a day ago: nobody ended it (lib/runHistoryBadge.ts).
@@ -214,7 +214,7 @@ const HE = {
     title: 'ניתוח הריצה',
     back: 'חזרה להיסטוריה',
     loadError: 'טעינת הניתוח נכשלה. נסו שוב.',
-    retry: 'נסה שוב',
+    retry: 'נסו שוב',
     loading: [
       'אוספים את התשובות של כולם',
       'סופרים נקודות ומשימות',
@@ -2696,7 +2696,7 @@ const HE = {
     untitledGame: 'משחק ללא שם',
     routedSuffix: ' (מנותב)',
     cannotLoad: 'לא ניתן לטעון את המשחק',
-    tryAgain: 'נסה שוב',
+    tryAgain: 'נסו שוב',
     loadingBuilder: 'טוען בונה…',
     loadingGame: [
       'פורשים את מגרש המשחק',

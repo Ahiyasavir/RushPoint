@@ -238,7 +238,11 @@ export default function App() {
         : isRunConsole ? 'max-w-[1680px] px-4 py-5'
         : 'max-w-6xl px-4 py-8'}`}>
         <Suspense fallback={<Spinner label="…" />}>
-          <Routes>
+          {/* Keyed on the signed-in account (issue 37, 2026-10-06): switching account in another tab
+              updated the header through onAuthStateChanged, but every page had loaded its data once,
+              so the header named one account over the other account's games. A new uid remounts
+              every route, so nothing a page fetched for the previous account survives. */}
+          <Routes key={user?.uid ?? 'signed-out'}>
             <Route path="/"                   element={<DashboardPage />} />
             <Route path="/build/:gameId"       element={<BuilderPage />} />
             <Route path="/gallery"             element={<GalleryPage />} />
