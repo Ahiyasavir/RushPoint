@@ -280,9 +280,9 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
         <Card className="p-4 w-full">
           <div className="text-sm font-semibold text-zinc-300 mb-3 text-start flex items-center gap-1.5"><Icon name="image" className="w-4 h-4 shrink-0" />{t.final.recapTitle}</div>
           <div className="grid grid-cols-2 gap-2.5">
-            <Stat label={t.final.statTotalTime} value={totalSec != null ? fmtDuration(totalSec) : t.final.statNone} accent={accent} />
+            <Stat label={t.final.statTotalTime} value={totalSec != null ? fmtDuration(totalSec) : t.final.statNotFinished} accent={accent} />
             <Stat label={t.final.statStages} value={`${completedStages.length}/${team.stages.length}`} accent={accent} />
-            <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : t.final.statNone} accent={accent} />
+            <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : t.final.statNoStage} accent={accent} />
             <Stat label={t.final.statHints} value={String(hintsUsed)} accent={accent} />
           </div>
           <Button className="mt-4" disabled={busy} onClick={() => shareAction.run()}>
