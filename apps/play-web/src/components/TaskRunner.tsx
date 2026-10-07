@@ -831,6 +831,8 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   async function requestHelp(forId: string) {
     const coords = await new Promise<{ lat?: number; lng?: number }>((resolve) => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve({});
+      // Never wait on a browser that does not answer (7.10 QA): the help call goes out anyway.
+      window.setTimeout(() => resolve({}), 9000);
       navigator.geolocation.getCurrentPosition(
         (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
         () => resolve({}),

@@ -3,7 +3,7 @@
 // silently calling cb(0, 0). Extracted to apps/play-web/src/utils/withLocation.ts so it
 // imports with no React. No emulator.
 //   npx tsx scripts/test-gps-error-ux.ts
-import { withLocation } from '../apps/play-web/src/utils/withLocation';
+import { withLocation, LOCATION_WATCHDOG_MS } from '../apps/play-web/src/utils/withLocation';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -81,6 +81,38 @@ function installGeo(mock: GeoMock | null): void {
   try { withLocation(() => { cbCalls++; }); } catch { threw = true; }
   check('no onDenied + error → does not throw', !threw);
   check('no onDenied + error → cb NOT called', cbCalls === 0, `cb=${cbCalls}`);
+}
+
+// 5. A browser that NEVER answers (an open permission prompt stops the `timeout`; 7.10 QA on
+//    production: mission 8 never loaded, "try again" waited again). The watchdog falls back, once.
+{
+  (globalThis as any).navigator = { geolocation: { getCurrentPosition: () => { /* silence */ } } };
+  let cbCalls = 0, deniedCalls = 0;
+  const realSetTimeout = globalThis.setTimeout;
+  const timers: Array<() => void> = [];
+  (globalThis as any).setTimeout = (fn: () => void) => { timers.push(fn); return 0; };
+  withLocation(() => { cbCalls++; }, () => { deniedCalls++; });
+  (globalThis as any).setTimeout = realSetTimeout;
+  check('silent browser → a watchdog is armed', timers.length === 1, `timers=${timers.length}`);
+  timers.forEach((f) => f());
+  check('silent browser → onDenied fires from the watchdog', deniedCalls === 1, `denied=${deniedCalls}`);
+  check('silent browser → cb NOT called', cbCalls === 0);
+  check('watchdog is longer than the 5 s fix timeout', LOCATION_WATCHDOG_MS > 5000, String(LOCATION_WATCHDOG_MS));
+}
+
+// 6. A late answer after the watchdog fired is ignored (one outcome only).
+{
+  let succeed: (() => void) | null = null;
+  (globalThis as any).navigator = { geolocation: { getCurrentPosition: (ok: any) => { succeed = () => ok({ coords: { latitude: 1, longitude: 2, accuracy: 5 } }); } } };
+  const realSetTimeout = globalThis.setTimeout;
+  const timers: Array<() => void> = [];
+  (globalThis as any).setTimeout = (fn: () => void) => { timers.push(fn); return 0; };
+  let cbCalls = 0, deniedCalls = 0;
+  withLocation(() => { cbCalls++; }, () => { deniedCalls++; });
+  (globalThis as any).setTimeout = realSetTimeout;
+  timers.forEach((f) => f());
+  (succeed as (() => void) | null)?.();
+  check('late fix after watchdog → still exactly one outcome', deniedCalls === 1 && cbCalls === 0, `cb=${cbCalls} denied=${deniedCalls}`);
 }
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}  (test-gps-error-ux)`);

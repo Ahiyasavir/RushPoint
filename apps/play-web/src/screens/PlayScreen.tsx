@@ -501,6 +501,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // a SAFETY feature could leave a team in trouble believing the organizers know.
     const coords = await new Promise<{ lat: number; lng: number } | null>((resolve) => {
       if (!navigator.geolocation) { resolve(null); return; }
+      // The SOS must go out even when the browser never answers (7.10 QA: an open permission prompt
+      // stops the 8 s timeout, and the alert was never sent). A second resolve is a no-op.
+      window.setTimeout(() => resolve(null), 9000);
       navigator.geolocation.getCurrentPosition(
         (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
         () => resolve(null),
