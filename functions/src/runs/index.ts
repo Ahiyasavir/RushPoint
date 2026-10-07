@@ -180,6 +180,7 @@ import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 // Guardian-consent assignment gate (change: consent-gate-routing): the pure,
 // total predicate that decides whether a team may be assigned a task at all.
+import { decideClaim } from './claimDecision';
 import { canReceiveTaskAssignment } from './consentGate';
 import { buildCompletedPins } from './completedPins';
 import {
@@ -5581,12 +5582,13 @@ export async function assignNextInActiveStage(
         const cur = await tx.get(teamRef);
         if (!cur.exists) return { taskId: undefined as string | undefined, mine: false };
         const curTeam = cur.data() as RunTeam;
-        const curStage = curTeam.stages[activeStageIdx];
-        if (!curStage) return { taskId: undefined, mine: false };
-        const existing = curStage.tasks.find((t) => t.status === 'assigned');
-        if (existing) return { taskId: existing.taskId, mine: false };
-        const localIdx = curStage.tasks.findIndex((t) => t.taskId === result.taskId);
-        if (localIdx < 0) return { taskId: undefined, mine: false };
+        // Decided on THIS read (claimDecision.ts): the stage must still be active and the mission
+        // still unassigned. A slow call used to re-assign a mission the team had completed
+        // meanwhile, inside a stage that had closed, and the team was stuck for good (2026-10-07).
+        const decision = decideClaim(curTeam.stages, activeStageIdx, result.taskId as string);
+        if (decision.kind === 'existing') return { taskId: decision.taskId, mine: false };
+        if (decision.kind === 'stale') return { taskId: undefined, mine: false };
+        const localIdx = decision.localIdx;
         const stages = curTeam.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
         stages[activeStageIdx].tasks[localIdx].status = 'assigned';
         stages[activeStageIdx].tasks[localIdx].startedAt = now;
