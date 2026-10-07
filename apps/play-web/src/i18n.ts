@@ -665,6 +665,7 @@ const HE = {
     teamMap: 'מפת הקבוצות',
     teamMapEmpty: 'אף קבוצה עדיין לא שידרה מיקום.',
     teamMapOpen: 'ניווט לקבוצה',
+    mapShowAll: 'הצג את כולן',
     // staff-event-map
     teamMapUpdated: ({ min }: { min: number | null }) => (min === null ? 'זמן העדכון לא ידוע' : min === 0 ? 'עודכן עכשיו' : `עודכן לפני ${min} דק׳`),
     teamMapNoFix: ({ n }: { n: number }) => (n === 1 ? 'קבוצה אחת עוד לא שידרה מיקום' : `${n} קבוצות עוד לא שידרו מיקום`),
@@ -1772,6 +1773,7 @@ const EN: typeof HE = {
     teamMap: 'Team map',
     teamMapEmpty: 'No team has reported a location yet.',
     teamMapOpen: 'Navigate to team',
+    mapShowAll: 'Show all teams',
     teamMapUpdated: ({ min }: { min: number | null }) => (min === null ? 'Last update unknown' : min === 0 ? 'Updated just now' : `Updated ${min} min ago`),
     teamMapNoFix: ({ n }: { n: number }) => (n === 1 ? 'One team has not reported a location yet' : `${n} teams have not reported a location yet`),
     // followed-teams: "My teams".

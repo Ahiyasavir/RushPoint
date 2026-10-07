@@ -196,3 +196,5 @@ export * from './staffCapabilities';
 export * from './senderQuiet';
 // Sending a rejected photo again (change: rejected-photo-resend)
 export * from './mediaResend';
+// When may a live team map move its own camera? (issue 52)
+export * from './liveMapFraming';

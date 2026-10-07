@@ -6,7 +6,7 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor, shouldAutoFrame, isUserCameraEvent } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
@@ -86,8 +86,12 @@ export default function LiveTeamMap({
   const markersById = useRef<Map<string, maplibregl.Marker>>(new Map());
   // The set of teamIds we last framed to — reframe only when the set changes.
   const framedKey = useRef<string>('');
+  // Issue 52: once the person moves the map, it never moves itself again ("show all" is the way back).
+  const userMoved = useRef(false);
   const [mode, setMode] = useState<MapMode>(DEFAULT_MAP_MODE);
   const [locs, setLocs] = useState<TeamLoc[]>([]);
+  const locsRef = useRef<TeamLoc[]>([]);
+  locsRef.current = locs;
   // Read by marker creation, which runs in an effect keyed on positions only.
   const followedRef = useRef(followed);
   followedRef.current = followed;
@@ -124,7 +128,22 @@ export default function LiveTeamMap({
       attributionControl: { compact: true },
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-    return () => { map.current?.remove(); map.current = null; };
+    map.current.on('movestart', (e) => { if (isUserCameraEvent(e)) userMoved.current = true; });
+    // The console mounts this map inside a section that may be HIDDEN (0x0). Framing a 0x0 map is
+    // lost, so it waits: when the box gets a real size, resize the canvas and frame then (7.10).
+    const box = ref.current;
+    const ro = new ResizeObserver(() => {
+      const m = map.current;
+      if (!m || box.clientWidth === 0 || box.clientHeight === 0) return;
+      m.resize();
+      const key = [...new Set(locsRef.current.map((l) => l.teamId))].sort().join(',');
+      if (shouldAutoFrame({ presentKey: key, framedKey: framedKey.current, userMoved: userMoved.current, count: locsRef.current.length })) {
+        framedKey.current = key;
+        frameTeams(m, locsRef.current);
+      }
+    });
+    ro.observe(box);
+    return () => { ro.disconnect(); map.current?.remove(); map.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -155,7 +174,9 @@ export default function LiveTeamMap({
         const el = document.createElement('div');
         // The label is positioned OUTSIDE the wrapper's box, so the wrapper stays exactly the pin's
         // size and MapLibre's centre anchor still sits on the team's position.
-        el.style.cssText = 'position:relative;';
+        // No `position` here: MapLibre's own `.maplibregl-marker { position:absolute }` places the
+        // marker AND anchors the label. An inline `position:relative` stacked every marker in the page
+        // flow, so each team after the first was drawn below its real spot (issue 52, 7.10).
         el.appendChild(document.createElement('div'));
         const label = document.createElement('div');
         label.setAttribute('data-follow-label', '');
@@ -189,20 +210,14 @@ export default function LiveTeamMap({
       }
     }
 
-    // Frame only when the SET of reporting teams changes (first load or a team
-    // joins/leaves) — never on a mere position update, so the map stays put and
-    // open popups survive while teams move.
+    // Frame when the SET of reporting teams changes (first load or a team joins), never on a mere
+    // position update, and never after the person has moved the map (issue 52: it zoomed out on
+    // its own mid-run, throwing away the organizer's zoom).
     const key = [...present].sort().join(',');
-    if (key !== framedKey.current && locs.length > 0) {
+    const visible = !!ref.current && ref.current.clientWidth > 0 && ref.current.clientHeight > 0;
+    if (visible && shouldAutoFrame({ presentKey: key, framedKey: framedKey.current, userMoved: userMoved.current, count: locs.length })) {
       framedKey.current = key;
-      const pts = locs.map((l) => [l.lng, l.lat] as [number, number]);
-      if (pts.length === 1) {
-        map.current.easeTo({ center: pts[0], zoom: 13 });
-      } else {
-        const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
-        pts.forEach((p) => b.extend(p));
-        map.current.fitBounds(b, { padding: 60, maxZoom: 15, duration: 500 });
-      }
+      frameTeams(map.current, locs);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(locs.map((l) => [l.teamId, l.lat, l.lng]))]);
@@ -220,6 +235,13 @@ export default function LiveTeamMap({
     <div className="relative">
       <div ref={ref} className={`rounded-xl overflow-hidden border border-glass-border ${className}`} />
       <MapModeToggle mode={mode} onChange={setMode} />
+      {locs.length > 0 && (
+        <button type="button" data-testid="live-map-show-all"
+          onClick={() => { if (!map.current) return; userMoved.current = false; frameTeams(map.current, locs); }}
+          className="absolute top-2 left-2 min-h-[36px] px-3 rounded-full bg-app-card/95 border border-glass-border text-xs font-semibold text-ink-700 shadow hover:border-accent/50">
+          {rc.mapShowAll}
+        </button>
+      )}
       {locs.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="bg-app-card/90 text-zinc-500 text-xs px-3 py-1.5 rounded-full">
@@ -229,6 +251,19 @@ export default function LiveTeamMap({
       )}
     </div>
   );
+}
+
+// Fit the camera to every team with a position (one team: a street-level view around it).
+function frameTeams(m: maplibregl.Map, locs: readonly TeamLoc[]) {
+  const pts = locs.map((l) => [l.lng, l.lat] as [number, number]);
+  if (pts.length === 0) return;
+  if (pts.length === 1) {
+    m.easeTo({ center: pts[0], zoom: 13 });
+    return;
+  }
+  const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
+  pts.forEach((p) => b.extend(p));
+  m.fitBounds(b, { padding: 60, maxZoom: 15, duration: 500 });
 }
 
 function escapeHtml(s: string) {

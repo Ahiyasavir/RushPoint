@@ -334,7 +334,9 @@ export default function NavMap({
       if (t.active) {
         el.setAttribute('role', 'img');
         el.setAttribute('aria-label', t.title);
-        el.style.cssText = 'position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;';
+        // No `position` here (issue 53, 7.10): MapLibre's `.maplibregl-marker { position:absolute }`
+        // must win, or every marker after the first is pushed down by the ones before it.
+        el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;';
         const ring = document.createElement('div');
         ring.className = 'rp-pulse-ring';
         ring.style.cssText = `position:absolute;bottom:-6px;width:28px;height:28px;border-radius:50%;background:${accent};animation:rpPulse 1.6s ease-out infinite;`;

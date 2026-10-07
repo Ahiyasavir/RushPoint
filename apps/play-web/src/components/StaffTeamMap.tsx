@@ -21,7 +21,7 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor, shouldAutoFrame, isUserCameraEvent } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useT } from '../i18nContext';
 import { locationAge, type MissionSpot } from '../lib/staffMap';
@@ -96,6 +96,8 @@ export default function StaffTeamMap({
   const markersById = useRef<Map<string, { marker: maplibregl.Marker; el: HTMLDivElement; popup: maplibregl.Popup }>>(new Map());
   const spotMarkers = useRef<maplibregl.Marker[]>([]);
   const framedKey = useRef<string>('');
+  // Issue 52: once the marshal moves the map, it never moves itself again ("show all" is the way back).
+  const userMoved = useRef(false);
   const [locs, setLocs] = useState<TeamLoc[]>([]);
   // Re-renders the "updated N min ago" lines and the faded dots once a minute.
   const [now, setNow] = useState(() => Date.now());
@@ -144,6 +146,7 @@ export default function StaffTeamMap({
     // lib/recenter.ts) and a second watcher here would double the GPS drain on a
     // phone that has to survive a whole event.
     const m = map.current;
+    m.on('movestart', (e) => { if (isUserCameraEvent(e)) userMoved.current = true; });
     const markers = markersById.current;
     return () => { m.remove(); map.current = null; markers.clear(); spotMarkers.current = []; };
   }, []);
@@ -226,19 +229,24 @@ export default function StaffTeamMap({
 
     // Frame the group only when the SET of teams changes, not on every ping —
     // otherwise the camera yanks itself around while a marshal is reading it.
+    // ...and never after the marshal has moved the map (issue 52, 7.10: it zoomed out on its own).
     const key = [...seen].sort().join(',');
-    if (key && key !== framedKey.current) {
+    if (shouldAutoFrame({ presentKey: key, framedKey: framedKey.current, userMoved: userMoved.current, count: seen.size })) {
       framedKey.current = key;
-      const bounds = new maplibregl.LngLatBounds();
-      for (const loc of locs) bounds.extend([loc.lng, loc.lat]);
-      for (const sp of spots) bounds.extend([sp.lng, sp.lat]);
-      if (locs.length === 1 && spots.length === 0) {
-        m.easeTo({ center: [locs[0].lng, locs[0].lat], zoom: 15 });
-      } else if (!bounds.isEmpty()) {
-        m.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 400 });
-      }
+      frameAll(m);
     }
   }, [locs, nameOf, now, spotsKey, t, followedKey, mineOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function frameAll(m: maplibregl.Map) {
+    const bounds = new maplibregl.LngLatBounds();
+    for (const loc of locs) bounds.extend([loc.lng, loc.lat]);
+    for (const sp of spots) bounds.extend([sp.lng, sp.lat]);
+    if (locs.length === 1 && spots.length === 0) {
+      m.easeTo({ center: [locs[0].lng, locs[0].lat], zoom: 15 });
+    } else if (!bounds.isEmpty()) {
+      m.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 400 });
+    }
+  }
 
   const showTeam = (loc: TeamLoc) => {
     const entry = markersById.current.get(loc.teamId);
@@ -253,7 +261,16 @@ export default function StaffTeamMap({
 
   return (
     <div>
-      <div ref={ref} className="h-80 w-full rounded-xl overflow-hidden border border-glass-border" data-testid="staff-map" />
+      <div className="relative">
+        <div ref={ref} className="h-80 w-full rounded-xl overflow-hidden border border-glass-border" data-testid="staff-map" />
+        {locs.length > 0 && (
+          <button type="button" data-testid="staff-map-show-all"
+            onClick={() => { if (!map.current) return; userMoved.current = false; frameAll(map.current); }}
+            className="absolute top-2 start-2 min-h-[36px] px-3 rounded-full bg-app-card/95 border border-glass-border text-xs font-semibold text-zinc-100 shadow hover:border-accent/50">
+            {t.staff.mapShowAll}
+          </button>
+        )}
+      </div>
       {locs.length === 0 ? (
         <p className="text-zinc-500 text-sm mt-2">{t.staff.teamMapEmpty}</p>
       ) : (

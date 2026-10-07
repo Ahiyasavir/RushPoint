@@ -1489,6 +1489,7 @@ const HE = {
     push: 'שליחה',
     broadcastFailed: 'השליחה נכשלה. בדקו את החיבור ונסו שוב.',
     waitingForTeams: 'ממתינים שהקבוצות ידווחו מיקום…',
+    mapShowAll: 'הצג את כולן',
 
     // ── חלוקה לקבוצות תצוגה (change: run-console-progressive-disclosure) ──
     // שמות שאפשר לדמיין, לא שמות של מבנה נתונים (change: run-console-clarity).
@@ -4784,6 +4785,7 @@ const EN: typeof HE = {
     push: 'Send',
     broadcastFailed: 'Sending failed. Check your connection and try again.',
     waitingForTeams: 'Waiting for teams to report their location…',
+    mapShowAll: 'Show all teams',
 
     // ── Disclosure groups (change: run-console-progressive-disclosure) ──
     // Names a creator can picture, not names of a data structure
