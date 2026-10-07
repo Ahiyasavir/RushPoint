@@ -115,6 +115,7 @@
         "test:ui:report": "playwright show-report",
         "simulate": "node scripts/simulate-run.mjs",
         "simulate:browser": "node scripts/simulate-browser-run.mjs",
+        "simulate:live-ops": "node scripts/simulate-live-ops-ui.mjs",
         "verify:browser": "npm run shared:build && npm run build --workspace=functions && node scripts/emulator-exec.mjs \"node scripts/simulate-browser-run.mjs\"",
         "simulate:adversarial": "node scripts/simulate-adversarial.mjs",
         "simulate:v1": "node scripts/simulate-tournament.mjs",

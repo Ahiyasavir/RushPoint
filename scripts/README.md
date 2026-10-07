@@ -40,6 +40,7 @@ Three rules that hold across the folder:
 | `simulate-run.mjs` | `simulate` | N teams play a real game concurrently, then leaderboard invariants + station counters are audited. |
 | `simulate-adversarial.mjs` | `simulate:adversarial` | The same, with a share of the teams cheating. |
 | `simulate-browser-run.mjs` | `simulate:browser` · `verify:browser` | Playwright + synthetic GPS: the real client, not a callable harness. |
+| `simulate-live-ops-ui.mjs` | `simulate:live-ops` | Live-ops screens end to end on a fresh `dev:all`: SOS, chat, let in, flash, hold, skip, staff caps, remove, close, end run. |
 | `simulate-tournament.mjs` | `simulate:v1` | **Archived** v1 tournament sim. |
 
 ## Local development
