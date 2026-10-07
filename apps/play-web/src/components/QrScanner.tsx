@@ -27,6 +27,11 @@ export default function QrScanner({ onDecode, onClose }: {
   const { t } = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [denied, setDenied] = useState(false);
+  // Issue 51: TaskRunner passes a new onDecode every render, and the camera effect used to depend
+  // on it, so every team-state refresh stopped the camera and opened it again ("it keeps turning
+  // off and on"). The camera opens ONCE per mount; the latest callback is read through this ref.
+  const onDecodeRef = useRef(onDecode);
+  onDecodeRef.current = onDecode;
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +47,7 @@ export default function QrScanner({ onDecode, onClose }: {
     function handle(raw: string | null | undefined): boolean {
       const code = parseStationQrPayload(raw);
       if (code == null) return false;
-      onDecode(code);
+      onDecodeRef.current(code);
       return true;
     }
 
@@ -101,7 +106,7 @@ export default function QrScanner({ onDecode, onClose }: {
       if (video) video.srcObject = null;
       if (stream) stream.getTracks().forEach((tr) => tr.stop());
     };
-  }, [onDecode]);
+  }, []);
 
   return (
     <Card className="space-y-3">
