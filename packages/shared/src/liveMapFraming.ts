@@ -29,3 +29,9 @@ export function shouldAutoFrame(input: LiveMapFrameInput): boolean {
 export function isUserCameraEvent(e: { originalEvent?: unknown } | null | undefined): boolean {
   return !!e && e.originalEvent != null;
 }
+
+/** Canvas inputs that also count as the person moving the map. MapLibre 4.7 fires a WHEEL zoom's
+ *  movestart with no originalEvent (measured in Chromium, 7.10), so `isUserCameraEvent` alone missed
+ *  the commonest desktop gesture and the next team to report re-framed a map the organizer had
+ *  just zoomed. A press without a drag counts too: the person is working with the map. */
+export const USER_MAP_INPUTS = ['wheel', 'touchstart', 'mousedown'] as const;

@@ -21,7 +21,7 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor, shouldAutoFrame, isUserCameraEvent } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor, shouldAutoFrame, isUserCameraEvent, USER_MAP_INPUTS } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useT } from '../i18nContext';
 import { locationAge, type MissionSpot } from '../lib/staffMap';
@@ -147,6 +147,8 @@ export default function StaffTeamMap({
     // phone that has to survive a whole event.
     const m = map.current;
     m.on('movestart', (e) => { if (isUserCameraEvent(e)) userMoved.current = true; });
+    // A wheel zoom's movestart carries no DOM event, so the canvas input itself also counts (7.10).
+    for (const type of USER_MAP_INPUTS) m.getCanvas().addEventListener(type, () => { userMoved.current = true; }, { passive: true });
     const markers = markersById.current;
     return () => { m.remove(); map.current = null; markers.clear(); spotMarkers.current = []; };
   }, []);

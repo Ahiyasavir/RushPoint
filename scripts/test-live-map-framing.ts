@@ -3,7 +3,7 @@
 // itself only until the person moves the map; after that only "show all teams" moves it.
 //   npx tsx scripts/test-live-map-framing.ts
 import { readFileSync } from 'node:fs';
-import { shouldAutoFrame, isUserCameraEvent } from '../packages/shared/src/liveMapFraming';
+import { shouldAutoFrame, isUserCameraEvent, USER_MAP_INPUTS } from '../packages/shared/src/liveMapFraming';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -33,6 +33,16 @@ const staff = readFileSync(new URL('../apps/play-web/src/components/StaffTeamMap
 check('StaffTeamMap decides with shouldAutoFrame', /shouldAutoFrame\(/.test(staff));
 check('StaffTeamMap marks the marshal\'s own moves', /isUserCameraEvent\(/.test(staff) && /'movestart'/.test(staff));
 check('StaffTeamMap offers "show all teams"', /data-testid="staff-map-show-all"/.test(staff));
+
+// 7.10 re-check in a real browser: MapLibre 4.7 fires a WHEEL zoom's movestart with no originalEvent,
+// so the camera event alone missed the commonest desktop gesture and a new team re-framed the map
+// the organizer had just zoomed. A wheel, touch or press on the canvas itself is the person too.
+check('the canvas inputs that count as the person include wheel and touch',
+  ['wheel', 'touchstart', 'mousedown'].every((t) => (USER_MAP_INPUTS as readonly string[]).includes(t)));
+for (const [name, text] of [['LiveTeamMap', src], ['StaffTeamMap', staff]] as const) {
+  check(`${name} marks a wheel/touch/press on the canvas as the person's move`,
+    /USER_MAP_INPUTS/.test(text) && /getCanvas\(\)\.addEventListener/.test(text));
+}
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}  (test-live-map-framing)`);
 process.exit(failures === 0 ? 0 : 1);

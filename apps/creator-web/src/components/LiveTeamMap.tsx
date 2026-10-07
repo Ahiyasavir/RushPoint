@@ -6,7 +6,7 @@ import maplibregl from 'maplibre-gl';
 import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor, shouldAutoFrame, isUserCameraEvent } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE, teamMarkerLook, FOLLOWED_MARKER_COLOR, teamMarkerColor, shouldAutoFrame, isUserCameraEvent, USER_MAP_INPUTS } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
@@ -129,6 +129,8 @@ export default function LiveTeamMap({
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.current.on('movestart', (e) => { if (isUserCameraEvent(e)) userMoved.current = true; });
+    // A wheel zoom's movestart carries no DOM event, so the canvas input itself also counts (7.10).
+    for (const type of USER_MAP_INPUTS) map.current.getCanvas().addEventListener(type, () => { userMoved.current = true; }, { passive: true });
     // The console mounts this map inside a section that may be HIDDEN (0x0). Framing a 0x0 map is
     // lost, so it waits: when the box gets a real size, resize the canvas and frame then (7.10).
     const box = ref.current;

@@ -2571,8 +2571,11 @@ function PanelLanes({ layout, render, panelRef, flashedPanel }: {
   if (layout.columns.length === 0) return null;
   return (
     <div className={gridTemplateClass(layout.gridColumns)}>
+      {/* A lane is keyed by its POSITION, never by what it holds: a content key gave the lane a new
+          identity whenever a panel joined or left it, which remounted every panel in it. The live
+          map lost the organizer's zoom each time a team joined (issue 52, 7.10 re-check). */}
       {layout.columns.map((lane, i) => (
-        <div key={lane.join('|')} className={`space-y-4 min-w-0 ${columnSpanClass(layout.spans[i])}`}>
+        <div key={i} className={`space-y-4 min-w-0 ${columnSpanClass(layout.spans[i])}`}>
           {lane.map((panel) => (
             <div
               key={panel}
