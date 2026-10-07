@@ -12289,6 +12289,16 @@ async function main() {
       JSON.stringify((dry?.reopened ?? []).map((x) => x.id).sort()) === JSON.stringify([m1, m2, m3].sort()), JSON.stringify(dry?.reopened));
     const onlyDry = await creator.call('returnTeamTo', { ...C, teamId: uidP, target: { kind: 'task', taskId: m1 }, dryRun: true });
     check('only-this-mission dry run: names only that mission', JSON.stringify((onlyDry?.reopened ?? []).map((x) => x.id)) === JSON.stringify([m1]), JSON.stringify(onlyDry?.reopened));
+    // The staff app offers the same choice now (2026-10-07): a marshal with the route capability gets
+    // the same "from here" preview as the organizer.
+    const { pin: fhPin } = await creator.call('inviteStaff', { ownerUid: OWNER, gameId: g, runId: r, name: 'Rewind Marshal' });
+    const fhStaff = makeParty('fromHereStaff');
+    await signInAnonymously(fhStaff.auth);
+    const fhTok = await fhStaff.call('staffSignIn', { ownerUid: OWNER, gameId: g, runId: r, pin: fhPin });
+    await signInWithCustomToken(fhStaff.auth, fhTok.customToken);
+    const staffDry = await fhStaff.call('returnTeamTo', { ...C, teamId: uidP, target: { kind: 'task', taskId: m1 }, dryRun: true, scope: 'fromHere' });
+    check('from here: a staff member gets the same preview as the organizer',
+      JSON.stringify((staffDry?.reopened ?? []).map((x) => x.id).sort()) === JSON.stringify([m1, m2, m3].sort()), JSON.stringify(staffDry?.reopened));
     await creator.call('returnTeamTo', { ...C, teamId: uidP, target: { kind: 'task', taskId: m1 }, scope: 'fromHere', reason: 'redo from here' });
     const after = await doc();
     check('from here: the mission is the one to do now', after.activeTaskId === m1 && st(after, m1) === 'assigned', JSON.stringify(after.activeTaskId));
