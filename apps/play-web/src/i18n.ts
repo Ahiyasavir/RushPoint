@@ -203,7 +203,8 @@ const HE = {
     photoPreview: 'תצוגה מקדימה',
     yourTask: 'המשימה שלכם',
     routedTask: 'המשימה שלכם',
-    stopOf: ({ done, total }: { done: number; total: number }) => `עצור ${done} מתוך ${total}`,
+    // "תחנה", not "עצור": the imperative read as "Stop!" above the mission (QA 7.10).
+    stopOf: ({ done, total }: { done: number; total: number }) => `תחנה ${done} מתוך ${total}`,
     markComplete: 'סמן כהושלם',
     imHere: 'אני כאן',
     testDriveImHere: 'אני כאן (הרצת בדיקה)',
