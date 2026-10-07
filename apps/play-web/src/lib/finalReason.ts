@@ -14,3 +14,13 @@ export function finalScreenReason(
   if (run?.status === 'finished') return 'runEnded';
   return null;
 }
+
+/**
+ * Should the phone keep its GPS watch running? Only while location matters AND the race is not
+ * over. The final screen renders INSIDE PlayScreen, so without this the watch outlived the race
+ * (7.10 QA, "end the run mid-game, GPS stops"): no ping reached the server, but the phone kept
+ * the GPS on, and its location indicator, for as long as the final screen stayed open.
+ */
+export function shouldWatchGps(locationRelevant: boolean, reason: FinalReason): boolean {
+  return locationRelevant === true && reason == null;
+}

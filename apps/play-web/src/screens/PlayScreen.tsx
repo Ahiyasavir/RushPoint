@@ -41,7 +41,7 @@ import InRunAlerts from '../components/InRunAlerts';
 import { TopOverlay } from '../components/TopOverlays';
 import type { NavTarget } from '../components/NavMap';
 import { currentAssignedRec } from '../lib/currentMission';
-import { finalScreenReason } from '../lib/finalReason';
+import { finalScreenReason, shouldWatchGps } from '../lib/finalReason';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
 // join screen doesn't need it; it loads when the participant starts racing.
@@ -308,6 +308,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const locationVerdict = computeLocationRelevant(state, zones, everLocationRelevant.current);
   const locationRelevant = locationVerdict.relevant;
   everLocationRelevant.current = locationVerdict.latch;
+  // The race is over (finished, or the organizer ended the run): the GPS watch stops (7.10 QA).
+  const watchGps = shouldWatchGps(locationRelevant, state ? finalScreenReason(state.team, state.run) : null);
 
   // Track the participant's live position for the navigation map, and report it
   // to the host's live team map (throttled to once per ~20s, only while active).
@@ -315,7 +317,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // Locationless-only render: no map, no live ping, no arrival probe — and,
     // crucially, no browser location prompt. When location becomes relevant this
     // effect re-runs (locationRelevant is a dep) and the watcher starts then.
-    if (!locationRelevant) return;
+    if (!watchGps) return;
     if (!navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
       (p) => {
@@ -364,7 +366,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       { enableHighAccuracy: true, maximumAge: 10_000 },
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, [session, refresh, locationRelevant]);
+  }, [session, refresh, watchGps]);
 
   // Keep the screen awake while actively racing (map open, navigating).
   useWakeLock(!!state && state.team.launched && finalScreenReason(state.team, state.run) === null);
