@@ -64,6 +64,8 @@ import { crossedMilestone, type Milestone } from '../lib/milestones';
 import { creatorUrl } from '../lib/creatorUrl';
 import { closedNoticeKey, shouldShowClosedNotice, type ClosedTaskNotice } from '../lib/closedTaskNotice';
 import { Icon } from '../components/Icon';
+import { gpsCourse, pickHeading } from '../lib/heading';
+import { useDeviceHeading } from '../lib/useDeviceHeading';
 
 
 
@@ -86,6 +88,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // on any success and by the manual "try again" button.
   const firstLoadFails = useRef(0);
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
+  // Issue 54: which way the player faces, for the beam on their dot. The compass when the phone has
+  // one, else the walking course from the SAME watch below (play-web runs exactly one GPS watch).
+  const [course, setCourse] = useState<number | null>(null);
+  const { compass, compassAtMs, requestCompass } = useDeviceHeading();
+  const heading = pickHeading({ compass, compassAtMs, course, nowMs: Date.now() });
   // Issue 46: the instant the race-ending mission was sent; the race clock stands still from it.
   const [raceFrozenAt, setRaceFrozenAt] = useState<number | null>(null);
   // Fail open: a race clock frozen at the tap that is NOT followed by the finish (an unexpected server
@@ -315,6 +322,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         const lat = p.coords.latitude;
         const lng = p.coords.longitude;
         setMe({ lat, lng });
+        const c = gpsCourse({ heading: p.coords.heading, speed: p.coords.speed });
+        setCourse((prev) => (prev === c || (prev != null && c != null && Math.abs(prev - c) < 3) ? prev : c));
         const now = Date.now();
         // change: participant-read-budget. A flat 20s throttle spent a callable — and a
         // Firestore read, measured at 1.00/call in production — on fixes the server was
@@ -945,7 +954,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       {locationRelevant && (
         <div className={wide ? 'relative flex-1 min-w-0 rounded-2xl overflow-hidden' : 'absolute inset-0 rounded-2xl overflow-hidden'}>
           <Suspense fallback={<div className="h-full rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-            <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} pins={state.missionPins ?? []} bottomInset={wide ? 0 : sheetHeight} className="h-full" />
+            <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} heading={heading} onRecenterTap={requestCompass} pins={state.missionPins ?? []} bottomInset={wide ? 0 : sheetHeight} className="h-full" />
           </Suspense>
         </div>
       )}

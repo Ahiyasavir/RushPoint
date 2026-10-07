@@ -10,6 +10,7 @@ import MapModeToggle from './MapModeToggle';
 import { useT } from '../i18nContext';
 import type { MapSearchArea } from '../lib/searchAreas';
 import { recenterVerdict } from '../lib/recenter';
+import { beamRotation } from '../lib/heading';
 import { Icon, iconSvgMarkup, type IconName } from './Icon';
 import { mapLocale } from '../lib/mapLocale';
 
@@ -75,8 +76,12 @@ function zoneOwnership(z: CaptureZone, myTeamId?: string): 'mine' | 'rival' | 'o
 
 export default function NavMap({
   targets, me, hotZone = null, zones = [], searchAreas = [], myTeamId, accent = '#F97316', className = '', keepMapWithMe = false,
-  pins = [], bottomInset = 0,
+  pins = [], bottomInset = 0, heading = null, onRecenterTap,
 }: {
+  /** Which way the player faces, degrees from north (issue 54). null = no beam. */
+  heading?: number | null;
+  /** Called on a tap of "focus on me": iOS can only ask for the compass inside a tap. */
+  onRecenterTap?: () => void;
   targets: NavTarget[];
   /** Every located mission of the game (located-mission-arrival), drawn under the targets. */
   pins?: MissionPin[];
@@ -107,6 +112,9 @@ export default function NavMap({
   const pinMarkers = useRef<maplibregl.Marker[]>([]);
   const arrowMarker = useRef<maplibregl.Marker | null>(null);
   const meMarker = useRef<maplibregl.Marker | null>(null);
+  const beamEl = useRef<HTMLDivElement | null>(null);
+  const headingRef = useRef<number | null>(heading);
+  headingRef.current = heading;
   const fitted = useRef(false);
   // PARTICIPANTS STAY ON TOPO (change: maps-open-on-satellite). The creator's
   // maps now open on satellite — imagery answers "is this the right spot on the
@@ -444,16 +452,53 @@ export default function NavMap({
     if (!map.current) return;
     if (me && isValidCoord(me.lat, me.lng)) {
       if (!meMarker.current) {
+        // A wrapper exactly the dot's size (so MapLibre's centre anchor stays on the fix), holding
+        // the heading beam UNDER the dot (issue 54: Google Maps' blue fan, strong at the dot and
+        // fading outward, pointing where the player faces). The beam is hidden until a heading exists.
         const el = document.createElement('div');
-        el.style.cssText =
-          'width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 8px #3b82f6;';
+        el.style.cssText = 'width:22px;height:22px;';
+        const beam = document.createElement('div');
+        beam.setAttribute('data-heading-beam', '');
+        beam.style.cssText = 'position:absolute;left:50%;top:50%;width:110px;height:110px;margin:-55px 0 0 -55px;'
+          + 'pointer-events:none;display:none;transition:transform 120ms linear;';
+        beam.innerHTML = '<svg viewBox="-55 -55 110 110" width="110" height="110" aria-hidden="true">'
+          + '<defs><radialGradient id="rp-beam" cx="0" cy="0" r="52" gradientUnits="userSpaceOnUse">'
+          + '<stop offset="0" stop-color="#3b82f6" stop-opacity="0.7"/>'
+          + '<stop offset="0.55" stop-color="#3b82f6" stop-opacity="0.3"/>'
+          + '<stop offset="1" stop-color="#3b82f6" stop-opacity="0"/></radialGradient></defs>'
+          // A 70-degree fan pointing up (north); rotated as a whole by the heading.
+          + '<path d="M0 0 L-29.8 -42.6 A52 52 0 0 1 29.8 -42.6 Z" fill="url(#rp-beam)"/></svg>';
+        const dot = document.createElement('div');
+        dot.style.cssText = 'position:absolute;inset:0;border-radius:50%;background:#3b82f6;border:3px solid #fff;'
+          + 'box-shadow:0 0 8px #3b82f6;box-sizing:border-box;';
+        el.appendChild(beam);
+        el.appendChild(dot);
+        beamEl.current = beam;
         meMarker.current = new maplibregl.Marker({ element: el });
+        applyBeam();
       }
       meMarker.current.setLngLat([me.lng, me.lat]).addTo(map.current);
     } else {
       meMarker.current?.remove();
     }
   }, [me?.lat, me?.lng]);
+
+  // Turn the beam: the heading against the map's own rotation, re-applied when the map turns.
+  function applyBeam() {
+    const beam = beamEl.current;
+    if (!beam) return;
+    const h = headingRef.current;
+    if (h == null || !Number.isFinite(h)) { beam.style.display = 'none'; return; }
+    beam.style.display = 'block';
+    beam.style.transform = `rotate(${beamRotation(h, map.current?.getBearing() ?? 0)}deg)`;
+  }
+  useEffect(() => { applyBeam(); }, [heading]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    m.on('rotate', applyBeam);
+    return () => { m.off('rotate', applyBeam); };
+  }, [map.current]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fit bounds to frame targets + me — once we actually have something to show.
   useEffect(() => {
@@ -484,6 +529,7 @@ export default function NavMap({
     // Re-check rather than trusting the render-time verdict: a click can race a
     // fix disappearing, and easeTo with a non-finite centre leaves MapLibre in a
     // permanently broken camera state. A no-op is the correct outcome.
+    onRecenterTap?.();
     const v = recenterVerdict(me);
     if (!map.current || !v.enabled || !v.center) return;
     map.current.easeTo({ center: v.center, zoom: v.zoom, duration: 500 });
