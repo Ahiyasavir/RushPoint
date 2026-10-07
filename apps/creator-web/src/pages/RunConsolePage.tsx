@@ -1147,6 +1147,9 @@ export default function RunConsolePage() {
     pausedTaskCount: pausedTaskCount,
     shareLinkCount: SHARE_LINK_COUNT,
   });
+  // The SOS card's "chat with the team" opens the chat panel, which exists only while the run is
+  // live. In a finished run the button did nothing (QA 7.10), so it is not offered there.
+  const chatPanelShown = plan.groups.some((g) => g.panels.includes('chat'));
   // The rail's destinations, the one that is showing, and the lane layouts for
   // the pinned zone and for that section. All decided by the pure module.
   const sections = buildRunConsoleSections(plan);
@@ -1598,11 +1601,13 @@ export default function RunConsolePage() {
                     </a>
                   )}
                   {/* Issue 25 (Ahiya, 2026-10-06): write to the team straight from its SOS. */}
-                  <button type="button" data-testid="sos-chat"
-                    onClick={() => { setChatFocus({ teamId: a.teamId, nonce: Date.now() }); goToPanel('chat'); }}
-                    className="inline-flex items-center gap-1 min-h-[44px] rounded-lg border border-ink-alert px-3 text-xs font-bold text-ink-alert">
-                    <Icon name="chat" className="w-3.5 h-3.5" /> {rc.sosChat}
-                  </button>
+                  {chatPanelShown && (
+                    <button type="button" data-testid="sos-chat"
+                      onClick={() => { setChatFocus({ teamId: a.teamId, nonce: Date.now() }); goToPanel('chat'); }}
+                      className="inline-flex items-center gap-1 min-h-[44px] rounded-lg border border-ink-alert px-3 text-xs font-bold text-ink-alert">
+                      <Icon name="chat" className="w-3.5 h-3.5" /> {rc.sosChat}
+                    </button>
+                  )}
                   <Button
                     variant={runActionVariant('acknowledgeAlert')}
                     className="min-h-0 px-2.5 py-1 text-xs rounded-lg ms-auto"
@@ -4079,7 +4084,7 @@ function StaffChannelConsole({ ctx, selfUid }: {
             maxLength={CHAT_TEXT_MAX_LEN}
             dir="auto"
             disabled={busy}
-            placeholder={rc.chatReplyPlaceholder}
+            placeholder={rc.staffChannelPlaceholder}
             className="flex-1"
           />
           <Button variant={runActionVariant('sendChatReply')} onClick={() => void send()} disabled={busy || !draft.trim()}>

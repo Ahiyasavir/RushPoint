@@ -1116,6 +1116,8 @@ const HE = {
     chatSend: 'שליחה',
     chatUnread: 'חדש',
     chatReplyPlaceholder: 'כתבו תשובה לקבוצה',
+    // The staff channel's own box (QA 7.10: it said "reply to the team" in a channel players never see).
+    staffChannelPlaceholder: 'כתבו הודעה לצוות',
     copyJoinLink: 'העתקת קישור הצטרפות',
     deviceCapNote: ({ max }: { max: number }) => `כרגע יכולים להצטרף עד ${max} טלפונים לריצה אחת (סך כל המכשירים בכל הקבוצות). טלפונים נוספים יקבלו הודעה שהריצה מלאה.`,
     standingsVisibleToTeams: 'גלוי לקבוצות',
@@ -4412,6 +4414,7 @@ const EN: typeof HE = {
     chatSend: 'Send',
     chatUnread: 'New',
     chatReplyPlaceholder: 'Reply to the team',
+    staffChannelPlaceholder: 'Message your staff',
     copyJoinLink: 'Copy join link',
     deviceCapNote: ({ max }: { max: number }) => `For now, up to ${max} phones can join one run (total devices across all teams). Extra phones will be told the run is full.`,
     standingsVisibleToTeams: 'Visible to teams',
