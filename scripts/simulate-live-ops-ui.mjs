@@ -92,9 +92,9 @@ try {
   await A.getByRole('button', { name: 'שליחת קריאת מצוקה למארגנים' }).first().click();
   await A.getByTestId('sos-message').fill('בדיקת SOS מקומית');
   await A.getByTestId('sos-send').click();
-  await sleep(3000);
+  const sosOk = await A.getByText('המארגנים קיבלו את ההתראה').first().waitFor({ timeout: 30000 }).then(() => true).catch(() => false);
   await shot(A, '02-player-sos-sent');
-  ok('the phone confirms the SOS was received', /המארגנים קיבלו את ההתראה/.test(await textOf(A)));
+  ok('the phone confirms the SOS was received', sosOk);
   await A.getByRole('button', { name: 'אישור', exact: true }).last().click().catch(() => {});
   const staffSees = await S.getByText('בדיקת SOS מקומית').first().waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
   ok('SOS with a message appears on the staff screen', staffSees);
@@ -223,8 +223,9 @@ try {
 
 // ── P1: skip a mission for one team ──
 try {
+  await sleep(1500);
   await teamWindow('קבוצה א');
-  await S.getByRole('button', { name: 'דילוג על המשימה' }).first().click();
+  await S.getByRole('button', { name: 'דילוג על המשימה' }).first().click({ timeout: 15000 });
   await sleep(700);
   await S.getByRole('button', { name: 'דילוג על המשימה', exact: true }).last().click();
   const confirmed = 'clicked';
@@ -268,6 +269,23 @@ try {
     ok('restore: the phone is back in the game', back);
   } else ok('remove/restore: found team B', false, JSON.stringify(teams).slice(0, 200));
 } catch (e) { ok('remove/restore flow ran', false, String(e).slice(0, 200)); }
+
+// ── P1: send a team to a chosen mission from the staff window ──
+try {
+  await teamWindow('קבוצה ב');
+  await S.getByRole('button', { name: 'שליחה למשימה' }).first().click();
+  const list = S.getByTestId('staff-route-list').first();
+  await list.waitFor({ timeout: 10000 });
+  await list.getByRole('button').filter({ hasText: 'משימה נוספת' }).first().click();
+  await S.getByTestId('staff-route-confirm').first().waitFor({ timeout: 10000 });
+  await shot(S, '17-staff-route');
+  await S.getByTestId('staff-route-now').first().click();
+  await confirmIfAsked();
+  const routed = await B.getByText('משימה נוספת').first().waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+  ok('route: "send to mission" puts the team on the chosen mission', routed);
+  await shot(B, '18-player-routed');
+  await S.keyboard.press('Escape').catch(() => {});
+} catch (e) { ok('route flow ran', false, String(e).slice(0, 200)); }
 
 // ── Organizer console (creator-web): chat from an SOS card, and closing a mission a team holds ──
 try {
