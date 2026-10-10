@@ -43,7 +43,22 @@ let calls = 0;
 const t0 = Date.now();
 let stop = false;
 
+// PRODUCTION MODE (--tokens=<file> --key=<web api key>): identities are Admin-minted custom tokens
+// exchanged here, so no anonymous sign-up quota is touched. The first token is the game owner.
+const TOKENS = arg('tokens', '') ? JSON.parse(readFileSync(arg('tokens', ''), 'utf8')) : null;
+const KEY = arg('key', '');
+let tokenCursor = 0;
+async function signInCustom(row) {
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${KEY}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: row.customToken, returnSecureToken: true }),
+  });
+  const j = await r.json();
+  if (!j.idToken) throw new Error(`signInWithCustomToken failed: ${JSON.stringify(j).slice(0, 200)}`);
+  return { uid: row.uid, token: j.idToken };
+}
+
 async function signUp() {
+  if (TOKENS) return signInCustom(TOKENS[tokenCursor++]);
   const r = await fetch(`${AUTH}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=emulator`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }),
   });

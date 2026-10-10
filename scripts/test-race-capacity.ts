@@ -54,5 +54,21 @@ t('the guard rejects the pre-change transaction shape', () => {
   assert.ok(!/deviceCount:\s*FieldValue\.increment\(1\)/.test(before));
 });
 
+console.log('\n── the API outlives the proxy\'s idle upstream connections ──');
+
+// Measured in a 420-phone production load test: 2 HTTP 502s out of 260,000 calls, both logged by
+// Caddy as upstream "EOF" at the same instant. Node's default keepAliveTimeout is 5s; Caddy keeps
+// idle upstream connections far longer, so it occasionally sends a request down a socket Node is
+// closing. Node must hold idle sockets LONGER than the proxy, and headersTimeout must exceed that.
+t('server.js holds idle keep-alive sockets longer than the proxy does', () => {
+  const src = read('functions/server.js');
+  const ka = /server\.keepAliveTimeout\s*=\s*([\d_]+(?:\s*\*\s*[\d_]+)?)/.exec(src);
+  const ht = /server\.headersTimeout\s*=\s*([\d_]+(?:\s*\*\s*[\d_]+)?)/.exec(src);
+  assert.ok(ka && ht, 'server.keepAliveTimeout and server.headersTimeout must both be set explicitly');
+  const num = (x: string) => x.split('*').map((p) => Number(p.trim().replace(/_/g, ''))).reduce((a, b) => a * b, 1);
+  assert.ok(num(ka![1]) > 120_000, `keepAliveTimeout ${num(ka![1])}ms must exceed Caddy's 2-minute idle upstream timeout`);
+  assert.ok(num(ht![1]) > num(ka![1]), 'headersTimeout must exceed keepAliveTimeout');
+});
+
 console.log(`\n${passed} assertions passed`);
 if (process.exitCode) { console.error('FAILED'); process.exit(1); }

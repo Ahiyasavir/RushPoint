@@ -348,7 +348,15 @@ const server = app.listen(port, host, () => {
 // weak field link can take longer than that while still moving, and the phone then re-sends the
 // whole file (change: media-upload-reliability, D2). The client caps one attempt at 15 minutes
 // (attemptBudgetMs), so the server allows 16. A DEAD connection is still cut after 45 s of no
-// bytes by uploadRoute.js's own stall timer; headersTimeout keeps its default.
+// bytes by uploadRoute.js's own stall timer; keep-alive and headersTimeout are set just below.
 server.requestTimeout = 16 * 60_000;
+// Caddy keeps idle upstream connections open for 2 minutes; Node's default keepAliveTimeout is 5 s.
+// So Caddy occasionally sent a request down a socket Node was closing that same instant, and the
+// player got a 502 (logged by Caddy as upstream "EOF"): 2 of 260,000 calls in a 420-phone
+// production load test, which at a race is someone's mission submission. Node must hold idle
+// sockets LONGER than the proxy does, and headersTimeout must exceed keepAliveTimeout or Node
+// cuts a slow-arriving request on a reused socket. Pinned by scripts/test-race-capacity.ts.
+server.keepAliveTimeout = 3 * 60_000;
+server.headersTimeout = 181_000;
 
 module.exports = { app };
