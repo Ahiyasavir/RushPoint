@@ -4987,15 +4987,33 @@ export async function resolveCallerTeam(
   if (cached.exists && cached.data) {
     team = cached.data;
   } else {
-    // A secondary device: its uid is not the team id, so fall back to the membership query.
-    // Deliberately NOT cached — it is a query rather than a document read, it happens once
-    // per attached phone rather than per action, and a stale membership answer would attach
-    // someone to the wrong team.
-    const q = await db.collection(teamsCol(ctx.ownerUid, ctx.gameId, ctx.runId))
-      .where('deviceUids', 'array-contains', uid).limit(1).get();
-    if (q.empty) throw new functions.https.HttpsError('not-found', 'Team not found');
-    teamRef = q.docs[0].ref;
-    team = q.docs[0].data() as RunTeam;
+    // A secondary device: its uid is not the team id. This branch runs on EVERY call from an
+    // attached phone (each 60s poll and each team-document change), not once per phone, so at
+    // 35 teams x 6 phones an uncached query here was the largest per-phone read in the product
+    // (change: race-multi-phone-capacity). The device-membership index is written in the same
+    // transaction as the attach and only by the server, so it caches like any other document.
+    //
+    // A stale answer would attach someone to the wrong team, so the index is only TRUSTED once
+    // the (write-invalidated) team document confirms the uid is still in `deviceUids`. Anything
+    // else - no index (a phone attached before it existed), a team that no longer lists this
+    // uid - falls back to the authoritative query.
+    const member = await cachedGetDoc<{ teamId?: string }>(
+      db, docCachePolicy, FIRESTORE_PATHS.runDeviceMember(ctx.ownerUid, ctx.gameId, ctx.runId, uid),
+    );
+    const indexedTeamId = member.exists ? member.data?.teamId : undefined;
+    const indexed = indexedTeamId
+      ? await cachedGetDoc<RunTeam>(db, docCachePolicy, teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, indexedTeamId))
+      : null;
+    if (indexedTeamId && indexed?.exists && indexed.data && (indexed.data.deviceUids ?? []).includes(uid)) {
+      teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, indexedTeamId));
+      team = indexed.data;
+    } else {
+      const q = await db.collection(teamsCol(ctx.ownerUid, ctx.gameId, ctx.runId))
+        .where('deviceUids', 'array-contains', uid).limit(1).get();
+      if (q.empty) throw new functions.https.HttpsError('not-found', 'Team not found');
+      teamRef = q.docs[0].ref;
+      team = q.docs[0].data() as RunTeam;
+    }
   }
   if (opts.requireController) assertController(team, uid);
   return { ctx, teamId: team.id, team, teamRef };
@@ -5131,29 +5149,36 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
   // run-wide device counter, so every extra phone on every team contends on the SAME run
   // document. Same lock, same burst, same failure mode joinRun hit in production — a
   // second phone joining reached the player as an opaque INTERNAL instead of retrying.
-  await withLockRetry(() => db.runTransaction(async (tx) => {
-    // All reads before any write (Firestore transaction rule).
-    const [snap, runFresh] = await Promise.all([tx.get(teamRef), tx.get(runRef)]);
+  //
+  // ...but no longer on the run document (change: race-multi-phone-capacity). The transaction
+  // used to read-lock it too, so every extra phone of every team queued on ONE lock: the exact
+  // shape that measured joinRun at p50 12s for 120 simultaneous joins before joinRun moved to an
+  // atomic increment. A race opens with 100-200 extra phones attaching in the same minutes.
+  // Same trade as joinRun: the global ceiling is checked against the run read a moment ago, so a
+  // burst can overshoot it by at most the attaches in flight. It is a safety ceiling sized to
+  // measured capacity, not an entitlement, and a turned-away phone at a real event costs more.
+  // The transaction still serialises phones of the SAME team, which is what keeps the per-team
+  // allowance and the deviceUids append exact.
+  const runNow = runSnap.data() as Run | undefined;
+  const usedDevices = runNow?.deviceCount ?? runNow?.participantCount ?? 0;
+  if (!canAddRunDevice(usedDevices).ok) {
+    throw new functions.https.HttpsError(
+      'resource-exhausted',
+      `This run is full (${MAX_RUN_DEVICES} devices max).`,
+      { cap: MAX_RUN_DEVICES, used: usedDevices },
+    );
+  }
+  const attached = await withLockRetry(() => db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
     const team = snap.data() as RunTeam;
     const decision = canAttachDevice(team, uid);
     if (!decision.ok) {
-      if (decision.reason === 'duplicate') return; // raced with ourselves — already attached
+      if (decision.reason === 'duplicate') return false; // raced with ourselves — already attached
       if (decision.reason === 'full') {
         throw new functions.https.HttpsError('resource-exhausted', 'This team already has the maximum number of phones');
       }
       throw new functions.https.HttpsError('failed-precondition', 'This team has already finished.');
-    }
-    // Global per-run phone ceiling — additive to the per-team cap above. Legacy runs
-    // fall back to the team count; the field becomes exact once written here.
-    const r = runFresh.data() as Run | undefined;
-    const usedDevices = r?.deviceCount ?? r?.participantCount ?? 0;
-    if (!canAddRunDevice(usedDevices).ok) {
-      throw new functions.https.HttpsError(
-        'resource-exhausted',
-        `This run is full (${MAX_RUN_DEVICES} devices max).`,
-        { cap: MAX_RUN_DEVICES, used: usedDevices },
-      );
     }
     // Rewrite the devices array wholesale (never dotted-path an array element)
     // and backfill the device fields on a legacy doc in the same write.
@@ -5167,7 +5192,6 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
       devices,
       updatedAt: now,
     });
-    tx.update(runRef, { deviceCount: usedDevices + 1, updatedAt: now });
     // Device-membership reverse index. The attaching phone has no team doc of its
     // own, so firestore.rules' isRunParticipant() (an exists() at the caller's OWN
     // uid) failed for it and every secondary phone got permission-denied on the
@@ -5178,7 +5202,13 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
     tx.set(db.doc(FIRESTORE_PATHS.runDeviceMember(ownerUid, gameId, runId, uid)), {
       teamId: teamRef.id, deviceUid: uid, joinedAt: now,
     });
+    return true;
   }));
+  // Only an attach that actually happened may move the counter, and only AFTER it committed, so
+  // a refused or duplicate attach can never consume a place nobody holds (same order as joinRun).
+  if (attached) {
+    await runRef.update({ deviceCount: FieldValue.increment(1), updatedAt: now });
+  }
 
   return { ownerUid, gameId, runId, teamId: teamRef.id, role: 'viewer', alreadyAttached: false };
 });

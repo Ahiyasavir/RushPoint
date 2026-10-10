@@ -86,6 +86,18 @@ t('the guard rejects the pre-change source it was written for', () => {
     `uncached team read not caught (got: ${named})`);
 });
 
+t('the guard rejects a viewer lookup that only has the uncached membership query', () => {
+  const before = [
+    'export async function resolveCallerTeam(uid) {',
+    '  const cached = await cachedGetDoc(db, docCachePolicy, teamPath(a, b, c, uid));',
+    "  const q = await db.collection(teamsCol(a, b, c)).where('deviceUids', 'array-contains', uid).limit(1).get();",
+    '}',
+  ].join(String.fromCharCode(10));
+  const problems = findUncachedHotReads(() => before);
+  assert.ok(problems.some((p) => p.fn === 'resolveCallerTeam' && /cached lookup/.test(p.problem)),
+    `uncached viewer lookup not caught (got: ${problems.map((p) => p.problem).join(' | ')})`);
+});
+
 t('a renamed declared site fails rather than silently passing', () => {
   const problems = findUncachedHotReads(() => 'export const somethingElse = 1;');
   assert.equal(problems.length, CACHED_GAME_READS.length + CACHED_DOC_READS.length + CACHED_COLLECTION_READS.length,

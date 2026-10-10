@@ -35,7 +35,10 @@ export const PAYMENTS_ENABLED = false;
  * zero headroom against a cap of 100: one extra phone and a real participant was
  * turned away with `resource-exhausted`.
  */
-export const FREE_MODE_MAX_PARTICIPANTS = 150;
+//
+// RAISED 150 -> 250 -> 500 (change: race-multi-phone-capacity, 2026-10-10) in step with MAX_RUN_DEVICES,
+// which this must never sit below (scripts/test-free-mode.ts).
+export const FREE_MODE_MAX_PARTICIPANTS = 500;
 
 /**
  * Participant ceiling for a test-drive (rehearsal) run: the creator plus one

@@ -199,8 +199,15 @@ describe('canAddRunDevice (global per-run phone ceiling)', () => {
   // writes of 20,000, and the VPS sat at load 0.14 with 2.8 GB free through a 100 team
   // rehearsal. Note that DEVICES, not teams, is what the read budget scales with, because every
   // extra phone polls team state on its own.
-  test('MAX_RUN_DEVICES is 150', () => {
-    expect(MAX_RUN_DEVICES).toBe(150);
+  //
+  // 150 -> 250 on 2026-10-10 (change: race-multi-phone-capacity). A 35-team school race with 3-6
+  // phones per team is 105-210 phones; at 150 the LATE teams could not even register, because
+  // `joinRun` checks this same ceiling before it creates a team. Raised together with the two
+  // read cuts that make an extra phone cheap: its team lookup is cached, and the cache outlives
+  // the participant poll.
+  // 250 -> 500 the same day after the move to Blaze (see runCapacity.ts).
+  test('MAX_RUN_DEVICES is 500', () => {
+    expect(MAX_RUN_DEVICES).toBe(500);
   });
 
   test('admits a phone while the run is below the ceiling', () => {
