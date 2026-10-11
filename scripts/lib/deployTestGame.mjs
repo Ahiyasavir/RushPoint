@@ -42,6 +42,9 @@ export function buildDeployTestGame(date, notes = {}) {
       tasks: [
         anywhere({
           id: 'dt-station-wait', title: 'תחנה שיש בה מקום לקבוצה אחת', type: 'self_report', maxConcurrentTeams: 1,
+          // Not `locationless`: a mission played from anywhere has no station cap. The trigger mode
+          // still lets it be finished without walking.
+          locationless: false,
           description: say('התחילו שתי קבוצות יחד. הקבוצה שקיבלה את המשימה מחכה חצי דקה ורק אז מסמנת שסיימה.',
             'הקבוצה השנייה רואה "כל התחנות תפוסות כרגע" והשעון שלה נעצר. בקונסולה קופצת הודעה עם שם הקבוצה, ועל השורה שלה כתוב "מחכים לתחנה פנויה, השעון שלהם עצור". כשהראשונה מסיימת, השנייה מקבלת את המשימה לבד תוך כמה שניות.'),
         }),
