@@ -172,3 +172,19 @@ export function raceElapsedMs(
   const raw = teamClockNowMs(team, clockNow) - start;
   return Math.max(0, raw - teamHeldExclusionMs(team) - teamStationWaitMs(team));
 }
+
+/**
+ * A FINISHED team's race time in seconds, from its own stored document: raw time minus everything
+ * the board also takes off (clock-pausing missions, staff holds, waiting for a station). The
+ * finish screen shows this until a published board supplies the ranked duration, so the two
+ * cannot disagree. `null` when the team has no start or no finish stamp.
+ */
+export function finishedRaceSeconds(
+  team: (HeldTimingRecord & StationWaitRecord & { startedAt?: string | null; finishedAt?: string | null; stages?: ExcludedStageRecord[] }) | null | undefined,
+): number | null {
+  const start = typeof team?.startedAt === 'string' ? Date.parse(team.startedAt) : NaN;
+  const end = typeof team?.finishedAt === 'string' ? Date.parse(team.finishedAt) : NaN;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  const excluded = teamExcludedMs(Array.isArray(team?.stages) ? team!.stages! : []) + teamHeldExclusionMs(team!) + teamStationWaitMs(team);
+  return Math.max(0, end - start - excluded) / 1000;
+}
