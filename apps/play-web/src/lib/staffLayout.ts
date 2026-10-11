@@ -43,11 +43,27 @@ export function staffDesktopLayout(): StaffDesktopLayout {
   };
 }
 
-export interface StaffDeskCounts { teams: number; playing: number; held: number; finished: number; waiting: number; sos: number; photos: number }
+export interface StaffDeskCounts {
+  teams: number; playing: number; held: number; finished: number; waiting: number; sos: number; photos: number;
+  /** Teams whose every open station is full (station-wait-clock). They are also counted in `playing`. */
+  stationWait: number;
+}
+
+/**
+ * Whether a team is standing in a queue for a station right now: the server stamped the start of
+ * a wait and nothing has ended it. Total: an unreadable stamp, a held, finished or removed team
+ * is not waiting.
+ */
+export function teamWaitsForStation(
+  team: { held?: boolean; status?: string; removed?: boolean; stationWaitSince?: unknown } | null | undefined,
+): boolean {
+  if (!team || team.removed === true || team.held === true || team.status === 'finished') return false;
+  return typeof team.stationWaitSince === 'string' && Number.isFinite(Date.parse(team.stationWaitSince));
+}
 
 /** The top bar's live numbers. Total, never throws; a removed team is not counted. */
 export function staffDeskCounts(
-  teams: ReadonlyArray<{ held?: boolean; launched?: boolean; status?: string; removed?: boolean }> | null | undefined,
+  teams: ReadonlyArray<{ held?: boolean; launched?: boolean; status?: string; removed?: boolean; stationWaitSince?: unknown }> | null | undefined,
   openAlerts: number,
   pendingPhotos: number,
 ): StaffDeskCounts {
@@ -63,5 +79,6 @@ export function staffDeskCounts(
     waiting: rows.length - finished - held - playing,
     sos: Math.max(0, Math.floor(Number(openAlerts) || 0)),
     photos: Math.max(0, Math.floor(Number(pendingPhotos) || 0)),
+    stationWait: rows.filter(teamWaitsForStation).length,
   };
 }

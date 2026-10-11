@@ -34,12 +34,26 @@ const counts = staffDeskCounts([
 ], 2, 3);
 ok('top bar counts: playing, held, finished, waiting; a removed team is not a team',
   counts.teams === 4 && counts.playing === 1 && counts.held === 1 && counts.finished === 1 && counts.waiting === 1 && counts.sos === 2 && counts.photos === 3, counts);
+// station-wait-clock: a team whose every open station is full. Counted among the playing teams
+// (it is playing; it is standing in a queue), never once it finished, was held or was removed.
+const waits = staffDeskCounts([
+  { launched: true, stationWaitSince: '2026-10-11T08:00:00.000Z' },
+  { launched: true },
+  { launched: true, status: 'finished', stationWaitSince: '2026-10-11T08:00:00.000Z' },
+  { launched: true, held: true, stationWaitSince: '2026-10-11T08:00:00.000Z' },
+  { launched: true, removed: true, stationWaitSince: '2026-10-11T08:00:00.000Z' },
+  { launched: true, stationWaitSince: 'nonsense' },
+], 0, 0);
+ok('top bar counts teams waiting for a station', waits.stationWait === 1 && waits.playing === 3, JSON.stringify(waits));
+ok('a team list without the field counts nobody as waiting', staffDeskCounts([{ launched: true }], 0, 0).stationWait === 0);
 ok('top bar counts are total on junk', staffDeskCounts(undefined, NaN, -1).teams === 0 && staffDeskCounts(null, NaN, -1).sos === 0);
 
 const src = readFileSync(path.resolve(__dirname, '../apps/play-web/src/screens/StaffConsole.tsx'), 'utf8');
 ok('the staff app renders through the table, by width', /useWideLayout\(\)/.test(src) && /staffDesktopLayout\(\)/.test(src) && /STAFF_PHONE_ORDER\.map/.test(src));
 ok('the computer layout has a top bar with the live counts', /data-testid="staff-topbar"/.test(src) && /staffDeskCounts\(/.test(src));
 ok('the side panel is tabbed', /role="tablist"/.test(src) && /data-testid="staff-side-tabs"/.test(src));
+ok('the top bar shows the station-wait count', /counts\.stationWait > 0/.test(src));
+ok('a team card and a team tile both say the team waits for a station', (src.match(/stationWaitBadge/g) ?? []).length >= 2);
 
 console.log(failures === 0 ? '\n✅ staff layout: ALL PASS' : `\n❌ staff layout: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);
