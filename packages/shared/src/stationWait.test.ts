@@ -100,3 +100,10 @@ describe('finishedRaceSeconds (the time a finished team is shown before the boar
     expect(finishedRaceSeconds({ startedAt, finishedAt, stationWaitMs: 999_999_999 })).toBe(0);
   });
 });
+
+describe('the in-game clock and clock-pausing missions', () => {
+  it('takes finished clock-pausing missions off, like the board', () => {
+    const team = { startedAt: iso(T0), stages: [{ tasks: [{ excludedMs: 3_000 }, { excludedMs: 2_000 }, {}] }] };
+    expect(raceElapsedMs(team, T0 + 100_000)).toBe(95_000);
+  });
+});

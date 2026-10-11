@@ -1835,7 +1835,7 @@ function MissionProgressRow({ progress, beat, accent }: {
 }
 
 /** What stops the race clock: a staff hold, and waiting for a full station (station-wait-clock). */
-type ClockStops = { held?: boolean; heldAt?: string; heldMs?: number; stationWaitSince?: string; stationWaitMs?: number };
+type ClockStops = { held?: boolean; heldAt?: string; heldMs?: number; stationWaitSince?: string; stationWaitMs?: number; stages?: { tasks: { excludedMs?: number }[] }[] };
 
 // A live m:ss elapsed clock for time_only runs, ticking on its own so only this
 // node re-renders each second (not the whole header/screen). Before the race is
