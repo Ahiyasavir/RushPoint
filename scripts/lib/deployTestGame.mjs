@@ -37,7 +37,18 @@ export function buildDeployTestGame(date, notes = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`date must be YYYY-MM-DD, got "${date}"`);
   const stages = [
     {
-      id: 'dt-s1', order: 0, title: 'ניקוד ותשובות', isFinal: false,
+      // One station, room for one team: the second team waits, and its clock stops (2026-10-11).
+      id: 'dt-s0', order: 0, title: 'תחנה לקבוצה אחת', isFinal: false,
+      tasks: [
+        anywhere({
+          id: 'dt-station-wait', title: 'תחנה שיש בה מקום לקבוצה אחת', type: 'self_report', maxConcurrentTeams: 1,
+          description: say('התחילו שתי קבוצות יחד. הקבוצה שקיבלה את המשימה מחכה חצי דקה ורק אז מסמנת שסיימה.',
+            'הקבוצה השנייה רואה "כל התחנות תפוסות כרגע" והשעון שלה נעצר. בקונסולה קופצת הודעה עם שם הקבוצה, ועל השורה שלה כתוב "מחכים לתחנה פנויה, השעון שלהם עצור". כשהראשונה מסיימת, השנייה מקבלת את המשימה לבד תוך כמה שניות.'),
+        }),
+      ],
+    },
+    {
+      id: 'dt-s1', order: 1, title: 'ניקוד ותשובות', isFinal: false,
       tasks: [
         anywhere({
           id: 'dt-quiz-outcomes', title: 'ניקוד לפי תשובה', type: 'quiz',
@@ -80,7 +91,7 @@ export function buildDeployTestGame(date, notes = {}) {
       ],
     },
     {
-      id: 'dt-s2', order: 1, title: 'צילום ווידאו', isFinal: false,
+      id: 'dt-s2', order: 2, title: 'צילום ווידאו', isFinal: false,
       tasks: [
         anywhere({
           id: 'dt-photo-auto', title: 'צילום עם אישור אוטומטי', type: 'photo',
@@ -103,7 +114,7 @@ export function buildDeployTestGame(date, notes = {}) {
       ],
     },
     {
-      id: 'dt-s3', order: 2, title: 'שטח ובטיחות', isFinal: true,
+      id: 'dt-s3', order: 3, title: 'שטח ובטיחות', isFinal: true,
       tasks: [
         {
           id: LOCATED_TASK_ID, title: 'הליכה לנקודה', type: 'field', triggerMode: 'radius',
