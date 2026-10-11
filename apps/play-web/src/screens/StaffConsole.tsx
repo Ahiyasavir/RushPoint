@@ -1,6 +1,6 @@
 import { Fragment, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useWideLayout } from '../lib/useWideLayout';
-import { STAFF_PHONE_ORDER, staffDesktopLayout, staffDeskCounts, type StaffSection } from '../lib/staffLayout';
+import { STAFF_PHONE_ORDER, staffDesktopLayout, staffDeskCounts, teamWaitsForStation, type StaffSection } from '../lib/staffLayout';
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, signInStaff, uid } from '../services/firebase';
@@ -120,6 +120,8 @@ interface TeamRow {
   held?: boolean;
   heldReason?: string;
   outOfBounds?: boolean;
+  /** ISO: every station open to the team is full and it is waiting for one (station-wait-clock). */
+  stationWaitSince?: string;
   activeTaskId?: string | null;
   /** Task ids still open in this team's ACTIVE stage — the force-assign menu. */
   assignableTaskIds?: string[];
@@ -375,6 +377,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           held?: boolean;
           heldReason?: string;
           outOfBounds?: boolean;
+          stationWaitSince?: string;
           activeTaskId?: string | null;
           stages?: { status?: string; tasks?: { taskId?: string; status?: string }[] }[];
           registrationData?: unknown;
@@ -402,6 +405,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           held: td.held === true,
           heldReason: td.heldReason,
           outOfBounds: td.outOfBounds === true,
+          stationWaitSince: typeof td.stationWaitSince === 'string' ? td.stationWaitSince : undefined,
           activeTaskId: td.activeTaskId ?? null,
           assignableTaskIds,
           stages: td.stages,
@@ -917,6 +921,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                     const state = tm.status === 'finished' ? { text: t.staff.follow.status.finished, cls: 'bg-app-raised text-zinc-300' }
                       : tm.held ? { text: t.staff.heldBadge, cls: 'bg-accent text-black' }
                       : tm.outOfBounds ? { text: t.staff.outOfBoundsBadge, cls: 'bg-danger/15 text-danger' }
+                      : teamWaitsForStation(tm) ? { text: t.staff.stationWaitBadge, cls: 'bg-amber-100 text-amber-800' }
                       : !tm.launched ? { text: t.staff.desk.notStarted, cls: 'bg-app-raised text-zinc-500' } : null;
                     // Only once the outline (mission names) has loaded: never a raw mission id on a tile.
                     const mission = tm.activeTaskId && outline ? titleOf(tm.activeTaskId) : '';
@@ -1062,6 +1067,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               <span className="rounded-full bg-app-raised px-3 py-1 font-semibold text-zinc-200">{t.staff.desk.teams(counts.teams)}</span>
               {counts.playing > 0 && <span className="rounded-full bg-accent/15 px-3 py-1 font-semibold text-ink-fire">{t.staff.desk.playing(counts.playing)}</span>}
               {counts.held > 0 && <span className="rounded-full bg-accent px-3 py-1 font-semibold text-black">{t.staff.desk.held(counts.held)}</span>}
+              {counts.stationWait > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 font-semibold text-amber-800">{t.staff.desk.stationWait(counts.stationWait)}</span>}
               {counts.waiting > 0 && <span className="rounded-full bg-app-raised px-3 py-1 text-zinc-400">{t.staff.desk.waiting(counts.waiting)}</span>}
               {counts.finished > 0 && <span className="rounded-full bg-app-raised px-3 py-1 text-zinc-400">{t.staff.desk.finished(counts.finished)}</span>}
               {counts.sos > 0 && <span className="rounded-full bg-ink-alert px-3 py-1 font-bold text-white motion-safe:animate-pulse">{t.staff.desk.sos(counts.sos)}</span>}
@@ -1279,6 +1285,12 @@ function TeamOpsCard({
             {team.outOfBounds && (
               <span className="inline-flex items-center rounded-full bg-danger/20 border border-danger/50 px-2 py-0.5 text-[13px] font-semibold text-danger">
                 {t.staff.outOfBoundsBadge}
+              </span>
+            )}
+            {/* station-wait-clock: standing in a queue the organizer's cap created. */}
+            {teamWaitsForStation(team) && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[13px] font-semibold text-amber-800">
+                <Icon name="stopwatch" className="w-3.5 h-3.5" /> {t.staff.stationWaitBadge}
               </span>
             )}
             {/* Says why a finished team offers fewer actions (lib/staffTeamActions.ts). */}

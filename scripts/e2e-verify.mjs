@@ -9603,6 +9603,158 @@ async function main() {
     void secondUid;
   });
 
+  // ═══ Station wait: the cases a person cannot check by hand (station-wait-clock) ═══
+  //
+  // The rule is only fair if it holds at its edges: a phone that went quiet earns one allowance and
+  // no more, a team sent to another free station earns nothing, a hold and a wait never overlap, a
+  // marshal's assignment ends the wait, a run that ends mid-wait keeps what was earned, and the
+  // published live board and the final board give every team the same time.
+  await scenario('station wait: quiet phone, redirect, hold, staff assignment, finalize, parity, reopened mission', async () => {
+    const OWNER = creatorCred.user.uid;
+    const db = adminSdk.firestore();
+    const at = { lat: 31.78, lng: 35.21, accuracyMeters: 5 };
+    const station = (id, extra = {}) => ({ id, title: id, type: 'self_report', coordinates: { lat: 31.78, lng: 35.21 },
+      difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 1, ...extra });
+    const mk = async (title, preset, stage) => {
+      const { gameId } = await creator.call('createGame', { title, mode: 'individual' });
+      await creator.call('updateGame', { gameId, scoringPreset: preset, stages: [{ id: 'e-0', order: 0, isFinal: true, title: 'One stage', ...stage }] });
+      const { runId, accessCode } = await creator.call('launchRun', { gameId });
+      return { gameId, runId, code: accessCode, C: { ownerUid: OWNER, gameId, runId } };
+    };
+    const join = async (g, name) => {
+      const p = makeParty(`sw-edge-${name}-${Math.random().toString(36).slice(2, 7)}`);
+      p.uid = (await signInAnonymously(p.auth)).user.uid;
+      await p.call('joinRun', { code: g.code, displayName: name });
+      return p;
+    };
+    const teamDoc = async (g, p) => (await db.doc(`users/${OWNER}/games/${g.gameId}/runs/${g.runId}/teams/${p.uid}`).get()).data();
+    const holds = async (g, p) => (await teamDoc(g, p)).stages.flatMap((x) => x.tasks).find((x) => x.status === 'assigned')?.taskId ?? null;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    // ── A. A phone that went quiet ────────────────────────────────────────────
+    const A = await mk('Wait: quiet phone', 'time_only', { tasks: [station('qa')] });
+    const a1 = await join(A, 'First'); const a2 = await join(A, 'Second');
+    await creator.call('startTeams', { gameId: A.gameId, runId: A.runId });
+    await a1.call('requestNextTask', { code: A.code }); await a2.call('requestNextTask', { code: A.code });
+    const aHolder = (await holds(A, a1)) ? a1 : a2; const aWaiter = aHolder === a1 ? a2 : a1;
+    await aWaiter.call('requestNextTask', { code: A.code });
+    // The wait began ten minutes ago and the phone last asked nine minutes ago.
+    const now0 = Date.now();
+    await db.doc(`users/${OWNER}/games/${A.gameId}/runs/${A.runId}/teams/${aWaiter.uid}`).update({
+      stationWaitSince: new Date(now0 - 600_000).toISOString(), stationWaitSeenAt: new Date(now0 - 540_000).toISOString(),
+    });
+    await aWaiter.call('requestNextTask', { code: A.code });
+    let d = await teamDoc(A, aWaiter);
+    check('quiet phone: ten minutes of silence earn the minute it asked plus ONE allowance, not ten minutes',
+      d.stationWaitMs === 120_000, String(d.stationWaitMs));
+    check('quiet phone: coming back starts a new wait from now',
+      typeof d.stationWaitSince === 'string' && Date.now() - Date.parse(d.stationWaitSince) < 15_000, String(d.stationWaitSince));
+    await sleep(1500);
+    await aHolder.call('completeTask', { ...A.C, taskId: 'qa', ...at, code: A.code });
+    await aWaiter.call('requestNextTask', { code: A.code });
+    d = await teamDoc(A, aWaiter);
+    check('quiet phone: the second wait is added to the first, and the wait is closed',
+      d.stationWaitSince === undefined && d.stationWaitMs >= 121_000 && d.stationWaitMs < 140_000, JSON.stringify({ since: d.stationWaitSince, ms: d.stationWaitMs }));
+
+    // ── B. Three teams, two one-team stations, any one of them finishes the stage ──
+    const B = await mk('Wait: redirect and staff', 'fixed_points_speed', { requiredTaskCount: 1, tasks: [station('ba'), station('bb')] });
+    const b = [await join(B, 'T1'), await join(B, 'T2'), await join(B, 'T3')];
+    await creator.call('startTeams', { gameId: B.gameId, runId: B.runId });
+    for (const p of b) await p.call('requestNextTask', { code: B.code });
+    const held = await Promise.all(b.map((p) => holds(B, p)));
+    const waiterB = b[held.findIndex((h) => h === null)];
+    const playing = b.filter((p) => p !== waiterB);
+    check('redirect: two stations hold one team each and the third team waits',
+      held.filter((h) => h === 'ba').length === 1 && held.filter((h) => h === 'bb').length === 1 && !!waiterB, JSON.stringify(held));
+    const docs = await Promise.all(playing.map((p) => teamDoc(B, p)));
+    check('redirect: a team that was given another free station carries no wait at all',
+      docs.every((x) => x.stationWaitSince === undefined && !x.stationWaitMs), JSON.stringify(docs.map((x) => [x.stationWaitSince, x.stationWaitMs])));
+    await waiterB.call('requestNextTask', { code: B.code });
+    check('the third team is waiting', typeof (await teamDoc(B, waiterB)).stationWaitSince === 'string');
+
+    // A hold begins: the wait ends there, and nothing accrues under the hold.
+    await sleep(1200);
+    await creator.call('setTeamHold', { gameId: B.gameId, runId: B.runId, teamId: waiterB.uid, held: true, reason: 'edge' });
+    d = await teamDoc(B, waiterB);
+    const beforeHold = d.stationWaitMs;
+    check('hold: the wait is settled where the hold begins', d.held === true && d.stationWaitSince === undefined && beforeHold >= 1000, JSON.stringify({ since: d.stationWaitSince, ms: beforeHold }));
+    await waiterB.call('requestNextTask', { code: B.code }).catch(() => null);
+    await sleep(1500);
+    await waiterB.call('requestNextTask', { code: B.code }).catch(() => null);
+    d = await teamDoc(B, waiterB);
+    check('hold: a held team asking for a station opens no wait', d.stationWaitSince === undefined && d.stationWaitMs === beforeHold, JSON.stringify({ since: d.stationWaitSince, ms: d.stationWaitMs }));
+    await creator.call('setTeamHold', { gameId: B.gameId, runId: B.runId, teamId: waiterB.uid, held: false });
+    d = await teamDoc(B, waiterB);
+    check('hold: the held time is counted once, as a hold', d.heldMs >= 1400 && d.stationWaitMs === beforeHold, JSON.stringify({ heldMs: d.heldMs, ms: d.stationWaitMs }));
+
+    // Back in the queue; a marshal then sends the team to a station that has just freed.
+    await waiterB.call('requestNextTask', { code: B.code });
+    check('after the hold the team is waiting again', typeof (await teamDoc(B, waiterB)).stationWaitSince === 'string');
+    await sleep(1200);
+    const freed = await holds(B, playing[0]);
+    await playing[0].call('completeTask', { ...B.C, taskId: freed, ...at, code: B.code });
+    await creator.call('forceAssignTask', { gameId: B.gameId, runId: B.runId, teamId: waiterB.uid, taskId: freed });
+    d = await teamDoc(B, waiterB);
+    check('staff assignment: being sent to a station by a marshal ends the wait and keeps what it earned',
+      d.stationWaitSince === undefined && d.stationWaitMs >= beforeHold + 1000 && (await holds(B, waiterB)) === freed,
+      JSON.stringify({ since: d.stationWaitSince, ms: d.stationWaitMs, beforeHold }));
+    await waiterB.call('completeTask', { ...B.C, taskId: freed, ...at, code: B.code });
+    const other = await holds(B, playing[1]);
+    await playing[1].call('completeTask', { ...B.C, taskId: other, ...at, code: B.code });
+
+    // Published live board == final board, for every team, with a wait and a hold in the run.
+    const live = await creator.call('refreshLeaderboard', { gameId: B.gameId, runId: B.runId, publish: true });
+    const fin = await creator.call('finalizeRun', { gameId: B.gameId, runId: B.runId });
+    const finR = fin?.rankings ?? fin?.leaderboard?.rankings ?? [];
+    const sameTimes = b.every((p) => {
+      const l = (live?.rankings ?? []).find((r) => r.teamId === p.uid); const f = finR.find((r) => r.teamId === p.uid);
+      return l && f && l.durationSeconds === f.durationSeconds && l.score === f.score;
+    });
+    check('parity: the published live board and the final board give every team the same time and score', sameTimes && finR.length === 3,
+      JSON.stringify({ live: (live?.rankings ?? []).map((r) => [r.durationSeconds, r.score]), fin: finR.map((r) => [r.durationSeconds, r.score]) }));
+    d = await teamDoc(B, waiterB);
+    const rawB = (Date.parse(d.finishedAt) - Date.parse(d.startedAt)) / 1000;
+    const entryB = finR.find((r) => r.teamId === waiterB.uid);
+    check('the final time is the raw time minus the wait and minus the hold, each once',
+      Math.abs(rawB - entryB.durationSeconds - (d.stationWaitMs + d.heldMs) / 1000) < 0.05,
+      JSON.stringify({ rawB, board: entryB.durationSeconds, wait: d.stationWaitMs, held: d.heldMs }));
+
+    // ── C. The run ends while a team is still waiting ─────────────────────────
+    const Cg = await mk('Wait: run ends', 'time_only', { tasks: [station('ca')] });
+    const c1 = await join(Cg, 'First'); const c2 = await join(Cg, 'Second');
+    await creator.call('startTeams', { gameId: Cg.gameId, runId: Cg.runId });
+    await c1.call('requestNextTask', { code: Cg.code }); await c2.call('requestNextTask', { code: Cg.code });
+    const cWaiter = (await holds(Cg, c1)) ? c2 : c1;
+    await cWaiter.call('requestNextTask', { code: Cg.code });
+    await sleep(1500);
+    await creator.call('finalizeRun', { gameId: Cg.gameId, runId: Cg.runId });
+    d = await teamDoc(Cg, cWaiter);
+    check('finalize: a team still waiting when the run ends keeps the wait, and it is closed',
+      d.stationWaitSince === undefined && d.stationWaitMs >= 1500 && d.stationWaitMs < 30_000, JSON.stringify({ since: d.stationWaitSince, ms: d.stationWaitMs }));
+    // ── D. The organizer reopens a paused mission while a team waits (Ahiya, 2026-10-11) ──
+    // Two stations; the NEAR one is paused, the far one is taken. The waiting team stands beside
+    // the paused one. Reopening it must hand it to that team on its next ask, and end the wait.
+    const Dg = await mk('Wait: reopened mission', 'time_only', { requiredTaskCount: 1, tasks: [
+      station('d-far', { coordinates: { lat: 31.79, lng: 35.22 } }), station('d-near')] });
+    const DL = { ownerUid: OWNER, gameId: Dg.gameId, runId: Dg.runId };
+    await creator.call('setRunTaskStatus', { ...DL, taskId: 'd-near', status: 'paused', reason: 'not ready yet' });
+    const d1 = await join(Dg, 'First'); const d2 = await join(Dg, 'Second');
+    await creator.call('startTeams', { gameId: Dg.gameId, runId: Dg.runId });
+    await d1.call('requestNextTask', { code: Dg.code }); await d2.call('requestNextTask', { code: Dg.code });
+    const dHolder = (await holds(Dg, d1)) ? d1 : d2; const dWaiter = dHolder === d1 ? d2 : d1;
+    check('reopen: the open station is taken, and nobody was given the paused one', (await holds(Dg, dHolder)) === 'd-far' && (await holds(Dg, dWaiter)) === null);
+    const dFull = await dWaiter.call('requestNextTask', { code: Dg.code, lat: 31.78, lng: 35.21 });
+    check('reopen: the other team waits (a paused mission is not offered)', dFull?.taskId === null && dFull?.reason === 'stationsFull', JSON.stringify(dFull));
+    await sleep(1500);
+    await creator.call('setRunTaskStatus', { ...DL, taskId: 'd-near', status: 'active', reason: 'ready' });
+    const dGot = await dWaiter.call('requestNextTask', { code: Dg.code, lat: 31.78, lng: 35.21 });
+    check('reopen: the waiting team is given the reopened mission on its next ask', dGot?.taskId === 'd-near', JSON.stringify(dGot));
+    d = await teamDoc(Dg, dWaiter);
+    check('reopen: its wait is closed and counted', d.stationWaitSince === undefined && d.stationWaitMs >= 1500 && d.stationWaitMs < 30_000, JSON.stringify({ since: d.stationWaitSince, ms: d.stationWaitMs }));
+    const dRows = (await creator.call('listRunTeams', { gameId: Dg.gameId, runId: Dg.runId }))?.teams ?? [];
+    check('reopen: the console no longer shows the team as waiting', !dRows.some((r) => r.waitingForStationSince), JSON.stringify(dRows.map((r) => r.waitingForStationSince)));
+  });
+
   // ═══ Photo review THROUGHPUT (change: photo-review-throughput) ══════════════
   //
   // The queue is a client-side flattening of every team's `taskSubmissions` map
