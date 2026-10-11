@@ -296,5 +296,17 @@ check('empty / whitespace-only yields undefined', boundStoredAnswer('   ') === u
   }
 }
 
+
+// The phone computes its own race time (in-game clock, finish screen) from this projection, so
+// every duration the board subtracts must be in it. Found 2026-10-11: `excludedMs` was not, and
+// each team's phone ran ~3 s ahead of the board in a simulation of a real game.
+{
+  const t = sanitizeTeamForParticipant({ id: 'x', heldMs: 5, stationWaitMs: 7,
+    stages: [{ stageId: 's', order: 0, status: 'active', tasks: [{ taskId: 'a', status: 'completed', excludedMs: 3000 }] }] } as unknown as RunTeam, true);
+  const rec = (t.stages?.[0]?.tasks?.[0] ?? {}) as { excludedMs?: number };
+  check('the phone is given every duration the board subtracts (mission, hold, station wait), sealed or not',
+    rec.excludedMs === 3000 && (t as { heldMs?: number }).heldMs === 5 && (t as { stationWaitMs?: number }).stationWaitMs === 7);
+}
+
 console.log(`\n${failures === 0 ? 'ALL TEST-MODE TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

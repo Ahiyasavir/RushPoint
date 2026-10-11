@@ -160,7 +160,7 @@ export function teamClockNowMs(team: HeldClockRecord | null | undefined, nowMs: 
  * still while held. Never negative; 0 before the start.
  */
 export function raceElapsedMs(
-  team: HeldClockRecord & HeldTimingRecord & StationWaitRecord & { startedAt?: string | null },
+  team: HeldClockRecord & HeldTimingRecord & StationWaitRecord & { startedAt?: string | null; stages?: ExcludedStageRecord[] },
   nowMs: number,
 ): number {
   const start = typeof team?.startedAt === 'string' ? Date.parse(team.startedAt) : NaN;
@@ -170,7 +170,9 @@ export function raceElapsedMs(
   const waitingSince = typeof team?.stationWaitSince === 'string' ? Date.parse(team.stationWaitSince) : NaN;
   const clockNow = Number.isFinite(waitingSince) ? Math.min(nowMs, waitingSince) : nowMs;
   const raw = teamClockNowMs(team, clockNow) - start;
-  return Math.max(0, raw - teamHeldExclusionMs(team) - teamStationWaitMs(team));
+  // Clock-pausing missions already finished come off too, as on the board.
+  const missions = Array.isArray(team?.stages) ? teamExcludedMs(team.stages) : 0;
+  return Math.max(0, raw - teamHeldExclusionMs(team) - teamStationWaitMs(team) - missions);
 }
 
 /**

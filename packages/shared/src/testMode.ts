@@ -91,6 +91,9 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
       copy(out, r, 'startedAt');
       copy(out, r, 'completedAt');
       copy(out, r, 'actualMinutes');
+      // How long this mission stopped the clock (a clock-pausing mission). A duration, not a score:
+      // without it the phone's own clock and its finish screen run ahead of the board.
+      copy(out, r, 'excludedMs');
       // The hidden-task arrival latch: dropping it would re-seal a task the
       // player has already walked to.
       copy(out, r, 'arrivedAt');
