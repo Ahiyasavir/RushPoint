@@ -3209,6 +3209,22 @@ async function main() {
     check('queue race: a further approval after the race broadcasts nothing new',
       replayFeed.length === dualFeed.length, `${replayFeed.length} vs ${dualFeed.length}`);
 
+    // [review-needs-a-submission] (found by the 420-phone load test, 2026-10-10): approving a
+    // mission the team never submitted used to WRITE an 'approved' record and then fail to complete
+    // the (still locked) task, leaving it half-finished: approved on the record, assigned on the
+    // stage, and the team's phone waiting forever. A review must refuse when there is nothing to
+    // review, in both directions, and leave no record behind.
+    await expectError('review: approving a mission nothing was submitted for is refused',
+      creator.call('reviewStationSubmission', { ...RQCTX, teamId: rqUid, taskId: 'rq-end', approved: true }),
+      { codeIn: ['failed-precondition', 'functions/failed-precondition'], match: /no-submission/ });
+    await expectError('review: rejecting a mission nothing was submitted for is refused',
+      creator.call('reviewStationSubmission', { ...RQCTX, teamId: rqUid, taskId: 'rq-end', approved: false }),
+      { codeIn: ['failed-precondition', 'functions/failed-precondition'], match: /no-submission/ });
+    {
+      const ghost = (await creator.getDocAt(rqTeamPath)).data?.taskSubmissions?.['rq-end'];
+      check('review: a refused review leaves no submission record behind', ghost === undefined, JSON.stringify(ghost));
+    }
+
     // 7) Retention: feed items (photo URLs + team names) die with the run's PII.
     const prunedFeed = await platformAdmin.call('pruneRunNow', { ...FCTX });
     check('feed: pruneRunNow succeeds on the feed run', prunedFeed?.ok === true, JSON.stringify(prunedFeed));

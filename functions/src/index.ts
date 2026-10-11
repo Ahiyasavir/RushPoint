@@ -2389,6 +2389,18 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   // reject of an already-rejected submission must not count it twice).
   const reviewedSub = (teamSnap.data() as { taskSubmissions?: Record<string, { status?: string; mediaHash?: unknown }> } | undefined)
     ?.taskSubmissions?.[taskId];
+  // review-needs-a-submission (found by the 420-phone load test, 2026-10-10): a review of a mission
+  // the team never submitted used to WRITE a fresh 'approved'/'rejected' record. For an approval it
+  // then failed to complete the still-locked task, leaving it half-finished - approved on the
+  // record, assigned on the stage, the team's phone waiting for ever. Nothing submitted, nothing to
+  // review: refuse before anything is written. (Re-approving an existing submission stays a no-op.)
+  if (!reviewedSub) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'no-submission: this team has not submitted anything for this mission',
+      { reason: 'no-submission' },
+    );
+  }
   const countRejectedHash = !approved && reviewedSub?.status !== 'rejected' && isMediaHash(reviewedSub?.mediaHash)
     ? reviewedSub!.mediaHash as string : undefined;
   // ── Reversing an approval (change: approval-can-be-undone) ────────────────
@@ -2450,6 +2462,18 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
     });
   }
 
+  // Validated BEFORE completion: a bad note must not fail the call after the mission was scored.
+  const reviewNote = validate(() => optionalString(note, 'note', MAX_MESSAGE_LEN)) ?? '';
+
+  // Approved photo = task complete → score it + advance the team. This runs BEFORE the approval
+  // is recorded (review-needs-a-submission): if completion refuses - a locked task, a stage that is
+  // not active - the submission stays pending and the reviewer sees the error, instead of a record
+  // that says approved over a mission that never completed. Pinned by
+  // scripts/test-review-approval-order.ts.
+  const completed = approved
+    ? (await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now)).completed
+    : false;
+
   // merge:true deep-merges this into the existing submission, preserving
   // photoUrl/submittedAt while updating the review subfields.
   await teamRef.set(
@@ -2459,7 +2483,7 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
           status: approved ? 'approved' : 'rejected',
           reviewedAt: now,
           reviewedBy: context.auth!.uid,
-          reviewNote: validate(() => optionalString(note, 'note', MAX_MESSAGE_LEN)) ?? '',
+          reviewNote,
           // A nested object, not a dotted key: this is a .set({merge}) (CLAUDE.md footgun).
           ...(countRejectedHash ? { rejectedHashes: { [countRejectedHash]: admin.firestore.FieldValue.increment(1) } } : {}),
         },
@@ -2468,9 +2492,7 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
     { merge: true },
   );
 
-  // Approved photo = task complete → score it + advance the team.
   if (approved) {
-    const { completed } = await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
     // WO Fix 1: the completed task's station slot is released atomically inside
     // completeTaskForTeam's transaction.
 
