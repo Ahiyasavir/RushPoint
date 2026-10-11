@@ -882,6 +882,22 @@ describe('buildRunSignals — the catalogue', () => {
     expect(chip?.count).toBe(3);
   });
 
+  // change: station-wait-clock. Every station open to a team is full: its clock is stopped and
+  // the organizer is the only one who can do anything about it (open a station, raise a cap).
+  it('surfaces teams waiting for a free station, answered in the teams panel', () => {
+    const signals = buildRunSignals({ ...quietSignals('live'), waitingForStationCount: 2 });
+    const chip = signals.find((s) => s.id === 'waitingForStation');
+    expect(chip?.severity).toBe('warn');
+    expect(chip?.count).toBe(2);
+    expect(chip?.panel).toBe('teams');
+  });
+
+  it('says nothing when no team waits for a station, or an older backend does not say', () => {
+    expect(buildRunSignals({ ...quietSignals('live'), waitingForStationCount: 0 }).map((s) => s.id)).not.toContain('waitingForStation');
+    expect(buildRunSignals(quietSignals('live')).map((s) => s.id)).not.toContain('waitingForStation');
+    expect(buildRunSignals({ ...quietSignals('finished'), waitingForStationCount: 3 })).toEqual([]);
+  });
+
   it('says nothing when every team is fully connected or unknowable', () => {
     const ids = buildRunSignals({ ...quietSignals('live'), teamsWithMembersOffline: 0 }).map((s) => s.id);
     expect(ids).not.toContain('membersOffline');

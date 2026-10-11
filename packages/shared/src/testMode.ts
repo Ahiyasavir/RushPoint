@@ -165,6 +165,10 @@ export function sanitizeTeamForParticipant(team: RunTeam | null | undefined, sea
   copy(out, t, 'heldReason');
   copy(out, t, 'heldBy');
   copy(out, t, 'heldMs');
+  // station-wait-clock: the phone shows its clock standing still while it waits for a station.
+  // Not the `seenAt` heartbeat: that is the server's bookkeeping.
+  copy(out, t, 'stationWaitSince');
+  copy(out, t, 'stationWaitMs');
   // team-lifecycle-controls: the phone must be able to say the organizers removed the team,
   // and why. NOT `removedBy`: that is an operator uid.
   copy(out, t, 'removed');

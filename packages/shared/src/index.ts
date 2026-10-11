@@ -198,3 +198,5 @@ export * from './senderQuiet';
 export * from './mediaResend';
 // When may a live team map move its own camera? (issue 52)
 export * from './liveMapFraming';
+// Waiting for a station stops the team's clock (change: station-wait-clock).
+export * from './stationWait';

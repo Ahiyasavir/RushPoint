@@ -391,6 +391,8 @@ const ALLOWED_RUN_TEAM_ROW_KEYS = new Set([
   // team-lifecycle-controls: two BOOLEANS the row actions branch on (resume a paused team, bring
   // back a removed one). Never who paused/removed it, never the reason text.
   'held', 'removed',
+  // station-wait-clock: an instant, not a place or a person. Every open station is full.
+  'waitingForStationSince',
   // late-joiner-autostart: WHEN the team joined. Consciously classified rather than
   // waved through: it is a timestamp the organizer already sees as "joined at" in
   // their own console, it is not a position, not an answer key and not a guardian
@@ -9479,6 +9481,126 @@ async function main() {
     check('re-submit after approval keeps status approved + original url',
       sub?.status === 'approved' && sub?.photoUrl === ownPhoto(1),
       JSON.stringify(sub));
+  });
+
+  // ═══ An approval whose completion never landed (station-caps sim, 2026-10-10) ═══
+  //
+  // submitStationPhoto stamps the submission `approved` and THEN completes the mission: two
+  // writes. When the second never lands (the process restarts, or the run is too busy and the
+  // completion gives up) the mission stays in the team's hand, and every resend used to answer
+  // `already: true` without completing it: the team was stuck until a marshal skipped the
+  // mission. Found with 4 of 14 teams stuck in a simulation of a real game. The state is built
+  // with the Admin SDK because it is exactly the one a half-finished call leaves behind.
+  await scenario('auto-approved photo: an approval without a completion is finished by the resend', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gh } = await creator.call('createGame', { title: 'Photo Half Landed', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gh, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'hl-0', order: 0, isFinal: true, title: 'Auto photo', tasks: [
+        { id: 'hl-t', title: 'Snap it', type: 'photo', coordinates: { lat: 31.78, lng: 35.21 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'photo_verification', autoApprove: true } },
+      ] }],
+    });
+    const { runId: rh, accessCode: ch } = await creator.call('launchRun', { gameId: gh });
+    const hp = makeParty('halfLandedPlayer');
+    const hpCred = await signInAnonymously(hp.auth);
+    await hp.call('joinRun', { code: ch, displayName: 'Half Landed' });
+    await creator.call('startTeams', { gameId: gh, runId: rh });
+    await hp.call('requestNextTask', { code: ch });
+    const url = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.firebasestorage.app/o/runs%2F${rh}%2Fteams%2F${hpCred.user.uid}%2Fphoto-1.jpg?alt=media`;
+    await adminSdk.firestore().doc(`users/${OWNER}/games/${gh}/runs/${rh}/teams/${hpCred.user.uid}`).set(
+      { taskSubmissions: { 'hl-t': { status: 'approved', photoUrl: url, submittedAt: new Date().toISOString(), mediaKind: 'photo' } } },
+      { merge: true },
+    );
+    const resend = await hp.call('submitStationPhoto', { ownerUid: OWNER, gameId: gh, runId: rh, taskId: 'hl-t', photoUrl: url });
+    const st = await hp.call('getMyTeamState', { code: ch });
+    const rec = (st?.team?.stages ?? []).flatMap((x) => x.tasks ?? []).find((x) => x.taskId === 'hl-t');
+    check('the resend completes the mission the first call left in hand', rec?.status === 'completed', JSON.stringify({ resend, rec }));
+    check('…and it is scored once', (st?.team?.score ?? 0) > 0, String(st?.team?.score));
+    const again = await hp.call('submitStationPhoto', { ownerUid: OWNER, gameId: gh, runId: rh, taskId: 'hl-t', photoUrl: url });
+    const st2 = await hp.call('getMyTeamState', { code: ch });
+    check('a further resend is a no-op', again?.already === true && st2?.team?.score === st?.team?.score, JSON.stringify({ again, score: st2?.team?.score }));
+  });
+
+  // ═══ Waiting for a station stops the clock (change: station-wait-clock) ══════
+  //
+  // One station, room for one team. The second team is told every station is full: from that
+  // moment its clock stands still, the console's row says it is waiting, and when the station
+  // frees the wait is settled and comes off its time on the board. A team that never waited
+  // carries nothing.
+  await scenario('station wait: a full station stops the waiting team\'s clock', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gw } = await creator.call('createGame', { title: 'Station Wait', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gw, scoringPreset: 'time_only',
+      stages: [{ id: 'sw-0', order: 0, isFinal: true, title: 'One station', tasks: [
+        { id: 'sw-t', title: 'The only station', type: 'self_report', coordinates: { lat: 31.78, lng: 35.21 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 1 },
+      ] }],
+    });
+    const { runId: rw, accessCode: cw } = await creator.call('launchRun', { gameId: gw });
+    const CW = { ownerUid: OWNER, gameId: gw, runId: rw };
+    const first = makeParty('stationWaitFirst');
+    const second = makeParty('stationWaitSecond');
+    await signInAnonymously(first.auth);
+    const secondUid = (await signInAnonymously(second.auth)).user.uid;
+    await first.call('joinRun', { code: cw, displayName: 'Got The Station' });
+    await second.call('joinRun', { code: cw, displayName: 'Waiting' });
+    await creator.call('startTeams', { gameId: gw, runId: rw });
+    const recOf = (st) => (st?.team?.stages ?? []).flatMap((x) => x.tasks ?? []).find((x) => x.taskId === 'sw-t');
+    await first.call('requestNextTask', { code: cw });
+    await second.call('requestNextTask', { code: cw });
+    // startTeams routes both at once; whichever holds the station is "holder".
+    const firstHolds = recOf(await first.call('getMyTeamState', { code: cw }))?.status === 'assigned';
+    const holder = firstHolds ? first : second;
+    const waiter = firstHolds ? second : first;
+    const waiterUid = waiter.auth.currentUser.uid;
+
+    const full = await waiter.call('requestNextTask', { code: cw });
+    check('the second team is told every station is full', full?.reason === 'stationsFull', JSON.stringify(full));
+    const waiting = await waiter.call('getMyTeamState', { code: cw });
+    const since = waiting?.team?.stationWaitSince;
+    check('the waiting team\'s phone is given the start of its wait', typeof since === 'string' && Number.isFinite(Date.parse(since)), JSON.stringify(since));
+    const holding = await holder.call('getMyTeamState', { code: cw });
+    check('the team on the station carries no wait', holding?.team?.stationWaitSince === undefined && !holding?.team?.stationWaitMs,
+      JSON.stringify({ since: holding?.team?.stationWaitSince, ms: holding?.team?.stationWaitMs }));
+    const rows = (await creator.call('listRunTeams', { gameId: gw, runId: rw }))?.teams ?? [];
+    check('the console row says the team is waiting for a station',
+      rows.find((r) => r.id === waiterUid)?.waitingForStationSince === since
+      && !rows.find((r) => r.id !== waiterUid)?.waitingForStationSince,
+      JSON.stringify(rows.map((r) => ({ id: r.id, w: r.waitingForStationSince }))));
+
+    await new Promise((r) => setTimeout(r, 2500));
+    // Asking again while the station is still full must not restart the wait.
+    await waiter.call('requestNextTask', { code: cw });
+    const still = await waiter.call('getMyTeamState', { code: cw });
+    check('asking again keeps the same wait', still?.team?.stationWaitSince === since, JSON.stringify(still?.team?.stationWaitSince));
+
+    await holder.call('completeTask', { ...CW, taskId: 'sw-t', lat: 31.78, lng: 35.21, accuracyMeters: 5, code: cw });
+    const got = await waiter.call('requestNextTask', { code: cw });
+    check('the waiting team gets the station once it frees', got?.taskId === 'sw-t', JSON.stringify(got));
+    const after = await waiter.call('getMyTeamState', { code: cw });
+    const settled = after?.team?.stationWaitMs;
+    check('the wait is closed and settled', after?.team?.stationWaitSince === undefined && settled >= 2000 && settled < 30000,
+      JSON.stringify({ since: after?.team?.stationWaitSince, settled }));
+    const rowsAfter = (await creator.call('listRunTeams', { gameId: gw, runId: rw }))?.teams ?? [];
+    check('the console row is no longer waiting', !rowsAfter.find((r) => r.id === waiterUid)?.waitingForStationSince,
+      JSON.stringify(rowsAfter.map((r) => r.waitingForStationSince)));
+
+    await waiter.call('completeTask', { ...CW, taskId: 'sw-t', lat: 31.78, lng: 35.21, accuracyMeters: 5, code: cw });
+    const done = await waiter.call('getMyTeamState', { code: cw });
+    const rawSec = (Date.parse(done?.team?.finishedAt) - Date.parse(done?.team?.startedAt)) / 1000;
+    const board = await creator.call('refreshLeaderboard', { gameId: gw, runId: rw, publish: false });
+    const entry = (board?.rankings ?? []).find((r) => r.teamId === waiterUid);
+    check('the board takes the wait off the team\'s time',
+      Number.isFinite(entry?.durationSeconds) && Math.abs((rawSec - entry.durationSeconds) - settled / 1000) < 0.05,
+      JSON.stringify({ rawSec, board: entry?.durationSeconds, settled }));
+    const fin = await creator.call('finalizeRun', { gameId: gw, runId: rw });
+    const finalEntry = (fin?.rankings ?? fin?.leaderboard ?? []).find((r) => r.teamId === waiterUid);
+    check('live and final boards agree on that time', finalEntry === undefined || finalEntry.durationSeconds === entry?.durationSeconds,
+      JSON.stringify({ live: entry?.durationSeconds, final: finalEntry?.durationSeconds }));
+    void secondUid;
   });
 
   // ═══ Photo review THROUGHPUT (change: photo-review-throughput) ══════════════

@@ -14,6 +14,8 @@
 // Sign convention: an excluded amount is always >= 0 and can only ever SUBTRACT.
 // Nothing in this module can lengthen a team's clock.
 
+import { teamStationWaitMs, type StationWaitRecord } from './stationWait';
+
 /** The only two fields of a run task record this rule reads. Both server-written. */
 export interface TaskTimingRecord {
   startedAt?: string;
@@ -158,11 +160,15 @@ export function teamClockNowMs(team: HeldClockRecord | null | undefined, nowMs: 
  * still while held. Never negative; 0 before the start.
  */
 export function raceElapsedMs(
-  team: HeldClockRecord & HeldTimingRecord & { startedAt?: string | null },
+  team: HeldClockRecord & HeldTimingRecord & StationWaitRecord & { startedAt?: string | null },
   nowMs: number,
 ): number {
   const start = typeof team?.startedAt === 'string' ? Date.parse(team.startedAt) : NaN;
   if (!Number.isFinite(start)) return 0;
-  const raw = teamClockNowMs(team, nowMs) - start;
-  return Math.max(0, raw - teamHeldExclusionMs(team));
+  // station-wait-clock: a team waiting for a station sees its clock stand at the moment the
+  // wait began, and a finished wait never counts. An unreadable stamp freezes nothing.
+  const waitingSince = typeof team?.stationWaitSince === 'string' ? Date.parse(team.stationWaitSince) : NaN;
+  const clockNow = Number.isFinite(waitingSince) ? Math.min(nowMs, waitingSince) : nowMs;
+  const raw = teamClockNowMs(team, clockNow) - start;
+  return Math.max(0, raw - teamHeldExclusionMs(team) - teamStationWaitMs(team));
 }

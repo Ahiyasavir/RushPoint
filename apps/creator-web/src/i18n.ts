@@ -1708,6 +1708,8 @@ const HE = {
     outOfBoundsBadge: 'מחוץ לאזור המשחק, לא מקבלים משימות',
     // Held-team visibility: which team the start held back, not just how many.
     heldForConsentBadge: 'מעוכבים עד לאישור הורה, לא יצאו לדרך',
+    waitingForStationBadge: 'מחכים לתחנה פנויה, השעון שלהם עצור',
+    waitingForStationToast: ({ team }: { team: string }) => `${team} מחכים לתחנה פנויה. השעון שלהם נעצר עד שתתפנה תחנה`,
     letBackIn: 'החזרה למשחק',
     letBackInAria: ({ team }: { team: string }) => `החזרת ${team} למשחק`,
     letBackInFailed: 'לא הצלחנו להחזיר את הקבוצה למשחק. נסו שוב.',
@@ -1739,6 +1741,7 @@ const HE = {
       outOfBounds: ({ n }: { n: number }) => (n === 1 ? 'קבוצה אחת מחוץ לאזור המשחק' : `${n} קבוצות מחוץ לאזור המשחק`),
       photoOverdue: ({ n }: { n: number }) => (n === 1 ? 'הגשה אחת שממתינה לכם יותר מדי זמן' : `${n} הגשות שממתינות לכם יותר מדי זמן`),
       teamsStuck: ({ n }: { n: number }) => (n === 1 ? 'קבוצה אחת תקועה' : `${n} קבוצות תקועות`),
+      waitingForStation: ({ n }: { n: number }) => (n === 1 ? 'קבוצה אחת מחכה לתחנה פנויה' : `${n} קבוצות מחכות לתחנה פנויה`),
       heldForConsent: ({ n }: { n: number }) => (n === 1 ? 'קבוצה אחת מעוכבת עד אישור הורה' : `${n} קבוצות מעוכבות עד אישור הורה`),
       photoPending: ({ n }: { n: number }) => (n === 1 ? 'הגשה אחת ממתינה לבדיקה' : `${n} הגשות ממתינות לבדיקה`),
       flashPending: ({ n }: { n: number }) => (n === 1 ? 'משימת בזק אחת מחכה לאישור שלכם' : `${n} משימות בזק מחכות לאישור שלכם`),
@@ -4999,6 +5002,8 @@ const EN: typeof HE = {
     outOfBoundsBadge: 'Outside the play area, not receiving missions',
     // Held-team visibility: which team the start held back, not just how many.
     heldForConsentBadge: 'Held for guardian approval, not started',
+    waitingForStationBadge: 'Waiting for a free station, their clock is stopped',
+    waitingForStationToast: ({ team }: { team: string }) => `${team} is waiting for a free station. Their clock is stopped until one frees up`,
     letBackIn: 'Let back in',
     letBackInAria: ({ team }: { team: string }) => `Let ${team} back into the game`,
     letBackInFailed: 'We could not let this team back in. Please try again.',
@@ -5031,6 +5036,7 @@ const EN: typeof HE = {
       outOfBounds: ({ n }: { n: number }) => (n === 1 ? '1 team outside the play area' : `${n} teams outside the play area`),
       photoOverdue: ({ n }: { n: number }) => (n === 1 ? '1 submission has waited too long' : `${n} submissions have waited too long`),
       teamsStuck: ({ n }: { n: number }) => (n === 1 ? '1 team is stuck' : `${n} teams are stuck`),
+      waitingForStation: ({ n }: { n: number }) => (n === 1 ? '1 team is waiting for a free station' : `${n} teams are waiting for a free station`),
       heldForConsent: ({ n }: { n: number }) => (n === 1 ? '1 team held for guardian approval' : `${n} teams held for guardian approval`),
       photoPending: ({ n }: { n: number }) => (n === 1 ? '1 submission waiting for review' : `${n} submissions waiting for review`),
       flashPending: ({ n }: { n: number }) => (n === 1 ? '1 flash mission is waiting for your approval' : `${n} flash missions are waiting for your approval`),

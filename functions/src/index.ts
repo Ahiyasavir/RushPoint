@@ -2171,8 +2171,16 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   const taskAlreadyCompleted = team.stages.some((s) =>
     s.tasks.some((t) => t.taskId === taskId && t.status === 'completed'),
   );
-  if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
+  if (taskAlreadyCompleted) {
     return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), already: true };
+  }
+  // Approved, and the mission is still in hand: the approval was stamped and the completion never
+  // landed (the two are separate writes, and the second can be lost to a restart or a run too busy
+  // to take it). Answering "already" here left the team on that mission for good, so the resend
+  // finishes what the first call started. completeTaskForTeam is idempotent and keeps every guard.
+  if (priorSubmission?.status === 'approved') {
+    const { completed } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, new Date().toISOString());
+    return { submitted: true, autoApproved: autoApprove, autoApproveSource: approvalSource(), ...(completed ? {} : { already: true }) };
   }
   // rejected-photo-resend (Ahiya, 2026-10-06): the same picture rejected twice is not taken a
   // third time. A new photo is different bytes; a missing or junk hash is never a refusal.
