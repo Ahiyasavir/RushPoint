@@ -3,7 +3,7 @@ import {
   STATION_WAIT_GAP_MS, STATION_WAIT_HEARTBEAT_MS,
   stationWaitCreditMs, settleStationWait, stationWaitStamp, teamStationWaitMs, isWaitingForStation,
 } from './stationWait';
-import { raceElapsedMs } from './pausedClock';
+import { raceElapsedMs, finishedRaceSeconds } from './pausedClock';
 
 const T0 = Date.parse('2026-10-10T10:00:00.000Z');
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -82,5 +82,21 @@ describe('reading it', () => {
     expect(raceElapsedMs(playing, T0 + 300_000)).toBe(290_000);
     // A hold and a wait are separate totals; both come off.
     expect(raceElapsedMs({ ...playing, heldMs: 20_000 }, T0 + 300_000)).toBe(270_000);
+  });
+});
+
+describe('finishedRaceSeconds (the time a finished team is shown before the board is published)', () => {
+  const startedAt = iso(T0); const finishedAt = iso(T0 + 83_000);
+  it('takes a station wait, a hold and clock-pausing missions off the raw time, like the board does', () => {
+    expect(finishedRaceSeconds({ startedAt, finishedAt })).toBe(83);
+    expect(finishedRaceSeconds({ startedAt, finishedAt, stationWaitMs: 51_000 })).toBe(32);
+    expect(finishedRaceSeconds({ startedAt, finishedAt, stationWaitMs: 51_000, heldMs: 10_000 })).toBe(22);
+    expect(finishedRaceSeconds({ startedAt, finishedAt, stages: [{ tasks: [{ excludedMs: 3_000 }] }] })).toBe(80);
+  });
+  it('is null without both stamps, and never negative', () => {
+    expect(finishedRaceSeconds({ startedAt })).toBeNull();
+    expect(finishedRaceSeconds({ finishedAt })).toBeNull();
+    expect(finishedRaceSeconds(null)).toBeNull();
+    expect(finishedRaceSeconds({ startedAt, finishedAt, stationWaitMs: 999_999_999 })).toBe(0);
   });
 });

@@ -9,7 +9,7 @@ import { Button, Card, Screen } from '../components/ui';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import PostGameSurvey from '../components/PostGameSurvey';
 import { useT } from '../i18nContext';
-import { selectPodium } from '@rushpoint/shared';
+import { selectPodium, finishedRaceSeconds } from '@rushpoint/shared';
 import { fireConfetti } from '../lib/confetti';
 import { feedback } from '../lib/sound';
 import { creatorUrl } from '../lib/creatorUrl';
@@ -60,16 +60,18 @@ export default function FinalScreen({ state, session, onLeave, runEnded = false 
   // recap boards exactly (a frozen-before-finish board would otherwise show a
   // different completion time here than everywhere else). Fall back to the raw
   // timestamps only if the team isn't in the snapshot yet.
-  const totalSec = myEntry?.durationSeconds
-    ?? (team.startedAt && team.finishedAt
-      ? (new Date(team.finishedAt).getTime() - new Date(team.startedAt).getTime()) / 1000
-      : null);
+  // Before the board is published the time comes from the team's own record, with the same
+  // exclusions the board applies (a hold, waiting for a station, clock-pausing missions). The raw
+  // span showed 1:23 to a team whose clock, and whose board time, said 0:32 (found 2026-10-11).
+  const totalSec = myEntry?.durationSeconds ?? finishedRaceSeconds(team);
   const completedStages = team.stages.filter((s) => s.status === 'completed');
   let fastest: { order: number; dur: number } | null = null;
   for (const s of completedStages) {
     if (s.startedAt && s.completedAt) {
       const dur = (new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000;
-      if (!fastest || dur < fastest.dur) fastest = { order: s.order, dur };
+      // A stage cannot be shown as longer than the whole race (its span includes excluded time).
+      const shown = totalSec != null ? Math.min(dur, totalSec) : dur;
+      if (!fastest || shown < fastest.dur) fastest = { order: s.order, dur: shown };
     }
   }
   const hintsUsed = team.taskHintsUsed?.length ?? 0;
