@@ -343,6 +343,25 @@ async function main() {
   if (waited.length === 0) console.log('  no team waited');
   else audit('waiting for a station comes off the waiting team\'s clock (station-wait-clock)', anyExcluded, `${stationWaitTotal}ms settled across the teams shown`);
 
+  // ── Every team: the time its own phone would show at the finish == its time on the board ──
+  // Computed from what the PHONE is given (getMyTeamState), the way the finish screen does it
+  // before the board is published: raw time minus holds, station waits and clock-pausing missions.
+  // Exact for every team, or a team would see one time on its phone and another on the screen.
+  const phoneVsBoard = [];
+  for (let i = 0; i < teams.length; i++) {
+    const t = (await teams[i].call('getMyTeamState', { code: accessCode }).catch(() => null))?.team;
+    const e = entries.find((x) => x.teamId === teams[i].uid);
+    if (!t?.startedAt || !t?.finishedAt || e?.durationSeconds == null) continue;
+    const excl = (t.stages ?? []).flatMap((x) => x.tasks ?? []).reduce((n, x) => n + (Number(x.excludedMs) || 0), 0)
+      + (Number(t.heldMs) || 0) + (Number(t.stationWaitMs) || 0);
+    const phone = Math.max(0, Date.parse(t.finishedAt) - Date.parse(t.startedAt) - excl) / 1000;
+    phoneVsBoard.push({ name: teams[i].name, phone, board: e.durationSeconds, diff: Math.abs(phone - e.durationSeconds) });
+  }
+  const off = phoneVsBoard.filter((x) => x.diff > 0.05);
+  audit('every finished team: the time on its own finish screen equals its time on the board',
+    phoneVsBoard.length > 0 && off.length === 0,
+    `${phoneVsBoard.length} teams compared${off.length ? ' · ' + off.slice(0, 4).map((x) => `${x.name} phone ${x.phone} board ${x.board}`).join(' | ') : ''}`);
+
   console.log('\n── what the console is given about a team waiting for a station (listRunTeams row) ──');
   if (waitingRow) {
     const { id, displayName, activeTaskId, ...rest } = waitingRow;
