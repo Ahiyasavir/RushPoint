@@ -1684,7 +1684,7 @@ function Header({
   // elapsed clock instead (mirrors the finish/TV/public boards).
   timeOnly?: boolean; startedAt?: string;
   // The team's hold state, so the race clock subtracts finished holds and stands still during one.
-  hold?: { held?: boolean; heldAt?: string; heldMs?: number };
+  hold?: ClockStops;
   /** The race clock stands still from this instant: the finishing mission was sent (issue 46). */
   clockFrozenAtMs?: number | null;
   // Always-reachable SOS entry point (active-race branch only). Drives the same
@@ -1834,10 +1834,13 @@ function MissionProgressRow({ progress, beat, accent }: {
   );
 }
 
+/** What stops the race clock: a staff hold, and waiting for a full station (station-wait-clock). */
+type ClockStops = { held?: boolean; heldAt?: string; heldMs?: number; stationWaitSince?: string; stationWaitMs?: number };
+
 // A live m:ss elapsed clock for time_only runs, ticking on its own so only this
 // node re-renders each second (not the whole header/screen). Before the race is
 // stamped (startedAt absent) it reads 0:00.
-function ElapsedClock({ startedAt, hold, frozenAtMs }: { startedAt?: string; hold?: { held?: boolean; heldAt?: string; heldMs?: number }; frozenAtMs?: number | null }) {
+function ElapsedClock({ startedAt, hold, frozenAtMs }: { startedAt?: string; hold?: ClockStops; frozenAtMs?: number | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);

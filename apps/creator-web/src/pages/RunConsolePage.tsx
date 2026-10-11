@@ -478,6 +478,24 @@ export default function RunConsolePage() {
     if (verdict.shouldCue) playAlert();
   }, [photoQueues]);
 
+  // A team has just started waiting for a free station (change: station-wait-clock): say so once,
+  // by name. Baselined to null like `seenPendingKeys`, so opening the console on a run that already
+  // has teams waiting is silent, and a team that waits a second time is announced again.
+  const seenStationWaits = useRef<Set<string> | null>(null);
+  useEffect(() => { seenStationWaits.current = null; }, [gameId, runId, ownerUid]);
+  useEffect(() => {
+    const waiting = teams.filter((tm) => !!tm.waitingForStationSince && !tm.finished);
+    const keys = new Set(waiting.map((tm) => `${tm.id}@${tm.waitingForStationSince}`));
+    const seen = seenStationWaits.current;
+    seenStationWaits.current = keys;
+    if (seen === null) return;
+    const fresh = waiting.filter((tm) => !seen.has(`${tm.id}@${tm.waitingForStationSince}`));
+    if (fresh.length === 0) return;
+    for (const tm of fresh.slice(0, 3)) toast.info(t.runConsole.waitingForStationToast({ team: tm.displayName }));
+    playAlert();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teams]);
+
   // ── The review-wait alarm (change: review-wait-alarm) ──────────────────────────
   // Field report 2026-09-27: "alert strongly if I don't approve a photo for more than 20 seconds".
   // A 1 s clock runs only while something is waiting; the verdict is pure (reviewWaitAlarm). The
@@ -1196,6 +1214,7 @@ export default function RunConsolePage() {
     pendingFlashCount,
     stuckTeamCount: teams.filter((tm) => attentionById.get(tm.id)?.level === 'stuck').length,
     heldForConsentCount: teams.filter((tm) => tm.heldForConsent).length,
+    waitingForStationCount: teams.filter((tm) => !!tm.waitingForStationSince && !tm.finished).length,
     unreadChatThreads,
     pausedTaskCount,
     // Unknown until the first team poll lands: an empty list before then is not "nobody joined".
@@ -1815,6 +1834,10 @@ export default function RunConsolePage() {
                           teams, which the attention classifier suppresses by design. */}
                       {team.heldForConsent && (
                         <div className="mt-1 text-[13px] text-ink-amber">{rc.heldForConsentBadge}</div>
+                      )}
+                      {/* station-wait-clock: every station open to this team is full. */}
+                      {!!team.waitingForStationSince && !team.finished && (
+                        <div className="mt-1 text-[13px] text-ink-amber">{rc.waitingForStationBadge}</div>
                       )}
                       {/* One badge, carrying the REASON: "needs attention" with
                           no cause is a puzzle, not a signal. Suppressed when the

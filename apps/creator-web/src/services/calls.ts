@@ -318,6 +318,8 @@ export interface RunTeamRow {
   heldForConsent?: boolean;
   /** Paused by an operator (setTeamHold). Optional: an older backend reads as "not paused". */
   held?: boolean;
+  /** ISO: every station open to the team is full and its clock is stopped (station-wait-clock). */
+  waitingForStationSince?: string | null;
   /** Taken out of the game by the organizer (team-lifecycle-controls). */
   removed?: boolean;
 }

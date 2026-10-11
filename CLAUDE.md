@@ -459,6 +459,16 @@ strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify vi
   `team.timeUpNotice`); a submission waiting for review is never swept. The phone gets
   `activeTaskTimeLeftMs`, a duration. `Task.expiresAt` is an absolute close beside
   `expiresAfterMinutes` (earlier wins, `schedule.ts`).
+- **Waiting for a station stops the clock** (change: station-wait-clock). When every station open to a
+  team is at its `maxConcurrentTeams`, routing answers `stationsFull`; `assignNextInActiveStage` stamps
+  `RunTeam.stationWaitSince`, and the claim that finally hands the team a mission settles the wait into
+  `stationWaitMs`, which `buildRankings` subtracts beside `heldMs`. The clock stops only while the phone
+  keeps asking: the server refreshes `stationWaitSeenAt` at most every 30 s and a wait is credited to
+  60 s past it (`packages/shared/src/stationWait.ts`), so closing the app does not stop time. The console
+  gets `waitingForStationSince` on the `listRunTeams` row (signal, row mark, one toast per new wait).
+  Any new write that hands a team a mission must spread `stationWaitSettlePatch`.
+  `scripts/simulate-station-caps.mjs <game.json>` plays a REAL game with N teams and audits the caps,
+  the wait and the console row; bound it with `--parallel` (the emulator keeps a worker per function).
 - **Skip ONE mission for ONE team** — `skipTaskForTeam` (owner or run-scoped staff) marks a single
   task `skipped` with `earnedScore: 0`, releases its station slot, keeps the team **in the same
   stage** and, if the skip put `requiredTaskCount` out of reach, lowers that team's stored

@@ -152,6 +152,7 @@ import {
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
 import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSeconds, teamClockNowMs } from '@rushpoint/shared';
+import { settleStationWait, stationWaitStamp, teamStationWaitMs } from '@rushpoint/shared';
 import { teamAdvanceRefusal, rankableTeams } from '@rushpoint/shared';
 import { routeBlockers, acceptsAll, type RouteBlockers, type HardBlocker, type WaivableKind } from '@rushpoint/shared';
 import { arrivalGateApplies, missionPins, resumedStartedAt } from '@rushpoint/shared';
@@ -2211,6 +2212,8 @@ export const setTeamHold = loggedCallable('setTeamHold', async (data, context) =
 
     if (held) {
       tx.update(teamRef, {
+        // A wait for a station ends where the hold begins: two exclusions never overlap.
+        ...stationWaitSettlePatch(team, now),
         held: true,
         heldAt: now,
         heldReason: cleanReason,
@@ -2498,6 +2501,8 @@ async function applyRoute(a: {
       rec.startedAt = a.now;
       rec.routedByOperator = { at: a.now, by: a.operatorId, waived: a.waived };
       tx.update(a.teamRef, {
+        // The team has a mission now, so a wait for a station is over (station-wait-clock).
+        ...stationWaitSettlePatch(fresh, a.now),
         stages,
         activeTaskId: a.taskId,
         // A route that happened supersedes a queued one for the same mission.
@@ -2760,6 +2765,7 @@ export const forceAssignTask = loggedCallable('forceAssignTask', async (data, co
       rec.startedAt = now;
 
       tx.update(teamRef, {
+        ...stationWaitSettlePatch(fresh, now),
         stages,
         activeTaskId: ids.taskId,
         updatedAt: now,
@@ -3132,7 +3138,9 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string, opts: {
     // server wrote at resume from its own clock — never `heldAt` measured against
     // `now` — so a team released an hour ago cannot keep accruing exclusion, and the
     // live board and the final board still read the identical number.
-    const excludedMs = teamExcludedMs(team.stages) + teamHeldExclusionMs(team);
+    // station-wait-clock: time spent waiting for a full station, settled by the server when the
+    // team got one. The same argument again: a stored total, never `now`.
+    const excludedMs = teamExcludedMs(team.stages) + teamHeldExclusionMs(team) + teamStationWaitMs(team);
 
     switch (game.scoringPreset) {
       case 'time_only':
@@ -3570,6 +3578,18 @@ async function finalizeRunCore(
     team.heldMs = total;
     team.held = false;
     settledHolds.push({ teamId: team.id, heldMs: total });
+  }
+  // station-wait-clock: a team still waiting for a station when the run ends keeps what the
+  // wait earned. In memory first so the rankings below see it, then persisted best-effort.
+  for (const team of teams) {
+    const settled = settleStationWait(team, nowMs);
+    if (!settled) continue;
+    team.stationWaitMs = settled.totalMs;
+    delete team.stationWaitSince;
+    delete team.stationWaitSeenAt;
+    await db.doc(teamPath(ownerUid, gameId, runId, team.id))
+      .update({ stationWaitSince: FieldValue.delete(), stationWaitSeenAt: FieldValue.delete(), stationWaitMs: settled.totalMs })
+      .catch((e) => logBestEffort('finalizeRunCore.settleStationWait', { runId, teamId: team.id }, e));
   }
   for (const s of settledHolds) {
     await db.doc(teamPath(ownerUid, gameId, runId, s.teamId))
@@ -4916,6 +4936,8 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       // team, bring back a removed one) and the list files removed teams behind a filter.
       held: t.held === true,
       removed: t.removed === true,
+      // station-wait-clock: every station open to this team is full and its clock is stopped.
+      waitingForStationSince: !t.finishedAt && typeof t.stationWaitSince === 'string' ? t.stationWaitSince : null,
     };
   });
 
@@ -5409,6 +5431,56 @@ export async function advanceTeamStateOnPoll(args: {
   }
 }
 
+// ─── Waiting for a station (change: station-wait-clock) ──────────────────────
+//
+// Every station open to the team was full. The wait is stamped on the team document and comes
+// off its race clock like a staff hold; the rule and its allowance for a phone that went quiet
+// live in packages/shared/src/stationWait.ts.
+
+/** The fields that close a team's open station wait, or nothing when none is open. */
+function stationWaitSettlePatch(team: RunTeam, nowIso: string): Record<string, unknown> {
+  const settled = settleStationWait(team, Date.parse(nowIso));
+  if (!settled) return {};
+  return {
+    stationWaitSince: FieldValue.delete(),
+    stationWaitSeenAt: FieldValue.delete(),
+    stationWaitMs: settled.totalMs,
+  };
+}
+
+/**
+ * Routing has just answered "every station is full": start the team's wait, or refresh the
+ * stamp that proves its phone is still asking. Re-read in a transaction so an answer that
+ * arrives late cannot open a wait on a team that already holds a mission. Writes nothing when
+ * the stamp is fresh, which is most calls. Best-effort: a failed stamp costs the team a few
+ * seconds of credit and must never fail the routing answer.
+ */
+async function stampStationWait(teamRef: FirebaseFirestore.DocumentReference, nowIso: string): Promise<void> {
+  const nowMs = Date.parse(nowIso);
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(teamRef);
+      if (!snap.exists) return;
+      const team = snap.data() as RunTeam;
+      if (team.held === true || team.status === 'finished') return;
+      const holding = (team.stages ?? []).some((s) => s.status === 'active' && s.tasks.some((t) => t.status === 'assigned'));
+      if (holding) return;
+      const verdict = stationWaitStamp(team, nowMs);
+      if (verdict === 'none') return;
+      if (verdict === 'beat') { tx.update(teamRef, { stationWaitSeenAt: nowIso }); return; }
+      // 'restart': the phone was quiet past the allowance. Keep what the old wait earned.
+      const earned = verdict === 'restart' ? settleStationWait(team, nowMs) : null;
+      tx.update(teamRef, {
+        stationWaitSince: nowIso,
+        stationWaitSeenAt: nowIso,
+        ...(earned ? { stationWaitMs: earned.totalMs } : {}),
+      });
+    });
+  } catch (e) {
+    logBestEffort('stationWait.stamp', { teamId: teamRef.id }, e);
+  }
+}
+
 export async function assignNextInActiveStage(
   ownerUid: string, gameId: string, runId: string, teamId: string,
   teamLocation: { lat: number; lng: number },
@@ -5622,7 +5694,7 @@ export async function assignNextInActiveStage(
         const stages = curTeam.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
         stages[activeStageIdx].tasks[localIdx].status = 'assigned';
         stages[activeStageIdx].tasks[localIdx].startedAt = now;
-        tx.update(teamRef, { stages, activeTaskId: result.taskId, updatedAt: now });
+        tx.update(teamRef, { stages, activeTaskId: result.taskId, updatedAt: now, ...stationWaitSettlePatch(curTeam, now) });
         return { taskId: result.taskId, mine: true };
       }));
     } catch (e) {
@@ -5637,6 +5709,9 @@ export async function assignNextInActiveStage(
       return { taskId: claim.taskId };
     }
   }
+  // station-wait-clock: nothing was handed out because every open station is full. The team's
+  // clock stops from here until it gets a station.
+  if (!result.taskId && result.reason === 'stationsFull') await stampStationWait(teamRef, now);
   // Thread the "why nothing" reason (stationsFull / allLocked / none) so the
   // participant UI can wait-and-retry on a full station instead of dead-ending.
   return { taskId: result.taskId, reason: result.reason };

@@ -1314,6 +1314,12 @@ export interface RunTeam {
   // team-level analogue of RunTaskRecord.excludedMs. Absent on every pre-change doc
   // and read as 0.
   heldMs?: number;
+  // station-wait-clock: every station open to the team was full. `stationWaitSince` is the open
+  // wait, `stationWaitSeenAt` the last time the phone asked and was told "full", `stationWaitMs`
+  // the settled total buildRankings takes off the clock. See packages/shared/src/stationWait.ts.
+  stationWaitSince?: string;
+  stationWaitSeenAt?: string;
+  stationWaitMs?: number;
   // Removed from the game by the organizers (change: team-lifecycle-controls). A STATE, never a
   // delete: refused at every progress door (teamAdvanceRefusal), left out of every standing
   // (rankableTeams), SOS still allowed, fully reversible by setTeamRemoved({ removed: false }).
