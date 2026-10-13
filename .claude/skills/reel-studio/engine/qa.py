@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -104,7 +105,8 @@ def check(reel: str, opening: str | None, final: bool) -> int:
         if o.get("kind", "text") not in ("text", "logo") or o["png"] in seen:
             continue
         seen.add(o["png"])
-        a = np.asarray(Image.open(o["png"]).convert("RGBA"))[:, :, 3]
+        ovp = Path(o["png"])
+        a = np.asarray(Image.open(ovp if ovp.is_absolute() else rdir / ovp).convert("RGBA"))[:, :, 3]
         rows = np.where(a.max(axis=1) > 16)[0]
         if len(rows) and (rows[0] < TOP or rows[-1] > BOT):
             obad.append(f"{Path(o['png']).name} y {rows[0]}..{rows[-1]}")
@@ -204,6 +206,107 @@ def check(reel: str, opening: str | None, final: bool) -> int:
         worst = best if worst is None or abs(best) > abs(worst) else worst
     if worst is not None:
         (ok if abs(worst) * 10 <= 60 else fails).append(f"lip sync: worst talking shot offset {worst * 10} ms (limit 60)")
+
+    # ── checks for what reached the founder on 2026-10-05 (reels 14, 15) ──
+    # captions too small ("הכתוביות קטנות מידי"): 84 by default, never under 78
+    small = [c.get("text", "")[:20] for c in caps if int(c.get("size") or CFG["captions"]["sub_size"]) < 78]
+    (fails if small else ok).append(f"caption size: {len(small)} of {len(caps)} under 78px {small[:3] if small else ''}")
+    # no logo any more (founder rule 43)
+    logos = sorted({Path(o["png"]).name for o in tl.get("overlays", []) if "logo" in Path(str(o["png"])).name.lower()})
+    (fails if logos else ok).append(f"logo: {len(logos)} logo overlays (rule 43: none) {logos or ''}")
+    # no dates in a reel (rule 36); a captive video (classroom, in app) may set allow_dates
+    date_re = re.compile(r"\d{1,2}\s*ב?(ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)|\d{1,2}[./]\d{1,2}")
+    txt_ = lambda c: c.get("text") or " ".join(w for w, *_ in c.get("words", []))  # noqa: E731
+    dated = [txt_(c)[:30] for c in caps if date_re.search(txt_(c))]
+    if not tl.get("allow_dates"):
+        (fails if dated else ok).append(f"dates: {len(dated)} captions carry a date {dated[:3] if dated else ''}")
+    # music loud enough ("תחזק קצת את המוזיקה", twice): -11 is his level
+    if mu and float(mu.get("gain", -13)) < -12.5:
+        warns.append(f"music gain {mu.get('gain')} dB: he asked for louder twice, use about -11")
+    # audio/video drift: every source that brings its own sound, and the render itself, must
+    # end its audio and its picture together (acrossfade joins once ate 0.7 s over 12 cuts)
+    def stream_durs(path):
+        inf = ffprobe(path)
+        v_ = next((float(s_.get("duration", 0)) for s_ in inf["streams"] if s_["codec_type"] == "video"), 0)
+        a_ = next((float(s_.get("duration", 0)) for s_ in inf["streams"] if s_["codec_type"] == "audio"), None)
+        return v_, a_
+    drift = []
+    for src in sorted({sh["clip"] for sh in tl["shots"] if sh.get("clip") and float(sh.get("audio_gain", 0)) > 0}):
+        v_, a_ = stream_durs(rdir / src)
+        if a_ is not None and abs(v_ - a_) > 0.1:
+            drift.append(f"{src} video {v_:.2f}s audio {a_:.2f}s")
+    (fails if drift else ok).append(f"a/v drift: {len(drift)} talking sources whose sound and picture differ in length {drift or ''}")
+    # a jump cut left showing: two consecutive shots of the SAME clip, same framing, not continuous
+    jumps = []
+    for p_, n_ in zip(tl["shots"], tl["shots"][1:]):
+        if p_.get("clip") and p_.get("clip") == n_.get("clip") and p_.get("crop") == n_.get("crop"):
+            exp = float(p_.get("in", 0)) + (float(p_["end"]) - float(p_["start"])) * float(p_.get("speed", 1))
+            if abs(float(n_.get("in", 0)) - exp) > 0.08:
+                jumps.append(f"{p_['id']}→{n_['id']}")
+    (fails if jumps else ok).append(f"visible jump cuts: {len(jumps)} (cover each with a framing change AT the join, an insert or a card) {jumps or ''}")
+    # flat colour ("נראה מאוד עמום ולא איכותי"): low mean saturation means grade it (portrait.GRADE)
+    try:
+        import subprocess as _sp
+        raw = _sp.run([ffmpeg_bin(), "-v", "error", "-i", str(video), "-vf", "fps=0.5,scale=96:170,format=rgb24",
+                       "-f", "rawvideo", "-"], capture_output=True).stdout
+        px = np.frombuffer(raw, np.uint8).reshape(-1, 3).astype(np.float32) / 255
+        if tl.get("white_background"):          # a white ground is not "flat": judge the person, not the paper
+            px = px[px.min(1) < 0.9]
+        mx, mn = px.max(1), px.min(1)
+        sat = float(np.mean((mx - mn) / (mx + 1e-6)))
+        (ok if sat >= 0.20 else warns).append(f"colour: mean saturation {sat:.2f} (under 0.20 reads flat: apply lib/portrait.GRADE)")
+    except Exception as e:  # noqa: BLE001
+        warns.append(f"colour: not measured ({e})")
+
+    # ── 2026-10-13: three things that reached him or nearly did (lessons-2026-10-13.md) ──────────
+    import subprocess as _sp2
+
+    def grab(at, size="108:192", fmt="gray"):
+        raw = _sp2.run([ffmpeg_bin(), "-v", "error", "-ss", f"{max(at, 0):.3f}", "-i", str(video), "-frames:v", "1",
+                        "-vf", f"scale={size},format={fmt}", "-f", "rawvideo", "-"], capture_output=True).stdout
+        return np.frombuffer(raw, np.uint8).astype(np.float32)
+
+    talk = [s_ for s_ in tl["shots"] if s_.get("clip") and "audio_gain" in s_]
+    # (a) a frozen last frame: the clip ran out before the shot did and the engine cloned its final
+    #     frame ("רואים אותי מפסיק לזוז"). The last frame must differ from the one 3 frames before it.
+    frozen = []
+    for s_ in talk:
+        f1, f0 = grab(s_["end"] - 0.035), grab(s_["end"] - 0.135)
+        if len(f1) and len(f1) == len(f0) and float(np.abs(f1 - f0).mean()) < 0.12:
+            frozen.append(s_["id"])
+    (fails if frozen else ok).append(f"frozen tails: {len(frozen)} of {len(talk)} talking shots end on a held frame {frozen or ''}")
+    # (b) the picture of a talking shot outlives his eyes: tails.json (the work folder's tails.py:
+    #     head pose, iris, blink) says where the last vowel ends and where he looks away.
+    tails_p = rdir / "tails.json"
+    if tails_p.exists() and talk:
+        tails = json.loads(tails_p.read_text(encoding="utf-8"))
+        vstart = {Path(x["file"]).stem: x["at"] for x in tl.get("sfx", []) if str(x.get("file", "")).startswith("voice/")}
+        late = []
+        for s_ in talk:
+            tinfo = tails.get(s_["id"])
+            if not tinfo:
+                continue
+            pic = s_["end"] - vstart.get(s_["id"], s_["start"])
+            lim = tinfo["vend"] + 0.06
+            if tinfo.get("leave") and tinfo["leave"] > 0.3:
+                lim = min(lim, tinfo["leave"] - 0.10)
+            if pic > max(lim, tinfo["vend"] - 0.45) + 0.04:
+                late.append(f"{s_['id']} +{pic - lim:.2f}s")
+        (fails if late else ok).append(f"eyes at the cut: {len(late)} of {len(talk)} talking shots stay after he looks away or stops {late or ''}")
+    elif talk and tl.get("white_background"):
+        warns.append("eyes at the cut: no tails.json. Run tails.py: he looks to the laptop on the last word of every take")
+    # (c) "white" means measured white in the FINAL file, per shot (mixed colour range tags once
+    #     turned it 235 grey from one shot on, while every clip measured 255 on its own).
+    if tl.get("white_background"):
+        grey = []
+        for s_ in talk:
+            # rgb24, not gray: ffmpeg's gray conversion of a limited range file reads white as 241
+            f = grab((s_["start"] + s_["end"]) / 2, "108:192", "rgb24").reshape(192, 108, 3)
+            # rows 18..23 = y 180..230: above the safe zone, so no chapter tag or title can sit there
+            corner = float(min(f[18:23, 1:6].mean(), f[18:23, -6:-1].mean()))
+            if corner < 247:
+                grey.append(f"{s_['id']} {corner:.0f}")
+        (fails if grey else ok).append(f"white background: {len(grey)} of {len(talk)} talking shots under 247 at the top corners (y 180..230) {grey or ''}")
 
     # todo + placeholders
     t = todos(tl)

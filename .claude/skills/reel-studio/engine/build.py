@@ -106,8 +106,11 @@ def render_segment(i: int, shot: dict, rdir: Path, bdir: Path, clip_gain: float,
             raise SystemExit(f"shot {shot['id']}: crop {crop} leaves the {W}x{H} frame")
     pre = f"crop={int(crop[2])}:{int(crop[3])}:{int(crop[0])}:{int(crop[1])},scale={W}:{H}," if crop else ""
     tail = (f"{pre}{effect_filter(shot.get('effect', 'none'), frames, float(shot.get('punch_at', 0)))},{blur_chain(shot.get('blur', []))},"
-            f"@@OV@@tpad=stop_mode=clone:stop_duration={dur + 1:.3f},format=yuv420p")
-    enc = ["-c:v", "libx264", "-preset", PRESET, "-crf", str(crf), "-pix_fmt", "yuv420p",
+            f"@@OV@@tpad=stop_mode=clone:stop_duration={dur + 1:.3f},scale=out_range=tv:out_color_matrix=bt709,format=yuv420p")
+    # 2026-10-13: segments built from PNGs came out tagged full range ('pc') and the talking ones
+    # untagged; after the first 'pc' segment the final pass read every untagged one as full range
+    # too, so pure white turned 235 grey from that shot on. One range, one matrix, always tagged.
+    enc = ["-c:v", "libx264", "-preset", PRESET, "-crf", str(crf), "-pix_fmt", "yuv420p", "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
            "-r", str(FPS), "-fps_mode", "cfr", "-frames:v", str(frames),
            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart"]
     silence = ["-f", "lavfi", "-t", f"{dur:.4f}", "-i", "anullsrc=r=48000:cl=stereo"]
@@ -298,7 +301,7 @@ def build(reel: str, opening: str | None, final: bool, quiet: bool = False) -> P
             out = bdir / f"seg_{i:02d}_d.mp4"
             run([FF, "-y", "-v", "error", "-i", segs[i].name, "-loop", "1", "-t", f"{dz:.3f}", "-i", lasts[i].name,
                  "-filter_complex", f"[1:v]format=rgba,fade=t=out:st=0:d={dz:.3f}:alpha=1[q];[0:v][q]overlay=0:0:eof_action=pass,format=yuv420p[v]",
-                 "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-preset", PRESET, "-crf", str(crf), "-pix_fmt", "yuv420p",
+                 "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-preset", PRESET, "-crf", str(crf), "-pix_fmt", "yuv420p", "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                  "-r", str(FPS), "-fps_mode", "cfr", "-c:a", "copy", out.name], cwd=bdir)
             return i, out
         with ThreadPoolExecutor(WORKERS) as ex:
@@ -419,7 +422,7 @@ def build(reel: str, opening: str | None, final: bool, quiet: bool = False) -> P
     inputs += ["-i", mixwav.name]
     out = bdir / f"{reel}_{op}.mp4"
     run([FF, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(fc),
-         "-map", "[vout]", "-map", f"{k_video}:a", "-c:v", "libx264", "-preset", PRESET, "-crf", str(crf),
+         "-map", "[vout]", "-map", f"{k_video}:a", "-c:v", "libx264", "-preset", PRESET, "-crf", str(crf), "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
          "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p", "-r", str(FPS), "-fps_mode", "cfr",
          "-frames:v", str(total_frames), "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
          "-movflags", "+faststart", out.name], cwd=bdir)

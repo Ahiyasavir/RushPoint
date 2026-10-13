@@ -60,7 +60,7 @@
     "active_color": "#FFB300",
     "idle_color": "#FFFFFF",
     "outline_color": "#000000",
-    "sub_size": 66,
+    "sub_size": 84,
     "big_size": 118,
     "sub_center_y": 1180,
     "big_center_y": 760,
@@ -69,7 +69,8 @@
     "bold": true,
     "outline_px": 10,
     "center_x": 505,
-    "max_width": 860
+    "max_width": 860,
+    "_size_comment": "84 since 2026-10-05 ('הכתוביות קטנות מידי' at 66). qa.py fails anything under 78."
   },
   "money": {
     "usd_ils_rate": "TODO",

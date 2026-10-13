@@ -9,6 +9,9 @@ the mixer, each with its own instruments, groove and harmony:
   funk      (stairs)   boom bap: kick, snare on 2 and 4, swung hats, e-piano, bouncy bass
   synthwave (AI reel)  16th arpeggiator, pumping pad, four on the floor, gated snare
   procession (classroom race video) walking toms, frame drum, lyre in an old mode, swells
+  pulse     (reel 14 phone) dark heartbeat that opens into a bright four on the floor
+  lofi      (reel 15 bet)   lazy lo fi under dialogue, a clock ticks at level 3
+  briefing  (race opening)  soft piano arpeggio + pad, calm under a long talk
 
     make_music(out, total, style="funk", bpm=95, energy=[(0, 1), (10, 3)],
                accents=[2.0, 3.27], drops=[(20.0, 20.8)])
@@ -302,7 +305,207 @@ def _procession(bus, total, bpm, lvl, accents):
         bus.add(a, lp(saw(hz("D3"), 1.2, 900), 800) * env(int(1.2 * SR), 0.005, 3) * 0.3)
 
 
+def _pad(freqs, dur, cut=1800, att=0.6, rel=0.6):
+    x = sum(lp(saw(f, dur, cut, (-0.004, 0.0, 0.005)), cut) for f in freqs) / max(len(freqs), 1)
+    n = len(x); i = np.arange(n)
+    return x * np.minimum(1, i / (att * SR)) * np.minimum(1, (n - i) / (rel * SR))
+
+
+def _crackle(rng, dur):
+    n = int(dur * SR)
+    x = np.zeros(n)
+    k = rng.integers(0, n, max(1, int(dur * 9)))
+    x[k] = rng.normal(0, 1, len(k))
+    return hp(lp(x, 6000), 1500) * 0.6
+
+
+def _pulse(bus, total, bpm, lvl, accents):
+    """Reel 14 'this phone' (2026-10-05). Two halves that mirror the script: level 0..1 is
+    a dark heartbeat (sub thump, a ticking click, minor pad); from level 2 it opens into a
+    bright four on the floor with a rising major pluck arpeggio and claps."""
+    beat = 60 / bpm; rng = bus.rng; bar = beat * 4
+    dark = [["A2", "C3", "E3"], ["F2", "A2", "C3"]]
+    bright = [["A2", "C#3", "E3", "A3"], ["F#2", "A2", "C#3", "F#3"], ["D2", "F#2", "A2", "D3"], ["E2", "G#2", "B2", "E3"]]
+    b = 0
+    while b * bar < total:
+        t0 = b * bar; L = lvl(t0)
+        if L <= 1:
+            ch = [hz(n) for n in dark[b % 2]]
+            bus.add(t0, _pad([f * 2 for f in ch], bar, 900, 0.8, 0.5), 0.10)
+            for k in range(4):   # lub dub
+                bus.add(t0 + k * beat, kick(rng, 0.25, 42, 0.5), 0.55)
+                bus.add(t0 + k * beat + 0.18, kick(rng, 0.2, 40, 0.3), 0.3)
+                if L >= 1:
+                    bus.add(t0 + k * beat + beat / 2, hat(rng) * 0.6, 0.6, pan=0.4)
+        else:
+            ch = [hz(n) for n in bright[b % 4]]
+            bus.add(t0, _pad([f * 2 for f in ch], bar, 2600, 0.05, 0.3), 0.07)
+            for k in range(4):
+                bus.add(t0 + k * beat, kick(rng, 0.3, 52, 1.0), 0.8)
+                bus.add(t0 + k * beat + beat / 2, hat(rng), 0.8, pan=0.3)
+            if L >= 3:
+                for k in (1, 3):
+                    bus.add(t0 + k * beat, snare(rng, 0.18, 240, 1.0), 0.6)
+            for s in range(8):   # rising arpeggio
+                f = ch[s % 4] * (4 if s < 4 else 8)
+                bus.add(t0 + s * beat / 2, pluck(f, beat * 0.8, 0.994, rng), 0.5, pan=-0.3 + 0.08 * s)
+            bus.add(t0, sub(ch[0], beat * 3.5) * env(int(beat * 3.5 * SR), 0.01, 1.2) * 0.25)
+        b += 1
+    for a in accents:
+        bus.add(a, kick(rng, 0.6, 46, 1.2), 1.0)
+        bus.add(max(a - beat * 2, 0), riser(rng, beat * 2), 0.8)
+
+
+def _lofi(bus, total, bpm, lvl, accents):
+    """Reel 15, the 100 shekel bet in the park (2026-10-05). Lo fi hip hop under dialogue:
+    lazy swung kick and rim, warm maj7 e-piano, round bass, vinyl crackle, and at level 3+
+    a soft clock tick on every eighth for the 60 second countdown."""
+    beat = 60 / bpm; rng = bus.rng; bar = beat * 4
+    prog = [["F3", "A3", "C4", "E4"], ["E3", "G3", "B3", "D4"], ["D3", "F3", "A3", "C4"], ["C3", "E3", "G3", "B3"]]
+    sw = beat * 0.58
+    b = 0
+    while b * bar < total:
+        t0 = b * bar; L = lvl(t0)
+        ch = [hz(n) for n in prog[b % 4]]
+        bus.add(t0, _crackle(rng, bar), 0.5)
+        bus.add(t0, lp(epiano(ch, bar * 0.95), 2500), 0.9, pan=-0.1)
+        if L >= 1:
+            bus.add(t0, lp(sub(ch[0] / 2, beat * 1.6), 300) * env(int(beat * 1.6 * SR), 0.01, 1.5) * 0.35)
+            bus.add(t0 + 2.5 * beat, lp(sub(ch[0] / 2, beat), 300) * env(int(beat * SR), 0.01, 2.5) * 0.3)
+        if L >= 2:
+            for at in (0.0, 1.5 + 0.08, 2.5):
+                bus.add(t0 + at * beat, lp(kick(rng, 0.3, 50, 0.8), 2000), 0.7)
+            for k in (1, 3):
+                bus.add(t0 + k * beat + 0.02, lp(snare(rng, 0.16, 330, 0.3), 3500), 0.55)
+            for k in range(4):
+                bus.add(t0 + k * beat, hat(rng) * 0.7, 0.5, pan=0.35)
+                bus.add(t0 + k * beat + sw, hat(rng) * 0.5, 0.4, pan=0.35)
+        if L >= 3:   # the clock
+            for s in range(8):
+                n = int(0.03 * SR); t = np.arange(n) / SR
+                tick = np.sin(2 * np.pi * (2400 if s % 2 == 0 else 1900) * t) * np.exp(-t * 160)
+                bus.add(t0 + s * beat / 2, tick * 0.12, pan=0.5)
+        b += 1
+    for a in accents:
+        bus.add(a, lp(epiano([hz("F4"), hz("A4"), hz("C5"), hz("E5")], 2.0), 3000), 1.0)
+
+
+def _briefing(bus, total, bpm, lvl, accents):
+    """The race opening (in app) briefing, 2026-10-05. Calm and clear under a long talk:
+    a soft piano arpeggio, a warm pad, light shaker; level 2 adds a gentle low drum, level 3
+    a fuller kit for the last lines. Nothing sharp in the voice band."""
+    beat = 60 / bpm; rng = bus.rng; bar = beat * 4
+    prog = [["C3", "G3", "E4"], ["A2", "E3", "C4"], ["F2", "C3", "A3"], ["G2", "D3", "B3"]]
+    b = 0
+    while b * bar < total:
+        t0 = b * bar; L = lvl(t0)
+        ch = [hz(n) for n in prog[b % 4]]
+        bus.add(t0, _pad(ch, bar, 1200, 0.7, 0.7), 0.08)
+        for s in range(8):   # piano like pluck arpeggio, low passed out of the voice band
+            f = ch[s % 3] * (2 if s < 6 else 4)
+            bus.add(t0 + s * beat / 2, lp(pluck(f, beat * 1.5, 0.997, rng), 1800), 0.45, pan=-0.25 + 0.07 * s)
+        if L >= 1:
+            for s in range(8):
+                n = int(0.06 * SR); t = np.arange(n) / SR
+                sh = hp(rng.normal(0, 1, n), 6000) * np.exp(-t * 60) * (0.05 if s % 2 else 0.03)
+                bus.add(t0 + s * beat / 2, sh, pan=0.4)
+        if L >= 2:
+            bus.add(t0, kick(rng, 0.5, 48, 0.6), 0.55)
+            bus.add(t0 + 2.5 * beat, kick(rng, 0.4, 48, 0.5), 0.4)
+        if L >= 3:
+            for k in (1, 3):
+                bus.add(t0 + k * beat, lp(snare(rng, 0.2, 200, 0.4), 4000), 0.4)
+        b += 1
+    for a in accents:
+        bus.add(a, lp(pluck(hz("C5"), 1.5, 0.997, rng), 2500), 0.8)
+
+
+def _kickoff(bus, total, bpm, lvl, accents):
+    """The race opening, second pass (2026-10-13: "I want it more energetic"). A sports briefing
+    bed: four on the floor, an octave bouncing bass, off beat hats; level 2 adds claps and
+    syncopated major stabs, level 3 a rising arpeggio and open hats. Stabs are low passed so
+    nothing sharp sits in the voice band."""
+    beat = 60 / bpm; rng = bus.rng; bar = beat * 4
+    prog = [["D2", "F#3", "A3", "D4"], ["B1", "F#3", "B3", "D4"], ["G1", "G3", "B3", "D4"], ["A1", "E3", "A3", "C#4"]]
+    b = 0
+    while b * bar < total:
+        t0 = b * bar; L = lvl(t0)
+        ch = [hz(n) for n in prog[b % 4]]
+        root = ch[0]
+        for k in range(4):
+            bus.add(t0 + k * beat, kick(rng, 0.28, 52, 1.0), 0.85 if L >= 1 else 0.5)
+            bus.add(t0 + k * beat + beat / 2, hat(rng), 0.7, pan=0.3)
+            if L >= 1:   # octave bounce: root on the beat, octave on the off beat
+                n = int(beat * 0.45 * SR)
+                bus.add(t0 + k * beat, lp(saw(root * 2, beat * 0.45, 700), 500) * env(n, 0.005, 6) * 0.30)
+                bus.add(t0 + k * beat + beat / 2, lp(saw(root * 4, beat * 0.45, 900), 700) * env(n, 0.005, 8) * 0.22)
+        bus.add(t0, _pad(ch[1:], bar, 1500, 0.1, 0.4), 0.05)
+        if L >= 2:
+            for k in (1, 3):
+                bus.add(t0 + k * beat, snare(rng, 0.16, 230, 1.0), 0.55)
+            for st in (0, 1.5, 2.5, 3.5):   # syncopated stabs
+                for f in ch[1:]:
+                    bus.add(t0 + st * beat, lp(pluck(f * 2, beat * 0.6, 0.992, rng), 2600), 0.26, pan=-0.2)
+        if L >= 3:
+            for s_ in range(8):
+                f = ch[1 + s_ % 3] * (4 if s_ < 4 else 8)
+                bus.add(t0 + s_ * beat / 2 + beat / 4, lp(pluck(f, beat * 0.5, 0.99, rng), 3200), 0.3, pan=0.35 - 0.08 * s_)
+            bus.add(t0 + 3.5 * beat, hat(rng, True), 0.7, pan=0.3)
+        if b % 4 == 3:   # a small fill into the next four bars
+            for q in (3.0, 3.25, 3.5, 3.75):
+                bus.add(t0 + q * beat, snare(rng, 0.1, 260, 1.0), 0.35)
+        b += 1
+    for a in accents:
+        bus.add(a, kick(rng, 0.6, 46, 1.2), 1.0)
+        bus.add(max(a - beat * 2, 0), riser(rng, beat * 2), 0.7)
+
+
+def _heartdrop(bus, total, bpm, lvl, accents):
+    """Reel 16, the button (2026-10-13): a heartbeat that turns into a half time drop. Level 0 is
+    only the double thump of a pulse (the hesitation before the press); level 1 adds a sliding
+    sub and eighth hats; level 2 a clap on three and a minor bell motif; level 3 hat rolls and
+    the motif an octave up. Bells are low passed so nothing sharp sits in the voice band."""
+    beat = 60 / bpm; rng = bus.rng; bar = beat * 4
+    prog = [["F1", "F3", "G#3", "C4"], ["C#1", "F3", "G#3", "C#4"], ["D#1", "G3", "A#3", "D#4"], ["C1", "E3", "G3", "C4"]]
+    motif = [0, 2, 1, 2, 0, 1, 2, 1]
+    b = 0
+    while b * bar < total:
+        t0 = b * bar; L = lvl(t0)
+        ch = [hz(n) for n in prog[b % 4]]
+        root = ch[0]
+        if L < 1:
+            for k in (0, 2):   # lub dub, twice a bar
+                bus.add(t0 + k * beat, kick(rng, 0.34, 44, 0.7), 0.75)
+                bus.add(t0 + k * beat + beat * 0.42, kick(rng, 0.26, 40, 0.5), 0.5)
+            b += 1
+            continue
+        bus.add(t0, kick(rng, 0.5, 48, 1.2), 1.0)
+        bus.add(t0 + 1.5 * beat, kick(rng, 0.3, 48, 0.9), 0.7)
+        bus.add(t0 + 2.5 * beat, kick(rng, 0.3, 48, 0.9), 0.75)
+        n = int(bar * 0.9 * SR)
+        bus.add(t0, sub(root * 2, bar * 0.9) * env(n, 0.01, 1.6), 0.55)
+        for k in range(8):
+            bus.add(t0 + k * beat / 2, hat(rng), 0.5 if k % 2 else 0.32, pan=0.25)
+        bus.add(t0, _pad(ch[1:], bar, 1300, 0.2, 0.5), 0.045)
+        if L >= 2:
+            bus.add(t0 + 2 * beat, snare(rng, 0.2, 210, 1.1), 0.7)
+            for s_, m in enumerate(motif):
+                bus.add(t0 + s_ * beat / 2, lp(pluck(ch[1 + m] * 2, beat * 0.7, 0.994, rng), 2400), 0.3, pan=-0.25 + 0.07 * s_)
+        if L >= 3:
+            for q in (3.0, 3.125, 3.25, 3.375, 3.5, 3.667, 3.833):
+                bus.add(t0 + q * beat, hat(rng), 0.42, pan=-0.3)
+            for s_, m in enumerate(motif):
+                if s_ % 2 == 0:
+                    bus.add(t0 + s_ * beat / 2 + beat / 4, lp(pluck(ch[1 + m] * 4, beat * 0.5, 0.99, rng), 3000), 0.2, pan=0.3)
+            bus.add(t0 + 3.5 * beat, hat(rng, True), 0.55, pan=0.3)
+        b += 1
+    for a in accents:
+        bus.add(a, kick(rng, 0.7, 42, 1.3), 1.0)
+        bus.add(a, sub(hz("F1") * 2, 0.9) * env(int(0.9 * SR), 0.005, 3.0), 0.7)
+
+
 STYLES = {"suspense": _suspense, "funk": _funk, "synthwave": _synthwave, "procession": _procession,
+          "pulse": _pulse, "lofi": _lofi, "briefing": _briefing, "kickoff": _kickoff, "heartdrop": _heartdrop,
           # older names kept so an existing timeline still renders
           "tension": _suspense, "drive": _funk, "hype": _synthwave}
 

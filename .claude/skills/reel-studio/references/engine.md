@@ -70,3 +70,30 @@ script, re-flows on measured take lengths in `measured.json`), `map/render_map.m
 trails hidden), `screens/record_app.mjs` (records the REAL play-web on the emulator: two
 Pixel 7 phones of one team, a Node driven GPS shim, CDP screencast) and
 `screens/compose.py` (phones into 16:9 with bezel, blurred mission text, crisp score card).
+
+## 9:16 helpers and worked examples (2026-10-05)
+`lib/portrait.py`: `GRADE` (the colour filter he loved), `phone_shot()` (a 412x838 app recording in a
+big centred phone), `placeholder()` (a grey take stand in until his clip arrives), `png()` (HTML → PNG,
+cached by content hash), `est()` (seconds for a Hebrew line). Music styles added: `pulse` (dark
+heartbeat → bright four on the floor), `lofi` (dialogue bed, clock ticks at level 3), `briefing`
+(calm piano for long instruction videos). Worked examples: `examples/reel14-monologue/`,
+`examples/reel15-dialogue/`. `qa.py` gained: caption size, logo, dates, music gain, a/v drift,
+visible jump cuts, flat colour.
+
+## Added 2026-10-13
+Music style `kickoff` (116 bpm, four on the floor, octave bass, syncopated stabs: the energetic bed).
+`qa.py`: frozen tails, eyes at the cut (reads the work folder's `tails.json`), white background (when
+the timeline has `"white_background": true`; the colour check then ignores the white pixels).
+`build.py`: every segment leaves in limited range bt709 and every encode is tagged.
+A talking shot may be muted (`audio_gain: 0`) with its voice laid as `sfx` `voice/<id>.wav`: that is
+how the picture ends before the sound does.
+
+## White background and the timbre keeping voice chain (2026-10-13)
+`lib/whitebg.py` → `whiten_rvm(src, dst, a=, b=, proof=)`: a person cut out on pure white (Robust
+Video Matting, ONNX models in `toolkits/video-editing/models/`). Worked example:
+`examples/race-opening/` (a copy of `RushPoint-reels-work/race-opening/`) → `par_ingest.py`,
+`phrases.py`, `gaps.py` (three pass transcription), `assemble.py` (explicit `CUTS`, envelope cut
+points, `--check` round trip, the voice chain in `RP_VOICE_CHAIN`), `tails.py` (where his eyes
+leave), `make_timeline.py` (`picture_end()`, `held()`, `outro()`, white theme: `box` captions,
+lower third titles, white phone ground), `bench13.py` / `bench13b.py` (voice chains scored by
+DNSMOS and timbre drift; run with the `clearvoice` venv from `_audio-lab/`).

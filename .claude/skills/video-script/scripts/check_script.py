@@ -105,6 +105,18 @@ def check(text):
         if len(re.findall(r"\bש[֐-׿]", s)) >= 3 and len(s.split()) > 14:
             f.append(("WARN", ln, "three or more ש clauses in one sentence",
                       "break it into two sentences"))
+        # Ahiya 2026-10-05: "יש לך נטייה לעשות את זה וזה לא נשמע טוב" (ובניתי, ועכשיו, ותחשוב)
+        said = re.sub(r"^[^:]{1,12}:\s*", "", s)          # drop a dialogue label like "אחיה:"
+        for sent in re.split(r"(?<=[.?!])\s+", said):
+            w0 = sent.strip().split(" ")[0] if sent.strip() else ""
+            if len(w0) > 2 and w0.startswith("ו") and w0.strip(",.") not in ("וואי", "ואללה", "וזהו"):
+                f.append(("WARN", ln, f"sentence opens with ו: '{w0}'",
+                          "drop the ו and start on the word itself (founder rule 42)"))
+        if re.search(r"(^|\s)כבר(\s|[,.]|$)", said):
+            f.append(("WARN", ln, "filler 'כבר'", "delete it unless it carries meaning (founder rule 42)"))
+        if re.search(r"\d{1,2}\s*ב?(ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)", said):
+            f.append(("WARN", ln, "a date in a reel line",
+                      "founder rule 36: no dates in reels (a captive in app or classroom video may keep one)"))
 
     body = " ".join(s for _, s in lines)
 

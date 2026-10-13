@@ -74,7 +74,7 @@ frame. What loses is their own branded productions, floor of the sample at **148
 > He wants `אני אחיה` said out loud and one line naming **דרימז**.
 
 Their own caption formula, observed: hook line → first person plural body → a question to the
-audience → tag CTA → follow line → single hashtag `#הנוערשלישראל`. Match it.
+audience → tag CTA → follow line. (As of 2026-10-05 he is no longer partnered with @israeli_teens: never use #הנוערשלישראל.)
 
 **Madrichim and movement staff.** The highest intent audience he has and the least worked. He
 is one of them, which is an unfair advantage. They share into staff groups, which is

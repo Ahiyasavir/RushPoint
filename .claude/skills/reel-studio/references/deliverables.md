@@ -27,3 +27,15 @@ true (a mocked quiz is not "a game in the app").
 Nothing leaves the machine without his explicit OK. When he asks, captions go to him through
 the "אודי" Claude session (`SendMessage` to `bridge:session_015YRf8HZseCTdGPVKDq2jtA`, the
 address may change: `ListAgents`). Files go to him with `SendUserFile` (render).
+
+## A film that plays INSIDE the app (reel 16, the race opening, 2026-10-13)
+- No post caption, no loop, no hook. The README's `## כיתוב לפוסט` says so.
+- Deliver three files: the master (`-v<N>.mp4`, `build.py --final`), the chat preview (`-small`), and
+  the phone file: 720x1280, crf 25, maxrate 1400k, `-movflags +faststart`, plus a poster jpg of a
+  frame with his face.
+- It goes to the game's own media folder on the VPS and into the game's instructions. Files there are
+  served immutable for a year: a new version gets a new file name.
+- **Look for the path that needs nothing from him before proposing one that does** (he had no time
+  for a YouTube upload). State of that integration, what is owed and the rollback: the
+  `race-opening-video-live-2026-10-13` memory.
+- Never join the real run to test. Verify on the emulator with the identical stored value.
