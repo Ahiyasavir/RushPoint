@@ -88,6 +88,10 @@ look at the shelf's `sheet.jpg`. Rules of the shelf:
 - Nothing he says to the camera goes in. A clip where he happens to talk is marked "use without sound".
 - Screens that show mission text say so (rule 38: instruction videos blur it).
 - Tell him in one line what was added ("הוספתי לספרייה 4 קטעים מהצילום: ...").
+- **The GitHub repo is PUBLIC.** Only the catalogue text and the build script are committed. The clips,
+  the contact sheets and any photo of a person are gitignored (`docs/marketing/.gitignore`) and stay
+  on this computer. Before committing anything under `docs/marketing`, look at `git diff --cached
+  --stat` for a `.jpg`/`.png` that shows a real person other than him in a published video.
 
 ## Step 4 · Voice
 

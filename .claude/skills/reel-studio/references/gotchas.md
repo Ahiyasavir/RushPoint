@@ -92,3 +92,7 @@ fix away.
   range white as 241. It now samples rgb24 at y 180..230, above the safe zone.
 - `qa.py` seeks 3 frames per talking shot; on a 150 MB master that is ~2 minutes. Run QA on the
   preview build, and once more on the master.
+- **2026-10-13: I pushed a contact sheet with minors' faces to the PUBLIC repo** (the library's
+  `people/sheet.jpg` and a booth photo). Removed within minutes by amending and force pushing, and
+  `footage/library/**/*.jpg` is now ignored. Check `gh repo view --json visibility` before the first
+  push of any image of a person, and never commit one.
