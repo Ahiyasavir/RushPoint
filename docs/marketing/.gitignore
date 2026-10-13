@@ -2,3 +2,9 @@
 # Kept out of git to avoid multi-MB binary blobs in history. Track them via a
 # release/asset store if you need to share without rendering.
 *.mp4
+# the footage library: build stamps and logs are local
+footage/library/**/*.src
+footage/library/build.log
+# faces of real people, many of them minors: the sheets and photos stay on this computer (the repo is PUBLIC)
+footage/library/**/*.jpg
+*.webm

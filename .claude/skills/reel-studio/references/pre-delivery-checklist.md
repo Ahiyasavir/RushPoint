@@ -47,6 +47,8 @@ Extract frames at: 0.2 s, every cut ±0.1 s, every insert, the last second. Then
 - [ ] A minor on camera other than him → a parent's written consent noted in the README "פתוח".
 - [ ] No boy/girl physical contact in generated images unless he approved it.
 - [ ] Stock and images: license recorded next to the files.
+- [ ] **The library was checked before stock or a reshoot was used**, and the new footage of this
+      video went through a library pass (non talking, reusable moments added with start and end).
 
 ## 5. The message that goes with it
 - [ ] Hebrew, short: what changed per note (numbered like his notes), what is still open.

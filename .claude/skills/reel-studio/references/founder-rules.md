@@ -136,9 +136,20 @@ contradicts one, follow the rule and tell him in one line.
 58. **Show that the app is good, never that it might break.** No "if it falls", no bugs, no "what I could not test".
     Humanity comes from who it was built for (his grandmother), not from fear.
 59. **Assume the viewer never heard of RushPoint**: one plain sentence of what it is, then how it works, shown on screen.
-60. **Clean the room**: sockets, cupboards, cables and clutter behind him are removed (white cut out, `lib/whitebg`).
+60. **Clean the room, keep it NATURAL**: sockets, cupboards, cables and clutter behind him are removed, but the wall stays
+    his real wall with its own light (`lib/whitebg.clean_room_rvm`). A white cut out and a designed colour background were
+    both rejected the same night ("הרקע מאחורי לא נראה טוב, אני רוצה שזה יראה טבעי"). White is only for when he asks for white.
 61. **Something changes in the frame at least every 3 seconds** (a framing jump, an insert, a graphic), and he wants
     visible jumps between framings, not one long locked shot.
 62. **The hook is designed frame by frame** and has to look real: a screen insert must track, keep his fingers in
     front, and be impossible to tell from a lit phone.
 63. **Two rejected versions of an idea = stop and ask what bothers him**, then follow HIS structure; do not guess a third.
+64. **A light, invisible skin retouch on every take of him** ("יותר חתיך, אבל אני לגמרי, שלא ישימו לב"):
+    `whitebg.retouch_skin` (middle frequency band only, skin only). Never a beauty filter look.
+65. **Music present and pleasant**: around -8.5, warm chords, soft hats; a hard trap bed at -11 was "not prominent, not pleasant".
+66. **He restarts a phrase when the first try was bad**: listen for a repeated opening ("אבל כל אחד פה ... אבל כל אחד פה")
+    inside one cut and keep only the second.
+60. **The footage library is fed after every shoot and read before every script** (2026-10-13):
+    `docs/marketing/footage/library/`. Every clip there is a short cut of the main thing (not a raw
+    file) with an organised description: what is seen, what it is good for, source and seconds, and
+    a consent note for anyone who is not him. Nothing where he talks to the camera.

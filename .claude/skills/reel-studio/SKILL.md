@@ -19,6 +19,9 @@ happened because something already written was not read.
 4. `references/kill-criteria.md`: the six question test.
 5. `references/gotchas.md` + `~/.claude/toolkits/video-editing/README.md` (the long list).
 6. For words (script, hook, caption): the `video-script` skill, `.claude/skills/video-script/`.
+7. **The footage library**: `docs/marketing/footage/library/README.md` (94 trimmed clips on 2026-10-13:
+   him doing things, people at the booth and in games, app screens, maps, stock). Know what is on
+   the shelves before writing a shot list, so you ask him to film only what is missing.
 
 ## Step 1 · Concept gate (before ANY editing)
 
@@ -35,6 +38,11 @@ Hooks proven for him: "אל תדלגו על זה" and a stake with a live timer.
 person a beat every two or three lines. When he asks for a shoot plan, deliver a PDF: sections by
 LOCATION, every shot a separate take with its frame (A half body, B close, C angle, D phone to lens,
 V voice over a screen), and a "what I need from you" list.
+
+**Before a shot list asks him to film anything, and before any stock search, open the library.**
+A line that needs a picture (him typing, climbing stairs, the booth, a player doing a mission, a
+phone showing the app) probably has one already; name the library file in the script's ROLL. He has
+little time to film (rule 51), and a real clip of his beats stock.
 
 Use the `video-script` skill (structure by name, hook last, beats with timecodes, ROLL,
 CAPTION, RISK). Write the shot list as what he can film on a phone in one afternoon. Ask him
@@ -64,6 +72,22 @@ never rename the originals) into `RushPoint-reels-work/<reel>/clips/` under the 
 names. For a precise moment (a landing, a door opening) extract single frames with
 `ffmpeg -ss t` and look again. Talking head with separate recorder audio: the toolkit's
 `reel-pipeline/sync.py` and `headpose.py` (pick takes by head tilt, he asked).
+
+**Every ingest ends with a library pass (he asked, 2026-10-13: "כל פעם כשאני מצלם, תראה אם חלק מהחומר
+רלוונטי להוסיף").** While the contact sheets are open, mark every stretch that is NOT him talking to
+the camera and could serve another video: him doing something (walking in, stairs, typing, holding
+the phone, a sport, a place), other people (a game, a booth, friends), a screen recording, a view.
+Also the usable edges of a talking take: the walk in before the first word, a look at the phone.
+For each one add a row to `CLIPS` in `docs/marketing/footage/library/build-library.py`:
+shelf, an English kebab name that says what is seen, the source, **start and end of the main moment
+only (3 to 12 seconds, never the whole raw file)**, what you see, what line it would serve, and a
+note. Then run the script (it cuts only what changed and rebuilds the catalogue and the sheets) and
+look at the shelf's `sheet.jpg`. Rules of the shelf:
+- A clip with another person says in its note whether there is consent; a minor is never published
+  without it, and a face blurred "already" is checked frame by frame, not assumed.
+- Nothing he says to the camera goes in. A clip where he happens to talk is marked "use without sound".
+- Screens that show mission text say so (rule 38: instruction videos blur it).
+- Tell him in one line what was added ("הוספתי לספרייה 4 קטעים מהצילום: ...").
 
 ## Step 4 · Voice
 
@@ -150,7 +174,7 @@ Before saying "done": add any new gotcha to `references/gotchas.md`, any new rul
 ## What the engine can do (so you reach for it instead of rebuilding)
 
 Hebrew word by word captions (RTL correct, boxed or outlined, amber active word) ·
-a person cut out on a pure white background (`lib/whitebg.py`) · shots cut on the eyes with an L cut
+a footage library of trimmed, described clips (`docs/marketing/footage/library/`, `build-library.py`) · a person cut out on a pure white background (`lib/whitebg.py`) · shots cut on the eyes with an L cut
 (`examples/race-opening/tails.py`) · a RushPoint end animation (`outro()` there) ·
 phone screens in his style (WhatsApp dark, Calendar, Docs, lock screen) with blurred names ·
 quiz screens with a live countdown, progress dots, answer reveal · title cards with a follow
