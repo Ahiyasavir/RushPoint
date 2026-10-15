@@ -88,6 +88,10 @@ const HE = {
     joinFailed: 'ההצטרפות לא עברה. נסו שוב, ואם זה חוזר פנו למארגן.',
     gameFull: 'המירוץ מלא. עדכנו את המארגן, הוא יכול לפתוח עוד מקומות.',
     connectionError: 'בעיית חיבור. בדקו את הקליטה ונסו שוב.',
+    // change: self-healing-entry. The phone lost its sign-in and automatic recovery failed. Not a
+    // reception problem: the one action that works is a reload.
+    signInLost: 'הטלפון התנתק מהמשחק. טענו את הדף מחדש ונסו שוב.',
+    reloadCta: 'טעינה מחדש',
     // In-app legal links (Google Play requirement — the policy governing the
     // photo feed must be reachable by the people posting to it).
     legalTerms: 'תנאי שימוש',
@@ -878,6 +882,12 @@ const HE = {
     sosFailed: 'ההתראה לא נשלחה. נסו שוב, או צרו קשר ישיר עם המארגן.\nבמצב חירום התקשרו 101.',
     youreIn: ({ name }: { name: string }) => `נכנסתם, ${name}!`,
     waitingStart: 'ממתינים שהמארגן יתחיל את המירוץ…',
+    // change: self-healing-entry. The phone lost its sign-in and it could not be restored (the 14.10
+    // iPhones). Not "reconnecting" forever: say it, and offer the rejoin of the SAME team.
+    signedOut: 'הטלפון הזה התנתק מהקבוצה.',
+    signedOutRejoinHint: 'אפשר לחזור לאותה קבוצה בלחיצה אחת. הניקוד וההתקדמות נשמרו.',
+    signedOutNoCode: 'כדי לחזור, סרקו את הברקוד שמופיע אצל טלפון אחר בקבוצה.',
+    rejoinTeam: 'חזרה לקבוצה',
     // Held-team notice (change: held-team-visibility). A team the server held back
     // is NOT waiting for the start, so it must not be told that it is. The copy
     // says what is happening, says it is not their fault, and sends them to the
@@ -955,6 +965,8 @@ const HE = {
     attachCta: 'הצטרפות עם הטלפון הזה',
     attaching: 'מצטרף…',
     attachFailed: 'ההצטרפות נכשלה. בדקו את קוד המכשירים.',
+    // D05 (14.10): the code was right, the team was full. Say that.
+    teamFull: 'בקבוצה הזו כבר יש את מספר הטלפונים המרבי. פנו למארגן.',
     panelTitle: 'הטלפונים של הקבוצה',
     inviteHint: 'חברי הקבוצה מצטרפים עם הקוד:',
     // כמה מאיתנו עוד לא על טלפון (change: every-member-plays). מוצג רק כשידוע:
@@ -1224,6 +1236,8 @@ const EN: typeof HE = {
     joinFailed: 'The join did not go through. Try again, and if it keeps happening ask your host.',
     gameFull: 'This race is full. Tell your host, they can open more spots.',
     connectionError: 'Connection problem. Check your connection and try again.',
+    signInLost: 'This phone was signed out of the game. Reload the page and try again.',
+    reloadCta: 'Reload',
     // In-app legal links (Google Play requirement — the policy governing the
     // photo feed must be reachable by the people posting to it).
     legalTerms: 'Terms of Use',
@@ -1976,6 +1990,10 @@ const EN: typeof HE = {
     sosFailed: "The alert wasn't sent. Try again, or contact the host directly.\nIn an emergency, call 101.",
     youreIn: ({ name }: { name: string }) => `You're in, ${name}!`,
     waitingStart: 'Waiting for the host to start the race…',
+    signedOut: 'This phone was signed out of its team.',
+    signedOutRejoinHint: 'You can get back into the same team with one tap. Your score and progress are saved.',
+    signedOutNoCode: 'To get back in, scan the code shown on another phone in your team.',
+    rejoinTeam: 'Back to my team',
     // Held-team notice (change: held-team-visibility). See the Hebrew block above.
     // team-lifecycle-controls: the organizers took this team out of the game.
     removedTitle: 'The organizers took your team out of the game',
@@ -2046,6 +2064,7 @@ const EN: typeof HE = {
     attachCta: 'Join with this phone',
     attaching: 'Joining…',
     attachFailed: 'Could not join. Check the device code.',
+    teamFull: 'This team already has the most phones it can take. Ask the organizer.',
     panelTitle: "Your team's phones",
     inviteHint: 'Teammates join with the code:',
     // How many of us are not on a phone yet (change: every-member-plays). Shown only

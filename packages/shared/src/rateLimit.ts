@@ -213,6 +213,8 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // call is one small increment, and the VALUE is clamped separately
   // (clampEngagementDelta), so the budget bounds cost while the clamp bounds the number.
   recordEngagement: { max: 20, windowMs: MIN },
+  // change: self-healing-entry. A phone reports a lost sign-in at most a few times; 10/min is generous.
+  reportClientEvent: { max: 10, windowMs: MIN },
   // Admin roster read: expensive (2 Firestore reads per creator) and used by one person
   // clicking refresh, so it never needs a generous budget.
   listPlatformUsers: { max: 20, windowMs: MIN },

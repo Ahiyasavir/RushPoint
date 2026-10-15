@@ -68,21 +68,24 @@ export type JoinErrorKey =
   | 'finished'      // the run is over
   | 'staffSession'  // this browser is signed in as staff (issue #16): offer to switch to a player
   | 'full'          // the run hit its participant / device ceiling
-  | 'connection'    // transport, cold start, or anonymous sign-in not settled
+  | 'connection'    // transport or cold start: the network, not the phone's identity
+  | 'signIn'        // the phone lost its sign-in and automatic recovery failed: reload, not "check reception"
   | 'unknown';      // anything else — never a raw server sentence
 
 /** Codes that mean "transient / connectivity", not "your code is wrong". */
 const CONNECTION_CODES = new Set([
-  'unavailable', 'internal', 'deadline-exceeded', 'unauthenticated', 'aborted', 'cancelled',
+  'unavailable', 'internal', 'deadline-exceeded', 'aborted', 'cancelled',
 ]);
 
 /**
  * Map a callable rejection to a message key. Total: an unrecognized code, an
  * Error with no code, a bare string, null and undefined all yield a key.
  *
- * `unauthenticated` is connection on purpose: on the join screen it means
- * anonymous sign-in has not landed yet, which the participant fixes by waiting
- * or retrying, not by re-reading the code.
+ * `unauthenticated` is NOT connection (change: self-healing-entry). It used to be, on the theory that
+ * anonymous sign-in "had not landed yet". At המירוץ לציון (14.10) it meant the iPhone had LOST its
+ * user: every retry on that page went out with no token, and "check your reception" sent children to
+ * tap the same dead page dozens of times. The call wrapper now recovers the sign-in first; reaching
+ * this key means recovery failed, and the only action that works is a reload.
  */
 export function joinErrorKey(e: unknown): JoinErrorKey {
   const raw = e && typeof e === 'object' && 'code' in e
@@ -99,6 +102,7 @@ export function joinErrorKey(e: unknown): JoinErrorKey {
   if (isStaffIdentityRefusal(e)) return 'staffSession';
   if (code === 'failed-precondition') return 'finished';
   if (code === 'resource-exhausted') return 'full';
+  if (code === 'unauthenticated') return 'signIn';
   if (CONNECTION_CODES.has(code)) return 'connection';
   return 'unknown';
 }

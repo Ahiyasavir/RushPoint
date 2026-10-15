@@ -108,6 +108,15 @@ export function logBestEffortOk(op: string, ctx: Record<string, unknown>): void 
   active.info('bestEffort.ok', { op, ...redact(ctx) });
 }
 
+/**
+ * A validated report from a phone (change: self-healing-entry, obs/clientEvents.ts). One record per
+ * report, `client.event`, so `docker logs | grep client.event` finds every lost sign-in with the
+ * browser it happened on. The caller has already reduced it to a closed shape.
+ */
+export function logClientEvent(ctx: Record<string, unknown>): void {
+  active.info('client.event', redact(ctx));
+}
+
 // Cost containment (change: cost-containment-max-instances): no callable in this
 // codebase has ever set maxInstances, so a runaway loop or an abuse spike can
 // scale to Google's project-wide instance ceiling and generate a real bill. Every
