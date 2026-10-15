@@ -14277,9 +14277,6 @@ async function main() {
     await expectError('an unknown sector is refused',
       applicant.call('submitLiveApplication', { ...valid, sectors: ['pirates'] }),
       { codeIn: ['functions/invalid-argument'] });
-    await expectError('a team naming no sector is refused',
-      applicant.call('submitLiveApplication', { ...valid, sectors: [] }),
-      { codeIn: ['functions/invalid-argument'] });
     await expectError('a phone number that cannot be dialled is refused',
       applicant.call('submitLiveApplication', { ...valid, phone: '02-1234567' }),
       { codeIn: ['functions/invalid-argument'] });
@@ -14289,10 +14286,12 @@ async function main() {
     // The photo is OPTIONAL (change: rushpoint-live-optional-photo). A team that
     // cannot get everyone into one picture tonight must still be able to apply
     // tonight, so all three spellings of "absent" have to be ACCEPTED.
+    // The short form (rushpoint-live-short-form, 15.10) asks for three answers only. That one
+    // application also proves the photo is optional, inside the same store budget.
     const noPhoto = await applicant.call('submitLiveApplication', {
-      ...valid, teamName: 'בלי תמונה', photo: null,
+      teamSize: 6, ageRange: '16 עד 18', phone: '052-765-4321', language: 'he',
     });
-    check('a team can apply without a photo', noPhoto?.ok === true, JSON.stringify(noPhoto));
+    check('a team can apply with only its size, ages and phone (and no photo)', noPhoto?.ok === true, JSON.stringify(noPhoto));
     // The OTHER two spellings of absent — an empty string and an omitted key — are
     // asserted exhaustively in the pure lane (scripts/test-live-application.ts),
     // not here. This scenario shares ONE store budget of three with everything
@@ -14362,7 +14361,11 @@ async function main() {
       !/[A-Za-z0-9+/]{200,}/.test(listedJson),
       `${listedJson.length} chars for ${(listed?.applications ?? []).length} application(s)`);
 
-    const withoutPhoto = (listed?.applications ?? []).find((a) => a.teamName === 'בלי תמונה');
+    const withoutPhoto = (listed?.applications ?? []).find((a) => a.phone === '052-765-4321');
+    check('a short form application is stored with its three answers and nothing invented',
+      withoutPhoto?.teamSize === 6 && withoutPhoto?.ageRange === '16 עד 18' && withoutPhoto?.teamName === ''
+        && withoutPhoto?.sectors?.length === 0 && withoutPhoto?.cameraComfort === 0,
+      JSON.stringify(withoutPhoto ?? null));
     check('an application with no photo says so', withoutPhoto?.hasPhoto === false,
       JSON.stringify({ hasPhoto: withoutPhoto?.hasPhoto, bytes: withoutPhoto?.photoBytes }));
     check('an application WITH a photo says so', mine?.hasPhoto === true, String(mine?.hasPhoto));

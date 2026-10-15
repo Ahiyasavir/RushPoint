@@ -128,8 +128,13 @@ for (const sector of TEAM_SECTORS) {
   check(`C1 "${sector}" is a known sector`, fields.sectors[0] === sector);
 }
 refuses('C2 an unknown sector is refused', { ...base(), sectors: ['pirates'] }, 'sectors');
-refuses('C3 no sector at all is refused', { ...base(), sectors: [] }, 'sectors');
-refuses('C4 a list of blanks is refused', { ...base(), sectors: ['', null] }, 'sectors');
+// The short form (rushpoint-live-short-form) does not ask for sectors: none at all is an empty list.
+{
+  const none = validateLiveApplication({ ...base(), sectors: [] });
+  check('C3 no sector at all is accepted as an empty list', none.fields.sectors.length === 0);
+  const blanks = validateLiveApplication({ ...base(), sectors: ['', null] });
+  check('C4 a list of blanks is an empty list', blanks.fields.sectors.length === 0);
+}
 
 // ── D. The camera scale ──────────────────────────────────────────────────────
 
@@ -215,17 +220,41 @@ refuses('F8 base64 of a broken length is refused', { ...base(), photo: `data:ima
   );
 }
 
-// ── G. Every required text field is required, and bounded ────────────────────
+// ── G. Required text is required; optional text may be absent; both are bounded ─
+//
+// Since the short form (rushpoint-live-short-form, 15.10) only the ages and the phone are required
+// text. The other answers may be absent, and are still refused when sent with the wrong type or
+// over their bound: optional means "may be absent", never "may be anything".
 
-const TEXT_FIELDS = ['teamName', 'location', 'howTheyMet', 'ageRange', 'motivation'] as const;
-for (const field of TEXT_FIELDS) {
+const REQUIRED_TEXT = ['ageRange'] as const;
+for (const field of REQUIRED_TEXT) {
   refuses(`G1 ${field} is required`, { ...base(), [field]: null }, field);
   refuses(`G2 ${field} may not be whitespace`, { ...base(), [field]: '   ' }, field);
+}
+const OPTIONAL_TEXT = ['teamName', 'location', 'howTheyMet', 'motivation'] as const;
+for (const field of OPTIONAL_TEXT) {
+  const absent = validateLiveApplication({ ...base(), [field]: null });
+  check(`G1b ${field} may be absent (stored as empty)`, absent.fields[field] === '');
+  const blank = validateLiveApplication({ ...base(), [field]: '   ' });
+  check(`G2b ${field} whitespace is empty`, blank.fields[field] === '');
+}
+for (const field of [...REQUIRED_TEXT, ...OPTIONAL_TEXT]) {
   refuses(`G3 ${field} may not be a number`, { ...base(), [field]: 7 }, field);
   const max = LIVE_APPLICATION_LIMITS[field];
   const { fields } = validateLiveApplication({ ...base(), [field]: 'א'.repeat(max) });
   check(`G4 ${field} accepts exactly ${max} characters`, fields[field].length === max);
   refuses(`G5 ${field} refuses ${max + 1} characters`, { ...base(), [field]: 'א'.repeat(max + 1) }, field);
+}
+
+// ── G6. The short form: three answers are a whole application ─────────────────
+{
+  const { fields, photo } = validateLiveApplication({ teamSize: 5, ageRange: '16 עד 18', phone: '0541234567' });
+  check('G6 size, ages and phone alone are accepted', fields.teamSize === 5 && fields.ageRange === '16 עד 18');
+  check('G6b the rest are empty, the camera is 0, no photo',
+    fields.teamName === '' && fields.sectors.length === 0 && fields.cameraComfort === 0 && photo === null);
+  refuses('G6c the phone is still required', { teamSize: 5, ageRange: '16' }, 'phone');
+  refuses('G6d the team size is still required', { ageRange: '16', phone: '0541234567' }, 'teamSize');
+  refuses('G6e an off scale camera answer that IS sent is still refused', { teamSize: 5, ageRange: '16', phone: '0541234567', cameraComfort: 9 }, 'cameraComfort');
 }
 
 // ── H. Cheap checks run before the expensive one ─────────────────────────────
@@ -235,14 +264,14 @@ for (const field of TEXT_FIELDS) {
 // parsing half a megabyte to say so is work nobody needed.
 
 refuses(
-  'H1 a blank text field is reported before an oversized photo',
-  { ...base(), teamName: '', photo: photoOf(PHOTO_MAX_BASE64_CHARS + 4) },
-  'teamName',
+  'H1 a blank required field is reported before an oversized photo',
+  { ...base(), ageRange: '', photo: photoOf(PHOTO_MAX_BASE64_CHARS + 4) },
+  'ageRange',
 );
 
 // ── I. An empty payload names a field rather than crashing ───────────────────
 
-refuses('I1 an empty payload is refused, naming a field', {}, 'teamName');
+refuses('I1 an empty payload is refused, naming a field', {}, 'teamSize');
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILED`} :: ${checks} checks`);
 process.exit(failures === 0 ? 0 : 1);
