@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { FIRESTORE_PATHS, resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type PublicGame, type RegistrationField } from '@rushpoint/shared';
-import { db, switchToPlayer } from '../services/firebase';
+import { db, switchToPlayer, uid } from '../services/firebase';
 import { DEMO_GAME_ID } from '../lib/demoEntry';
 import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
 import { saveSession, clearStaffSession, loadSound, saveSound, type Session } from '../store';
@@ -145,6 +145,9 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       case 'staffSession': return t.join.staffSession;
       case 'full': return t.join.gameFull;
       case 'connection': return t.join.connectionError;
+      // change: self-healing-entry. The phone lost its sign-in and recovery failed: say so, and offer
+      // the one action that works (reload), never "check your reception".
+      case 'signIn': return t.join.signInLost;
       default: return t.join.joinFailed;
     }
   }
@@ -230,6 +233,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       const canonicalCode = normalizeJoinCodeInput(code);
       const res = await joinRun({ code: canonicalCode, displayName, registrationData, memberNames });
       const session: Session = {
+        deviceUid: uid() ?? undefined,
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         code: canonicalCode, displayName,
         teamId: res.teamId,
@@ -255,6 +259,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
         memberName: memberName.trim() || undefined,
       });
       const session: Session = {
+        deviceUid: uid() ?? undefined,
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         code: canonicalCode, displayName: memberName.trim(),
         teamId: res.teamId,
@@ -267,7 +272,13 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       // keeps the attach-specific copy, which already says what to check.
       const key = joinErrorKey(e);
       setStaffBlocked(key === 'staffSession' ? 'attach' : false);
-      setErr(key === 'connection' ? t.join.connectionError : key === 'staffSession' ? t.join.staffSession : t.devices.attachFailed);
+      // D05 (14.10): a FULL team read "check the device code" although the code was right. Name the
+      // real cause. A lost sign-in gets its own honest sentence too (change: self-healing-entry).
+      setErr(key === 'connection' ? t.join.connectionError
+        : key === 'staffSession' ? t.join.staffSession
+          : key === 'full' ? t.devices.teamFull
+            : key === 'signIn' ? t.join.signInLost
+              : t.devices.attachFailed);
     }
   }
 
@@ -481,6 +492,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
           {err && (
             <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center mb-4 font-medium animate-fade-up">{err}</p>
           )}
+          {err === t.join.signInLost && <ReloadAction label={t.join.reloadCta} />}
 
           {/* Whole groups were signing in phone-by-phone and then could not work
               out why they were separate teams (change: one-device-per-team-clarity).
@@ -650,6 +662,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
             </Card>
           </div>
           {err && <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+          {err === t.join.signInLost && <ReloadAction label={t.join.reloadCta} />}
           {staffSwitch}
           <Button
             disabled={busy || teamCode.trim().length < 6}
@@ -743,6 +756,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       </div>
 
       {err && <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+      {err === t.join.signInLost && <ReloadAction label={t.join.reloadCta} />}
           {staffSwitch}
 
       <Button
@@ -822,6 +836,18 @@ function FieldInput({ field, value, onChange, hasError }: { field: RegistrationF
         placeholder={field.label}
         className={hasError ? 'border-rp-alert' : undefined}
       />
+    </div>
+  );
+}
+
+// change: self-healing-entry. When the phone's sign-in is gone for good, a reload is the one action
+// that works (a fresh page restores or creates the identity). A real button, not an instruction.
+function ReloadAction({ label }: { label: string }) {
+  return (
+    <div className="mb-4 flex justify-center">
+      <Button variant="ghost" type="button" className="max-w-xs" onClick={() => window.location.reload()}>
+        <Icon name="refresh" className="w-4 h-4 me-2" /> {label}
+      </Button>
     </div>
   );
 }

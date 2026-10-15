@@ -7,12 +7,19 @@ import {
   connectFirestoreEmulator,
 } from 'firebase/firestore';
 import {
-  getAuth,
   connectAuthEmulator,
   signInAnonymously,
   signInWithCustomToken,
   onAuthStateChanged,
+  updateCurrentUser,
+  initializeAuth,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  type User,
+  type Auth,
 } from 'firebase/auth';
+import { authLossVerdict, afterFailedReinstate } from '../lib/authRecovery';
+import { loadSession } from '../store';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import {
   getStorage,
@@ -114,7 +121,24 @@ function initDb() {
   return dbHolder.__rpPlayDb;
 }
 export const db = initDb();
-export const auth      = getAuth(app);
+// Where the sign-in is stored (change: self-healing-entry). getAuth() kept it in IndexedDB, and an
+// empty IndexedDB read on iPhones signed players out (14.10). localStorage comes first now (a
+// synchronous read); IndexedDB stays in the list so a player signed in under the old storage is FOUND
+// and migrated by the SDK with the same uid (PersistenceUserManager.create checks every listed store).
+// A mitigation, not the guarantee: on mobile localStorage is polled too, and the recovery below
+// (reinstating the same user) is what actually keeps players in. Memoized like initDb(): a Vite HMR
+// re-execution must not call initializeAuth twice (it throws).
+const authHolder = globalThis as unknown as { __rpPlayAuth?: Auth };
+// No getAuth() fallback: importing getAuth pulls the popup/redirect resolver and every persistence into
+// the entry chunk (it broke the play-web first-load budget), and the globalThis memo already prevents
+// the only way initializeAuth can throw here (a second call under HMR).
+function initAuth(): Auth {
+  if (!authHolder.__rpPlayAuth) {
+    authHolder.__rpPlayAuth = initializeAuth(app, { persistence: [browserLocalPersistence, indexedDBLocalPersistence] });
+  }
+  return authHolder.__rpPlayAuth;
+}
+export const auth      = initAuth();
 // Self-hosted API server (change: self-host-functions-on-vps). When
 // VITE_API_ORIGIN is set, every httpsCallable() is routed to
 // `<VITE_API_ORIGIN>/<name>` (the Node server running the SAME functions code on
@@ -154,6 +178,139 @@ if (emulatorBuild && !emuFlag.__rpPlayEmu) {
 // otherwise a reload would clobber a restored staff (or anonymous) session.
 let authReady: Promise<void> | null = null;
 
+// ── Sign-in recovery (change: self-healing-entry) ────────────────────────────────────────────────
+// At המירוץ לציון (14.10.2026) iPhones lost their user seconds after sign-in: @firebase/auth's storage
+// poll read an empty store ONCE and signed the page out locally (no network, no error; reproduced on a
+// real iPhone 15.10). ensureAuth() used to cache its first success forever, so every later call went
+// out with no token and the player read "check your reception". Now:
+//  - we keep the last user object we saw. A local sign-out revokes nothing, so when the user becomes
+//    null without us asking, we put the SAME user back (updateCurrentUser also re-persists it, which
+//    repairs the store). Same uid, same team, no network.
+//  - every ensureAuth() re-checks that a user is really there before a call leaves.
+//  - if the same user cannot come back: before joining, sign in afresh (nothing to lose); after
+//    joining, never mint a new identity silently - report 'failed' so the screen can offer a rejoin.
+// The decisions are pure in lib/authRecovery.ts (scripts/test-auth-recovery.ts); the end-to-end proof
+// is scripts/browser-auth-loss.mjs.
+let retainedUser: User | null = null;
+let lastUid: string | null = null;
+let signOutRequested = false;
+let signedInAtMs = 0;
+let reinstating: Promise<boolean> | null = null;
+/** How long to wait for the user to come back (ours, or the SDK's own next poll) before giving up. */
+const RECOVERY_WAIT_MS = 1500;
+
+export type RecoveryState = 'ok' | 'pending' | 'failed';
+let recoveryState: RecoveryState = 'ok';
+const recoveryListeners = new Set<(s: RecoveryState) => void>();
+/** The play screen reads this to tell "reconnecting" from "this phone lost its sign-in". */
+export function getRecoveryState(): RecoveryState { return recoveryState; }
+export function onRecoveryState(cb: (s: RecoveryState) => void): () => void {
+  recoveryListeners.add(cb);
+  return () => { recoveryListeners.delete(cb); };
+}
+function setRecoveryState(s: RecoveryState) {
+  if (recoveryState === s) return;
+  recoveryState = s;
+  for (const cb of Array.from(recoveryListeners)) { try { cb(s); } catch { /* a listener must not break recovery */ } }
+}
+
+// What the server should hear about each loss (reportClientEvent). Queued, sent fire-and-forget once a
+// user is signed in again; a failure to report is ignored, because reporting must never break playing.
+type AuthLossOutcome = 'reinstated' | 'freshSignIn' | 'failed';
+const pendingReports: Array<{ kind: 'authLost'; outcome: AuthLossOutcome; phase: 'join' | 'play'; msSinceSignIn: number; userAgent: string }> = [];
+function queueAuthLossReport(outcome: AuthLossOutcome) {
+  pendingReports.push({
+    kind: 'authLost',
+    outcome,
+    phase: loadSession() ? 'play' : 'join',
+    msSinceSignIn: signedInAtMs ? Math.max(0, Date.now() - signedInAtMs) : -1,
+    userAgent: (typeof navigator !== 'undefined' ? navigator.userAgent : '').slice(0, 300),
+  });
+  void flushAuthLossReports();
+}
+async function flushAuthLossReports() {
+  if (!auth.currentUser || pendingReports.length === 0) return;
+  const batch = pendingReports.splice(0, pendingReports.length);
+  const report = httpsCallable(functions, 'reportClientEvent');
+  for (const ev of batch) { try { await report(ev); } catch { /* best effort */ } }
+}
+
+onAuthStateChanged(auth, (user) => {
+  const verdict = authLossVerdict({
+    prevUid: lastUid, nextUid: user?.uid ?? null, signOutRequested, hasRetained: retainedUser !== null,
+  });
+  if (user) {
+    retainedUser = user;
+    lastUid = user.uid;
+    signOutRequested = false;
+    if (!signedInAtMs) signedInAtMs = Date.now();
+    void flushAuthLossReports();
+    return;
+  }
+  if (verdict === 'reinstate') { void reinstateRetainedUser(); return; }
+  // A sign-out we asked for (or nothing to put back): forget the old user for good.
+  retainedUser = null;
+  lastUid = null;
+});
+
+/**
+ * The play screen found this page running under a different identity from the one that joined (the
+ * stored sign-in was wiped before the page loaded, so nothing was left in memory to reinstate). Report
+ * it once per page, so the server sees this case too.
+ */
+let identityLossReported = false;
+export function reportIdentityLost(): void {
+  if (identityLossReported) return;
+  identityLossReported = true;
+  queueAuthLossReport('failed');
+}
+
+/** Put the same user back. Idempotent and single-flight: concurrent callers share one attempt. */
+function reinstateRetainedUser(): Promise<boolean> {
+  if (auth.currentUser) return Promise.resolve(true);
+  const user = retainedUser;
+  if (!user || signOutRequested) return Promise.resolve(false);
+  if (!reinstating) {
+    reinstating = updateCurrentUser(auth, user)
+      .then(() => { queueAuthLossReport('reinstated'); return true; })
+      .catch(() => false)
+      .finally(() => { reinstating = null; });
+  }
+  return reinstating;
+}
+
+function waitForUser(ms: number): Promise<boolean> {
+  if (auth.currentUser) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { unsub(); resolve(!!auth.currentUser); }, ms);
+    const unsub = onAuthStateChanged(auth, (u) => { if (u) { clearTimeout(timer); unsub(); resolve(true); } });
+  });
+}
+
+/** The error a call gets when this phone is in a team but its identity could not be recovered. */
+function signedOutError(): Error & { code: string } {
+  return Object.assign(new Error('Signed out: the sign-in could not be recovered'), { code: 'functions/unauthenticated' });
+}
+
+/** The re-check every call runs once the first sign-in has completed. */
+async function confirmSignedIn(): Promise<void> {
+  if (auth.currentUser) { setRecoveryState('ok'); return; }
+  setRecoveryState('pending');
+  if ((await reinstateRetainedUser()) || (await waitForUser(RECOVERY_WAIT_MS))) {
+    setRecoveryState('ok');
+    return;
+  }
+  if (afterFailedReinstate({ hasSession: loadSession() !== null }) === 'freshSignIn') {
+    await signInAnonymously(auth);
+    queueAuthLossReport('freshSignIn');
+    setRecoveryState('ok');
+    return;
+  }
+  queueAuthLossReport('failed');
+  setRecoveryState('failed');
+  throw signedOutError();
+}
+
 /**
  * Issue #16: this browser holds a staff sign-in and the person wants to PLAY. Firebase keeps one user
  * per origin, so this signs the staff identity out (any staff console open in another tab of this
@@ -161,9 +318,25 @@ let authReady: Promise<void> | null = null;
  * anonymous player.
  */
 export async function switchToPlayer(): Promise<void> {
+  // A sign-out we ASKED for: recovery must not put the staff identity back.
+  signOutRequested = true;
   await auth.signOut();
   authReady = null;
   await ensureAuth();
+}
+
+/**
+ * change: self-healing-entry. The rejoin path, after this phone's identity is genuinely gone: drop
+ * whatever user is current (a sign-out WE asked for, so recovery does not undo it) and start a fresh
+ * anonymous one, which the caller then attaches to the same team with the saved device code.
+ */
+export async function startFreshIdentity(): Promise<void> {
+  signOutRequested = true;
+  retainedUser = null;
+  if (auth.currentUser) await auth.signOut();
+  authReady = null;
+  await ensureAuth();
+  setRecoveryState('ok');
 }
 
 export function ensureAuth(): Promise<void> {
@@ -183,7 +356,8 @@ export function ensureAuth(): Promise<void> {
       throw e;
     });
   }
-  return authReady;
+  // The first sign-in having happened says nothing about NOW: re-check before every call.
+  return authReady.then(confirmSignedIn);
 }
 
 // Staff sign in with a custom token minted by the staffSignIn callable.
@@ -710,25 +884,36 @@ export function callable<Req = void, Res = unknown>(
 ): (data?: Req) => Promise<Res> {
   const fn = httpsCallable<Req, Res>(functions, name);
   const maxAttempts = opts.retry === false ? 1 : CALLABLE_ATTEMPTS;
+  // Same timeout + jittered-backoff policy as before, now via the shared
+  // implementation the Storage uploads use (lib/uploadResiliency.ts) so there
+  // is exactly one retry loop in the app.
+  const send = (data?: Req) => runWithRetry(
+    async () => {
+      const res = await withTimeout(
+        fn(data as Req),
+        CALLABLE_TIMEOUT_MS,
+        'functions/deadline-exceeded',
+      );
+      return (res as { data: Res }).data;
+    },
+    {
+      attempts: maxAttempts,
+      isRetryable: (e) => RETRYABLE_CALLABLE_CODES.has(errorCode(e)),
+    },
+  );
   return async (data?: Req) => {
     await ensureAuth();
-    // Same timeout + jittered-backoff policy as before, now via the shared
-    // implementation the Storage uploads use (lib/uploadResiliency.ts) so there
-    // is exactly one retry loop in the app.
-    return runWithRetry(
-      async () => {
-        const res = await withTimeout(
-          fn(data as Req),
-          CALLABLE_TIMEOUT_MS,
-          'functions/deadline-exceeded',
-        );
-        return (res as { data: Res }).data;
-      },
-      {
-        attempts: maxAttempts,
-        isRetryable: (e) => RETRYABLE_CALLABLE_CODES.has(errorCode(e)),
-      },
-    );
+    try {
+      return await send(data);
+    } catch (e) {
+      // change: self-healing-entry. "Sign in required" means this request left with no usable token
+      // (the user vanished between the check and the send). Re-sending the SAME request is the
+      // race-day loop; recover the sign-in first, then send once more. A failed recovery throws the
+      // signed-out error instead, which the screens report honestly.
+      if (errorCode(e) !== 'functions/unauthenticated') throw e;
+      await ensureAuth();
+      return send(data);
+    }
   };
 }
 

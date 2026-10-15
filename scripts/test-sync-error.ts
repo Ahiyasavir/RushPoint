@@ -58,6 +58,15 @@ check('verdict first-load unauthenticated over max → sync-failed', syncErrorVe
 check('verdict unauthenticated + hasState → reconnect', syncErrorVerdict('unauthenticated', true, 0) === 'reconnect');
 check('verdict unauthenticated + hasState → reconnect (high budget)', syncErrorVerdict('unauthenticated', true, 99) === 'reconnect');
 
+// D51 (change: self-healing-entry). "Almost always a transient token refresh" was false on 14.10: the
+// iPhone had LOST its user, so every poll was refused and the phone said "reconnecting" until the end.
+// The recovery state now decides. While recovery is pending (or not reported), keep reconnecting as
+// before; once recovery has FAILED, say so: 'signedOut' (an honest card with a rejoin).
+check('verdict unauthenticated + hasState + recovery pending → reconnect', syncErrorVerdict('unauthenticated', true, 0, 'pending') === 'reconnect');
+check('verdict unauthenticated + hasState + recovery failed → signed-out', syncErrorVerdict('unauthenticated', true, 0, 'failed') === 'signedOut');
+check('verdict unauthenticated first load + recovery failed → signed-out', syncErrorVerdict('unauthenticated', false, 0, 'failed') === 'signedOut');
+check('recovery state does not change other codes', syncErrorVerdict('unavailable', true, 0, 'failed') === 'reconnect');
+
 // Transient WITH state → keep the game on screen and reconnect.
 check('verdict transient undefined + hasState → reconnect', syncErrorVerdict(undefined, true, 0) === 'reconnect');
 check('verdict transient unavailable + hasState → reconnect', syncErrorVerdict('unavailable', true, 0) === 'reconnect');

@@ -38,7 +38,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
       const res = await startInstantPlay({ gameId, displayName: name });
       const session: Session = {
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
-        code: res.accessCode, displayName: name, teamId: uid() ?? undefined,
+        code: res.accessCode, displayName: name, teamId: uid() ?? undefined, deviceUid: uid() ?? undefined,
       };
       saveSession(session);
       onInstantPlay(session);

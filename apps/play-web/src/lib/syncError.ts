@@ -18,16 +18,23 @@ export function isFatalSyncError(code: string | undefined): boolean {
 // up after FIRST_LOAD_MAX_FAILS consecutive transient misses. Fatal codes still
 // surface immediately.
 export const FIRST_LOAD_MAX_FAILS = 4;
-export type SyncVerdict = 'reconnect' | 'game-gone' | 'sync-failed';
+export type SyncVerdict = 'reconnect' | 'game-gone' | 'sync-failed' | 'signedOut';
 
 // Decide what a poll failure should do, given the error code, whether we already
-// have team state on screen, and how many times the FIRST load has failed so far.
-// Pure + dependency-free (scripts/test-sync-error.ts).
+// have team state on screen, how many times the FIRST load has failed so far, and
+// (change: self-healing-entry) where sign-in recovery stands. Pure + dependency-free
+// (scripts/test-sync-error.ts).
 export function syncErrorVerdict(
   code: string | undefined,
   hasState: boolean,
   firstLoadFails: number,
+  recovery?: 'ok' | 'pending' | 'failed',
 ): SyncVerdict {
+  // D51 (14.10). An `unauthenticated` poll was read as a token-refresh blip forever, and an iPhone
+  // that had really LOST its user said "reconnecting" until the race ended. Once the sign-in recovery
+  // has FAILED, that is the truth to show: 'signedOut' (an honest card with a rejoin). While it is
+  // pending, or never reported, the old reconnect grace below still applies.
+  if (recovery === 'failed' && /unauthenticated/.test(code ?? '')) return 'signedOut';
   if (code === 'not-found') {
     // On the FIRST load a `not-found` is usually transient: the team doc is still
     // being created right after joinRun, or a run read raced finalize/prune. Give

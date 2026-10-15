@@ -117,6 +117,7 @@
         "simulate:browser": "node scripts/simulate-browser-run.mjs",
         "simulate:live-ops": "node scripts/simulate-live-ops-ui.mjs",
         "verify:browser": "npm run shared:build && npm run build --workspace=functions && node scripts/emulator-exec.mjs \"node scripts/simulate-browser-run.mjs\"",
+        "verify:auth-loss": "npm run shared:build && npm run build --workspace=functions && node scripts/emulator-exec.mjs \"node scripts/browser-auth-loss.mjs\"",
         "simulate:adversarial": "node scripts/simulate-adversarial.mjs",
         "simulate:v1": "node scripts/simulate-tournament.mjs",
         "reset:teams": "node scripts/reset-teams.mjs",

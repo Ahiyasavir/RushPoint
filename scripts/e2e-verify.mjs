@@ -14579,6 +14579,29 @@ async function main() {
     check('question outcome: updateGame refuses the same answer in two outcomes', overlapRefused);
   }); // scenario: points by answer
 
+  // change: self-healing-entry. The phone reports each lost sign-in (the 14.10 iPhones) so the server
+  // can see it. Untrusted input from an anonymous phone: a closed shape, signed-in callers only, one log
+  // line, nothing written to Firestore (the payload checks themselves: functions/src/obs/clientEvents.test.ts).
+  await scenario('reportClientEvent (lost sign-in reports)', async () => {
+    const phone = makeParty('client-event-phone');
+    await signInAnonymously(phone.auth);
+    const ok = await phone.call('reportClientEvent', { kind: 'authLost', outcome: 'reinstated', phase: 'join', msSinceSignIn: 11000, userAgent: 'e2e (iPhone)' });
+    check('reportClientEvent: a well-formed report from a signed-in phone is accepted', ok?.ok === true, JSON.stringify(ok));
+    await expectError('reportClientEvent: an unknown kind is refused',
+      phone.call('reportClientEvent', { kind: 'nope', outcome: 'reinstated', phase: 'join', msSinceSignIn: 1, userAgent: 'x' }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('reportClientEvent: an extra field (a name) is refused, never logged',
+      phone.call('reportClientEvent', { kind: 'authLost', outcome: 'failed', phase: 'play', msSinceSignIn: 1, userAgent: 'x', displayName: 'a child' }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('reportClientEvent: an oversized user agent is refused',
+      phone.call('reportClientEvent', { kind: 'authLost', outcome: 'failed', phase: 'play', msSinceSignIn: 1, userAgent: 'x'.repeat(301) }),
+      { codeIn: ['functions/invalid-argument'] });
+    const stranger = makeParty('client-event-stranger'); // never signed in
+    await expectError('reportClientEvent: a caller with no sign-in is refused',
+      stranger.call('reportClientEvent', { kind: 'authLost', outcome: 'reinstated', phase: 'join', msSinceSignIn: 1, userAgent: 'x' }),
+      { codeIn: ['functions/unauthenticated'] });
+  }); // scenario: reportClientEvent
+
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();
     check('coverage: introspected the deployed callable set', deployed.length > 0, `${deployed.length} callables`);

@@ -2,12 +2,13 @@ import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNo
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
 import { gateSatisfiedTaskIds, senderQuiet, toTelHref, raceElapsedMs } from '@rushpoint/shared';
-import { claimController } from '../services/calls';
+import { claimController, joinTeamAsDevice } from '../services/calls';
 import { haptic } from '../lib/haptics';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { shouldSendPing } from '../lib/pingGate';
-import { db, ensureAuth, uid } from '../services/firebase';
-import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
+import { db, ensureAuth, uid, getRecoveryState, startFreshIdentity, reportIdentityLost } from '../services/firebase';
+import { joinErrorKey } from '../lib/joinCode';
+import { clearSession, loadChatSeen, saveChatSeen, loadSession, saveSession, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useWideLayout } from '../lib/useWideLayout';
 import { completionFinishesRace } from '../lib/finishLine';
@@ -69,12 +70,31 @@ import { useDeviceHeading } from '../lib/useDeviceHeading';
 
 
 
+// change: self-healing-entry. True when the page is running under a DIFFERENT identity from the one
+// that joined: the stored sign-in was wiped (the 14.10 iPhones) and a fresh anonymous user was minted on
+// load. That identity is not a member, so every team call fails; those failures must read as "signed
+// out of the team", never overwrite it with "sync failed" (which would also pull the rejoin button out
+// from under a tap). Module-level: it reads only the saved session and the current uid.
+/** The play screen's error KIND for a phone signed out of its team (a state value, not copy). */
+const SIGNED_OUT = 'signedOut' as const;
+
+function identityLost(): boolean {
+  const joinedAs = loadSession()?.deviceUid;
+  const now = uid();
+  const lost = !!joinedAs && !!now && now !== joinedAs;
+  if (lost) reportIdentityLost();
+  return lost;
+}
+
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const { t, lang } = useT();
   // desktop-layouts-play-staff: on a computer the map and the mission sit side by side.
   const wide = useWideLayout();
   const [state, setState] = useState<MyTeamState | null>(null);
-  const [err, setErr] = useState<'' | 'game-gone' | 'sync-failed'>('');
+  const [err, setErr] = useState<'' | 'game-gone' | 'sync-failed' | 'signedOut'>('');
+  // change: self-healing-entry. The rejoin attempt on the signed-out card: busy flag + its own error.
+  const [rejoinBusy, setRejoinBusy] = useState(false);
+  const [rejoinErr, setRejoinErr] = useState('');
   // Offline continuity (change: fix-play-offline-continuity): a transient poll
   // failure keeps the last state on screen and flips `reconnecting` (a subtle,
   // non-blocking pill) instead of blanking to the error screen. `hasState` lets the
@@ -180,7 +200,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       const s = await getMyTeamState({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId });
       setState(s); hasState.current = true; setErr(''); setReconnecting(false);
       firstLoadFails.current = 0;
+      // change: self-healing-entry. Keep the team's device code in the saved session, so a phone that
+      // later loses its sign-in can rejoin THIS team with one tap instead of meeting a dead end.
+      const code = s.team.deviceJoinCode;
+      const saved = loadSession();
+      if (code && saved && saved.runId === session.runId && saved.deviceJoinCode !== code) {
+        saveSession({ ...saved, deviceJoinCode: code });
+      }
     } catch (e) {
+      if (identityLost()) { setReconnecting(false); setErr(SIGNED_OUT); return; }
       const code = (e as { code?: string })?.code;
       // A transient blip → keep the game on screen (or the branded loader on first
       // load) and auto-retry via `reconnecting`; only a fatal code, a deleted run,
@@ -188,7 +216,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       // screen. Never surface a raw English server message to a Hebrew-default
       // participant — map to the localized gameGone / syncFailed copy.
       if (!hasState.current) firstLoadFails.current += 1;
-      const verdict = syncErrorVerdict(code, hasState.current, firstLoadFails.current);
+      const verdict = syncErrorVerdict(code, hasState.current, firstLoadFails.current, getRecoveryState());
       if (verdict === 'reconnect') {
         setReconnecting(true);
       } else {
@@ -198,7 +226,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         // identity and tears down the live team listener + restarts the 12s poll.
         // The copy is localized at render time, so a toggle while this error shows
         // still switches the message.
-        setErr(verdict === 'game-gone' ? 'game-gone' : 'sync-failed');
+        setErr(verdict === 'game-gone' ? 'game-gone' : verdict === 'signedOut' ? 'signedOut' : 'sync-failed');
       }
     }
   }, [session]);
@@ -232,6 +260,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // state via getMyTeamState so answer keys never reach the client.
     void ensureAuth().then(() => {
       if (!alive) return;
+      // change: self-healing-entry. The page came back under a DIFFERENT identity from the one that
+      // joined: the stored sign-in was wiped (the 14.10 iPhones), and a fresh anonymous user is not a
+      // member of the team. Say so and offer the rejoin, instead of a "sync failed" dead end.
+      if (identityLost()) { setReconnecting(false); setErr(SIGNED_OUT); return; }
       // Shared team devices: an attached viewer phone's uid is NOT the team id —
       // the session carries the real teamId (legacy sessions fall back to uid).
       const teamId = session.teamId ?? uid();
@@ -595,6 +627,50 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // recovery card whenever `err !== ''` is safe and never pre-empts the
   // ReconnectingPill. Copy is localized here at render time so a language toggle
   // while it shows still switches the message.
+  // change: self-healing-entry. This phone lost its sign-in and it could not be restored. Not
+  // "reconnecting" forever (D51) and not a generic failure: say what happened and offer the rejoin of
+  // the SAME team with the device code saved at join time.
+  async function rejoinTeam() {
+    const saved = loadSession();
+    if (!saved?.deviceJoinCode) return;
+    setRejoinBusy(true);
+    setRejoinErr('');
+    try {
+      await startFreshIdentity();
+      await joinTeamAsDevice({ code: saved.code, teamCode: saved.deviceJoinCode, memberName: saved.displayName || undefined });
+      saveSession({ ...saved, deviceUid: uid() ?? undefined });
+      firstLoadFails.current = 0;
+      setErr('');
+      setReconnecting(true);
+      void refresh();
+    } catch (e) {
+      const key = joinErrorKey(e);
+      setRejoinErr(key === 'full' ? t.devices.teamFull : key === 'connection' ? t.join.connectionError : t.join.joinFailed);
+    } finally {
+      setRejoinBusy(false);
+    }
+  }
+
+  if (err === 'signedOut') {
+    const canRejoin = !!loadSession()?.deviceJoinCode;
+    return (
+      <Screen>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-2">
+          <div className="flex justify-center text-ink-amber"><Icon name="alert" className="w-10 h-10" /></div>
+          <p className="text-zinc-100 text-base font-semibold" data-testid="signedOut">{t.play.signedOut}</p>
+          <p className="text-zinc-400 text-sm">{canRejoin ? t.play.signedOutRejoinHint : t.play.signedOutNoCode}</p>
+          {rejoinErr && <p role="status" aria-live="polite" className="text-ink-alert text-sm font-medium">{rejoinErr}</p>}
+          <div className="flex flex-col gap-2 mt-1 w-full max-w-xs">
+            {canRejoin && (
+              <Button loading={rejoinBusy} disabled={rejoinBusy} onClick={() => void rejoinTeam()} data-testid="rejoin-team">{t.play.rejoinTeam}</Button>
+            )}
+            <Button variant="ghost" onClick={() => { clearSession(); onLeave(); }}>{t.play.leave}</Button>
+          </div>
+        </div>
+      </Screen>
+    );
+  }
+
   if (err) {
     return (
       <Screen>

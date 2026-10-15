@@ -15,6 +15,12 @@ export interface Session {
   // Test-drive (rehearsal) run flag (change: test-drive-mode): drives the
   // persistent "TEST RUN" banner. Absent on normal runs → treated as false.
   isTestDrive?: boolean;
+  // change: self-healing-entry. The identity that joined, and the team's device code. If the page
+  // later comes back under a DIFFERENT identity (the stored sign-in was wiped, as on the iPhones at
+  // the 14.10 race), the play screen knows this phone lost its sign-in and can rejoin the same team
+  // with the device code instead of showing a dead end. Both absent on older sessions.
+  deviceUid?: string;
+  deviceJoinCode?: string;
 }
 
 const KEY = 'rushpoint.session';

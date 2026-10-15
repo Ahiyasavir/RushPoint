@@ -125,11 +125,19 @@ key('failed-precondition → finished', err('failed-precondition', 'This race ha
 key('functions/failed-precondition → finished', err('functions/failed-precondition'), 'finished');
 key('resource-exhausted → full', err('resource-exhausted'), 'full');
 key('functions/resource-exhausted → full', err('functions/resource-exhausted'), 'full');
-// Transport / sign-in.
-for (const c of ['unavailable', 'internal', 'deadline-exceeded', 'unauthenticated', 'aborted', 'cancelled']) {
+// Transport.
+for (const c of ['unavailable', 'internal', 'deadline-exceeded', 'aborted', 'cancelled']) {
   key(`${c} → connection`, err(c), 'connection');
   key(`functions/${c} → connection`, err(`functions/${c}`), 'connection');
 }
+// Sign-in (change: self-healing-entry). On 14.10 an iPhone lost its Firebase user seconds after the
+// code check; every join then went out with no token and came back `unauthenticated`, which this
+// mapping called "connection", so children were told to check their reception and tapped the same
+// dead page dozens of times. A missing sign-in is recovered automatically first; if the player still
+// sees this key, the truthful sentence is "the phone lost its sign-in, reload", never "connection".
+key('unauthenticated → signIn', err('unauthenticated', 'Sign in required'), 'signIn' as JoinErrorKey);
+key('functions/unauthenticated → signIn', err('functions/unauthenticated'), 'signIn' as JoinErrorKey);
+check('unauthenticated is never connection', joinErrorKey(err('functions/unauthenticated')) !== 'connection');
 // Total function: anything else is a key, never a throw.
 key('an unrecognized code → unknown', err('something-else'), 'unknown');
 key('an Error with no code → unknown', new Error('boom'), 'unknown');
@@ -185,6 +193,17 @@ check('a plain failed-precondition is still a finished run',
   }
   check('staffSession copy exists in both languages',
     (i18n.match(/\bstaffSession: '/g) ?? []).length === 2 && (i18n.match(/\bstaffSessionSwitch: '/g) ?? []).length === 2);
+}
+
+// D05 (14.10): a FULL team on the add-a-phone path was shown as "check the device code". The code was
+// right; the team had its maximum number of phones. The attach path must name the real cause.
+{
+  const screen = readFileSync(join(process.cwd(), 'apps/play-web/src/screens/JoinScreen.tsx'), 'utf8');
+  const attachBody = screen.split('async function attach()')[1]?.slice(0, 2000) ?? '';
+  check('attach maps a full team to its own copy, not attachFailed', /key === 'full'[\s\S]{0,200}t\.devices\.teamFull/.test(attachBody));
+  const i18n = readFileSync(join(process.cwd(), 'apps/play-web/src/i18n.ts'), 'utf8');
+  check('teamFull copy exists in both languages', (i18n.match(/\bteamFull: '/g) ?? []).length === 2);
+  check('signIn copy exists in both languages', (i18n.match(/\bsignInLost: '/g) ?? []).length === 2);
 }
 
 console.log(`\n${failures === 0 ? 'ALL JOIN-CODE TESTS PASSED' : failures + ' FAILED'}`);

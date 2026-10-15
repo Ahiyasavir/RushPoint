@@ -87,6 +87,7 @@ export {
   backfillPublicTaskCoordinatesNow,
 } from './maintenance/index';
 export { listPlatformUsers, recordEngagement, setUserNote } from './admin/index';
+export { reportClientEvent } from './obs/clientEvents';
 // Marketing site contact form (change: marketing-site). submitContactMessage is
 // UNAUTHENTICATED by necessity and is declared in PUBLIC_CALLABLES with its
 // reason; listContactMessages is admin only and audit logged.
