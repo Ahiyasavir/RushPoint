@@ -22,7 +22,7 @@ import { webkit, chromium, devices } from '@playwright/test';
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
 import { resolveEmulatorPorts, BASE_EMULATOR_PORTS, PORT_OFFSET_ENV } from './lib/emulatorPorts.mjs';
 import { mkdirSync } from 'node:fs';
@@ -77,7 +77,10 @@ async function ensurePlayServer() {
   await waitUntil(() => httpOk(PLAY_URL), { timeout: 120_000, interval: 1000, label: 'play-web dev server' });
   return () => {
     try {
-      if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      // SYNC on purpose: the caller exits right after this, and an async taskkill never finished,
+      // which left a play-web dev server on :5181 that the NEXT run reused (and so tested whatever
+      // checkout had started it). Found 16.10 by a check that failed for exactly that reason.
+      if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
       else child.kill();
     } catch { /* already gone */ }
   };
@@ -193,6 +196,22 @@ async function joinAfterWipe(browserName, launcher, profile, ctx) {
       `check=${checkUid} join=${okJoin?.uid ?? 'none'}`);
     const screenText = outcome === 'timeout' ? (await page.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 220) : '';
     audit(`${tag} the phone joined the team`, outcome === 'joined', `${outcome}${shown ? ' :: screen: ' + shown : ''}${screenText ? ' :: page: ' + screenText : ''}`);
+
+    // change: return-to-game. The waiting screen says how to get back, and the menu searches in a
+    // NEW tab. Checked here because this is the one place a real phone browser reaches that screen.
+    if (outcome === 'joined') {
+      const tip = await page.getByTestId('return-tip').isVisible().catch(() => false);
+      audit(`${tag} the waiting screen tells the team how to get back`, tip);
+      await shot(page, `waiting-${browserName.replace('/', '-')}`);
+      await page.getByTestId('play-menu').first().click();
+      const search = page.getByTestId('web-search').first();
+      const searchOk = await search.isVisible().catch(() => false);
+      const target = await search.getAttribute('target').catch(() => null);
+      const rel = await search.getAttribute('rel').catch(() => null);
+      audit(`${tag} the menu searches in a new tab`, searchOk && target === '_blank' && /noopener/.test(rel ?? ''), `${target} ${rel}`);
+      await shot(page, `menu-${browserName.replace('/', '-')}`);
+      await page.keyboard.press('Escape');
+    }
 
     const after = await ctx.founder.call('getMyTeamState', { ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId });
     const devicesNow = after?.team?.deviceUids ?? [];

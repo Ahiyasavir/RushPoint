@@ -68,6 +68,7 @@ import { closedNoticeKey, shouldShowClosedNotice, type ClosedTaskNotice } from '
 import { Icon } from '../components/Icon';
 import { gpsCourse, pickHeading } from '../lib/heading';
 import { useDeviceHeading } from '../lib/useDeviceHeading';
+import { webSearchHref } from '../lib/webSearch';
 
 
 
@@ -801,6 +802,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           ) : (
             <p className="text-zinc-500">{t.play.waitingStart}</p>
           )}
+          {/* change: return-to-game. Every team sees this screen before playing, so it is where they
+              learn that a rescan brings them back and that searching from the menu keeps the game. */}
+          <div data-testid="return-tip" className="w-full max-w-sm rounded-xl bg-app-raised border border-glass-border px-4 py-3 text-start space-y-1">
+            <p className="text-sm font-bold text-zinc-200">{t.play.returnTipTitle}</p>
+            <p className="text-sm text-zinc-400">{t.play.returnTipBody}</p>
+          </div>
     </>);
     const waitExtras = (<>
         {hasTeammateDevices && myUid && (
@@ -1735,7 +1742,7 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
 }
 
 function LeaveMenu({ onLeave }: { onLeave: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -1752,6 +1759,15 @@ function LeaveMenu({ onLeave }: { onLeave: () => void }) {
         <>
           <button type="button" aria-label={t.play.menuClose} className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
           <div role="menu" className="absolute end-0 top-full z-50 mt-1 min-w-[14rem] rounded-xl border border-glass-border bg-app-card shadow-task-card p-1">
+            {/* change: return-to-game. A link to a NEW tab, so searching never navigates the game's
+                own tab away (at the 14.10 race people did, and could not find their way back). A
+                link rather than window.open: no popup blocker refuses a user's own tap on it. */}
+            <a role="menuitem" data-testid="web-search" href={webSearchHref(lang)} target="_blank" rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-2 min-h-[44px] rounded-lg px-3 text-start text-sm font-semibold text-zinc-200 hover:bg-app-raised">
+              <Icon name="search" className="w-4 h-4 shrink-0" />
+              <span>{t.play.webSearch}</span>
+            </a>
             <button type="button" role="menuitem" data-testid="leave-game"
               onClick={() => { setOpen(false); onLeave(); }}
               className="w-full min-h-[44px] rounded-lg px-3 text-start text-sm font-semibold text-ink-alert hover:bg-app-raised">

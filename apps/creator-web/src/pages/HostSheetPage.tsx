@@ -656,6 +656,9 @@ export default function HostSheetPage() {
           <p className="mt-1 text-[18px] font-semibold" dir="ltr">{PLAY_URL.replace(/^https?:\/\//, '')}</p>
         </div>
         <p className="rounded-2xl border-[3px] border-[#1c1917] px-8 py-3 font-mono text-[56px] font-bold tracking-[0.25em]" dir="ltr">{sheet.cover.joinCode}</p>
+        {/* change: return-to-game. Players who left the game at the 14.10 race did not know a rescan
+            brings them back. */}
+        <p className="max-w-[150mm] text-[16px] text-[#44403c]">{h.joinSignReturn}</p>
       </section>
     );
 

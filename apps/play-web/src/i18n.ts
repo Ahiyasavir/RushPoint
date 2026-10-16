@@ -935,6 +935,12 @@ const HE = {
     menu: 'תפריט',
     menuClose: 'סגירת התפריט',
     leaveOnThisPhone: 'יציאה מהמשחק בטלפון הזה',
+    // change: return-to-game. At the 14.10 race people left the game to search Google and could not
+    // find their way back. The menu opens a search in a NEW tab, and the waiting screen says how to
+    // get back (a rescan of the same code resumes exactly where the team was).
+    webSearch: 'חיפוש באינטרנט',
+    returnTipTitle: 'יצאתם מהמשחק?',
+    returnTipBody: 'סרקו שוב את הברקוד ותחזרו לאותו מקום.',
     sosAria: 'שליחת קריאת מצוקה למארגנים',
     callContact: ({ label }: { label: string }) => `להתקשר אל ${label}`,
     headlineFirst: 'אנחנו #1!',
@@ -2037,6 +2043,9 @@ const EN: typeof HE = {
     menu: 'Menu',
     menuClose: 'Close the menu',
     leaveOnThisPhone: 'Leave the game on this phone',
+    webSearch: 'Search the web',
+    returnTipTitle: 'Left the game?',
+    returnTipBody: 'Scan the code again and you are back where you were.',
     sosAria: 'Send an SOS alert to the organizers',
     callContact: ({ label }: { label: string }) => `Call ${label}`,
     headlineFirst: "WE'RE #1!",

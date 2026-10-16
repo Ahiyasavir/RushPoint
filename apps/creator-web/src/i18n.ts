@@ -3358,6 +3358,8 @@ const HE = {
     joinSignHeading: 'מצטרפים למשחק',
     joinSignScan: 'סורקים את הקוד במצלמה של הטלפון',
     joinSignOr: 'או נכנסים לכתובת ומקלידים את הקוד:',
+    // change: return-to-game. A rescan of the same code resumes; at the 14.10 race nobody knew that.
+    joinSignReturn: 'יצאתם מהמשחק באמצע? סרקו שוב את הקוד הזה, ותחזרו בדיוק לאותו מקום.',
     joinSignNoRun: 'לשלט ההצטרפות צריך קוד של ריצה. השיקו את המשחק, ואז פתחו את ההדפסות מחדר הבקרה.',
   },
   // MapLibre's own words (change: map-locale). lib/mapLocale.ts.
@@ -6647,6 +6649,7 @@ const EN: typeof HE = {
     joinSignHeading: 'Join the game',
     joinSignScan: 'Scan the code with your phone camera',
     joinSignOr: 'or open this address and type the code:',
+    joinSignReturn: 'Left the game halfway? Scan this code again and you are back exactly where you were.',
     joinSignNoRun: 'A join sign needs a run code. Launch the game, then open Prints from the control room.',
   },
   mapUi: {
