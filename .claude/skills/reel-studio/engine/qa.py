@@ -215,11 +215,15 @@ def check(reel: str, opening: str | None, final: bool) -> int:
     logos = sorted({Path(o["png"]).name for o in tl.get("overlays", []) if "logo" in Path(str(o["png"])).name.lower()})
     (fails if logos else ok).append(f"logo: {len(logos)} logo overlays (rule 43: none) {logos or ''}")
     # no dates in a reel (rule 36); a captive video (classroom, in app) may set allow_dates
-    date_re = re.compile(r"\d{1,2}\s*ב?(ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)|\d{1,2}[./]\d{1,2}")
+    date_re = re.compile(r"\d{1,2}\s*ב?(ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)|\b\d{1,2}[./]\d{1,2}\b")
     txt_ = lambda c: c.get("text") or " ".join(w for w, *_ in c.get("words", []))  # noqa: E731
     dated = [txt_(c)[:30] for c in caps if date_re.search(txt_(c))]
     if not tl.get("allow_dates"):
-        (fails if dated else ok).append(f"dates: {len(dated)} captions carry a date {dated[:3] if dated else ''}")
+        (fails if dated else ok).append(f"dates: {len(dated)} of {len(caps)} captions carry a date {dated[:3] if dated else ''}")
+    # words he ruled out even as a joke (founder rule 79, "סחטנו" in reel 18 v2): cut the clause, never reword him
+    banned_re = re.compile(r"סחט")
+    banned = [txt_(c)[:30] for c in caps if banned_re.search(txt_(c))]
+    (fails if banned else ok).append(f"wording: {len(banned)} of {len(caps)} captions carry a word he ruled out (rule 79) {banned[:3] if banned else ''}")
     # music loud enough ("תחזק קצת את המוזיקה", twice): -11 is his level
     if mu and float(mu.get("gain", -13)) < -12.5:
         warns.append(f"music gain {mu.get('gain')} dB: he asked for louder twice, use about -11")

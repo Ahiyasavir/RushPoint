@@ -96,3 +96,14 @@ fix away.
   `people/sheet.jpg` and a booth photo). Removed within minutes by amending and force pushing, and
   `footage/library/**/*.jpg` is now ignored. Check `gh repo view --json visibility` before the first
   push of any image of a person, and never commit one.
+
+## 2026-10-16 (street-200, see lessons-2026-10-16.md)
+- **WhatsApp phone audio carries overs above 0 dBFS as a clean wave; a 16 bit decode clips them.**
+  Decode with `volume=-8dB` into `pcm_f32le` first. Check `np.abs(float_decode).max()` before calling a mic bad.
+- **Trim inside the graph decodes from 0**: add `-ss <a-2> -copyts` before `-i` and keep `trim=start=a`.
+- **Nested reel names (`folder/reel`) break `build.py`** (`build/<reel>_A.missing.txt` path). Reels live at the top.
+- **mediapipe FaceLandmarker misses small faces**; tile the frame. OpenCV 5 ships no haarcascades.
+- **Headless Edge times out (90 s) when the CPU is saturated**: rerun, the PNG cache keeps what finished.
+- **Bash heredocs that contain Python with `\n` escapes break** (twice today). Write such files with the editor tool.
+
+- **`qa.py`'s date check was half blind** (found 2026-10-17): its regex held two literal BACKSPACE bytes where `\b` was meant, so numeric dates ("15.10", "22/10") never matched and the line still printed "0 captions carry a date". Fixed by byte value. **The fix hit the same trap**: writing `\b` through a heredoc'd Python string produced a backspace again. Edit such bytes with `bytes([92, 98])`, then grep the file for `[\x00-\x08]` to prove it. CLAUDE.md's `test-source-control-chars.ts` does not scan `.claude/`.

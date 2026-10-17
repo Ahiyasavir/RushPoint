@@ -76,7 +76,7 @@ def render(html: str, out: Path, w: int, h: int) -> Path:
                "--virtual-time-budget=1500", f"--screenshot={shot}", src.resolve().as_uri()]
         if os.name != "nt":
             cmd.insert(1, "--no-sandbox")
-        subprocess.run(cmd, capture_output=True, timeout=90)
+        subprocess.run(cmd, capture_output=True, timeout=240)   # 90 s timed out twice under a full CPU (2026-10-16)
         if not shot.exists():
             raise RuntimeError(f"browser produced no screenshot for {out.name}")
         im = Image.open(shot).convert("RGBA")

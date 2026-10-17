@@ -14,7 +14,7 @@ happened because something already written was not read.
 ## Step 0 · Read before the first command (every time)
 
 1. `references/founder-rules.md`: his standing rules (55). They outrank any brief.
-2. `references/lessons-2026-10-13.md` (newest: white background, the voice chain that keeps his timbre, three pass ingest), `lessons-2026-10-05.md` and `lessons-2026-10-02.md`: what went wrong and the fix.
+2. `references/lessons-2026-10-16.md` (newest: street interviews, WhatsApp audio decoded in float, the measured field chain, an exact countdown, parallel work; worked example `engine/examples/street-200/`), `lessons-2026-10-13.md` (white background, the voice chain that keeps his timbre, three pass ingest), `lessons-2026-10-05.md` and `lessons-2026-10-02.md`: what went wrong and the fix.
 3. `references/pre-delivery-checklist.md`: the zero notes checklist. **Every cut passes it before it is sent.**
 4. `references/kill-criteria.md`: the six question test.
 5. `references/gotchas.md` + `~/.claude/toolkits/video-editing/README.md` (the long list).

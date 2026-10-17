@@ -96,7 +96,29 @@ RVM = MODEL.parent / "rvm_resnet50_fp32.onnx"
 RVM_FAST = MODEL.parent / "rvm_mobilenetv3_fp32.onnx"
 
 
-def whiten_rvm(src, dst, proof=None, crf=14, fast=False, ratio=0.3, shadow=True, a=None, b=None):
+def retouch_skin(rgb, strength=0.55, shine=0.28):
+    """A light, invisible retouch (he asked to look "a bit smoother, but completely me", 2026-10-13).
+    Frequency separation: only the MIDDLE band (blotches, spots, 4 to 15 px) is turned down, on skin
+    only; pores and edges (the fine band) and the shape of the face (the coarse band) are untouched,
+    so nothing reads as a filter. Highlights on skin are compressed a little (a shiny forehead).
+    rgb: float32 0..255, HxWx3. Returns the same."""
+    r, g, b_ = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    skin = np.clip((r - b_ - 14) / 22, 0, 1) * np.clip((r - 70) / 40, 0, 1) * np.clip((r - g + 2) / 12, 0, 1)
+    skin = cv2.erode(skin, np.ones((5, 5), np.uint8))
+    skin = cv2.GaussianBlur(skin, (0, 0), 4)[..., None]
+    fine = cv2.GaussianBlur(rgb, (0, 0), 2.2)
+    coarse = cv2.GaussianBlur(rgb, (0, 0), 13)
+    mid = fine - coarse
+    # keep real features: a strong mid band value is an eyelid, a nostril, the lip line, not a blotch
+    keep = np.clip((np.abs(mid).max(axis=2, keepdims=True) - 9) / 9, 0, 1)
+    out = rgb - mid * skin * strength * (1 - keep)
+    lum = coarse.mean(axis=2, keepdims=True)
+    hot = np.clip((lum - 185) / 50, 0, 1) * skin
+    out = out - (out - 185) * hot * shine * (out > 185)
+    return out
+
+
+def whiten_rvm(src, dst, proof=None, crf=14, fast=False, ratio=0.3, shadow=True, a=None, b=None, bg=None, retouch=False):
     """Robust Video Matting (recurrent, so the matte is stable in time). The model also predicts
     the true foreground colour, used in the soft band so no wall or sky colour fringes the hair.
     a, b: cut this span (seconds) while matting. shadow: a faint soft grey halo behind him, so a
@@ -118,6 +140,9 @@ def whiten_rvm(src, dst, proof=None, crf=14, fast=False, ratio=0.3, shadow=True,
     n = w * h * 3
     i = 0
     proofs, worst = [], 255.0
+    bg_img = None
+    if bg is not None:      # any background instead of white: an RGB image of the frame's size (a brand colour, a pattern)
+        bg_img = cv2.cvtColor(cv2.resize(cv2.imread(str(bg)), (w, h)), cv2.COLOR_BGR2RGB).astype(np.float32)
     while True:
         buf = rd.stdout.read(n)
         if len(buf) < n:
@@ -131,18 +156,24 @@ def whiten_rvm(src, dst, proof=None, crf=14, fast=False, ratio=0.3, shadow=True,
         ff = f.astype(np.float32)
         solid = (al > 0.97)[..., None]
         col = np.where(solid, ff, fg)
+        if retouch:
+            col = retouch_skin(col)
         bgc = np.full((h, w), 255.0, np.float32)
         if shadow:
             # tight: 60 px from the body the background is exactly 255 again ("לבן לגמרי"); the first
             # version (sigma 9, 26 levels) left the corners of a cropped shot at 233
             sm = cv2.GaussianBlur(cv2.resize(al, (w // 8, h // 8)), (0, 0), 3.5)
             bgc = 255.0 - 22.0 * np.clip((cv2.resize(sm, (w, h)) - 0.12) / 0.88, 0, 1)
-        out = col * al[..., None] + bgc[..., None] * (1 - al[..., None])
+        if bg_img is not None:      # on a colour the same halo becomes a soft drop shadow
+            back = bg_img * (bgc[..., None] / 255.0) ** 2.2
+        else:
+            back = bgc[..., None]
+        out = col * al[..., None] + back * (1 - al[..., None])
         out = np.clip(out, 0, 255).astype(np.uint8)
         wr.stdin.write(out.tobytes())
         if i % 15 == 0:
             far = cv2.dilate((al > 0.02).astype(np.uint8), np.ones((161, 161), np.uint8)) == 0
-            if far.any():
+            if far.any() and bg_img is None:
                 worst = min(worst, float(out[far].min()))
         if proof and i % 30 == 15 and len(proofs) < 4:
             proofs.append(cv2.cvtColor(np.hstack([cv2.resize(f, (w // 3, h // 3)), cv2.resize(out, (w // 3, h // 3))]), cv2.COLOR_RGB2BGR))
@@ -153,6 +184,123 @@ def whiten_rvm(src, dst, proof=None, crf=14, fast=False, ratio=0.3, shadow=True,
     if proof and proofs:
         cv2.imwrite(str(proof), np.hstack(proofs))
     rep = {"frames": i, "mode": "rvm", "far_background_min_value": worst}
+    print(json.dumps(rep))
+    return rep
+
+
+def _wall_fit(frames, alphas, w, h):
+    """The wall as a smooth cubic colour surface, fitted robustly on the pixels the matte calls
+    background, and the soft mask of everything on that wall that is NOT wall (sockets, a cupboard,
+    cables, a shelf, a bed corner): the places where the background departs from the surface."""
+    step = 6
+    yy, xx = np.mgrid[0:h:step, 0:w:step].astype(np.float32)
+    xn, yn = xx / w - 0.5, yy / h - 0.5
+
+    def basis(x, y):
+        return np.stack([np.ones_like(x), x, y, x * x, x * y, y * y, x ** 3, x * x * y, x * y * y, y ** 3], -1)
+
+    A_all, Y_all = [], []
+    bgs = []
+    for f, al in zip(frames, alphas):
+        bgm = cv2.erode((al < 0.02).astype(np.uint8), np.ones((9, 9), np.uint8)).astype(bool)
+        bgs.append(bgm)
+        m = bgm[::step, ::step]
+        A_all.append(basis(xn[m], yn[m]))
+        Y_all.append(f[::step, ::step][m].astype(np.float32))
+    A, Y = np.concatenate(A_all), np.concatenate(Y_all)
+    keep = np.ones(len(A), bool)
+    for _ in range(5):                       # drop what is not wall, refit
+        coef = np.linalg.lstsq(A[keep], Y[keep], rcond=None)[0]
+        res = np.abs(A @ coef - Y).max(axis=1)
+        thr = max(6.0, 2.2 * float(np.median(res[keep])) + 3.0)
+        keep = res < thr
+    Yf, Xf = np.mgrid[0:h, 0:w].astype(np.float32)
+    model = (basis(Xf / w - 0.5, Yf / h - 0.5).reshape(-1, 10) @ coef).reshape(h, w, 3).astype(np.float32)
+    obj = np.zeros((h, w), np.uint8)
+    for f, bgm in zip(frames, bgs):
+        dev = np.abs(f.astype(np.float32) - model).max(axis=2)
+        obj |= ((dev > 12) & bgm).astype(np.uint8)
+    obj = cv2.morphologyEx(obj, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    obj = cv2.dilate(obj, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)))
+    M = cv2.GaussianBlur(obj.astype(np.float32), (0, 0), 9)
+    return np.clip(model, 0, 255), np.clip(M * 1.15, 0, 1)
+
+
+def clean_room_rvm(src, dst, proof=None, crf=14, ratio=0.3, a=None, b=None, retouch=False, samples=8):
+    """His real room, tidied (2026-10-13: a white cut out "does not look good, I want it natural").
+    The footage stays as shot, with its own light and shadows. Only where something sits on the wall
+    (a socket, a cupboard, a cable, clutter at the frame edge) the picture is rebuilt: clean wall from
+    the fitted wall surface behind, him from the matte in front. Two passes: a few sampled frames
+    to learn the wall and find the objects, then every frame."""
+    import onnxruntime as ort
+    src, dst = Path(src), Path(dst)
+    w, h, fps = probe(src)
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = 3
+    sess = ort.InferenceSession(str(RVM), so, providers=["CPUExecutionProvider"])
+    dr = np.array([ratio], np.float32)
+    n = w * h * 3
+    a0 = a or 0.0
+    b0 = b if b is not None else float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(src)],
+                                                      capture_output=True, text=True).stdout)
+
+    def matte(f, rec):
+        x = (f.astype(np.float32) / 255).transpose(2, 0, 1)[None]
+        fgr, pha, *rec = sess.run(None, {"src": x, "r1i": rec[0], "r2i": rec[1], "r3i": rec[2], "r4i": rec[3], "downsample_ratio": dr})
+        return fgr, np.clip((pha[0, 0] - 0.04) / 0.92, 0, 1), rec
+
+    fr_s, al_s = [], []
+    for k in range(samples):
+        t = a0 + (k + 0.5) * (b0 - a0) / samples
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", str(src), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                             capture_output=True).stdout
+        if len(raw) < n:
+            continue
+        f = np.frombuffer(raw, np.uint8).reshape(h, w, 3)
+        rec = [np.zeros([1, 1, 1, 1], np.float32)] * 4
+        for _ in range(3):                   # the recurrent matte needs a few looks at a still
+            _, al, rec = matte(f, rec)
+        fr_s.append(f)
+        al_s.append(al)
+    model, M = _wall_fit(fr_s, al_s, w, h)
+    M3 = M[..., None]
+    cut = ["-ss", f"{a0:.3f}", "-t", f"{b0 - a0:.3f}"]
+    rd = subprocess.Popen(["ffmpeg", "-v", "error", *cut, "-i", str(src), "-vf", "fps=30", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                          stdout=subprocess.PIPE)
+    wr = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
+                           "-r", "30", "-i", "-", "-c:v", "libx264", "-crf", str(crf), "-preset", "fast",
+                           "-pix_fmt", "yuv420p", str(dst)], stdin=subprocess.PIPE)
+    rec = [np.zeros([1, 1, 1, 1], np.float32)] * 4
+    rng = np.random.default_rng(7)
+    proofs, i = [], 0
+    while True:
+        buf = rd.stdout.read(n)
+        if len(buf) < n:
+            break
+        f = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+        fgr, al, rec = matte(f, rec)
+        ff = f.astype(np.float32)
+        if retouch:
+            ff = retouch_skin(ff)
+        fg = fgr[0].transpose(1, 2, 0) * 255
+        col = np.where((al > 0.97)[..., None], ff, fg)
+        # where the wall is rebuilt he still casts a little shade on it, and the wall keeps its grain
+        sm = cv2.GaussianBlur(cv2.resize(al, (w // 8, h // 8)), (0, 0), 4.0)
+        shade = 1.0 - 0.07 * np.clip((cv2.resize(sm, (w, h)) - 0.10) / 0.9, 0, 1)
+        wall = model * shade[..., None] + rng.normal(0, 1.2, (h, w, 1)).astype(np.float32)
+        comp = col * al[..., None] + wall * (1 - al[..., None])
+        out = np.clip(ff * (1 - M3) + comp * M3, 0, 255).astype(np.uint8)
+        wr.stdin.write(out.tobytes())
+        if proof and i % 30 == 15 and len(proofs) < 4:
+            proofs.append(cv2.cvtColor(np.hstack([cv2.resize(f, (w // 3, h // 3)), cv2.resize(out, (w // 3, h // 3))]), cv2.COLOR_RGB2BGR))
+        i += 1
+    wr.stdin.close()
+    wr.wait()
+    rd.wait()
+    if proof and proofs:
+        cv2.imwrite(str(proof), np.hstack(proofs))
+        cv2.imwrite(str(Path(proof).with_name(Path(proof).stem + "_mask.jpg")), (M * 255).astype(np.uint8)[::3, ::3])
+    rep = {"frames": i, "mode": "clean_room", "rebuilt_fraction": round(float(M.mean()), 3)}
     print(json.dumps(rep))
     return rep
 

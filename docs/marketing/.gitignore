@@ -8,3 +8,6 @@ footage/library/build.log
 # faces of real people, many of them minors: the sheets and photos stay on this computer (the repo is PUBLIC)
 footage/library/**/*.jpg
 *.webm
+# video covers are frames of real people, many of them minors (2026-10-17): they stay on this computer
+videos/**/*-cover.png
+**/__pycache__/

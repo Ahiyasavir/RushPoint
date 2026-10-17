@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="he"><head><meta charset="utf-8">
+<link rel="stylesheet" href="MAPLIBRE_CSS">
+<style>
+@font-face{font-family:'Rubik';font-weight:900;src:url('FONT_RUBIK_900');}
+@font-face{font-family:'Rubik';font-weight:700;src:url('FONT_RUBIK_700');}
+html,body{margin:0;width:1080px;height:1920px;overflow:hidden;background:#F5EFE6;}
+#map{position:absolute;inset:0;}
+#veil{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 55%,rgba(28,25,23,0) 45%,rgba(28,25,23,.38) 100%);}
+.lbl{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;opacity:0;pointer-events:none;}
+.lbl .t{font:900 50px 'Rubik';color:#fff;direction:rtl;background:#1C1917;padding:6px 24px 10px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.45);white-space:nowrap;}
+.lbl .t.fire{background:#FF5722;}
+.lbl .stem{width:6px;height:30px;background:#fff;}
+.lbl .dot{width:28px;height:28px;border-radius:50%;background:#FF5722;border:6px solid #fff;margin-top:-4px;}
+#count{position:absolute;left:0;right:0;top:268px;text-align:center;direction:rtl;opacity:0;}
+#count .n{font:900 250px/1 'Rubik';color:#fff;-webkit-text-stroke:10px #1C1917;paint-order:stroke fill;text-shadow:0 14px 50px rgba(0,0,0,.55);direction:ltr;display:inline-block;}
+#count .k{display:inline-block;margin-top:6px;font:900 78px 'Rubik';color:#fff;background:#E11D2A;border-radius:22px;padding:4px 40px 10px;box-shadow:0 10px 34px rgba(0,0,0,.4);}
+.pop{position:absolute;transform:translate(-50%,-50%);font:900 46px 'Rubik';color:#fff;background:#10B981;border-radius:999px;padding:2px 20px 4px;border:4px solid #fff;box-shadow:0 6px 18px rgba(0,0,0,.35);opacity:0;direction:ltr;white-space:nowrap;}
+#board{position:absolute;left:60px;width:560px;top:1010px;background:rgba(28,25,23,.92);border-radius:28px;padding:18px 26px 22px;direction:rtl;opacity:0;box-shadow:0 14px 40px rgba(0,0,0,.45);}
+#board .h{font:900 44px 'Rubik';color:#FFB300;margin-bottom:8px;}
+#board .row{position:absolute;left:0;right:0;height:64px;display:flex;align-items:center;justify-content:space-between;font:700 42px 'Rubik';color:#F5EFE6;}
+#board .row .p{font:900 44px 'Rubik';color:#fff;direction:ltr;}
+#board .row .r{display:inline-block;width:52px;height:52px;border-radius:50%;background:#FF5722;color:#fff;text-align:center;line-height:52px;font:900 34px 'Rubik';margin-left:16px;}
+.att{position:absolute;left:14px;bottom:8px;font:12px sans-serif;color:rgba(255,255,255,.7);direction:ltr;}
+#wash{position:absolute;inset:0;background:#F5EFE6;opacity:0;pointer-events:none;}
+#flash{position:absolute;border-radius:50%;background:#FF5722;pointer-events:none;opacity:0;}
+</style></head>
+<body><div id="map"></div><div id="veil"></div><div id="labels"></div><div id="pops"></div>
+<div id="count"><div class="n" id="cn">0</div><br><div class="k">תלמידים במרוץ</div></div>
+<div id="board"><div class="h">טבלה חיה</div><div id="rows" style="position:relative;height:270px"></div></div>
+<div class="att">© MapTiler © OpenStreetMap contributors</div>
+<div id="wash"></div><div id="flash"></div>
+<script src="MAPLIBRE_JS"></script>
+<script>
+const SPEC = SPEC_JSON;
+maplibregl.setRTLTextPlugin('RTL_PLUGIN', false);
+const map = new maplibregl.Map({container:'map', style:SPEC.style, center:SPEC.camera[0].center, zoom:SPEC.camera[0].zoom,
+  interactive:false, attributionControl:false, fadeDuration:0, preserveDrawingBuffer:true, pixelRatio:1});
+window.__ready = false;
+let seed = 20261014; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const N = SPEC.n;
+const ph = [];
+for (let i = 0; i < N; i++) {
+  const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd());
+  ph.push({ spawn: 0.02 + Math.pow(i / N, 0.8) * SPEC.spawnSpan, ex: Math.cos(a) * r, ey: Math.sin(a) * r,
+            speed: 0.035 + Math.pow(rnd(), 1.25) * 0.40, side: (rnd() + rnd() + rnd() - 1.5) * 1.6, mf: 1.5 + rnd() * 2.5, wob: rnd() * 6.28, team: i % 35 });
+}
+const pops = [];
+for (let i = 0; i < SPEC.pops; i++) pops.push({ who: Math.floor(rnd() * N), t: SPEC.popFrom + rnd() * (SPEC.dur - SPEC.popFrom - 0.5), v: [10, 15, 20, 25, 30][Math.floor(rnd() * 5)] });
+function phoneIcon() {
+  const c = document.createElement('canvas'); c.width = 36; c.height = 60; const g = c.getContext('2d');
+  const rr = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+  g.shadowColor = 'rgba(0,0,0,.45)'; g.shadowBlur = 6; g.shadowOffsetY = 3;
+  rr(4, 3, 28, 50, 7); g.fillStyle = '#1C1917'; g.fill(); g.shadowColor = 'transparent';
+  rr(7, 7, 22, 42, 4); g.fillStyle = '#FFB300'; g.fill();
+  g.fillStyle = '#FF5722'; g.beginPath(); g.arc(18, 32, 6, 0, 6.3); g.fill();
+  return g.getImageData(0, 0, 36, 60);
+}
+map.on('load', () => {
+  for (const l of map.getStyle().layers) {
+    if (l.type === 'symbol' && map.getLayoutProperty(l.id, 'text-field')) map.setLayoutProperty(l.id, 'text-field', ['coalesce', ['get', 'name:he'], ['get', 'name']]);
+    if (/trail|path|cycle|hiking|bicycle|piste|poi/i.test(l.id)) map.setLayoutProperty(l.id, 'visibility', 'none');
+  }
+  map.addImage('phone', phoneIcon());
+  map.addSource('ph', {type:'geojson', data:{type:'FeatureCollection', features:[]}});
+  map.addLayer({id:'ph-glow', type:'circle', source:'ph', paint:{'circle-radius':['*',['get','s'],20],'circle-color':'#FF5722','circle-opacity':0.16,'circle-blur':0.9}});
+  map.addLayer({id:'ph', type:'symbol', source:'ph', layout:{'icon-image':'phone','icon-size':['*',['get','s'],0.8],'icon-allow-overlap':true,'icon-ignore-placement':true,'icon-rotate':['get','rot']}});
+  for (const p of SPEC.pins || []) {
+    const el = document.createElement('div'); el.className = 'lbl'; el.id = 'pin_' + p.id;
+    el.innerHTML = `<div class="t ${p.fire ? 'fire' : ''}">${p.label}</div><div class="stem"></div><div class="dot"></div>`;
+    document.getElementById('labels').appendChild(el);
+  }
+  pops.forEach((p, i) => { const el = document.createElement('div'); el.className = 'pop'; el.id = 'pop' + i; el.textContent = '+' + p.v; document.getElementById('pops').appendChild(el); });
+  const rows = document.getElementById('rows');
+  for (let i = 0; i < 4; i++) { const el = document.createElement('div'); el.className = 'row'; el.id = 'row' + i; rows.appendChild(el); }
+  window.__ready = true;
+});
+const ease = x => x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x);
+const out3 = x => x < 0 ? 0 : x > 1 ? 1 : 1 - Math.pow(1 - x, 3);
+const back = x => { if (x <= 0) return 0; if (x >= 1) return 1; const c = 2.2; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+function lerp(a, b, k) { return a + (b - a) * k; }
+function camAt(t) {
+  const ks = SPEC.camera; let i = 0;
+  while (i < ks.length - 1 && t > ks[i + 1].t) i++;
+  const a = ks[i], b = ks[Math.min(i + 1, ks.length - 1)];
+  const k = b.t > a.t ? ease((t - a.t) / (b.t - a.t)) : 0;
+  return {center:[lerp(a.center[0], b.center[0], k), lerp(a.center[1], b.center[1], k)], zoom:lerp(a.zoom, b.zoom, k), bearing:lerp(a.bearing || 0, b.bearing || 0, k), pitch:lerp(a.pitch || 0, b.pitch || 0, k), padding:{top:lerp(a.pad || 0, b.pad || 0, k), bottom:0, left:lerp(a.padl || 0, b.padl || 0, k), right:0}};
+}
+const R = SPEC.route; const seg = []; let tot = 0;
+for (let i = 1; i < R.length; i++) { const d = Math.hypot(R[i][0] - R[i-1][0], R[i][1] - R[i-1][1]); seg.push(d); tot += d; }
+function along(frac) {
+  let want = tot * Math.min(Math.max(frac, 0), 1);
+  for (let i = 1; i < R.length; i++) {
+    if (want > seg[i-1] && i < R.length - 1) { want -= seg[i-1]; continue; }
+    const k = Math.min(want / seg[i-1], 1);
+    const dx = R[i][0] - R[i-1][0], dy = R[i][1] - R[i-1][1], n = Math.hypot(dx, dy);
+    return {c:[lerp(R[i-1][0], R[i][0], k), lerp(R[i-1][1], R[i][1], k)], nx:-dy / n, ny:dx / n};
+  }
+}
+function posOf(p, t) {
+  const age = t - p.spawn;
+  if (age <= 0) return null;
+  const burst = out3(age / 0.45);                          // the explosion out of the start point
+  const settle = ease((age - 0.35) / 0.9);                 // then they fall into the path
+  const prog = Math.max(0, age - 0.5) * p.speed * (1 + 0.15 * Math.sin(t * 2 + p.wob));
+  const a = along(Math.min(prog, 0.86 + 0.12 * Math.abs(p.ex)));   // arrivals gather around the park, not on one point
+  const spread = SPEC.burstR * burst * (1 - settle);
+  const lane = SPEC.lane * (p.side + 0.45 * Math.sin(prog * 40 * p.mf / 2 + p.wob)) * settle;
+  return {c:[a.c[0] + p.ex * spread + a.nx * lane, a.c[1] + p.ey * spread * 0.85 + a.ny * lane], s: back(age / 0.28), prog};
+}
+const TEAMS = SPEC.teams;
+window.setFrame = (t) => new Promise(res => {
+  map.jumpTo(camAt(t));
+  const feats = []; let live = 0;
+  for (const p of ph) { const q = posOf(p, t); if (!q) continue; live++;
+    feats.push({type:'Feature', properties:{s:q.s, rot:Math.sin(t * 5 + p.wob) * 7}, geometry:{type:'Point', coordinates:q.c}}); }
+  map.getSource('ph').setData({type:'FeatureCollection', features:feats});
+  for (const p of SPEC.pins || []) {
+    const el = document.getElementById('pin_' + p.id); const k = ease((t - p.t) / 0.4); const xy = map.project(p.c);
+    el.style.left = xy.x + 'px'; el.style.top = (xy.y + 14) + 'px'; el.style.opacity = k; el.style.transform = `translate(-50%,-100%) translateY(${(1 - k) * -40}px)`;
+  }
+  const cn = document.getElementById('count'); const ck = ease((t - 0.12) / 0.25) * (1 - ease((t - SPEC.countOut) / 0.35));
+  cn.style.opacity = ck; cn.style.transform = `scale(${0.8 + 0.2 * back((t - 0.12) / 0.35)})`;
+  document.getElementById('cn').textContent = Math.min(N, Math.round(live));
+  pops.forEach((p, i) => { const el = document.getElementById('pop' + i); const a = t - p.t; const q = posOf(ph[p.who], t);
+    if (a < 0 || a > 0.9 || !q) { el.style.opacity = 0; return; }
+    const xy = map.project(q.c); el.style.left = xy.x + 'px'; el.style.top = (xy.y - 40 - a * 70) + 'px';
+    el.style.opacity = Math.min(1, a / 0.08) * (1 - ease((a - 0.55) / 0.35)); el.style.transform = `translate(-50%,-50%) scale(${0.6 + 0.4 * back(a / 0.2)})`; });
+  const bd = document.getElementById('board'); const bk = ease((t - SPEC.boardIn) / 0.4) * (1 - ease((t - SPEC.boardOut) / 0.3));
+  bd.style.opacity = bk; bd.style.transform = `translateX(${(1 - ease((t - SPEC.boardIn) / 0.4)) * -80}px)`;
+  if (bk > 0) {
+    const sc = TEAMS.map((n, i) => ({n, v: Math.round(SPEC.base[i] + SPEC.rate[i] * Math.floor((t - SPEC.boardIn) * 4) * 5)}));
+    const order = [...sc].sort((a, b) => b.v - a.v);
+    sc.forEach((s, i) => { const el = document.getElementById('row' + i); const rank = order.indexOf(s);
+      el.style.top = (rank * 66) + 'px'; el.innerHTML = `<span><span class="r">${rank + 1}</span>${s.n}</span><span class="p">${s.v}</span>`; });
+  }
+  // the first frames grow out of the pressed screen: a bone wash and the button's orange opening like an iris
+  const w = 1 - ease(t / SPEC.washDur); document.getElementById('wash').style.opacity = w * 0.96;
+  const fl = document.getElementById('flash'); const fr = 340 + 2600 * out3(t / 0.5);
+  fl.style.width = fl.style.height = (2 * fr) + 'px'; fl.style.left = (SPEC.btn[0] - fr) + 'px'; fl.style.top = (SPEC.btn[1] - fr) + 'px';
+  fl.style.opacity = 0.95 * (1 - ease(t / 0.42));
+  map.once('idle', () => res(true));
+  map.triggerRepaint();
+});
+</script></body></html>

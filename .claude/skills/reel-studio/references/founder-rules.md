@@ -153,3 +153,32 @@ contradicts one, follow the rule and tell him in one line.
     `docs/marketing/footage/library/`. Every clip there is a short cut of the main thing (not a raw
     file) with an organised description: what is seen, what it is good for, source and seconds, and
     a consent note for anyone who is not him. Nothing where he talks to the camera.
+
+## From 2026-10-16 (street-200: five reels from street interviews) · details in lessons-2026-10-16.md
+67. **A spoken countdown lands EXACTLY** ("שיפול בול על 60 שניות"): it starts on the word that announces it and hits
+    0 on the end of the payoff line, both measured on the edited sound. Speed the TIMER up or down to fit; never slow
+    his speech, and cut the boring stretches instead.
+68. **Field audio must be really good AND still sound like us**: measure every chain on DNSMOS and timbre drift per
+    source type (`examples/street-200/audio_bench2.py`); remove noise professionally, never move the voice band.
+69. **Save time: run things in parallel** (asked twice). Transcribe in workers, bench beside renders, render finals in
+    lanes, deliver each reel as it lands. He also allows downloading a tool when it helps.
+70. **A frame change every ~3 seconds, in every video** ("חוק: כל 3 שניות מומלץ להחליף פריים"): framing changes,
+    faces, library inserts on lines that describe something. A long locked shot of a street group is "boring and does not move".
+71. **Reactions are emphasised, and strongly**: freeze on the reactor's face, a fast punch in, a beat of black and white,
+    a flash and a boom (`examples/street-200/hits.py`). A plain cut past a reaction wastes the best moment.
+72. **Titles and timers never sit on faces.** In street footage they go at chest height (y ~1000), not at the top.
+73. **Each person is asked the WHOLE question on screen** ("200 שקל או משימה מסתורית?"); starting at its tail cuts too late.
+74. **A "we lost" summary is sad on purpose**: black and white, a sad violin bed, a freeze on the worst number.
+75. **No failed takes in a video that must look real**, and **end on energy** (the pick, a cheer, a shout), never on a calm
+    or off topic line ("תעקבו ואולי תנצחו" mixes following with the race).
+76. **His own introduction stays in** ("לי קוראים אחיה"); a mis heard word in the transcript is not a reason to cut a line.
+    Cut only the ums.
+77. **At the end of a "stranger" story, show the stranger's face**, not the person he was talking to.
+78. **Sound effects carry the edit** (asked 2026-10-16): a boom under every freeze with the music cut out, a swell into it,
+    a register on money, a record scratch into a mood change, ticks on a timer, a whoosh on every jump to an insert, a pop on
+    every title. The picture change you also HEAR is what reads as fast (`examples/street-200/tl_common.py` hit_fx, motion_fx).
+
+79. **Words that sound like pressure or crime are cut, even said as a joke** (2026-10-16: "אם סחטנו אתכם לצפות" in 18). Cut the clause and let what he says next carry the line; never put a word in his mouth that he did not say. Read every kept line for how a stranger hears it, not how it was meant.
+80. **An insert must not show a different event** (2026-10-16): the Race to Zion route map ("מוצא") came out of 19 and 21; a city wide race gets a map of the city (`maps/map-jerusalem-zoom.mp4`), not another race's route.
+81. **The end is excitement, not a polite reaction** (2026-10-17, reel 20: a sarcastic "יאיי"). Never end on a line whose tone you cannot vouch for; end on the loudest real moment (their pick shouted), and make the picture and the sound celebrate it: a riser into it, a colour freeze with a hard shake and flash, a big headline (`T.big`), a register. `s200-mystery-girls` v3.
+82. **When the camera shows someone other than the speaker, label it** (2026-10-17, reel 22 "מבולגן, לא ברור"): a viewer reads the face on screen as the voice. Switch the pill when the camera turns ("משכנע עובר אורח"), keep one idea per beat, and drop every voice that is not the story's. Fewer, clearer beats beat more material: 22 went from 31 s to 18.6 s.

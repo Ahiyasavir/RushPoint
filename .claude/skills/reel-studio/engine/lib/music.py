@@ -466,7 +466,8 @@ def _heartdrop(bus, total, bpm, lvl, accents):
     sub and eighth hats; level 2 a clap on three and a minor bell motif; level 3 hat rolls and
     the motif an octave up. Bells are low passed so nothing sharp sits in the voice band."""
     beat = 60 / bpm; rng = bus.rng; bar = beat * 4
-    prog = [["F1", "F3", "G#3", "C4"], ["C#1", "F3", "G#3", "C#4"], ["D#1", "G3", "A#3", "D#4"], ["C1", "E3", "G3", "C4"]]
+    # a warm four chord loop in F major (he asked for the music to be "more present and more pleasant")
+    prog = [["F1", "A3", "C4", "F4"], ["C1", "G3", "C4", "E4"], ["D1", "A3", "D4", "F4"], ["A#0", "A#3", "D4", "F4"]]
     motif = [0, 2, 1, 2, 0, 1, 2, 1]
     b = 0
     while b * bar < total:
@@ -485,15 +486,16 @@ def _heartdrop(bus, total, bpm, lvl, accents):
         n = int(bar * 0.9 * SR)
         bus.add(t0, sub(root * 2, bar * 0.9) * env(n, 0.01, 1.6), 0.55)
         for k in range(8):
-            bus.add(t0 + k * beat / 2, hat(rng), 0.5 if k % 2 else 0.32, pan=0.25)
-        bus.add(t0, _pad(ch[1:], bar, 1300, 0.2, 0.5), 0.045)
+            bus.add(t0 + k * beat / 2, hat(rng), 0.30 if k % 2 else 0.18, pan=0.25)
+        bus.add(t0, _pad(ch[1:], bar, 1500, 0.2, 0.5), 0.13)
+        bus.add(t0, epiano(ch[1:], bar * 0.95), 0.16)
         if L >= 2:
-            bus.add(t0 + 2 * beat, snare(rng, 0.2, 210, 1.1), 0.7)
+            bus.add(t0 + 2 * beat, snare(rng, 0.2, 200, 0.7), 0.42)
             for s_, m in enumerate(motif):
                 bus.add(t0 + s_ * beat / 2, lp(pluck(ch[1 + m] * 2, beat * 0.7, 0.994, rng), 2400), 0.3, pan=-0.25 + 0.07 * s_)
         if L >= 3:
             for q in (3.0, 3.125, 3.25, 3.375, 3.5, 3.667, 3.833):
-                bus.add(t0 + q * beat, hat(rng), 0.42, pan=-0.3)
+                bus.add(t0 + q * beat, hat(rng), 0.22, pan=-0.3)
             for s_, m in enumerate(motif):
                 if s_ % 2 == 0:
                     bus.add(t0 + s_ * beat / 2 + beat / 4, lp(pluck(ch[1 + m] * 4, beat * 0.5, 0.99, rng), 3000), 0.2, pan=0.3)
@@ -522,6 +524,9 @@ def make_music(out, total: float, style: str = "funk", bpm: float = 100.0, energ
                 v = l
         return v
 
+    if style not in STYLES:   # street-200 styles live in their own file (2026-10-16)
+        from .music_street import STYLES_STREET
+        STYLES.update(STYLES_STREET)
     STYLES[style](bus, total, bpm, lvl, list(accents))
     x = np.stack([bus.L, bus.R])
     for a, b in drops:
