@@ -79,6 +79,8 @@
       "trailingSlash": true,
       "redirects": [
         { "source": "/", "destination": "/he/", "type": 302 },
+        { "source": "/t", "destination": "/he/?utm_source=shirt&utm_medium=qr&utm_campaign=tshirt", "type": 302 },
+        { "source": "/t/", "destination": "/he/?utm_source=shirt&utm_medium=qr&utm_campaign=tshirt", "type": 302 },
         { "source": "/terms", "destination": "https://player.rush-point.com/terms", "type": 301 },
         { "source": "/privacy", "destination": "https://player.rush-point.com/privacy", "type": 301 },
         { "source": "/he/bar-mitzva", "destination": "https://player.rush-point.com/he/bar-mitzva/", "type": 301 },

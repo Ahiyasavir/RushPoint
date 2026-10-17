@@ -94,6 +94,22 @@ check(
   `${redirects.length} redirect(s)`,
 );
 
+// The printed QR address. A shirt carries `rush-point.com/t` forever, so the code
+// must never point anywhere but a redirect we control: 302 so the destination can
+// move without reprinting (a 301 is cached by the scanning phone), both spellings
+// because trailingSlash is on, and a utm tag so analytics can count the scans.
+for (const source of ['/t', '/t/']) {
+  const shirt = redirects.find((r) => r.source === source);
+  check(`E · the shirt QR address ${source} is redirected`, Boolean(shirt), shirt ? String(shirt.destination) : '(absent)');
+  check(`E · ${source} is a 302, so the printed code can be re-aimed`, shirt?.type === 302, shirt ? String(shirt.type) : '(absent)');
+  check(
+    `E · ${source} lands on a language home and is tagged as a shirt scan`,
+    Boolean(shirt) && LANGUAGES.some((lang) => String(shirt!.destination).startsWith(`${pagePath(lang, '')}?`))
+      && /utm_source=shirt/.test(String(shirt!.destination)) && /utm_medium=qr/.test(String(shirt!.destination)),
+    shirt ? String(shirt.destination) : '(absent)',
+  );
+}
+
 // The target has to be mapped to an actual Hosting site or a deploy fails with a
 // message about targets rather than about anything you just changed.
 const targets = firebaserc?.targets?.['rushpoint-pwa-7daaa']?.hosting ?? {};
