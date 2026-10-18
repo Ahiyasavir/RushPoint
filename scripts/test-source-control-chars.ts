@@ -38,7 +38,16 @@ const SKIP_DIRS = new Set([
   'coverage', 'build', '.turbo', '.git', 'public',
 ]);
 
-const EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|astro|css|json|md|yaml|yml|rules)$/;
+const EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|astro|css|json|md|yaml|yml|rules|py|sh|html)$/;
+
+/**
+ * The project's own skills are code too: the reel engine and the script checker are Python, and on
+ * 2026-10-17 three backspace/form-feed bytes were found there, two of them silently disabling a check
+ * (qa.py's numeric dates, check_script.py's Hebrew number words). `lib` is real source here (the reel
+ * engine's library), not build output, so this root gets its own skip set.
+ */
+const SKILLS_ROOT = '.claude/skills';
+const SKILLS_SKIP = new Set([...SKIP_DIRS, '__pycache__'].filter((d) => d !== 'lib'));
 
 /**
  * Files allowed to contain a control character, with the reason. DECLARED, never
@@ -91,7 +100,7 @@ function check(name: string, ok: boolean, detail = ''): void {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` :: ${detail}` : ''}`);
 }
 
-function walk(dir: string, out: string[] = []): string[] {
+function walk(dir: string, out: string[] = [], skip: Set<string> = SKIP_DIRS): string[] {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -101,8 +110,8 @@ function walk(dir: string, out: string[] = []): string[] {
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      walk(full, out);
+      if (skip.has(entry.name)) continue;
+      walk(full, out, skip);
     } else if (EXTENSIONS.test(entry.name)) {
       out.push(full);
     }
@@ -120,6 +129,15 @@ for (const root of ROOTS) {
     // assertion below is what catches "we scanned nothing".
   }
 }
+const skillFiles = walk(join(ROOT, SKILLS_ROOT), [], SKILLS_SKIP);
+files.push(...skillFiles);
+const skillRel = skillFiles.map((f) => relative(ROOT, f).split(sep).join('/'));
+check(
+  'the scan reached the skills, engine lib included',
+  skillRel.includes('.claude/skills/reel-studio/engine/qa.py') &&
+    skillRel.includes('.claude/skills/reel-studio/engine/lib/captions.py'),
+  `${skillFiles.length} skill file(s)`,
+);
 
 // The reach assertion, first, because every other check here is an absence and
 // an absence over an empty file list is a green nobody earned. That is the very

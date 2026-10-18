@@ -108,7 +108,7 @@ def _measure_font(size: int):
             from .common import font_file
             f = CFG["fonts"]
             path = str(font_file(f["display"], f["display_weight"]))
-        # ASS s is not a pixel em; ~0.72 matches the libass render (test_captions.py)
+        # ASS \fs is not a pixel em; ~0.72 matches the libass render (test_captions.py)
         _MEASURE[key] = ImageFont.truetype(path, max(int(size * EM_RATIO), 8))
     return _MEASURE[key]
 

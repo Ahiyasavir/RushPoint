@@ -19,6 +19,11 @@ Extract frames at: 0.2 s, every cut ±0.1 s, every insert, the last second. Then
       the last word of every take. `qa.py` "frozen tails" and "eyes at the cut" must be ✔ (rule 56).
 - [ ] **No walk ins, no head turns to the camera, no off script words** at clip edges (read the
       transcript of the kept span).
+- [ ] **Every reaction freeze is on the right face**: `examples/street-200/hit_sheet.py <reel>` and read the
+      sheet. The detector freezes on whoever stands in front; set `face=(x, y)` by eye when it is wrong.
+- [ ] **Whose face is on screen while who speaks**: when the camera shows someone other than the
+      speaker, a label says who is who (rule 82), or the viewer takes the face for the voice.
+- [ ] **Every insert shows THIS event**: no other race's route, place or people (rule 80).
 - [ ] **Captions**: 84 px, under the speaker's face, never touching a phone, never below y 1420, the
       text = what was SAID, no dashes, no sentence initial ו.
 - [ ] **Phone mockups**: big, centred, mission text blurred.
@@ -29,6 +34,10 @@ Extract frames at: 0.2 s, every cut ±0.1 s, every insert, the last second. Then
 - [ ] **No logo. No dates.**
 - [ ] **Last frame**: ends on the last scripted line, nothing after; if it loops, first and last
       shots in the same place and framing.
+- [ ] **The ending is the loudest real moment, and sounds like it means it**: no sarcastic, polite or
+      off topic closing line (rule 81). Picture and sound celebrate it (riser, colour freeze, headline, sfx).
+- [ ] **Read every kept line as a stranger hears it once**: no word that reads as pressure or crime even
+      as a joke (rule 79; `qa.py` fails the known ones). Cut the clause, never reword him.
 
 ## 3. Listen
 - [ ] Voice: not harsh, not fast (1.12 monologue, ~1.03 dialogue), every word audible, no breath or
@@ -56,3 +65,5 @@ Extract frames at: 0.2 s, every cut ±0.1 s, every insert, the last second. Then
       it is an instruction video (rule 57). Calm dissolves are for a classroom projector only.
 - [ ] The file renders in the chat (`display: render`); the caption, if asked, ends with exactly 5
       hashtags including #RushPoint and #רשפוינט, and no ex partners' tags.
+- [ ] The caption was written from THIS version and quotes only lines that are still in it.
+- [ ] Several reels: each one is sent as soon as its own chain passes, not held for the batch.

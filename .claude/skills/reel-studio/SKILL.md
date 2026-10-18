@@ -14,7 +14,7 @@ happened because something already written was not read.
 ## Step 0 · Read before the first command (every time)
 
 1. `references/founder-rules.md`: his standing rules (55). They outrank any brief.
-2. `references/lessons-2026-10-16.md` (newest: street interviews, WhatsApp audio decoded in float, the measured field chain, an exact countdown, parallel work; worked example `engine/examples/street-200/`), `lessons-2026-10-13.md` (white background, the voice chain that keeps his timbre, three pass ingest), `lessons-2026-10-05.md` and `lessons-2026-10-02.md`: what went wrong and the fix.
+2. `references/lessons-2026-10-17.md` (newest: v2 to v3 of five reels; look at every freeze, ship each reel as its chain finishes, the four notes that became rules 79 to 82, backspaces that blinded two checks, captions from the final cut, no faces in git), `lessons-2026-10-16.md` (street interviews, WhatsApp audio decoded in float, the measured field chain, an exact countdown, parallel work; worked example `engine/examples/street-200/`), `lessons-2026-10-13.md` (white background, the voice chain that keeps his timbre, three pass ingest), `lessons-2026-10-05.md` and `lessons-2026-10-02.md`: what went wrong and the fix.
 3. `references/pre-delivery-checklist.md`: the zero notes checklist. **Every cut passes it before it is sent.**
 4. `references/kill-criteria.md`: the six question test.
 5. `references/gotchas.md` + `~/.claude/toolkits/video-editing/README.md` (the long list).
@@ -150,6 +150,12 @@ Read the preview jpg. Nothing readable may touch a zone. Then extract 6 to 10 fr
 moments that matter (`ffmpeg -ss t -frames:v 1`), read them, and measure what QA cannot see.
 Tile the LAST frame of every talking shot into one sheet and look at it: this is where v1 of reel 16
 failed, and no number caught all of it.
+**Every reaction freeze, too:** `python examples/street-200/hit_sheet.py <reel>` tiles one frame of each hit
+from the BUILT video with the face it aimed at. The detector picks the largest face near `hint_x`, so in a
+group it freezes on whoever stands in front (two of eleven were wrong in the street reels' v2; QA passed both).
+**And read the reel as a stranger who hears it once:** whose face is on screen while who speaks (label it
+when the camera shows someone else, rule 82), what the last line sounds like (sarcasm is not an ending, 81),
+any word that reads as pressure even as a joke (79), any insert that shows a different event (80).
 **A cut with any ✖ in QA is never sent** (rule 55). Walk `pre-delivery-checklist.md`. Only then send it to him
 (`SendUserFile`, display render) with a short Hebrew note: what changed, what is open.
 Every piece of feedback that is a RULE (not a one off) goes into `founder-rules.md` and
@@ -159,13 +165,20 @@ the `feedback-reel-edit-rules` memory in the same turn. A bug class that reached
 ## Step 7 · Finish
 
 ```bash
-python variants.py <reel> --final     # B and C openings, covers, master quality, only passing files delivered
+python variants.py <reel> --final     # the declared openings, covers, master quality, only passing files delivered
 ```
+**Several reels, or a round of notes: one chain per reel, in parallel, each shipped as it finishes**
+(he asked to save time; three reels took ~10 minutes instead of ~30): `cuts.py` -> `make_timeline.py` ->
+`variants.py --final` (strict QA included, so a small change needs no preview build) -> deliver -> send.
+One waiter per chain, each ending on its own marker. Pattern and traps: `lessons-2026-10-17.md` §2.
 Then `references/deliverables.md`: folder `docs/marketing/videos/drafts/<NN>-<slug>/`,
 `-v1`, `-v1-small`, `-v1-open-b/c`, `-v1-cover.png`, README with the five headings and
 `## כיתוב לפוסט`, index table, `npx tsx scripts/test-marketing-structure.ts` green.
 Caption: `video-script` skill, one for all platforms, 5 hashtags incl. `#RushPoint` and
-`#רשפוינט` (never #הנוערשלישראל: that partnership ended). Nothing is sent or posted without his
+`#רשפוינט` (never #הנוערשלישראל: that partnership ended). Write it from the FINAL cut, quoting only lines
+that survive in it; a batch gets one shared captions file copied into each README. **Committing:** text and
+tools only. Covers and clips are faces (most of them minors) and the repo is PUBLIC: before a commit
+`git diff --cached --name-only | grep -Ei '\.(png|jpg|mp4|webm)$'` prints nothing. Nothing is sent or posted without his
 explicit OK. Files go to him in the chat; text for WhatsApp goes to the אודי session, which posts in
 the group "תוכן" (it cannot open files on this machine).
 

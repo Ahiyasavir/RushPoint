@@ -1077,8 +1077,10 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   a check that examined everything and found no problem print the same line. It arrives easily
   from any tool that writes files through a language where `\b` in a string literal means
   backspace (Python, Ruby, JS strings, `echo -e`). `scripts/test-source-control-chars.ts` now
-  fails on any stray control character in `scripts/`, `packages/shared/src`, `functions/src` and
-  `apps`, naming file and line; six legitimate uses are DECLARED with reasons (sanitiser inputs,
+  fails on any stray control character in `scripts/`, `packages/shared/src`, `functions/src`,
+  `apps` and `.claude/skills` (Python included, `lib/` included: on 2026-10-17 it found backspaces
+  that had silently blinded the reel engine's date check and the script checker's Hebrew number
+  words, and the first fix re-created one the same way), naming file and line; six legitimate uses are DECLARED with reasons (sanitiser inputs,
   `adminNotes.ts`'s own strip range, and the NUL delimiter in `hashAnswerForReplay`), and a stale
   entry fails too. **Corollary worth generalising: whenever a check counts things, print the
   denominator.** "0 of 1 images missing alt" is a fact; "no images missing alt" is compatible

@@ -147,7 +147,7 @@ def check(text):
     # a count, a clock, a weekday, a place, a person. His own tape scores 5 here
     # (עשרות, 4, בחמישי, בבוקר, הצום) and must never fail this check.
     nums = len(re.findall(r"\d", body)) + len(re.findall(
-        r"(אחד|שתי|שני|שלוש|ארבע|חמש|שש|שבע|שמונה|תשע|עשר|מאות|עשרות|אלפי|חצי)", body))
+        r"\b(אחד|שתי|שני|שלוש|ארבע|חמש|שש|שבע|שמונה|תשע|עשר|מאות|עשרות|אלפי|חצי)\b", body))
     times = len(re.findall(
         r"(בבוקר|בערב|בלילה|בצהריים|אתמול|מחר|היום|השבוע|בראשון|בשני|בשלישי|ברביעי"
         r"|בחמישי|בשישי|בשבת|הצום|השמש|לפנות בוקר|שעבר)", body))
