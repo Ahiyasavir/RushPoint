@@ -117,7 +117,28 @@ export function buildDeployTestGame(date, notes = {}) {
       ],
     },
     {
-      id: 'dt-s3', order: 3, title: 'שטח ובטיחות', isFinal: true,
+      // The 14.10 vineyard (2026-10-21): a chain of required missions, and a pause in the middle of
+      // it. A pause used to strand every team that still needed the paused mission.
+      id: 'dt-s-chain', order: 3, title: 'שרשרת והשהיה', isFinal: false,
+      tasks: [
+        anywhere({
+          id: 'dt-chain-head', title: 'זינוק של השרשרת', type: 'self_report',
+          description: say('צריך שתי קבוצות. קבוצה א מסיימת את המשימה הזו ועוברת ל"משימה שמשהים". רק אז המארגן משהה בקונסולה את "משימה שמשהים" (השהיה, לא סגירה). אחרי זה קבוצה ב מסיימת את המשימה הזו.',
+            'בקונסולה אין "להשהות בכל זאת", ומופיעה הודעה שקבוצה שתישאר בלי משימות תדלג על המשימה ותמשיך. קבוצה ב לא נתקעת: היא מקבלת ישר את "סוף השרשרת" וממשיכה משם לשלב הבא. קבוצה א ממשיכה את "משימה שמשהים" ומקבלת עליה נקודות.'),
+        }),
+        anywhere({
+          id: 'dt-chain-mid', title: 'משימה שמשהים', type: 'self_report', unlockAfterTaskIds: ['dt-chain-head'],
+          description: say('זו המשימה שהמארגן משהה. קבוצה שכבר עליה מסיימת אותה כרגיל.',
+            'הקבוצה שהחזיקה בה ברגע ההשהיה מסיימת ומקבלת נקודות. קבוצה שעוד לא הגיעה אליה מדלגת עליה ולא נתקעת.'),
+        }),
+        anywhere({
+          id: 'dt-chain-end', title: 'סוף השרשרת', type: 'self_report', unlockAfterTaskIds: ['dt-chain-head', 'dt-chain-mid'],
+          description: say('מסיימים כרגיל.', 'אחרי המשימה הזו השלב נגמר והקבוצה ממשיכה לשלב הבא, גם אם דילגה על "משימה שמשהים".'),
+        }),
+      ],
+    },
+    {
+      id: 'dt-s3', order: 4, title: 'שטח ובטיחות', isFinal: true,
       tasks: [
         {
           id: LOCATED_TASK_ID, title: 'הליכה לנקודה', type: 'field', triggerMode: 'radius',
