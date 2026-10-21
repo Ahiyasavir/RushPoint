@@ -125,7 +125,7 @@ export {
 // access code that only the live console holds.
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, skipTaskForTeam, finalizeRun,
-  setTeamHold, setTeamRemoved, forceAssignTask, returnTeamTo, getRunOutline, markTeamArrived,
+  setTeamHold, setTeamRemoved, renameTeam, forceAssignTask, returnTeamTo, getRunOutline, markTeamArrived,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks, revealTaskAnswer,
@@ -2719,14 +2719,13 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
 // finishes and scores it (D2). The response reports how many teams that is.
 export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, context) => {
   await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'tasks');
-  const { ownerUid, gameId, runId, taskId, status, reason, force } = data as {
+  const { ownerUid, gameId, runId, taskId, status, reason } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     taskId: string;
     status: StationStatus;
     reason?: string;
-    force?: boolean;
   };
 
   const ids = validate(() => ({
@@ -2785,21 +2784,10 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     throw new functions.https.HttpsError('failed-precondition', `Cannot change this task: ${plan.reason}`);
   }
 
-  // The organizer learns about a dead-ended stage HERE, not through stuck teams.
-  // Same rule and the same quantity the Builder reports as `stageUnwinnable`.
-  if (plan.stageUnwinnable && force !== true) {
-    throw new functions.https.HttpsError(
-      'failed-precondition',
-      'Pausing this task would leave the stage with fewer available tasks than it requires',
-      {
-        code: 'stageUnwinnable',
-        availableCount: plan.availableAfter,
-        requiredCount: plan.requiredCount,
-        stageTitle: stage.title ?? '',
-        taskTitle: task.title ?? '',
-      },
-    );
-  }
+  // A pause is never refused, even one the stage cannot spare (change: pause-never-strands). On
+  // 14.10 such pauses were refused, then forced, and the forced pause stranded 16 teams in stage 1.
+  // Routing now owns that case: a team that runs out of missions because of a pause moves on past
+  // it (`setAsidePausedTasks`, runs/index.ts), so `stageUnwinnable` is only reported, never a wall.
 
   // Whole-map write inside a transaction. Deliberately NOT a dotted path: task ids
   // are opaque strings and this repo has been bitten by dotted-key writes twice.
@@ -2830,7 +2818,9 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     reason: cleanReason,
     taskId: ids.taskId,
     taskTitle: task.title ?? '',
-    forced: plan.stageUnwinnable === true,
+    // Kept in the record shape for old readers; a pause can no longer be forced (pause-never-strands).
+    forced: false,
+    stageUnwinnable: plan.stageUnwinnable === true,
   });
 
   return {

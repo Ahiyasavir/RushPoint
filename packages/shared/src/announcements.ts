@@ -26,20 +26,34 @@ export function announcementVisibleTo(
  * The sign is ALWAYS rendered on the delta ("+50" / "-25"); the reason is
  * optional and appended after a middot separator when present.
  */
+// D27 (race 14.10): the staff app sends a PRESET reason as its id (shared/scoreReasons, so the audit
+// log stays language neutral), and this notice printed the id: players read "+20 · reasonCreativity".
+// The labels match both apps' `t.staff.reason*` copy; `reasonOther` carries no text of its own.
+const SCORE_REASON_LABELS: Record<string, { he: string; en: string }> = {
+  reasonCreativity: { he: 'בונוס יצירתיות', en: 'Creativity bonus' },
+  reasonTeamwork: { he: 'עבודת צוות', en: 'Teamwork' },
+  reasonSpeed: { he: 'בונוס מהירות', en: 'Speed bonus' },
+  reasonHelpfulness: { he: 'עזרה לקבוצה אחרת', en: 'Helped another team' },
+  reasonLate: { he: 'קנס איחור', en: 'Late penalty' },
+  reasonRuleBreak: { he: 'הפרת כללים', en: 'Rule violation' },
+  reasonStaffCall: { he: 'החלטת צוות', en: 'Staff decision' },
+  reasonOther: { he: '', en: '' },
+};
+
 export function formatScoreNotice(
   delta: number,
   reason: string | undefined,
-  // `_lang` is accepted for a stable, explicit call-site contract (EN vs HE copy)
-  // and future localized separators/labels; the current copy is language-neutral —
-  // a signed number plus the caller-supplied reason, which is already in the
-  // caller's tongue. Prefixed with `_` so noUnusedParameters stays happy.
-  _lang: 'en' | 'he',
+  // A free-text reason is already in the marshal's tongue and is shown as typed; a preset id is
+  // shown by its label in THIS language (D27).
+  lang: 'en' | 'he',
 ): string {
   const n = Number.isFinite(delta) ? delta : 0;
   const signed = `${n >= 0 ? '+' : '-'}${Math.abs(n)}`;
   const trimmed = reason?.trim();
   if (!trimmed) return signed;
-  return `${signed} · ${trimmed}`;
+  const preset = Object.prototype.hasOwnProperty.call(SCORE_REASON_LABELS, trimmed) ? SCORE_REASON_LABELS[trimmed] : undefined;
+  const shown = preset ? preset[lang] : trimmed;
+  return shown ? `${signed} · ${shown}` : signed;
 }
 
 /**

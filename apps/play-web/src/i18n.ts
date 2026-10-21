@@ -91,6 +91,8 @@ const HE = {
     // change: self-healing-entry. The phone lost its sign-in and automatic recovery failed. Not a
     // reception problem: the one action that works is a reload.
     signInLost: 'הטלפון התנתק מהמשחק. טענו את הדף מחדש ונסו שוב.',
+    slowDown: 'היו הרבה ניסיונות ברצף. חכו חצי דקה ונסו שוב.',
+    networkBusy: 'יותר מדי טלפונים נרשמו מהרשת הזו בשעה האחרונה. כבו את האינטרנט האלחוטי, עברו לגלישה סלולרית ונסו שוב, או פנו למארגן.',
     reloadCta: 'טעינה מחדש',
     // In-app legal links (Google Play requirement — the policy governing the
     // photo feed must be reachable by the people posting to it).
@@ -1243,6 +1245,8 @@ const EN: typeof HE = {
     gameFull: 'This race is full. Tell your host, they can open more spots.',
     connectionError: 'Connection problem. Check your connection and try again.',
     signInLost: 'This phone was signed out of the game. Reload the page and try again.',
+    slowDown: 'Lots of tries in a row. Wait half a minute and try again.',
+    networkBusy: 'Too many phones signed up from this network in the last hour. Turn off WiFi, use mobile data and try again, or ask your host.',
     reloadCta: 'Reload',
     // In-app legal links (Google Play requirement — the policy governing the
     // photo feed must be reachable by the people posting to it).

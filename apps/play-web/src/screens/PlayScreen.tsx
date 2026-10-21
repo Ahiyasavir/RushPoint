@@ -639,7 +639,14 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     setRejoinErr('');
     try {
       await startFreshIdentity();
-      await joinTeamAsDevice({ code: saved.code, teamCode: saved.deviceJoinCode, memberName: saved.displayName || undefined });
+      // change: rejoin-replaces-lost-phone. Name the identity this phone joined with, so the server
+      // puts the new one in its place (no slot used, and the sending role comes back) instead of
+      // adding a phone, which a full team refused.
+      const lost = saved.deviceUid && saved.deviceUid !== uid() ? saved.deviceUid : undefined;
+      await joinTeamAsDevice({
+        code: saved.code, teamCode: saved.deviceJoinCode, memberName: saved.displayName || undefined,
+        ...(lost ? { replacesUid: lost } : {}),
+      });
       saveSession({ ...saved, deviceUid: uid() ?? undefined });
       firstLoadFails.current = 0;
       setErr('');
@@ -647,7 +654,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       void refresh();
     } catch (e) {
       const key = joinErrorKey(e);
-      setRejoinErr(key === 'full' ? t.devices.teamFull : key === 'connection' ? t.join.connectionError : t.join.joinFailed);
+      setRejoinErr(key === 'full' ? t.devices.teamFull
+        : key === 'connection' ? t.join.connectionError
+          // The rejoin mints a fresh identity, so the per-network sign-up limit can hit HERE (21.10).
+          : key === 'networkBusy' ? t.join.networkBusy
+            : key === 'slowDown' ? t.join.slowDown
+              : t.join.joinFailed);
     } finally {
       setRejoinBusy(false);
     }

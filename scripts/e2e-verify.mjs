@@ -894,16 +894,21 @@ async function main() {
   // [callable-rate-limiting #19] a single uid's call volume is bounded per window.
   // triggerSOS has a small budget (5/min); the 6th rapid call trips resource-exhausted.
   let sosRateTrip = false;
+  let sosRateDetails = null;
   for (let i = 0; i < 6; i++) {
     try {
       await player.call('triggerSOS', {
         ownerUid: creatorCred.user.uid, gameId, runId, message: 'rate-limit probe',
       });
     } catch (e) {
-      if (e.code === 'functions/resource-exhausted') sosRateTrip = true;
+      if (e.code === 'functions/resource-exhausted') { sosRateTrip = true; sosRateDetails = e.details ?? null; }
     }
   }
   check('rate limiting: spamming triggerSOS past its budget → resource-exhausted', sosRateTrip);
+  // 21.10: the same code also means "this race / team is full", so the phone must be able to tell
+  // them apart. Unmarked, ten failed join taps told the organizer to open more spots.
+  check('rate limiting: the refusal is marked as a rate limit (details.reason === rateLimited) with a wait',
+    sosRateDetails?.reason === 'rateLimited' && typeof sosRateDetails?.retryAfterMs === 'number', JSON.stringify(sosRateDetails));
 
   const verifyRes = await player.call('verifyStationCode', {
     ownerUid: creatorCred.user.uid, gameId, runId,
@@ -1612,6 +1617,103 @@ async function main() {
   check('team finished after the single required task', s2?.team?.status === 'finished', s2?.team?.status);
 
   }); // scenario: partial-completion
+
+  await scenario('rejoin replaces the lost phone (no slot used, sender moves, foreign uid ignored)', async () => {
+  // change: rejoin-replaces-lost-phone. A phone that lost its sign-in rejoins as a NEW identity and
+  // names the one it lost (`replacesUid`). 18.10: a full team refused it, every loss used a slot, and
+  // a rejoined sender came back as a viewer with the sending role left on a dead identity.
+  const adminDb = adminSdk.firestore();
+  const ownerUid = creatorCred.user.uid;
+  const { gameId: gR } = await creator.call('createGame', { title: 'Rejoin Game', mode: 'team' });
+  await creator.call('updateGame', {
+    gameId: gR,
+    stages: [{
+      id: 'rj-s', order: 0, title: 'Stage', isFinal: true,
+      // Two missions, so completing one leaves the team still playing for the checks after it.
+      tasks: ['rj-t', 'rj-t2'].map((id) => ({ id, title: 'Anywhere', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 3, pointValue: 10, maxConcurrentTeams: 50 })),
+    }],
+  });
+  const { runId: rR, accessCode: cR } = await creator.call('launchRun', { gameId: gR });
+  const runPathR = `users/${ownerUid}/games/${gR}/runs/${rR}`;
+  const anon = async (name) => { const p = makeParty(name); const cred = await signInAnonymously(p.auth); return { p, uid: cred.user.uid }; };
+  const teamOf = async (teamId) => (await adminDb.doc(`${runPathR}/teams/${teamId}`).get()).data();
+  const deviceCount = async () => (await adminDb.doc(runPathR).get()).data()?.deviceCount ?? 0;
+  const memberDoc = async (uid) => (await adminDb.doc(`${runPathR}/deviceMembers/${uid}`).get()).exists;
+
+  // A team declared with ONE member takes 3 phones: founder + b + c = full.
+  const founder = await anon('rj-founder');
+  await founder.p.call('joinRun', { code: cR, displayName: 'Rejoiners', memberNames: ['Solo'] });
+  const teamCodeR = (await founder.p.call('getMyTeamState', { code: cR }))?.team?.deviceJoinCode;
+  const b = await anon('rj-b');
+  const c = await anon('rj-c');
+  await b.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR, memberName: 'Noa' });
+  await c.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR });
+  check('setup: the team is at its phone limit', (await teamOf(founder.uid))?.deviceUids?.length === 3);
+
+  // Without naming the lost identity a 4th phone is still refused (the ordinary rule is unchanged).
+  const stray = await anon('rj-stray');
+  let strayRefused = false;
+  try { await stray.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR }); } catch (e) { strayRefused = e.code === 'functions/resource-exhausted'; }
+  check('an ordinary 4th phone on a full team is still refused', strayRefused);
+
+  // b loses its sign-in and rejoins as b2, naming b.
+  const countBefore = await deviceCount();
+  const b2 = await anon('rj-b2');
+  const rb = await b2.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR, replacesUid: b.uid });
+  let t = await teamOf(founder.uid);
+  check('a phone that lost its sign-in rejoins a FULL team', rb?.teamId === founder.uid && t?.deviceUids?.includes(b2.uid), JSON.stringify(rb));
+  check('the lost identity is no longer a device of the team', !t?.deviceUids?.includes(b.uid) && t?.deviceUids?.length === 3, t?.deviceUids?.join(','));
+  check('the replacement keeps the phone name', t?.devices?.find((d) => d.uid === b2.uid)?.name === 'Noa');
+  check('a replacement does not move the run device count', (await deviceCount()) === countBefore, `${countBefore} → ${await deviceCount()}`);
+  check('the device-membership index follows the swap', (await memberDoc(b2.uid)) && !(await memberDoc(b.uid)));
+  let lostRefused = false;
+  try { await b.p.call('getMyTeamState', { code: cR }); } catch (e) { lostRefused = e.code === 'functions/not-found'; }
+  check('the replaced identity can no longer read the team', lostRefused);
+  const b2State = await b2.p.call('getMyTeamState', { code: cR });
+  check('the rejoined phone reads its team as a viewer', b2State?.myRole === 'viewer', b2State?.myRole);
+
+  // Twice more on the same phone: the team never grows.
+  let prev = b2;
+  for (const n of ['rj-b3', 'rj-b4']) {
+    const next = await anon(n);
+    await next.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR, replacesUid: prev.uid });
+    prev = next;
+  }
+  t = await teamOf(founder.uid);
+  check('repeated losses on one phone never grow the team', t?.deviceUids?.length === 3 && t.deviceUids.includes(prev.uid), t?.deviceUids?.join(','));
+
+  // The founder (the sender) loses its sign-in and rejoins: it must be the sender again.
+  const f2 = await anon('rj-f2');
+  const rf = await f2.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR, replacesUid: founder.uid });
+  t = await teamOf(founder.uid);
+  check('a rejoined sender is the sender again', t?.controllerUid === f2.uid && rf?.role === 'controller', `${t?.controllerUid} role=${rf?.role}`);
+  check('the team keeps its id when the founder identity is replaced', t?.id === founder.uid && !t?.deviceUids?.includes(founder.uid));
+  await creator.call('startTeams', { gameId: gR, runId: rR });
+  const fState = await f2.p.call('getMyTeamState', { code: cR });
+  const rjTask = fState?.team?.stages?.[0]?.tasks?.find((x) => x.status === 'assigned');
+  let sentOk = false;
+  try { await f2.p.call('completeTask', { taskId: rjTask?.taskId, code: cR }); sentOk = true; } catch (e) { sentOk = e.code; }
+  check('the rejoined sender can complete a mission', sentOk === true, String(sentOk));
+  let deadFounderBlocked = false;
+  try { await founder.p.call('claimController', { code: cR }); } catch (e) { deadFounderBlocked = e.code === 'functions/permission-denied'; }
+  check('the replaced founder identity cannot take control back', deadFounderBlocked);
+
+  // A uid from ANOTHER team is never touched: the attach follows the ordinary rules (full ⇒ refused).
+  const other = await anon('rj-other');
+  await other.p.call('joinRun', { code: cR, displayName: 'Other Team', memberNames: ['A', 'B', 'C'] });
+  const intruder = await anon('rj-intruder');
+  let foreignRefused = false;
+  let foreignOutcome = 'attached';
+  try { await intruder.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR, replacesUid: other.uid }); } catch (e) { foreignOutcome = `${e.code} ${e.message}`; foreignRefused = e.code === 'functions/resource-exhausted'; }
+  const otherTeam = await teamOf(other.uid);
+  check('a replacesUid from another team falls back to the ordinary (full) rule', foreignRefused, foreignOutcome);
+  check('the other team is untouched', otherTeam?.deviceUids?.length === 1 && otherTeam.deviceUids[0] === other.uid && otherTeam.controllerUid === other.uid);
+
+  // Malformed replacesUid is refused at the door, never silently used.
+  let malformedRefused = false;
+  try { await intruder.p.call('joinTeamAsDevice', { code: cR, teamCode: teamCodeR, replacesUid: { x: 1 } }); } catch (e) { malformedRefused = e.code === 'functions/invalid-argument'; }
+  check('a malformed replacesUid is refused', malformedRefused);
+  }); // scenario: rejoin replaces the lost phone
 
   await scenario('locationless task is uncapped (>3 teams, unset cap)', async () => {
 
@@ -11341,61 +11443,75 @@ async function main() {
     check('holder: the paused station released its slot (counter back to 0 — no leak)',
       (hCounts[held] ?? 0) === 0, JSON.stringify(hCounts));
 
-    // ── C. The unwinnable-stage guard ────────────────────────────────────────
-    // requiredTaskCount 2 of 2: pausing EITHER task leaves the stage unable to
-    // yield what it requires. The organizer must learn that here, not through
-    // teams that silently dead-end in the field.
-    const { gameId: ug } = await creator.call('createGame', { title: 'Unwinnable Pause Game', mode: 'individual' });
+    // ── C. A pause never strands a team (change: pause-never-strands) ─────────
+    // The 14.10 race: stage 1 was a chain of required missions, the organizer paused missions in it,
+    // and every team that still needed one could never finish the stage, so only 2 of 30 reached the
+    // vineyard (stage 3). Here: head → mid → end, all required, then a final stage. Pausing `mid` is
+    // ACCEPTED. A team that already holds `mid` keeps it and finishes it; a team that runs out of
+    // missions because of the pause moves on past it (set aside for that team only, 0 points), and
+    // still reaches the next stage.
+    const { gameId: ug } = await creator.call('createGame', { title: 'Pause Never Strands Game', mode: 'individual' });
+    const ut = (id, after) => ({ id, title: `Mission ${id}`, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+      ...(after ? { unlockAfterTaskIds: after } : {}) });
     await creator.call('updateGame', {
       gameId: ug, scoringPreset: 'time_only',
-      stages: [{ id: 'uw-s', order: 0, title: 'Both required', isFinal: true, requiredTaskCount: 2, tasks: [
-        { id: 'uw-a', title: 'Left', type: 'self_report', triggerMode: 'locationless', locationless: true,
-          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
-        { id: 'uw-b', title: 'Right', type: 'self_report', triggerMode: 'locationless', locationless: true,
-          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
-      ] }],
+      stages: [
+        { id: 'uw-s1', order: 0, title: 'Chain', tasks: [ut('uw-head'), ut('uw-mid', ['uw-head']), ut('uw-end', ['uw-head', 'uw-mid'])] },
+        { id: 'uw-s2', order: 1, title: 'Vineyard', isFinal: true, tasks: [ut('uw-vine')] },
+      ],
     });
-    const { runId: ur } = await creator.call('launchRun', { gameId: ug });
+    const { runId: ur, accessCode: uc } = await creator.call('launchRun', { gameId: ug });
     const U = { ownerUid: OWNER, gameId: ug, runId: ur };
-    const uRunPath = `users/${OWNER}/games/${ug}/runs/${ur}`;
+    const uTeamPath = (uid) => `users/${OWNER}/games/${ug}/runs/${ur}/teams/${uid}`;
+    const uRec = (team, id) => (team?.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === id);
+    const uHolder = makeParty('pauseStrandHolder');
+    const uHolderUid = (await signInAnonymously(uHolder.auth)).user.uid;
+    await uHolder.call('joinRun', { code: uc, displayName: 'Holds Mid' });
+    const uLate = makeParty('pauseStrandLate');
+    const uLateUid = (await signInAnonymously(uLate.auth)).user.uid;
+    await uLate.call('joinRun', { code: uc, displayName: 'Still On Head' });
+    await creator.call('startTeams', { gameId: ug, runId: ur });
+    const activeOf = async (p) => (await p.call('getMyTeamState', { code: uc }))?.team?.activeTaskId;
+    const advance = async (p) => {
+      const cur = await activeOf(p);
+      if (cur) await p.call('completeTask', { ...U, taskId: cur });
+      if (!(await activeOf(p))) await p.call('requestNextTask', { code: uc, lat: 0, lng: 0 });
+      return activeOf(p);
+    };
+    check('pause precondition: the uHolder is on mid, the other team is still on head',
+      (await advance(uHolder)) === 'uw-mid' && (await activeOf(uLate)) === 'uw-head');
 
-    // This run has never had an override written, so `null` here is the full
-    // before-image — the comparison below is the literal "UNCHANGED" contract.
-    const uBefore = JSON.stringify((await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? null);
-    const uwErr = await expectError('unwinnable: pausing a task the stage cannot spare is refused',
-      creator.call('setRunTaskStatus', { ...U, taskId: 'uw-a', status: 'paused' }),
-      { codeIn: ['functions/failed-precondition'] });
-    check('unwinnable: the refusal is machine-readable (details.code === stageUnwinnable)',
-      uwErr?.details?.code === 'stageUnwinnable', JSON.stringify(uwErr?.details));
-    check('unwinnable: the refusal carries the counts the operator needs to decide',
-      uwErr?.details?.availableCount === 1 && uwErr?.details?.requiredCount === 2,
-      JSON.stringify(uwErr?.details));
-    const uAfter = JSON.stringify((await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? null);
-    check('unwinnable: the refused call left run.taskStatusOverrides UNCHANGED (nothing written)',
-      uAfter === uBefore, `${uBefore} → ${uAfter}`);
+    const uPaused = await creator.call('setRunTaskStatus', { ...U, taskId: 'uw-mid', status: 'paused', reason: 'station folding' });
+    check('pause: pausing a mission the stage cannot spare is ACCEPTED (no refusal, no force)',
+      uPaused?.ok === true && uPaused?.status === 'paused', JSON.stringify(uPaused));
 
-    // …and the operator can still override the guard deliberately.
-    const uForced = await creator.call('setRunTaskStatus', {
-      ...U, taskId: 'uw-a', status: 'paused', force: true, reason: 'street closed by police',
-    });
-    check('unwinnable: force applies the change and STILL reports the dead end it created',
-      uForced?.ok === true && uForced?.status === 'paused' && uForced?.stageUnwinnable === true
-      && uForced?.availableCount === 1 && uForced?.requiredCount === 2,
-      JSON.stringify(uForced));
-    const uOverrides = (await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? {};
-    check('unwinnable: the forced override is persisted on the run document',
-      uOverrides['uw-a'] === 'paused', JSON.stringify(uOverrides));
+    const lateNext = await advance(uLate);
+    check('pause: a team that runs out of missions because of the pause is NOT stuck: it moves past mid to end',
+      lateNext === 'uw-end', String(lateNext));
+    const lateTeam = (await creator.getDocAt(uTeamPath(uLateUid))).data ?? {};
+    const midRec = uRec(lateTeam, 'uw-mid');
+    check('pause: for that team mid is set aside, skipped with 0 points, and marked as set aside for a pause',
+      midRec?.status === 'skipped' && (midRec?.earnedScore ?? 0) === 0 && midRec?.setAsideWhilePaused === true && midRec?.closedByOrganizer !== true,
+      JSON.stringify(midRec));
+    check('pause: that team reaches the next stage (the vineyard)',
+      (await advance(uLate)) === 'uw-vine', JSON.stringify((await creator.getDocAt(uTeamPath(uLateUid))).data?.stages?.map((st) => st.status)));
+
+    const holderTeamBefore = (await creator.getDocAt(uTeamPath(uHolderUid))).data ?? {};
+    check('pause: the uHolder kept mid (a pause never takes a mission from a team on it)',
+      holderTeamBefore.activeTaskId === 'uw-mid' && uRec(holderTeamBefore, 'uw-mid')?.status === 'assigned', JSON.stringify(uRec(holderTeamBefore, 'uw-mid')));
+    check('pause: the uHolder finishes mid, plays end, and reaches the vineyard too',
+      (await advance(uHolder)) === 'uw-end' && (await advance(uHolder)) === 'uw-vine');
+    check('pause: the uHolder scored mid (it was completed, not set aside)',
+      uRec((await creator.getDocAt(uTeamPath(uHolderUid))).data, 'uw-mid')?.status === 'completed');
 
     // ── The durable trail: taking a task out of play changes what every team in
     //    the run can score, so it is audited like adjustTeamScore.
     const pauseLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
     const statusEntries = (pauseLogs?.logs ?? []).filter((l) => l.actionType === 'task_status_changed');
-    const forcedEntry = statusEntries.find((l) => l.runId === ur && l.taskId === 'uw-a');
-    check('audit: the FORCED change is recorded, and recorded as forced',
-      forcedEntry?.forced === true && forcedEntry?.previousValue === 'active' && forcedEntry?.newValue === 'paused',
-      JSON.stringify(forcedEntry));
+    const pauseEntry = statusEntries.find((l) => l.runId === ur && l.taskId === 'uw-mid' && l.newValue === 'paused');
     check('audit: the operator\'s reason rides along on the record',
-      forcedEntry?.reason === 'street closed by police', JSON.stringify(forcedEntry?.reason));
+      pauseEntry?.reason === 'station folding', JSON.stringify(pauseEntry));
     const plainEntry = statusEntries.find((l) => l.runId === lr && l.taskId === 'lp-near' && l.newValue === 'paused');
     check('audit: an ordinary pause is recorded as NOT forced (the flag distinguishes them)',
       plainEntry?.forced === false, JSON.stringify(plainEntry));
@@ -11493,12 +11609,219 @@ async function main() {
       { id: 'pc-s', order: 0, title: 'Chain', isFinal: true, requiredTaskCount: 2, tasks: [t('pc-a'), t('pc-b', ['pc-a']), t('pc-c')] },
     ] });
     const { runId: pr } = await creator.call('launchRun', { gameId: pg });
-    const pausedErr = await expectError('pause: pausing a prerequisite its stage cannot spare is refused',
-      creator.call('setRunTaskStatus', { ownerUid: OWNER, gameId: pg, runId: pr, taskId: 'pc-a', status: 'paused' }),
-      { codeIn: ['functions/failed-precondition'] });
-    check('pause: the refusal counts the locked dependent as unavailable (1 of 2)',
-      pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
+    // pause-never-strands: the pause is applied (routing sets it aside for a team that runs dry), and
+    // the stage check still REPORTS it, counting the locked dependent as unavailable.
+    const paused = await creator.call('setRunTaskStatus', { ownerUid: OWNER, gameId: pg, runId: pr, taskId: 'pc-a', status: 'paused' });
+    check('pause: a prerequisite its stage cannot spare is paused, and reported as unwinnable',
+      paused?.ok === true && paused?.status === 'paused' && paused?.stageUnwinnable === true, JSON.stringify(paused));
+    check('pause: the report counts the locked dependent as unavailable (1 of 2)',
+      paused?.availableCount === 1 && paused?.requiredCount === 2 && JSON.stringify(paused?.dependentsLocked) === JSON.stringify(['pc-b']),
+      JSON.stringify(paused));
   }); // scenario: closing a mission mid-run
+
+  // ═══ Race to Zion 14.10: no team is stuck in silence (package 3) ═════════════
+  //
+  // Each block is one way a team stood still on 14.10 while every gate was green: a check-in that
+  // asked again for the arrival it had just accepted (D49), a let-in that opened a quiz but not its
+  // answer (D50), a team sent to the vineyard that could not say "we are here" (D16), a restored team
+  // with no mission (D14), and a viewer phone that never asked for one (D15).
+  await scenario('race 14.10: no team stuck in silence (arrival · let-in · other stage · restore · viewer)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const SPOT = { lat: 31.7800, lng: 35.2100 };
+    const AWAY = { lat: 31.7830, lng: 35.2100 }; // ~330 m north, well outside every radius here
+    const zt = (id, extra) => ({ id, title: `Mission ${id}`, coordinates: { ...SPOT }, geofenceRadiusMeters: 40,
+      difficulty: 1, estimatedMinutes: 2, pointValue: 20, maxConcurrentTeams: 50, ...extra });
+    const { gameId: zg } = await creator.call('createGame', { title: 'Race Fixes Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: zg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'zs1', order: 0, title: 'Start', tasks: [
+        zt('z-start', { type: 'field', triggerMode: 'radius' }),
+        zt('z-quiz', { type: 'quiz', requirePresence: true, choices: ['North', 'South'], answers: ['North'], unlockAfterTaskIds: ['z-start'] }),
+      ] },
+      { id: 'zs2', order: 1, title: 'Vineyard', isFinal: true, tasks: [
+        zt('z-vine', { type: 'quiz', choices: ['Yes', 'No'], answers: ['Yes'] }),
+      ] },
+    ] });
+    const { runId: zr, accessCode: zc } = await creator.call('launchRun', { gameId: zg });
+    const Z = { ownerUid: OWNER, gameId: zg, runId: zr };
+    const zTeam = async (uid) => (await creator.getDocAt(`users/${OWNER}/games/${zg}/runs/${zr}/teams/${uid}`)).data ?? {};
+    const zJoin = async (party, name) => {
+      const uid = (await signInAnonymously(party.auth)).user.uid;
+      await party.call('joinRun', { code: zc, displayName: name });
+      return uid;
+    };
+    const pa = makeParty('raceFixArrive'); const paUid = await zJoin(pa, 'Arrives Then Drifts');
+    const pb = makeParty('raceFixRouted'); const pbUid = await zJoin(pb, 'Sent To The Vineyard');
+    const pc = makeParty('raceFixRestored'); const pcUid = await zJoin(pc, 'Removed And Restored');
+    await creator.call('startTeams', { gameId: zg, runId: zr });
+    check('race precondition: every team starts on the start point',
+      (await zTeam(paUid)).activeTaskId === 'z-start' && (await zTeam(pbUid)).activeTaskId === 'z-start' && (await zTeam(pcUid)).activeTaskId === 'z-start');
+
+    // D49: arrival proven at the point, then the fix drifts 330 m. The check-in must not ask again.
+    const arrived = await pa.call('reportArrival', { taskId: 'z-start', ...SPOT, accuracyMeters: 10, code: zc });
+    check('D49: the arrival at the start point is accepted', arrived?.arrived === true, JSON.stringify(arrived));
+    let d49 = null;
+    try { d49 = await pa.call('completeTask', { ...Z, taskId: 'z-start', ...AWAY, accuracyMeters: 10 }); }
+    catch (e) { d49 = { error: e?.message }; }
+    check('D49: after a proven arrival the check-in is accepted even from a drifted fix', !d49?.error, JSON.stringify(d49));
+
+    // D50: the organizer lets the team in at the compass quiz; it answers from where it stands.
+    const onQuiz = (await zTeam(paUid)).activeTaskId;
+    check('D50 precondition: the team is on the compass quiz', onQuiz === 'z-quiz', String(onQuiz));
+    await creator.call('markTeamArrived', { ...Z, teamId: paUid, taskId: 'z-quiz', reason: 'organizer' });
+    let d50 = null;
+    try { d50 = await pa.call('submitTaskAnswer', { ...Z, taskId: 'z-quiz', answer: 'north', ...AWAY }); }
+    catch (e) { d50 = { error: e?.message }; }
+    check('D50: after a let-in the presence quiz takes the answer (no "move closer")', d50?.correct === true, JSON.stringify(d50));
+
+    // D16: the organizer sends a team to a mission in a stage it has not reached.
+    const routed = await creator.call('forceAssignTask', { ...Z, teamId: pbUid, taskId: 'z-vine', accept: ['otherStage'] });
+    check('D16 precondition: the team is routed to the vineyard', routed?.ok === true && (await zTeam(pbUid)).activeTaskId === 'z-vine', JSON.stringify(routed));
+    let d16a = null;
+    try { d16a = await pb.call('reportArrival', { taskId: 'z-vine', ...SPOT, accuracyMeters: 10, code: zc }); }
+    catch (e) { d16a = { error: e?.message }; }
+    check('D16: "we are here" works on a mission the organizer sent it to (not "stage not active")', d16a?.arrived === true, JSON.stringify(d16a));
+    let d16b = null;
+    try { d16b = await pb.call('submitTaskAnswer', { ...Z, taskId: 'z-vine', answer: 'yes', ...SPOT }); }
+    catch (e) { d16b = { error: e?.message }; }
+    check('D16: and it can answer it', d16b?.correct === true, JSON.stringify(d16b));
+
+    // D14: removing a team gives its mission back; restoring it must give it one again.
+    const teamCode = (await zTeam(pcUid)).deviceJoinCode;
+    const viewer = makeParty('raceFixViewer');
+    await signInAnonymously(viewer.auth);
+    const attached = await viewer.call('joinTeamAsDevice', { code: zc, teamCode, memberName: 'Second phone' });
+    check('D15 precondition: the second phone is a viewer', attached?.role === 'viewer', JSON.stringify(attached));
+    await creator.call('setTeamRemoved', { ...Z, teamId: pcUid, removed: true, reason: 'name' });
+    check('D14 precondition: removal released the mission', !(await zTeam(pcUid)).activeTaskId);
+    await creator.call('setTeamRemoved', { ...Z, teamId: pcUid, removed: false });
+    check('D14: a restored team has its mission again, without any phone asking',
+      (await zTeam(pcUid)).activeTaskId === 'z-start', String((await zTeam(pcUid)).activeTaskId));
+
+    // D15: a viewer phone may ask for the team's mission (answers stay on the controller).
+    let d15 = null;
+    try { d15 = await viewer.call('requestNextTask', { code: zc, lat: 0, lng: 0 }); }
+    catch (e) { d15 = { error: e?.message }; }
+    check('D15: a viewer phone asking for the next mission gets the team\'s mission, not "not-controller"',
+      d15?.taskId === 'z-start', JSON.stringify(d15));
+    let viewerAnswer = '';
+    try { await viewer.call('completeTask', { ...Z, taskId: 'z-start', ...SPOT, accuracyMeters: 10 }); }
+    catch (e) { viewerAnswer = e?.message ?? ''; }
+    check('D15: a viewer phone still cannot complete a mission', /not-controller/.test(viewerAnswer), viewerAnswer);
+  }); // scenario: race 14.10 no team stuck in silence
+
+  // D70 (race 14.10): a team joined under an offensive name that showed on every screen, asked in
+  // the chat to change it, and was told there is no way. The organizer can rename a team now.
+  await scenario('race 14.10: the organizer renames a team (renameTeam)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: ng } = await creator.call('createGame', { title: 'Rename Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: ng, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'nr-s', order: 0, title: 'Only', isFinal: true, tasks: [{ id: 'nr-a', title: 'A', type: 'self_report', locationless: true,
+        coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 }] },
+    ] });
+    const { runId: nr, accessCode: nc } = await creator.call('launchRun', { gameId: ng });
+    const N = { ownerUid: OWNER, gameId: ng, runId: nr };
+    const np = makeParty('renamePlayer');
+    const npUid = (await signInAnonymously(np.auth)).user.uid;
+    await np.call('joinRun', { code: nc, displayName: 'A Rude Name' });
+    const res = await creator.call('renameTeam', { ...N, teamId: npUid, displayName: '  The Explorers  ' });
+    check('rename: the organizer renames the team', res?.ok === true && res?.displayName === 'The Explorers', JSON.stringify(res));
+    const team = (await creator.getDocAt(`users/${OWNER}/games/${ng}/runs/${nr}/teams/${npUid}`)).data ?? {};
+    check('rename: the stored name is the new one', team.displayName === 'The Explorers', team.displayName);
+    const mine = await np.call('getMyTeamState', { code: nc });
+    check('rename: the team\'s own phone shows the new name', mine?.team?.displayName === 'The Explorers', mine?.team?.displayName);
+    const rows = await creator.call('listRunTeams', { gameId: ng, runId: nr });
+    check('rename: the console lists the new name',
+      JSON.stringify(rows).includes('The Explorers') && !JSON.stringify(rows).includes('A Rude Name'), '');
+    await expectError('rename: an empty name is refused',
+      creator.call('renameTeam', { ...N, teamId: npUid, displayName: '   ' }), { codeIn: ['functions/invalid-argument'] });
+    await expectError('rename: the player cannot rename (organizer action)',
+      np.call('renameTeam', { ...N, teamId: npUid, displayName: 'Self Named' }), { codeIn: ['functions/permission-denied', 'functions/unauthenticated'] });
+    const logs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    const entry = (logs?.logs ?? []).find((l) => l.runId === nr && l.actionType === 'team_renamed');
+    check('rename: audited with the old and the new name',
+      entry?.previousValue === 'A Rude Name' && entry?.newValue === 'The Explorers', JSON.stringify(entry));
+  }); // scenario: renameTeam
+
+  // The edges of the 14.10 fixes: what a pause must NOT do, and a removal on top of a hold.
+  await scenario('race 14.10: edges (pause keeps pending · full station waits · removed while held)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const et = (id, extra) => ({ id, title: `Mission ${id}`, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, ...extra });
+    const mk = async (title, stages) => {
+      const { gameId } = await creator.call('createGame', { title, mode: 'individual' });
+      await creator.call('updateGame', { gameId, scoringPreset: 'time_only', stages });
+      const { runId, accessCode } = await creator.call('launchRun', { gameId });
+      return { gameId, runId, accessCode, C: { ownerUid: OWNER, gameId, runId } };
+    };
+    const teamDoc = async (g, uid) => (await creator.getDocAt(`users/${OWNER}/games/${g.gameId}/runs/${g.runId}/teams/${uid}`)).data ?? {};
+    const join = async (g, label) => {
+      const p = makeParty(label); const uid = (await signInAnonymously(p.auth)).user.uid;
+      await p.call('joinRun', { code: g.accessCode, displayName: label });
+      return { p, uid };
+    };
+    const rec = (team, id) => (team?.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === id);
+
+    // 1. A team that still has other work keeps the paused mission PENDING; a resume gives it back.
+    const g1 = await mk('Edge Pause Pending', [
+      { id: 'e1-s', order: 0, title: 'All', tasks: [et('e1-a'), et('e1-b'), et('e1-c')] },
+      { id: 'e1-f', order: 1, title: 'End', isFinal: true, tasks: [et('e1-end')] },
+    ]);
+    const t1 = await join(g1, 'edgePending');
+    await creator.call('startTeams', { gameId: g1.gameId, runId: g1.runId });
+    const first = (await teamDoc(g1, t1.uid)).activeTaskId;
+    const others = ['e1-a', 'e1-b', 'e1-c'].filter((x) => x !== first);
+    await creator.call('setRunTaskStatus', { ...g1.C, taskId: others[0], status: 'paused' });
+    await t1.p.call('completeTask', { ...g1.C, taskId: first });
+    let after = await teamDoc(g1, t1.uid);
+    check('edge: with other work left, the team is given that work, not the paused mission',
+      after.activeTaskId === others[1], String(after.activeTaskId));
+    check('edge: the paused mission stays pending for it (not set aside early)',
+      rec(after, others[0])?.status === 'unassigned', JSON.stringify(rec(after, others[0])));
+    await creator.call('setRunTaskStatus', { ...g1.C, taskId: others[0], status: 'active' });
+    await t1.p.call('completeTask', { ...g1.C, taskId: others[1] });
+    after = await teamDoc(g1, t1.uid);
+    check('edge: resumed in time, the team gets the mission back and plays it',
+      after.activeTaskId === others[0], String(after.activeTaskId));
+
+    // 2. A team waiting for a FULL station waits; nothing is set aside because of a pause elsewhere.
+    const g2 = await mk('Edge Full Station', [
+      { id: 'e2-s', order: 0, title: 'Two', tasks: [et('e2-busy', { locationless: false, triggerMode: 'instant', coordinates: { lat: 31.78, lng: 35.21 }, maxConcurrentTeams: 1 }), et('e2-p')] },
+      { id: 'e2-f', order: 1, title: 'End', isFinal: true, tasks: [et('e2-end')] },
+    ]);
+    const occupant = await join(g2, 'edgeOccupant');
+    await creator.call('startTeams', { gameId: g2.gameId, runId: g2.runId });
+    if ((await teamDoc(g2, occupant.uid)).activeTaskId !== 'e2-busy') {
+      await creator.call('forceAssignTask', { ...g2.C, teamId: occupant.uid, taskId: 'e2-busy', accept: [] });
+    }
+    // Pause the other mission FIRST, then the second team starts: its only open mission is full.
+    await creator.call('setRunTaskStatus', { ...g2.C, taskId: 'e2-p', status: 'paused' });
+    const waiter = await join(g2, 'edgeWaiter');
+    await creator.call('startTeams', { gameId: g2.gameId, runId: g2.runId });
+    check('edge precondition: the occupant holds the one-team station, the waiter holds nothing',
+      (await teamDoc(g2, occupant.uid)).activeTaskId === 'e2-busy' && !(await teamDoc(g2, waiter.uid)).activeTaskId);
+    const wait = await waiter.p.call('requestNextTask', { code: g2.accessCode, lat: 0, lng: 0 });
+    const wTeam = await teamDoc(g2, waiter.uid);
+    const pRec = rec(wTeam, 'e2-p');
+    check('edge: a team whose only open mission is a FULL station is told to wait for it',
+      !wait?.taskId && wait?.reason === 'stationsFull', JSON.stringify(wait));
+    check('edge: and the paused mission is NOT set aside while it waits (still pending)',
+      pRec?.status === 'unassigned', JSON.stringify(pRec));
+
+    // 3. Removed while held: restoring gives nothing yet (it cannot play), resuming gives the mission.
+    const g3 = await mk('Edge Held Removed', [
+      { id: 'e3-s', order: 0, title: 'One', isFinal: true, tasks: [et('e3-a')] },
+    ]);
+    const t3 = await join(g3, 'edgeHeldRemoved');
+    await creator.call('startTeams', { gameId: g3.gameId, runId: g3.runId });
+    await creator.call('setTeamHold', { ...g3.C, teamId: t3.uid, held: true, reason: 'edge' });
+    await creator.call('setTeamRemoved', { ...g3.C, teamId: t3.uid, removed: true, reason: 'edge' });
+    await creator.call('setTeamRemoved', { ...g3.C, teamId: t3.uid, removed: false });
+    check('edge: restored while still on hold, the team is given no mission (its clock would run)',
+      !(await teamDoc(g3, t3.uid)).activeTaskId, String((await teamDoc(g3, t3.uid)).activeTaskId));
+    await creator.call('setTeamHold', { ...g3.C, teamId: t3.uid, held: false });
+    check('edge: resuming it gives it its mission without any phone asking',
+      (await teamDoc(g3, t3.uid)).activeTaskId === 'e3-a', String((await teamDoc(g3, t3.uid)).activeTaskId));
+  }); // scenario: race 14.10 edges
 
   // ═══ Mission time limits (change: mission-time-limit) ═══════════════════════
   //

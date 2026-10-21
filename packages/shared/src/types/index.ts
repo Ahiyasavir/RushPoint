@@ -1020,6 +1020,11 @@ export interface LiveRunSummary {
   participantCount: number;
   launchedAt: string | null;
   unackedAlerts: number;
+  /** The run document's last write. The server refreshes it during play (every leaderboard
+   *  refresh), so it says whether anyone is PLAYING, which `launchedAt` alone cannot (D07). */
+  updatedAt?: string | null;
+  /** A test run (D06): never offered as "the run already live" when launching for real. */
+  isTestDrive?: boolean;
 }
 
 // A timed, geofenced score multiplier an organizer activates on a run
@@ -1142,6 +1147,9 @@ export interface RunTaskRecord {
   skipCause?: SkipCause;
   /** live-task-close-rules: skipped because the organizers CLOSED the mission for the run. Earns 0. */
   closedByOrganizer?: boolean;
+  /** pause-never-strands: skipped for THIS team because it ran out of missions while this one was
+   *  paused (the stage shrank so the team could move on). Earns 0. Not a closure. */
+  setAsideWhilePaused?: boolean;
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;

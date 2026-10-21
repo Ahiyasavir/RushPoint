@@ -26,6 +26,8 @@ import {
   type RunTeam,
   type RunStageRecord,
   type RunTaskRecord,
+  type TaskStatusOverrides,
+  effectiveTaskStatus,
   type AccessCode,
   type LeaderboardEntry,
   type StageStatus,
@@ -186,7 +188,7 @@ import { canReceiveTaskAssignment } from './consentGate';
 import { buildCompletedPins } from './completedPins';
 import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
-  attachedDeviceUids, controllerUidOf, canAddRunDevice, MAX_RUN_DEVICES,
+  attachedDeviceUids, controllerUidOf, canAddRunDevice, MAX_RUN_DEVICES, planDeviceReplacement,
 } from './teamDevices';
 import type { RunFeedback, TaskProgressStatus, RehearsalReveal } from '@rushpoint/shared';
 // `taskSubmissions` is a FIELD on the team doc, not part of the RunTeam type —
@@ -207,7 +209,7 @@ import { applyStageCompletion } from './helpers';
 import { planTaskSkip } from '@rushpoint/shared';
 import {
   writeAuditLog, auditBestEffort, AUDIT_TASK_SKIPPED,
-  AUDIT_TEAM_HELD, AUDIT_TEAM_RESUMED, AUDIT_TEAM_REMOVED, AUDIT_TEAM_RESTORED,
+  AUDIT_TEAM_HELD, AUDIT_TEAM_RESUMED, AUDIT_TEAM_REMOVED, AUDIT_TEAM_RESTORED, AUDIT_TEAM_RENAMED,
   AUDIT_TASK_ROUTED, AUDIT_ROUTE_QUEUED, AUDIT_ROUTE_QUEUE_DROPPED, AUDIT_TEAM_ARRIVAL_MARKED,
   AUDIT_TASK_FORCE_ASSIGNED, AUDIT_TASK_FORCE_ASSIGNED_OVERRIDE, AUDIT_TEAM_RETURNED,
 } from '../obs/audit';
@@ -326,6 +328,9 @@ export function applyTaskClosure(
   taskId: string,
   launchedAt: string | undefined,
   now: string,
+  // pause-never-strands: the same arithmetic sets a PAUSED mission aside for one team that ran out
+  // of missions because of it. Recorded apart from a closure so nothing reads it as "closed".
+  kind: 'closed' | 'paused' = 'closed',
 ): { changed: boolean; wasHolding: boolean; releaseIds: string[] } {
   const stageIdx = stages.findIndex((s) => (s.tasks ?? []).some((t) => t.taskId === taskId));
   if (stageIdx < 0) return { changed: false, wasHolding: false, releaseIds: [] };
@@ -352,7 +357,8 @@ export function applyTaskClosure(
   const wasHolding = rec.status === 'assigned';
   rec.status = 'skipped';
   rec.skipCause = 'operator';
-  rec.closedByOrganizer = true;
+  if (kind === 'closed') rec.closedByOrganizer = true;
+  else rec.setAsideWhilePaused = true;
   rec.earnedScore = 0;
   rec.completedAt = now;
   stageRec.requiredTaskCount = plan.requiredTaskCount;
@@ -362,6 +368,44 @@ export function applyTaskClosure(
     releaseIds.push(...heldAssignedTaskIds);
   }
   return { changed: true, wasHolding, releaseIds };
+}
+
+// ─── A pause never strands a team (change: pause-never-strands) ───────────────
+//
+// Race to Zion, 14.10: stage 1 was a chain of required missions, the organizer paused three of them
+// while the stations folded, and every team that still needed one could never finish the stage, so
+// only 2 of 30 reached the vineyard. A pause touches no team when it is made (a team on the mission
+// keeps it; one that still has other work may yet get it back on resume). This is the moment it
+// matters: the team has NOTHING left to be handed in its active stage, nothing in flight, and the
+// stage still holds missions that are paused right now. Each of those is set aside for THIS team
+// exactly like a closure (0 points, what waited for it opens, the team's requirement shrinks by the
+// smallest winnable amount), so the stage completes or the next mission opens. Pure; mutates the
+// `stages` copy the caller owns.
+export function setAsidePausedTasks(
+  stages: RunStageRecord[],
+  game: Game,
+  overrides: TaskStatusOverrides | undefined,
+  launchedAt: string | undefined,
+  now: string,
+): { changed: boolean; releaseIds: string[] } {
+  const idx = stages.findIndex((st) => st.status === 'active');
+  if (idx < 0) return { changed: false, releaseIds: [] };
+  const recs = stages[idx].tasks ?? [];
+  if (recs.some((t) => t.status === 'assigned')) return { changed: false, releaseIds: [] };
+  const paused = recs
+    .filter((t) => t.status === 'unassigned')
+    .map((t) => t.taskId)
+    .filter((id) => {
+      const task = findGameTask(game, id);
+      return !!task && effectiveTaskStatus(task, overrides) === 'paused';
+    });
+  let changed = false;
+  const releaseIds: string[] = [];
+  for (const id of paused) {
+    const out = applyTaskClosure(stages, game, id, launchedAt, now, 'paused');
+    if (out.changed) { changed = true; releaseIds.push(...out.releaseIds); }
+  }
+  return { changed, releaseIds };
 }
 
 /** Every closure already on the run, applied to a team's freshly built stages (a late joiner). */
@@ -2272,6 +2316,17 @@ export const setTeamHold = loggedCallable('setTeamHold', async (data, context) =
   // (forced, best-effort — a frozen board still wins, like every other caller).
   if (!held) {
     await maybeRefreshLeaderboardSnapshot(ownerUid, ids.gameId, ids.runId, { force: true });
+    // D14 follow-on: a team restored WHILE held gets its mission on resume, not on a phone that may
+    // no longer be asking. Returns the in-flight mission untouched when it has one; never for a team
+    // that is still removed (assignment itself does not look at removal).
+    try {
+      const after = (await db.doc(teamPath(ownerUid, ids.gameId, ids.runId, ids.teamId)).get()).data() as RunTeam | undefined;
+      if (after && after.removed !== true && after.held !== true) {
+        await assignNextInActiveStage(ownerUid, ids.gameId, ids.runId, ids.teamId, { lat: 0, lng: 0 }, new Date().toISOString());
+      }
+    } catch (e) {
+      logBestEffort('setTeamHold.resumeAssign', { gameId: ids.gameId, runId: ids.runId, teamId: ids.teamId }, e);
+    }
   }
 
   return { ok: true, held, heldMsAdded: addedMs };
@@ -2321,11 +2376,13 @@ export const setTeamRemoved = loggedCallable('setTeamRemoved', async (data, cont
   const now = new Date().toISOString();
   let changed = false;
   let releasedTaskId: string | null = null;
+  let restoredWhileHeld = false;
 
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(teamRef);
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
     const team = snap.data() as RunTeam;
+    restoredWhileHeld = team.held === true;
     // Idempotent in both directions, unlike a hold: removing is not an accumulator, and an
     // organizer double-tapping "remove" must simply end with the team removed.
     if ((team.removed === true) === removed) return;
@@ -2397,9 +2454,67 @@ export const setTeamRemoved = loggedCallable('setTeamRemoved', async (data, cont
   // The standings change the moment a team leaves or rejoins them.
   await maybeRefreshLeaderboardSnapshot(ownerUid, ids.gameId, ids.runId, { force: true });
 
+  // D14 (race 14.10, "אוראל…"): removing a team gives its mission back, and restoring it used to
+  // give nothing in return. Its only controller phone had already gone, so nobody ever asked for a
+  // mission again and the team sat with none for the rest of the race. A restore hands it its next
+  // mission here. Best effort: the restore itself already succeeded. A team that is ALSO on hold
+  // gets nothing yet: a mission handed out now would start its countdown while it cannot play, and
+  // resuming it routes it anyway. (A team that never started is refused by the assignment itself.)
+  if (!removed && !restoredWhileHeld) {
+    try {
+      await assignNextInActiveStage(ownerUid, ids.gameId, ids.runId, ids.teamId, { lat: 0, lng: 0 }, new Date().toISOString());
+    } catch (e) {
+      logBestEffort('setTeamRemoved.restoreAssign', { gameId: ids.gameId, runId: ids.runId, teamId: ids.teamId }, e);
+    }
+  }
+
   return { ok: true, removed, changed: true };
 });
 
+
+// ─── renameTeam (D70, race 14.10) ─────────────────────────────────────────────
+//
+// A team joined under an offensive name that every screen showed (the console, the board, the
+// staff app), asked in the chat to change it, and was told there was no way. The organizer can now
+// rename ONE team of a live run. Owner only, like removing a team: a name is what everyone else in
+// the event reads, so it is not a marshal's call. Audited with both names.
+export const renameTeam = loggedCallable('renameTeam', async (data, context) => {
+  const { ownerUid: ownerUidIn, gameId, runId, teamId, displayName } = data as {
+    ownerUid?: string; gameId: string; runId: string; teamId: string; displayName?: unknown;
+  };
+  const ownerUid = ownerUidIn ?? context.auth?.uid ?? '';
+  const operatorId = assertOwnerOrPlatformAdmin(context, ownerUid);
+  await enforceRateLimit(operatorId, 'renameTeam');
+  const ids = validate(() => ({
+    gameId: requireString(gameId, 'gameId', MAX_ID_LEN),
+    runId: requireString(runId, 'runId', MAX_ID_LEN),
+    teamId: requireString(teamId, 'teamId', MAX_ID_LEN),
+  }));
+  const name = typeof displayName === 'string' ? displayName.trim() : '';
+  if (!name) throw new functions.https.HttpsError('invalid-argument', 'displayName required');
+  validate(() => requireString(name, 'displayName', MAX_ID_LEN));
+
+  const runSnap = await db.doc(runPath(ownerUid, ids.gameId, ids.runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+  const teamRef = db.doc(teamPath(ownerUid, ids.gameId, ids.runId, ids.teamId));
+  let previous = '';
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    previous = String((snap.data() as RunTeam).displayName ?? '');
+    tx.update(teamRef, { displayName: name, updatedAt: new Date().toISOString() });
+  });
+  await writeAuditLog({
+    ownerUid, gameId: ids.gameId, runId: ids.runId, teamId: ids.teamId, operatorId,
+    actionType: AUDIT_TEAM_RENAMED, previousValue: previous, newValue: name, reason: '',
+  });
+  // The board carries team names; refresh it so the old name leaves it now, not at the next score.
+  await maybeRefreshLeaderboardSnapshot(ownerUid, ids.gameId, ids.runId, { force: true });
+  return { ok: true, displayName: name };
+});
 
 // ─── forceAssignTask (change: staff-console-field-ops) ────────────────────────
 //
@@ -5119,12 +5234,16 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
   const uid = context.auth.uid;
   await enforceRateLimit(uid, 'joinTeamAsDevice');
 
-  const { code, teamCode, memberName } = data as {
-    code: string; teamCode: string; memberName?: string;
+  const { code, teamCode, memberName, replacesUid } = data as {
+    code: string; teamCode: string; memberName?: string; replacesUid?: unknown;
   };
   const normalizedCode = validate(() => normalizeAccessCode(code));
   if (!teamCode?.trim()) throw new functions.https.HttpsError('invalid-argument', 'teamCode required');
   if (memberName != null) validate(() => requireString(memberName, 'memberName', MAX_ID_LEN));
+  // change: rejoin-replaces-lost-phone. The identity this phone held before it lost its sign-in.
+  // Optional; a value that IS sent must be a uid-shaped string (absent and null are the same thing,
+  // the callable transport sends undefined as null).
+  if (replacesUid != null) validate(() => requireString(replacesUid, 'replacesUid', MAX_ID_LEN));
 
   const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
@@ -5183,17 +5302,46 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
   // allowance and the deviceUids append exact.
   const runNow = runSnap.data() as Run | undefined;
   const usedDevices = runNow?.deviceCount ?? runNow?.participantCount ?? 0;
-  if (!canAddRunDevice(usedDevices).ok) {
+  // A replacement (below) is net zero, so the run ceiling cannot refuse it: a rejoining phone takes
+  // back a place it already holds. The ceiling only stops a phone that would ADD a device.
+  const mayReplace = typeof replacesUid === 'string' && replacesUid !== '';
+  if (!mayReplace && !canAddRunDevice(usedDevices).ok) {
     throw new functions.https.HttpsError(
       'resource-exhausted',
       `This run is full (${MAX_RUN_DEVICES} devices max).`,
       { cap: MAX_RUN_DEVICES, used: usedDevices },
     );
   }
+  let replaced = false;
   const attached = await withLockRetry(() => db.runTransaction(async (tx) => {
     const snap = await tx.get(teamRef);
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
     const team = snap.data() as RunTeam;
+    // change: rejoin-replaces-lost-phone. A phone that lost its sign-in names the identity it held;
+    // when that identity is on THIS team, the new one takes its place (D1-D4 of the change's design).
+    const plan = planDeviceReplacement(team, uid, replacesUid, now);
+    if (plan.kind === 'replace') {
+      tx.update(teamRef, {
+        deviceUids: plan.deviceUids,
+        controllerUid: plan.controllerUid,
+        devices: plan.devices,
+        updatedAt: now,
+      });
+      tx.set(db.doc(FIRESTORE_PATHS.runDeviceMember(ownerUid, gameId, runId, uid)), {
+        teamId: teamRef.id, deviceUid: uid, joinedAt: now,
+      });
+      tx.delete(db.doc(FIRESTORE_PATHS.runDeviceMember(ownerUid, gameId, runId, replacesUid as string)));
+      replaced = true;
+      return true;
+    }
+    if (plan.kind === 'attach' && !canAddRunDevice(usedDevices).ok) {
+      // Named an identity that is not on this team: an ordinary attach, so the run ceiling applies.
+      throw new functions.https.HttpsError(
+        'resource-exhausted',
+        `This run is full (${MAX_RUN_DEVICES} devices max).`,
+        { cap: MAX_RUN_DEVICES, used: usedDevices },
+      );
+    }
     const decision = canAttachDevice(team, uid);
     if (!decision.ok) {
       if (decision.reason === 'duplicate') return false; // raced with ourselves — already attached
@@ -5228,10 +5376,15 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
   }));
   // Only an attach that actually happened may move the counter, and only AFTER it committed, so
   // a refused or duplicate attach can never consume a place nobody holds (same order as joinRun).
-  if (attached) {
+  // A replacement moved no place, so it must not move the counter either.
+  if (attached && !replaced) {
     await runRef.update({ deviceCount: FieldValue.increment(1), updatedAt: now });
   }
 
+  if (replaced) {
+    const after = (await teamRef.get()).data() as RunTeam;
+    return { ownerUid, gameId, runId, teamId: teamRef.id, role: resolveDeviceRole(after, uid), alreadyAttached: false, replaced: true };
+  }
   return { ownerUid, gameId, runId, teamId: teamRef.id, role: 'viewer', alreadyAttached: false };
 });
 
@@ -5492,6 +5645,8 @@ export async function assignNextInActiveStage(
   // other caller (requestNextTask, completeTask's reassign, the poll sweep…)
   // is unaffected.
   preloadedGame?: Game,
+  // pause-never-strands: set once the paused-mission heal below has run, so it runs at most once.
+  pauseHealDone = false,
 ): Promise<{ taskId?: string; reason?: NoAssignmentReason | 'guardian_consent' }> {
   let game: Game;
   if (preloadedGame) {
@@ -5711,6 +5866,34 @@ export async function assignNextInActiveStage(
   }
   // station-wait-clock: nothing was handed out because every open station is full. The team's
   // clock stops from here until it gets a station.
+  // pause-never-strands: nothing could be handed out, and not because a station is full (that team
+  // waits for a slot). If paused missions are what stands between the team and the rest of the
+  // game, set them aside for this team and route again. Costs one run read, only on this path.
+  if (!result.taskId && result.reason !== 'stationsFull' && !pauseHealDone) {
+    const runData = (await db.doc(runPath(ownerUid, gameId, runId)).get()).data() as Run | undefined;
+    const overrides = runData?.taskStatusOverrides;
+    if (overrides && Object.values(overrides).includes('paused')) {
+      let releaseIds: string[] = [];
+      const healed = await withLockRetry(() => db.runTransaction<boolean>(async (tx) => {
+        const cur = await tx.get(teamRef);
+        if (!cur.exists) return false;
+        const curTeam = cur.data() as RunTeam;
+        const stages = (curTeam.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
+        const out = setAsidePausedTasks(stages, game, overrides, runData?.launchedAt, now);
+        if (!out.changed) return false;
+        releaseIds = out.releaseIds;
+        const allDone = stages.every((st) => st.status === 'completed');
+        tx.update(teamRef, { stages, ...(allDone ? { status: 'finished', finishedAt: now } : {}), updatedAt: now });
+        return true;
+      }));
+      if (healed) {
+        for (const id of [...new Set(releaseIds)]) await releaseTask(id, ownerUid, gameId, runId);
+        return assignNextInActiveStage(ownerUid, gameId, runId, teamId, teamLocation, now, game, true);
+      }
+    }
+  }
+  // station-wait-clock: nothing was handed out because every open station is full. The team's
+  // clock stops from here until it gets a station.
   if (!result.taskId && result.reason === 'stationsFull') await stampStationWait(teamRef, now);
   // Thread the "why nothing" reason (stationsFull / allLocked / none) so the
   // participant UI can wait-and-retry on a full station instead of dead-ending.
@@ -5795,9 +5978,12 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     // "Let them in" (markTeamArrived, located-mission-arrival): an operator vouched for this team's
     // arrival where GPS could not prove it. For a check-in, arriving IS the mission, so demanding the
     // fix here again stranded exactly the indoor team the let-in exists for (overnight 2026-09-29).
-    // Only an OPERATOR's latch counts; a GPS-latched arrival still proves itself at check-in.
-    const letInByOperator = team.stages.some((s) => s.tasks.some((r) => r.taskId === taskId && r.arrivalByOperator != null));
-    if ((mode === 'radius' || mode === 'exact') && hasRealCoords && !letInByOperator) {
+    // D49 (race 14.10): a GPS-latched arrival counts too. reportArrival judges it with the SAME fix,
+    // radius, accuracy and grace rules this door applies, so asking again proves nothing new; it only
+    // refused 108 of 117 check-ins at the start AFTER the arrival had been accepted, and three teams
+    // whose fix drifted after arriving never left the start at all.
+    const arrivalProven = arrivalLatched(team, taskId);
+    if ((mode === 'radius' || mode === 'exact') && hasRealCoords && !arrivalProven) {
       // Test-run bypass (wave-J): in a TEST run the creator may check in from their
       // desk, so a would-reject verdict is overridden — but ONLY on the reject path,
       // via a lazy run-doc read, so a real run's happy path is byte-identical (zero
@@ -5929,7 +6115,12 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
-  const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  // ANY phone of the team may ask for the next mission (D15, race 14.10). Asking is not answering:
+  // assignment is idempotent (an in-flight mission is returned as is) and the claim is a
+  // transaction, so a second phone asking changes nothing. Requiring the controller left a team
+  // whose controller phone had vanished with only viewer phones, none of which ever asked, so the
+  // team had no mission for the rest of the race with nothing on screen saying why.
+  const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
   // Staff hold (staff-console-field-ops) — before every other read/write, so a held
   // team causes zero side effects: no station slot reserved, no stage sweep persisted.
   assertTeamMayAdvance(team);
@@ -6282,7 +6473,27 @@ function teamStageStatusForTask(team: RunTeam, taskId: string): string | undefin
   return undefined;
 }
 
+// The team's arrival at this mission was latched (reportArrival's GPS verdict or an operator's
+// let-in, located-mission-arrival). Both are the proof a check-in or a presence gate asks for.
+function arrivalLatched(team: RunTeam, taskId: string, by: 'any' | 'operator' = 'any'): boolean {
+  return (team.stages ?? []).some((s) => (s.tasks ?? []).some((r) => r.taskId === taskId
+    && (r.arrivalByOperator != null || (by === 'any' && r.arrivedAt != null))));
+}
+
 const STAGE_NOT_ACTIVE_MSG = 'This stage is not active yet — finish your current stage first';
+
+// D16 (race 14.10): an organizer sent "חנה זלדה" to a mission in a stage it had not reached
+// (route-team-to-mission waives `otherStage`), and then every "we are here" and answer was refused
+// with "this stage is not active yet", three times. The team HOLDS that mission because an operator
+// put it there, so it is not a future-stage probe: the waiver the assignment granted must reach the
+// doors that act on the mission too.
+function routedHereByOperator(team: RunTeam, taskId: string): boolean {
+  for (const s of team.stages ?? []) {
+    const rec = (s.tasks ?? []).find((t) => t.taskId === taskId);
+    if (rec) return rec.status === 'assigned' && (rec.routedByOperator?.waived ?? []).includes('otherStage');
+  }
+  return false;
+}
 
 // WO-2 oracle guard: reject a submission whose stage the team has NOT YET reached
 // (a locked / future / scheduled-gated stage) — that is the only oracle a probe
@@ -6297,7 +6508,7 @@ const STAGE_NOT_ACTIVE_MSG = 'This stage is not active yet — finish your curre
 // failed-precondition, aborting the play loop.
 export function assertStageActiveForTask(team: RunTeam, taskId: string): void {
   const status = teamStageStatusForTask(team, taskId);
-  if (status !== 'active' && status !== 'completed') {
+  if (status !== 'active' && status !== 'completed' && !routedHereByOperator(team, taskId)) {
     throw new functions.https.HttpsError('failed-precondition', STAGE_NOT_ACTIVE_MSG);
   }
 }
@@ -6438,7 +6649,11 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // answered from anywhere. Default OFF ⇒ existing games unaffected. Placed BEFORE
   // grading so an out-of-range attempt is not recorded as wrong and consumes no
   // attempt-limit slot. The reason carries no distance and no answer (safe for hidden).
-  if (task.requirePresence) {
+  // D50 (race 14.10): a team the organizer let in at the compass was refused "move closer to
+  // answer" 59 times over 40 minutes. An operator's let-in IS presence: it exists for exactly the
+  // team whose GPS cannot prove it. A GPS arrival does NOT waive this gate, because answering is
+  // the mission here and a team that arrived and walked away must not answer from anywhere.
+  if (task.requirePresence && !arrivalLatched(team, taskId, 'operator')) {
     const verdict = evaluatePresence(task.coordinates, { lat, lng }, task.geofenceRadiusMeters);
     // Test-run bypass (wave-J): a desk rehearsal answers from anywhere. The run-doc
     // read happens ONLY on the would-reject path, so a real run is byte-identical.
@@ -7375,6 +7590,10 @@ export const listLiveRuns = loggedCallable('listLiveRuns', async (_data, context
       participantCount: r.participantCount ?? 0,
       launchedAt: r.launchedAt ?? null,
       unackedAlerts,
+      // D07/D08: when the run last showed life (written during play), so the console can tell the
+      // run being played from one that was merely launched.
+      updatedAt: (r as { updatedAt?: string }).updatedAt ?? null,
+      isTestDrive: r.isTestDrive === true,
     };
   }));
 
@@ -7449,6 +7668,8 @@ export const listMyRuns = loggedCallable('listMyRuns', async (data, context) => 
       leaderboardPublished: !!r.leaderboard?.published,
       topTeamName: top?.teamName ?? null,
       topScore: typeof top?.score === 'number' ? top.score : null,
+      // D07: the history badge reads "playing now" off activity, not only off the launch time.
+      updatedAt: (r as { updatedAt?: string }).updatedAt ?? null,
     });
   }
 

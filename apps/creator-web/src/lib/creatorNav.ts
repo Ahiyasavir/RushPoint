@@ -9,6 +9,7 @@
 //
 // Pure: no React, no Firebase.
 import type { LiveRunSummary } from '@rushpoint/shared';
+import { compareRunsForFocus } from './runHistoryBadge';
 
 export type NavDestinationId = 'myGames' | 'gallery' | 'wallet' | 'settings' | 'admin' | 'adminTemplates';
 
@@ -66,5 +67,12 @@ export function liveRunForGame(
   runs: LiveRunSummary[] | null | undefined,
 ): LiveRunSummary | null {
   if (!gameId || !runs || runs.length === 0) return null;
-  return runs.find((r) => r.gameId === gameId) ?? null;
+  // D08: among this game's live runs, the one with players and played most recently, never just
+  // the first in the list (which on 14.10 was an empty run launched that morning by mistake).
+  let best: LiveRunSummary | null = null;
+  for (const r of runs) {
+    if (r.gameId !== gameId) continue;
+    if (!best || compareRunsForFocus(r, best) < 0) best = r;
+  }
+  return best;
 }

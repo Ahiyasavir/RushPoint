@@ -148,6 +148,8 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
       // change: self-healing-entry. The phone lost its sign-in and recovery failed: say so, and offer
       // the one action that works (reload), never "check your reception".
       case 'signIn': return t.join.signInLost;
+      case 'slowDown': return t.join.slowDown;
+      case 'networkBusy': return t.join.networkBusy;
       default: return t.join.joinFailed;
     }
   }
@@ -278,7 +280,9 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
         : key === 'staffSession' ? t.join.staffSession
           : key === 'full' ? t.devices.teamFull
             : key === 'signIn' ? t.join.signInLost
-              : t.devices.attachFailed);
+              : key === 'slowDown' ? t.join.slowDown
+                : key === 'networkBusy' ? t.join.networkBusy
+                  : t.devices.attachFailed);
     }
   }
 
@@ -646,7 +650,7 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
                   <Input
                     value={teamCode}
                     dir="ltr"
-                    onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
+                    onChange={(e) => setTeamCode(normalizeJoinCodeInput(e.target.value))}
                     placeholder={t.devices.teamCodePlaceholder}
                     className="text-center font-mono text-xl tracking-[0.4em] mb-3"
                     maxLength={6}

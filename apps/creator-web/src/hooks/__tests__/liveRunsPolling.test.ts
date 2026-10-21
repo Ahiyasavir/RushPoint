@@ -56,6 +56,20 @@ describe('liveRunsPolling — featured run selection', () => {
     expect(selectFeaturedRun([never, older])).toBe(older);
   });
 
+  // Race to Zion 14.10 (D08): three empty runs were launched that morning by mistake, and the bar
+  // led to the newest of them while the real run, launched two days earlier, held every team.
+  it('D08: the run with players beats an empty run launched after it', () => {
+    const real = run({ runId: 'real', launchedAt: '2026-10-12T15:00:00.000Z', participantCount: 60, updatedAt: '2026-10-14T06:40:00.000Z' });
+    const dup = run({ runId: 'dup', launchedAt: '2026-10-14T06:25:00.000Z', participantCount: 0, updatedAt: '2026-10-14T06:25:00.000Z' });
+    expect(selectFeaturedRun([dup, real])?.runId).toBe('real');
+  });
+
+  it('D08: between two runs with players, the one played most recently wins', () => {
+    const a = run({ runId: 'a', launchedAt: '2026-10-14T06:00:00.000Z', participantCount: 4, updatedAt: '2026-10-14T06:05:00.000Z' });
+    const b = run({ runId: 'b', launchedAt: '2026-10-12T06:00:00.000Z', participantCount: 4, updatedAt: '2026-10-14T08:00:00.000Z' });
+    expect(selectFeaturedRun([a, b])?.runId).toBe('b');
+  });
+
   it('tie-breaks deterministically on runId', () => {
     const a = run({ runId: 'aaa', launchedAt: '2026-07-21T10:00:00.000Z' });
     const b = run({ runId: 'bbb', launchedAt: '2026-07-21T10:00:00.000Z' });

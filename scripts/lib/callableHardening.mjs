@@ -110,6 +110,9 @@ export const PRIVILEGED_CALLABLES = {
   markTeamArrived:
     'Opens a located mission for ONE team without its GPS proving arrival. It lets a team past a '
     + 'physical gate, so "who let them in, where, and why" must stay answerable (located-mission-arrival).',
+  renameTeam:
+    'Renames ONE identified team of a live run (D70). The name is what every screen shows, so "who '
+    + 'renamed this team, from what, and when" must stay answerable after the event.',
   setTeamRemoved:
     'Takes ONE identified team out of a live run (it can no longer advance and leaves every '
     + 'standing) or brings it back. It changes who is on the leaderboard, so "who removed this '

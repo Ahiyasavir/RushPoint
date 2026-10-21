@@ -1231,7 +1231,7 @@ describe('teamRowActions — a row that fits a phone', () => {
         const all = [...inline, ...overflow];
         expect(new Set(all).size, JSON.stringify(team)).toBe(all.length);
         expect([...all].sort()).toEqual(
-          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'holdTeam', 'removeTeam', 'routeTeam', 'sendBack', 'skipStage', 'skipTask'].sort(),
+          [...(team.outOfBounds ? ['clearTeamOutOfBounds'] : []), 'adjustTeamScore', 'holdTeam', 'removeTeam', 'renameTeam', 'routeTeam', 'sendBack', 'skipStage', 'skipTask'].sort(),
         );
       }
     }
@@ -1284,7 +1284,7 @@ describe('teamRowActions — a row that fits a phone', () => {
     const stuckRow = teamRowActions({}, stuck);
     expect(stuckRow.inline).toEqual(['skipTask']);
     expect(stuckRow.overflow).not.toContain('skipTask');
-    expect(stuckRow.overflow).toEqual(['skipStage', 'sendBack', 'routeTeam', 'holdTeam', 'adjustTeamScore', 'removeTeam']);
+    expect(stuckRow.overflow).toEqual(['skipStage', 'sendBack', 'routeTeam', 'holdTeam', 'adjustTeamScore', 'renameTeam', 'removeTeam']);
   });
 
   it('promotes nothing for a calm or merely watched team', () => {

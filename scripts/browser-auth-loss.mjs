@@ -421,6 +421,114 @@ async function teamFullMessage(browserName, launcher, profile, ctx) {
   }
 }
 
+// ── Scenarios: the rejoin takes the lost phone's place (change: rejoin-replaces-lost-phone) ─────
+// 18.10: the rejoin APPENDED a new identity, so a full team refused it, every loss used up a slot,
+// and a rejoined sender came back as a viewer. The phone now names the identity it lost.
+const JOINED_RE = /נכנסתם,|ממתינים שהמארגן/;
+const REFUSED_RE = /בקבוצה הזו כבר יש את מספר הטלפונים המרבי|ההצטרפות לא עברה|בעיית חיבור/;
+async function wipeReloadRejoin(phone) {
+  await wipeStoredSignIn(phone.page);
+  await phone.page.reload();
+  await phone.page.getByTestId('signedOut').waitFor({ state: 'visible', timeout: 30_000 });
+  await phone.page.getByTestId('rejoin-team').click();
+  return await Promise.race([
+    phone.page.getByText(JOINED_RE).first().waitFor({ state: 'visible', timeout: 25_000 }).then(() => 'rejoined').catch(() => null),
+    phone.page.getByText(REFUSED_RE).first().waitFor({ state: 'visible', timeout: 25_000 }).then(() => 'refused').catch(() => null),
+  ]) || 'timeout';
+}
+const currentUid = (page) => page.evaluate(() => {
+  const k = Object.keys(localStorage).find((x) => x.startsWith('firebase:authUser:'));
+  return k ? JSON.parse(localStorage.getItem(k)).uid : null;
+});
+
+async function rejoinFullTeam(browserName, launcher, profile, ctx) {
+  const tag = `[${browserName} rejoin full team]`;
+  const phone = await openPhone(launcher, profile);
+  try {
+    // One declared member ⇒ 3 phones: founder + one extra + this phone = full.
+    const team = await newTeam(ctx, `rjfull-${browserName}`, ['A']);
+    const extra = makeParty(`rjfull-x-${browserName}-${Date.now()}`);
+    await signInAnonymously(extra.auth);
+    await extra.call('joinTeamAsDevice', { code: ctx.accessCode, teamCode: team.deviceJoinCode });
+    const lostUid = await attachNormally(phone, ctx, team);
+    await sleep(1000);
+    audit(`${tag} the team is at its phone limit (setup)`, (await teamDevices(ctx, team)).length === 3);
+    const outcome = await wipeReloadRejoin(phone);
+    await shot(phone.page, `rejoin-full-${browserName.replace('/', '-')}`);
+    const devicesNow = await teamDevices(ctx, team);
+    const newUid = await currentUid(phone.page);
+    audit(`${tag} the phone rejoins a full team`, outcome === 'rejoined', outcome);
+    audit(`${tag} it took the lost phone's place (no extra slot)`,
+      devicesNow.length === 3 && devicesNow.includes(newUid) && !devicesNow.includes(lostUid), devicesNow.join(','));
+    audit(`${tag} no request went to production`, !phone.prodHit, phone.prodHit ?? '');
+  } catch (e) {
+    audit(`${tag} scenario ran to completion`, false, e.message);
+  } finally {
+    await phone.browser.close();
+  }
+}
+
+async function rejoinThreeTimes(browserName, launcher, profile, ctx) {
+  const tag = `[${browserName} rejoin x3]`;
+  const phone = await openPhone(launcher, profile);
+  try {
+    const team = await newTeam(ctx, `rjx3-${browserName}`, ['A', 'B', 'C']);
+    await attachNormally(phone, ctx, team);
+    await sleep(1000);
+    const counts = [];
+    let last = '';
+    for (let i = 0; i < 3; i++) {
+      last = await wipeReloadRejoin(phone);
+      counts.push((await teamDevices(ctx, team)).length);
+      if (last !== 'rejoined') break;
+      await sleep(1500); // the first team state saves the new identity + device code in the session
+    }
+    audit(`${tag} three losses in a row, three rejoins, and the team never grows`,
+      counts.length === 3 && last === 'rejoined' && counts.every((n) => n === 2), `${counts.join(' → ')} last=${last}`);
+    audit(`${tag} no request went to production`, !phone.prodHit, phone.prodHit ?? '');
+  } catch (e) {
+    audit(`${tag} scenario ran to completion`, false, e.message);
+  } finally {
+    await phone.browser.close();
+  }
+}
+
+async function rejoinSender(browserName, launcher, profile, ctx) {
+  const tag = `[${browserName} rejoin sender]`;
+  const phone = await openPhone(launcher, profile);
+  try {
+    // The phone FOUNDS the team through the join form, so it is the sender.
+    await phone.page.goto(`${PLAY_URL}/?code=${ctx.accessCode}`);
+    await phone.page.getByTestId('join-submit').waitFor({ state: 'visible', timeout: 40_000 });
+    await phone.page.getByTestId('join-team-name').fill(`Sender ${browserName}`).catch(() => undefined);
+    await phone.page.getByTestId('join-name').fill('Founder').catch(() => undefined);
+    let i = 0;
+    for (const m of await phone.page.getByTestId('join-member').all()) { if (await m.isVisible()) await m.fill(`Member ${i++}`); }
+    await phone.page.getByTestId('join-submit').click();
+    await phone.page.getByText(JOINED_RE).first().waitFor({ state: 'visible', timeout: 30_000 });
+    await sleep(1500);
+    const founderUid = await currentUid(phone.page);
+    const outcome = await wipeReloadRejoin(phone);
+    const newUid = await currentUid(phone.page);
+    // Read the team through a helper phone attached with the same device code.
+    const saved = await phone.page.evaluate(() => JSON.parse(localStorage.getItem('rushpoint.session') || 'null'));
+    const peek = makeParty(`rjsender-peek-${browserName}-${Date.now()}`);
+    await signInAnonymously(peek.auth);
+    await peek.call('joinTeamAsDevice', { code: ctx.accessCode, teamCode: saved?.deviceJoinCode });
+    const st = await peek.call('getMyTeamState', { ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId });
+    const controller = st?.team?.controllerUid ?? st?.team?.id;
+    audit(`${tag} the team's sender rejoins`, outcome === 'rejoined', outcome);
+    audit(`${tag} the rejoined phone is the sender again`, !!newUid && controller === newUid,
+      `controller=${controller} rejoined=${newUid} lost=${founderUid}`);
+    audit(`${tag} the team kept its id`, st?.team?.id === founderUid, String(st?.team?.id));
+    audit(`${tag} no request went to production`, !phone.prodHit, phone.prodHit ?? '');
+  } catch (e) {
+    audit(`${tag} scenario ran to completion`, false, e.message);
+  } finally {
+    await phone.browser.close();
+  }
+}
+
 async function main() {
   const t0 = Date.now();
   console.log('── RushPoint browser regression: sign-in wiped mid-join (14.10) ──\n');
@@ -461,6 +569,9 @@ async function main() {
       await reloadAfterWipe(name, launcher, profile, ctx);
       await migrationFromIndexedDb(name, launcher, profile, ctx);
       await teamFullMessage(name, launcher, profile, ctx);
+      await rejoinFullTeam(name, launcher, profile, ctx);
+      await rejoinThreeTimes(name, launcher, profile, ctx);
+      await rejoinSender(name, launcher, profile, ctx);
     }
   } finally {
     stopPlay();

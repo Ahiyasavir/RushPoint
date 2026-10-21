@@ -20,6 +20,8 @@ export type RunActionId =
   | 'skipStage' | 'skipTask' | 'sendBack' | 'adjustTeamScore' | 'finalizeRun'
   // team-lifecycle-controls: start ONE team, pause/resume it, take it out of the game and back.
   | 'startTeam' | 'holdTeam' | 'resumeTeam' | 'removeTeam' | 'restoreTeam'
+  // D70 (race 14.10): rename ONE team (an offensive name the team itself asked to change).
+  | 'renameTeam'
   // route-team-to-mission: send ONE team to ANY mission, waiving exactly what blocks it.
   | 'routeTeam';
 
@@ -89,6 +91,8 @@ const SEVERITY: Record<RunActionId, ActionSeverity> = {
   // they are cautionary rather than destructive. Removal is confirmed; a pause is not.
   holdTeam: 'cautionary',
   removeTeam: 'cautionary',
+  // Changes only what the team is called; reversible by renaming again.
+  renameTeam: 'routine',
   // Final for every team already playing (change: live-task-close-rules): the team on it is moved
   // off with no points and every team's stage shrinks.
   closeTask: 'destructive',
@@ -197,6 +201,8 @@ const CONSEQUENCE: Record<RunActionId, RunActionConsequence> = {
   resumeTeam: { audience: 'oneTeam', reversible: true, confirm: false, copyKey: 'resumeTeam' },
   removeTeam: { audience: 'oneTeam', reversible: true, confirm: true, copyKey: 'removeTeam' },
   restoreTeam: { audience: 'oneTeam', reversible: true, confirm: false, copyKey: 'restoreTeam' },
+  // The name prompt IS the confirm, as for removal: it says what changes and its button says so.
+  renameTeam: { audience: 'oneTeam', reversible: true, confirm: true, copyKey: 'renameTeam' },
 
   // ── Reaches nobody but the organizer ──
   refreshStandings: { audience: 'nobody', reversible: true, confirm: false, copyKey: 'refreshStandings' },
@@ -248,7 +254,7 @@ export type TeamRowActions = { inline: RunActionId[]; overflow: RunActionId[] };
 // `sendBack` (change: send-team-back) sits after the skips it most often undoes.
 // team-lifecycle-controls: pausing sits with the other routing changes; removal is last, the
 // heaviest thing a row can do (it takes the team out of every standing).
-const TEAM_ROW_OVERFLOW: RunActionId[] = ['skipTask', 'skipStage', 'sendBack', 'routeTeam', 'holdTeam', 'adjustTeamScore', 'removeTeam'];
+const TEAM_ROW_OVERFLOW: RunActionId[] = ['skipTask', 'skipStage', 'sendBack', 'routeTeam', 'holdTeam', 'adjustTeamScore', 'renameTeam', 'removeTeam'];
 
 export function teamRowActions(
   team: { outOfBounds?: boolean; launched?: boolean; held?: boolean; removed?: boolean } | null | undefined,

@@ -41,6 +41,15 @@ const CODE_PARAM_RE = /code=([A-Za-z0-9]+)/i;
  * character to be rewritten into: any substitution table would silently submit a
  * DIFFERENT code than the participant entered. An honest failure beats that.
  */
+// The Israeli keyboard: each Hebrew letter (and the two punctuation keys) is the Latin key it sits on.
+// An iPhone cannot be forced onto an English keyboard, and a child whose keyboard is in Hebrew types
+// "EH3L25" as "קי3ך25". The field used to drop every Hebrew letter as it was typed (21.10).
+const HEBREW_KEYBOARD: Record<string, string> = {
+  '/': 'Q', "'": 'W', 'ק': 'E', 'ר': 'R', 'א': 'T', 'ט': 'Y', 'ו': 'U', 'ן': 'I', 'ם': 'O', 'פ': 'P',
+  'ש': 'A', 'ד': 'S', 'ג': 'D', 'כ': 'F', 'ע': 'G', 'י': 'H', 'ח': 'J', 'ל': 'K', 'ך': 'L',
+  'ז': 'Z', 'ס': 'X', 'ב': 'C', 'ה': 'V', 'נ': 'B', 'מ': 'N', 'צ': 'M',
+};
+
 export function normalizeJoinCodeInput(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   let s = raw.trim();
@@ -53,6 +62,11 @@ export function normalizeJoinCodeInput(raw: unknown): string {
     // A link with no code parameter must not contribute its scheme and host
     // letters ("HTTPSPLAYEXAMPLE…"); keep only the last path/segment.
     s = s.slice(s.lastIndexOf('/') + 1);
+  } else if (!/\s/.test(s)) {
+    // Something typed as a code (no spaces): read a Hebrew-keyboard letter as its key. A pasted
+    // sentence ("הקוד שלכם: EH3L25") has spaces and keeps the old reading, so its words never
+    // become letters of the code.
+    s = [...s].map((ch) => HEBREW_KEYBOARD[ch] ?? ch).join('');
   }
 
   return s.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, MAX_JOIN_CODE_LEN);
@@ -70,6 +84,8 @@ export type JoinErrorKey =
   | 'full'          // the run hit its participant / device ceiling
   | 'connection'    // transport or cold start: the network, not the phone's identity
   | 'signIn'        // the phone lost its sign-in and automatic recovery failed: reload, not "check reception"
+  | 'slowDown'      // the server's rate limit: wait a moment (never "the race is full")
+  | 'networkBusy'   // Firebase's per-network sign-up limit: switch to mobile data or tell the host
   | 'unknown';      // anything else — never a raw server sentence
 
 /** Codes that mean "transient / connectivity", not "your code is wrong". */
@@ -93,7 +109,12 @@ export function joinErrorKey(e: unknown): JoinErrorKey {
     : undefined;
   // The Firebase JS SDK reports `functions/not-found`; the emulator sometimes
   // reports the bare code.
-  const code = (typeof raw === 'string' ? raw : '').replace(/^functions\//, '');
+  const full = typeof raw === 'string' ? raw : '';
+  // Anonymous sign-in failing reaches here as a Firebase AUTH code (21.10). The phone never got as
+  // far as the server, so "the join did not go through" says nothing the player can act on.
+  if (full === 'auth/too-many-requests') return 'networkBusy';
+  if (full === 'auth/network-request-failed' || full === 'auth/internal-error' || full === 'auth/timeout') return 'connection';
+  const code = full.replace(/^functions\//, '');
 
   if (code === 'not-found' || code === 'invalid-argument') return 'invalidCode';
   if (code === 'permission-denied') return 'revoked';
@@ -101,8 +122,17 @@ export function joinErrorKey(e: unknown): JoinErrorKey {
   // "this race has already finished" would send a host to look for a newer code that does not exist.
   if (isStaffIdentityRefusal(e)) return 'staffSession';
   if (code === 'failed-precondition') return 'finished';
+  // The rate limit shares `resource-exhausted` with the real capacity refusals; the server marks it.
+  // Read as "full", ten failed taps in a minute told the organizer to open more spots (21.10).
+  if (code === 'resource-exhausted' && isRateLimited(e)) return 'slowDown';
   if (code === 'resource-exhausted') return 'full';
   if (code === 'unauthenticated') return 'signIn';
   if (CONNECTION_CODES.has(code)) return 'connection';
   return 'unknown';
+}
+
+/** The server's rate-limit refusal carries `details.reason === 'rateLimited'` (rateLimitStore.ts). */
+export function isRateLimited(e: unknown): boolean {
+  const d = e && typeof e === 'object' && 'details' in e ? (e as { details?: unknown }).details : undefined;
+  return !!d && typeof d === 'object' && (d as { reason?: unknown }).reason === 'rateLimited';
 }

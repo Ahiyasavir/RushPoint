@@ -114,6 +114,14 @@ describe('creatorNav — a game\'s own live run', () => {
     expect(liveRunForGame('g2', runs)?.runId).toBe('r2');
   });
 
+  // Race to Zion 14.10 (D08): the game card led to an empty run launched that morning, not to the
+  // run launched two days earlier that held every team.
+  it("D08: prefers the game's run with players over a newer empty one", () => {
+    const real = { ...run({ gameId: 'gz', runId: 'real' }), launchedAt: '2026-10-12T15:00:00.000Z', participantCount: 60, updatedAt: '2026-10-14T06:40:00.000Z' };
+    const dup = { ...run({ gameId: 'gz', runId: 'dup' }), launchedAt: '2026-10-14T06:25:00.000Z', participantCount: 0 };
+    expect(liveRunForGame('gz', [dup, real])?.runId).toBe('real');
+  });
+
   it('returns nothing for a game with no live run', () => {
     expect(liveRunForGame('g3', runs)).toBeNull();
   });

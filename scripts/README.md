@@ -42,6 +42,8 @@ Three rules that hold across the folder:
 | `simulate-browser-run.mjs` | `simulate:browser` · `verify:browser` | Playwright + synthetic GPS: the real client, not a callable harness. |
 | `simulate-live-ops-ui.mjs` | `simulate:live-ops` | Live-ops screens end to end on a fresh `dev:all`: SOS, chat, let in, flash, hold, skip, staff caps, remove, close, end run. |
 | `simulate-tournament.mjs` | `simulate:v1` | **Archived** v1 tournament sim. |
+| `browser-auth-loss.mjs` | `verify:auth-loss` | The 14.10 join failure in WebKit (iPhone) and Chromium: the stored sign-in wiped mid-join, mid-game, before a reload, plus the rejoin cases. |
+| `browser-auth-loss-stress.mjs` | (`STRESS_ROUNDS=64` under `emulator-exec.mjs`) | The same wipe on many fresh phones, at four moments (before the tap, in flight, twice, a storm), both entry paths, both engines. |
 
 ## Local development
 
@@ -101,3 +103,9 @@ These already ran. None is wired to an npm script and nothing imports them.
 | `backfill-active-task.mjs` | [one-off] Backfilled the station-occupancy index. |
 | `verify-skip.mjs` · `verify-writeback.mjs` | [one-off] Focused verifications written while building station-aware skip scoring and the Sheet write-back path. |
 | `tmp-inventory.ts` | [one-off] Scratch inventory of the mission bank. |
+
+## Live event tools (read only)
+
+| Script | What it shows |
+|---|---|
+| `vps-join-funnel.sh [since]` | The join funnel from the production API log: code checks, joins, refusals by code, sign-in losses the phones reported and whether they recovered, rate-limit trips. Run it every few minutes during an event. |

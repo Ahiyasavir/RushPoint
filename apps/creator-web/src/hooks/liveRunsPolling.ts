@@ -2,7 +2,7 @@
 // Deliberately dependency-free (no React, no Firebase) so it runs in the node-env
 // vitest lane — see docs/wave-a/active-run-bar.md.
 import type { LiveRunSummary } from '@rushpoint/shared';
-import { isPlayingNow } from '../lib/runHistoryBadge';
+import { compareRunsForFocus, isPlayingNow } from '../lib/runHistoryBadge';
 
 /** How often the shared `listLiveRuns` loop fires while the tab is visible. */
 export const LIVE_RUNS_POLL_MS = 10_000;
@@ -33,14 +33,10 @@ export function recentLiveRuns(runs: LiveRunSummary[] | null | undefined, now: n
 
 export function selectFeaturedRun(runs: LiveRunSummary[] | null | undefined): LiveRunSummary | null {
   if (!runs || runs.length === 0) return null;
+  // D08: the run with players, then the one played most recently (compareRunsForFocus).
   let best: LiveRunSummary | null = null;
   for (const r of runs) {
-    if (!best) { best = r; continue; }
-    const a = r.launchedAt ? Date.parse(r.launchedAt) : Number.NEGATIVE_INFINITY;
-    const b = best.launchedAt ? Date.parse(best.launchedAt) : Number.NEGATIVE_INFINITY;
-    const aa = Number.isFinite(a) ? a : Number.NEGATIVE_INFINITY;
-    const bb = Number.isFinite(b) ? b : Number.NEGATIVE_INFINITY;
-    if (aa > bb || (aa === bb && r.runId < best.runId)) best = r;
+    if (!best || compareRunsForFocus(r, best) < 0) best = r;
   }
   return best;
 }

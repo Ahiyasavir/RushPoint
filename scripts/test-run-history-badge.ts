@@ -29,5 +29,16 @@ check('isPlayingNow: a finished run is not playing', isPlayingNow({ status: 'fin
 check('isPlayingNow: the bar summaries carry no status, and are live by definition',
   isPlayingNow({ launchedAt: new Date(NOW - h).toISOString() }, NOW) === true);
 
+// Race to Zion 14.10 (D07): the real run was launched on 12.10 and PLAYED on 14.10. The 24 hour
+// window counted from launch hid it while 31 teams were on it. Activity counts, not only launch:
+// the server refreshes `updatedAt` on the run during play (every leaderboard refresh writes it).
+check('D07: a run launched two days ago and played an hour ago is playing now',
+  isPlayingNow({ status: 'live', launchedAt: new Date(NOW - 48 * h).toISOString(), updatedAt: new Date(NOW - h).toISOString() }, NOW) === true);
+check('D07: the history badge says the same', runHistoryBadge({ status: 'live', launchedAt: new Date(NOW - 48 * h).toISOString(), updatedAt: new Date(NOW - h).toISOString() }, NOW) === 'live');
+check('D07: launched two days ago and untouched since is still only open',
+  isPlayingNow({ status: 'live', launchedAt: new Date(NOW - 48 * h).toISOString(), updatedAt: new Date(NOW - 47 * h).toISOString() }, NOW) === false);
+check('D07: a junk updatedAt never hides a run that the launch time still calls playing',
+  isPlayingNow({ status: 'live', launchedAt: new Date(NOW - h).toISOString(), updatedAt: 'garbage' }, NOW) === true);
+
 console.log(failures === 0 ? '\n✅ run history badge: ALL PASS' : `\n❌ run history badge: ${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -261,10 +261,10 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
 
   // If multi-task stage and nothing assigned yet, request a routing decision once.
   // A failed request surfaces a retryable error instead of an infinite spinner.
-  // Viewer phones never request routing — the controller drives assignment and
-  // the team-doc snapshot brings the result here.
+  // Every phone asks, viewers included (D15, race 14.10): a team whose controller phone had gone
+  // was left with viewers that never asked, and so with no mission at all. The server returns the
+  // mission already in flight, so a second phone asking cannot hand the team a second one.
   useEffect(() => {
-    if (isViewer) return;
     if (assignedRec || unassigned.length === 0) return;
     if (routingInFlight.current) return; // don't stampede a slow request
     routingInFlight.current = true;
@@ -310,7 +310,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
       () => { void requestRouting(undefined); },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignedRec, unassigned.length, routingAttempt, isViewer]);
+  }, [assignedRec, unassigned.length, routingAttempt]);
 
   // Routing wait (change: play-no-silent-failures): "finding your next task" used
   // to be a motionless sentence with no spinner and no escape, able to sit for the
@@ -858,7 +858,8 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
   // it). Sends REAL coords when the argument is present, OMITS them when not — never
   // synthetic at-the-spot coords (that would leak a hidden task's secret location and
   // pollute the movement heatmap). Callers decide when omission is allowed.
-  async function submitCheckIn(coords?: { lat: number; lng: number; accuracyMeters?: number }) {
+  // `onRefused` replaces the generic failure line, for a send the phone knew might be refused (D44).
+  async function submitCheckIn(coords?: { lat: number; lng: number; accuracyMeters?: number }, onRefused?: () => void) {
     try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); feedback('task'); advanceWithCardExit(); }
     catch (e) {
       resumeClocks();
@@ -898,6 +899,9 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           }, COARSE_FIX_GRACE_MS + 1500);
         }
       }
+      // Only the server's "you must be here" (failed-precondition) is the location refusal the
+      // caller asked to word itself; a network or other failure keeps its own honest message.
+      else if (onRefused && code === 'failed-precondition') { onRefused(); }
       else { setMsg(submitError(e, t.task.failed)); }
     }
     finally { end(); }
@@ -928,12 +932,16 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
         // permission prompt. A genuinely located field task still warns and does not
         // submit blind — the server needs its proximity coords.
         if (canCompleteWithoutLocation(task)) { void submitCheckIn(); return; }
-        // A genuinely located field task with no fix: warn, and open the same
-        // "request help" escape hatch the geofence/blocked cards use so a player
-        // who permanently denied location still has an in-card route to a human.
-        setFieldGpsFailed(true);
-        resumeClocks();
-        showError(t.task.gpsWarning); end();
+        // A genuinely located field task with no fix: SEND IT ANYWAY, and let the server decide
+        // (D44, race 14.10). The phone cannot know whether the organizer already let this team
+        // in, and the server accepts a let-in as the proof; "המצחינות" were let in at the start and
+        // never checked in, because this branch refused to send. Only when the server refuses do
+        // we warn, and open the same "request help" escape hatch the geofence/blocked cards use so
+        // a player who permanently denied location still has an in-card route to a human.
+        void submitCheckIn(undefined, () => {
+          setFieldGpsFailed(true);
+          showError(t.task.gpsWarning);
+        });
       },
     );
   }

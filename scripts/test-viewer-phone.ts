@@ -28,8 +28,12 @@ check('a viewer on a non-media mission gets the ViewerCard in place of the contr
 check('the ViewerCard offers taking over', /onTakeOver/.test(runner));
 check('PlayScreen passes the role', /role=\{isController \? 'sender' : 'viewer'\}/.test(play));
 check('the drawer viewer banner is gone', !/viewingBanner/.test(play));
-check('routing stays with the answering phone (a viewer never requests the next mission)',
-  /if \(isViewer\) return;/.test(runner));
+// D15 (race 14.10): "a viewer never requests the next mission" WAS the defect. A team whose
+// controller phone had gone kept only viewers, none ever asked, and it had no mission for the rest
+// of the race. Every phone asks now; answering stays with the controller (the server's rule).
+check('every phone asks for the next mission, viewers included (D15)',
+  !/if \(isViewer\) return;\s+if \(assignedRec \|\| unassigned\.length === 0\) return;/.test(runner)
+  && /if \(assignedRec \|\| unassigned\.length === 0\) return;/.test(runner));
 
 console.log(`\n${failures === 0 ? 'ALL VIEWER-PHONE TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

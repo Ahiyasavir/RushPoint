@@ -1352,6 +1352,10 @@ const HE = {
     removeTeamAria: ({ team }: { team: string }) => `להוציא את ${team} מהמשחק`,
     removeTeamPrompt: ({ team }: { team: string }) => `להוציא את ${team} מהמשחק? היא לא תוכל להתקדם ולא תופיע בדירוג. שום נתון לא נמחק ואפשר להחזיר אותה. אפשר לכתוב סיבה שתוצג לקבוצה (לא חובה).`,
     removeTeamDone: ({ team }: { team: string }) => `${team} הוצאה מהמשחק.`,
+    renameTeam: 'שינוי שם',
+    renameTeamAria: ({ team }: { team: string }) => `לשנות את השם של ${team}`,
+    renameTeamPrompt: ({ team }: { team: string }) => `שם חדש לקבוצה ${team}. השם יתחלף בכל המסכים: בטלפונים של הקבוצה, בקונסולה ובדירוג.`,
+    renameTeamDone: ({ team }: { team: string }) => `שם הקבוצה הוא עכשיו ${team}.`,
     restoreTeam: 'החזרה למשחק',
     restoreTeamAria: ({ team }: { team: string }) => `להחזיר את ${team} למשחק`,
     restoreTeamDone: ({ team }: { team: string }) => `${team} חזרה למשחק ולדירוג.`,
@@ -1638,9 +1642,7 @@ const HE = {
     taskAvailHolding: ({ n }: { n: number }) =>
       n === 1 ? 'קבוצה אחת נמצאת עליה עכשיו ותוכל לסיים אותה' : `${n} קבוצות נמצאות עליה עכשיו ויוכלו לסיים אותה`,
     taskAvailUpdated: 'הזמינות עודכנה',
-    taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
-      `בשלב "${stage}" יישארו ${available} משימות זמינות מתוך ${required} שנדרשות להשלמת השלב, כך שקבוצות שעדיין לא סיימו אותו ייתקעו. להשהות בכל זאת?`,
-    taskAvailForce: 'להשהות בכל זאת',
+    taskAvailPausedMovesOn: 'קבוצה שתישאר בלי משימות בשלב בגלל ההשהיה תדלג עליה ותמשיך הלאה',
     // live-task-close-rules: what a closure does, said before it happens.
     taskAvailCloseConfirm: ({ title }: { title: string }) =>
       `לסגור את "${title}" לכל שאר הריצה? קבוצה שנמצאת עליה עכשיו תעבור למשימה הבאה בלי נקודות ותקבל הודעה, משימות שחיכו לה ייפתחו, והשלב יתקצר לכל קבוצה כדי שאף אחת לא תיתקע. אם רק צריך הפסקה, עדיף להשהות.`,
@@ -1799,6 +1801,7 @@ const HE = {
       skipTask: 'כן, דלגו על המשימה',
       sendBack: 'כן, להחזיר את הקבוצה',
       removeTeam: 'כן, להוציא את הקבוצה מהמשחק',
+      renameTeam: 'לשמור את השם החדש',
       routeTeam: 'כן, לשלוח את הקבוצה',
       adjustTeamScore: 'כן, עדכנו את הניקוד',
     },
@@ -1828,6 +1831,7 @@ const HE = {
       holdTeam: 'עוצר את הקבוצה: היא לא יכולה להתקדם והשעון שלה לא רץ, עד שתמשיכו אותה.',
       resumeTeam: 'מחזיר את הקבוצה למשחק מהמקום שבו עצרה. הזמן שבו הייתה בהשהיה לא נספר לה.',
       removeTeam: 'מוציא את הקבוצה מהמשחק: היא לא יכולה להתקדם ולא מופיעה בדירוג. שום נתון לא נמחק, ואפשר להחזיר אותה. כפתור מצוקה עדיין עובד אצלה.',
+      renameTeam: 'משנה רק את השם של הקבוצה, בכל המסכים. הניקוד וההתקדמות לא משתנים.',
       restoreTeam: 'מחזיר את הקבוצה למשחק ולדירוג, בדיוק איפה שהייתה.',
       routeTeam: 'שולח את הקבוצה למשימה שבחרתם, בכל שלב. רק התנאים שחוסמים את המשימה הזאת לקבוצה הזאת מתבטלים, ורק הפעם. שום דבר אחר במשחק לא משתנה.',
       adjustTeamScore: 'רושם שינוי ניקוד ידני לקבוצה. השינוי נשמר ביומן הפעולות.',
@@ -2131,6 +2135,13 @@ const HE = {
     launchTestRunHint: 'ריצת חזרה חינמית עד 2 משתתפים, לא נספרת בסטטיסטיקות',
     firstLaunchConfirmBody: 'זה יוצר קוד הצטרפות שמשתתפים יכולים להשתמש בו כבר עכשיו. רוצים לעשות חזרה קודם? נסו ריצת בדיקה.',
     firstLaunchConfirmCta: 'כן, לצאת לדרך',
+    // D06 (race 14.10): asked before a launch when the game is already running.
+    liveRunExistsTitle: 'המשחק כבר רץ',
+    liveRunExistsBody: ({ when, players }: { when: string; players: number }) =>
+      `למשחק הזה כבר יש ריצה חיה${when ? `, שהופעלה ב${when}` : ''}, ובה ${players === 1 ? 'משתתף אחד' : `${players} משתתפים`}. הקוד שחילקתם שייך לה. לפתוח אותה?`,
+    liveRunOpenCta: 'לפתוח את הריצה הקיימת',
+    liveRunAnotherBody: 'ריצה חדשה תקבל קוד חדש, וקבוצות שנכנסו עם הקוד הקודם לא יופיעו בה. להפעיל בכל זאת ריצה נוספת?',
+    liveRunAnotherCta: 'להפעיל ריצה נוספת',
     readyNudge: 'המשחק מוכן. אפשר לעשות ריצת בדיקה לחזרה, או להפעיל ריצה ולצאת לדרך.',
     tabBuild: 'בנייה',
     tabPreview: 'תצוגה',
@@ -4657,6 +4668,10 @@ const EN: typeof HE = {
     removeTeamAria: ({ team }: { team: string }) => `Take ${team} out of the game`,
     removeTeamPrompt: ({ team }: { team: string }) => `Take ${team} out of the game? It cannot advance and is not in the standings. Nothing is deleted and you can bring it back. You can write a reason the team will see (optional).`,
     removeTeamDone: ({ team }: { team: string }) => `${team} was taken out of the game.`,
+    renameTeam: 'Rename',
+    renameTeamAria: ({ team }: { team: string }) => `Rename ${team}`,
+    renameTeamPrompt: ({ team }: { team: string }) => `A new name for ${team}. It changes on every screen: the team's phones, the console and the standings.`,
+    renameTeamDone: ({ team }: { team: string }) => `The team is now called ${team}.`,
     restoreTeam: 'Bring back',
     restoreTeamAria: ({ team }: { team: string }) => `Bring ${team} back into the game`,
     restoreTeamDone: ({ team }: { team: string }) => `${team} is back in the game and the standings.`,
@@ -4941,9 +4956,7 @@ const EN: typeof HE = {
     taskAvailHolding: ({ n }: { n: number }) =>
       n === 1 ? 'One team is on it now and can still finish it' : `${n} teams are on it now and can still finish it`,
     taskAvailUpdated: 'Availability updated',
-    taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
-      `Stage "${stage}" would be left with ${available} available missions out of the ${required} it needs to complete, so teams still in it would be stuck. Pause it anyway?`,
-    taskAvailForce: 'Pause anyway',
+    taskAvailPausedMovesOn: 'A team that runs out of missions in this stage because of the pause will skip it and move on',
     taskAvailCloseConfirm: ({ title }: { title: string }) =>
       `Close "${title}" for the rest of the run? A team on it right now moves to its next mission with no points and gets a message, missions that were waiting for it open, and each team's stage shrinks so nobody gets stuck. If you only need a break, pause it instead.`,
     taskAvailClosedMoved: ({ n }: { n: number }) => (n === 1 ? 'One team was moved to its next mission' : `${n} teams were moved to their next mission`),
@@ -5097,6 +5110,7 @@ const EN: typeof HE = {
       skipTask: 'Yes, skip the mission',
       sendBack: 'Yes, send the team back',
       removeTeam: 'Yes, take the team out of the game',
+      renameTeam: 'Save the new name',
       routeTeam: 'Yes, send the team',
       adjustTeamScore: 'Yes, update the score',
     },
@@ -5126,6 +5140,7 @@ const EN: typeof HE = {
       holdTeam: 'Pauses the team: it cannot advance and its clock stops, until you resume it.',
       resumeTeam: 'Puts the team back in the game where it stopped. The paused time does not count against it.',
       removeTeam: 'Takes the team out of the game: it cannot advance and is not in the standings. Nothing is deleted and you can bring it back. Its SOS button still works.',
+      renameTeam: 'Changes only what the team is called, on every screen. Its score and progress do not change.',
       restoreTeam: 'Puts the team back in the game and the standings, exactly where it was.',
       routeTeam: 'Sends the team to the mission you chose, in any stage. Only the conditions blocking THIS mission for THIS team are waived, only this once. Nothing else in the game changes.',
       adjustTeamScore: 'Records a manual score change for the team. The change is kept in the audit log.',
@@ -5430,6 +5445,13 @@ const EN: typeof HE = {
     launchTestRunHint: 'Free rehearsal, up to 2 players, not counted in your stats',
     firstLaunchConfirmBody: 'This creates a join code participants can use right now. Want to rehearse first? Try Test run.',
     firstLaunchConfirmCta: 'Yes, go live',
+    // D06 (race 14.10): asked before a launch when the game is already running.
+    liveRunExistsTitle: 'This game is already running',
+    liveRunExistsBody: ({ when, players }: { when: string; players: number }) =>
+      `This game already has a live run${when ? `, launched ${when}` : ''}, with ${players === 1 ? 'one participant' : `${players} participants`}. The code you handed out belongs to it. Open it?`,
+    liveRunOpenCta: 'Open the existing run',
+    liveRunAnotherBody: 'A new run gets a new code, and teams that joined with the old one will not appear in it. Launch another run anyway?',
+    liveRunAnotherCta: 'Launch another run',
     readyNudge: 'Your game is ready. Press Test run to rehearse, or Launch to go live.',
     tabBuild: 'Build',
     tabPreview: 'Preview',
