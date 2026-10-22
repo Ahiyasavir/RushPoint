@@ -21,6 +21,10 @@ that remained, each of which would again look like "it does not work" to a child
    sign-in mid-game could not take its place back in a full team, losses used up slots, and a lost
    sending phone came back as a viewer.
 
+5. **A game screen that never arrives** (found 22.10 by the production stress: a phone joined in 5 s,
+   then showed nothing and asked for nothing). The game screen is a lazy chunk; `lazyWithRetry`
+   healed one that FAILED, but waited forever on one that never settled.
+
 ## What Changes
 
 - The server's rate-limit refusal carries `details: { reason: 'rateLimited', retryAfterMs }`; the
@@ -30,6 +34,10 @@ that remained, each of which would again look like "it does not work" to a child
 - Every code field (join, team phones, staff) reads a Hebrew-keyboard letter as the key it sits on,
   when the input has no spaces (a pasted sentence keeps the old reading).
 - `rejoin-replaces-lost-phone` is carried into this release.
+- Every lazy route import has a 30 s deadline (`lib/chunkDeadline.ts`, both apps): a hang becomes the
+  existing one-reload heal. The join screen fetches the game screen in advance. Proven with the
+  first chunk request held forever: healed in ~36 s; the same test without the fix stayed on
+  "טוען" past 75 s.
 - `scripts/browser-auth-loss-stress.mjs`: the 14.10 wipe on many fresh phones, at four moments,
   both entry paths, WebKit and Chromium. `scripts/vps-join-funnel.sh`: the live join funnel from the
   production log, for the event itself.

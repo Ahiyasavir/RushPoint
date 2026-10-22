@@ -124,10 +124,13 @@ async function wipeStoredSignIn(page) {
 }
 
 async function round(i, ctx, launchers) {
-  const [browserName, launcher, profile] = launchers[i % launchers.length];
+  // STRESS_ONLY_ENGINE=webkit|chromium and STRESS_ONLY_MODE=<mode> narrow a run to one combination.
+  const onlyEngine = process.env.STRESS_ONLY_ENGINE;
+  const pool = onlyEngine ? launchers.filter((l) => l[0].startsWith(onlyEngine)) : launchers;
+  const [browserName, launcher, profile] = pool[i % pool.length];
   const onlyPath = process.env.STRESS_ONLY_PATH;
   const path = onlyPath || (Math.floor(i / launchers.length) % 2 === 0 ? 'attach' : 'found');
-  const mode = MODES[Math.floor(i / (launchers.length * 2)) % MODES.length];
+  const mode = process.env.STRESS_ONLY_MODE || MODES[Math.floor(i / (launchers.length * 2)) % MODES.length];
   const key = `${browserName}|${path}|${mode}`;
   tally[key] ??= { ok: 0, bad: 0 };
   const tag = `[#${i + 1} ${browserName} ${path} ${mode}]`;
@@ -154,6 +157,15 @@ async function round(i, ctx, launchers) {
     if (req.method() !== 'POST' || !m) return;
     calls.push({ name: m[1], uid: uidFromAuthHeader(req.headers()['authorization']), at: Date.now() });
   });
+  // What the page did, printed only when a round fails, so a failure explains itself.
+  const trail = [];
+  const at0 = Date.now();
+  const note = (s) => trail.push(`+${((Date.now() - at0) / 1000).toFixed(1)}s ${s}`);
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) note(`nav ${f.url().slice(0, 90)}`); });
+  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') note(`${m.type()}: ${m.text().slice(0, 180)}`); });
+  page.on('pageerror', (e) => note(`PAGEERROR ${String(e.message).slice(0, 220)}`));
+  page.on('requestfailed', (r) => note(`REQFAIL ${r.url().slice(0, 110)} ${r.failure()?.errorText ?? ''}`));
+  page.on('request', (r) => { if (/\.js(\?|$)/.test(r.url()) || /us-central1|api\.rush-point/.test(r.url())) note(`req ${r.url().split('/').pop().slice(0, 60)}`); });
   let stormTimer = null;
   let ok = true;
   try {
@@ -193,6 +205,13 @@ async function round(i, ctx, launchers) {
       page.getByText(ERR_RE).first().waitFor({ state: 'visible', timeout: 35_000 }).then(() => 'error').catch(() => null),
     ]) || 'timeout';
     if (stormTimer) { clearInterval(stormTimer); stormTimer = null; }
+    if (outcome !== 'in') {
+      const html = (await page.content().catch((e) => `content() failed: ${e.message}`)).replace(/\s+/g, ' ').slice(0, 600);
+      await page.screenshot({ path: `${process.env.TEMP || '.'}/stressfail-${i + 1}.png` }).catch(() => undefined);
+      console.log(`  TRAIL ${tag}:`);
+      for (const line of trail) console.log(`    ${line}`);
+      console.log(`  DOM: ${html}`);
+    }
     const shown = outcome === 'in' ? '' : (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
 
     const joinName = path === 'attach' ? 'joinTeamAsDevice' : 'joinRun';

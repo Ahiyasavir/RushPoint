@@ -1,4 +1,5 @@
 import { lazy, type ComponentType } from 'react';
+import { withImportDeadline } from './chunkDeadline';
 
 /**
  * `React.lazy` + a stale service-worker shell is a trap: the cached index.html can
@@ -22,7 +23,8 @@ export function lazyWithRetry<P extends object>(
   factory: () => Promise<{ default: ComponentType<P> }>,
 ) {
   return lazy<ComponentType<P>>(() =>
-    factory().then((mod) => {
+    // A hang is a failure too (2026-10-22): past the deadline the same one-reload heal runs.
+    withImportDeadline(factory()).then((mod) => {
       // Import succeeded: clear any prior stale-chunk reload flag so a LATER
       // redeploy in the same session gets its own one automatic reload instead
       // of rethrowing to the ErrorBoundary (the self-heal must be per-redeploy,

@@ -101,6 +101,16 @@ export default function JoinScreen({ initialCode, initialDeviceCode, autoJoin, o
   // pointless). Any failure — offline, rules, missing doc — simply leaves the
   // button hidden and the join screen byte-identical to today.
   const [demoReady, setDemoReady] = useState(false);
+
+  // The game screen is a lazy chunk the phone needs the moment the join succeeds. Fetch it now,
+  // while the player is still typing, so a slow or stuck download cannot leave a child who is
+  // already in the team looking at an empty screen (2026-10-22, production stress of the join).
+  // Best effort: the real import after the join still has its own deadline and reload.
+  useEffect(() => {
+    const t = window.setTimeout(() => { void import('./PlayScreen').catch(() => undefined); }, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     if (!onDemo) return;
     let alive = true;
