@@ -32,8 +32,17 @@ api.rush-point.com {
 
 	# Serving uploaded media back. These are the "download URLs" stored in
 	# Firestore, so they must stay reachable for the life of the run.
-	handle /uploads/* {
+	# READ verbs only. Media is never changed through this path; a second layer
+	# beside the server having no mutating /uploads route (security audit 2026-10-22).
+	@uploadsRead {
+		path /uploads/*
+		method GET HEAD OPTIONS
+	}
+	handle @uploadsRead {
 		reverse_proxy 127.0.0.1:8080
+	}
+	handle /uploads/* {
+		respond 405
 	}
 
 	# Health probe for uptime monitoring.

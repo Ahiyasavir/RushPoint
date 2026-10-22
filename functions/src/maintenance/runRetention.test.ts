@@ -342,3 +342,35 @@ describe('parseRunPath — no identifier may ever reach a Storage prefix blank',
     expect([...ABANDONABLE_RUN_STATUSES].sort()).toEqual(['draft', 'live']);
   });
 });
+
+// change: prepared-run — a run prepared ahead of the day is `draft` until it opens, and may be
+// prepared weeks before the event. Its planned start is evidence the run is NOT abandoned.
+describe('evaluateRunPrune — a prepared run whose event is still ahead', () => {
+  test('a draft created 100 days ago for an event next week is kept', () => {
+    const d = evaluateRunPrune({ status: 'draft', createdAt: ago(100 * DAY), updatedAt: ago(100 * DAY), plannedStartAt: ahead(7 * DAY) }, NOW, DAYS);
+    expect(d.prune).toBe(false);
+  });
+  test('a draft whose event passed more than the window ago, untouched since, is pruned as abandoned', () => {
+    const d = evaluateRunPrune({ status: 'draft', createdAt: ago(200 * DAY), updatedAt: ago(200 * DAY), plannedStartAt: ago(95 * DAY) }, NOW, DAYS);
+    expect(d.prune).toBe(true);
+    expect(d.reason).toBe('abandoned_retention_elapsed');
+  });
+  test('a recent planned start vetoes like any recent timestamp', () => {
+    const d = evaluateRunPrune({ status: 'draft', createdAt: ago(200 * DAY), plannedStartAt: ago(10 * DAY) }, NOW, DAYS);
+    expect(d.prune).toBe(false);
+    expect(d.reason).toBe('within_retention');
+  });
+  test('an unreadable planned start is ignored, never a veto by itself', () => {
+    const d = evaluateRunPrune({ status: 'draft', createdAt: ago(200 * DAY), plannedStartAt: 'next thursday' }, NOW, DAYS);
+    expect(d.prune).toBe(true);
+  });
+  test('a planned start more than a year ahead cannot keep data forever', () => {
+    const d = evaluateRunPrune({ status: 'draft', createdAt: ago(200 * DAY), plannedStartAt: ahead(5 * 365 * DAY) }, NOW, DAYS);
+    expect(d.prune).toBe(true);
+  });
+  test('a FINISHED run anchors on finishedAt, its planned start is irrelevant', () => {
+    const d = evaluateRunPrune({ status: 'finished', finishedAt: ago(95 * DAY), plannedStartAt: ago(1 * DAY) }, NOW, DAYS);
+    expect(d.prune).toBe(true);
+    expect(d.reason).toBe('finished_retention_elapsed');
+  });
+});

@@ -35,6 +35,7 @@ import { enforceRateLimit } from '../rateLimitStore';
 import { deleteDocsInChunks } from '../batchUtil';
 import { launchRunCore } from '../runs/index';
 import { rehostGameMedia } from './rehost';
+import { withoutTemplateMetadata } from './templateMetadata';
 import { assertGameNotDeleted, assertNotShareLocked } from './lifecycle';
 import {
   FIRESTORE_PATHS,
@@ -386,7 +387,7 @@ export const launchSharedRun = loggedCallable('launchSharedRun', async (data, co
   // the source.
   const now = new Date().toISOString();
   const newRef = db.collection(FIRESTORE_PATHS.games(uid)).doc();
-  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, sharedLaunch: _sl, ...safeSource } = source;
+  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, sharedLaunch: _sl, hostSheetFields: _hs, ...safeSource } = withoutTemplateMetadata(source);
   const stages = await rehostGameMedia(safeSource.stages, link.ownerUid, link.gameId, uid, newRef.id);
   const copy: Game = {
     ...safeSource,

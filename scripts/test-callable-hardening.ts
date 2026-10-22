@@ -46,6 +46,7 @@ import {
   WRAPPER_MODULE,
 } from './lib/callableHardening.mjs';
 import { STAFF_CAPABILITY_BY_CALLABLE } from '../packages/shared/src/staffCapabilities';
+import { DRAFT_REFUSED_CALLABLES } from '../packages/shared/src/preparedRun';
 
 let passed = 0;
 let failed = 0;
@@ -333,6 +334,35 @@ ok(callables.length >= CALLABLE_FLOOR,
   const stale = Object.keys(STAFF_CAPABILITY_BY_CALLABLE).filter((n) => !gated.has(n));
   ok(stale.length === 0, `C6: every table entry is a callable that really gates on it — stale: ${stale.join(', ')}`);
   ok(gated.size >= 16, `C6 anti-vacuity: found ${gated.size} staff-gated callables, expected >= 16`);
+}
+
+// C7 — a prepared run (change: prepared-run). Server code asked `status === 'finished'` and never
+// `=== 'draft'`, so a draft would be playable everywhere by default. Every door declared in
+// DRAFT_REFUSED_CALLABLES must refuse it through assertRunOpen / assertRunOpenAt, and a declared
+// name that is no longer a callable fails, so the list cannot rot. Only startTeams and joinRun's
+// self-start ever set `team.launched` (every grading path refuses an unlaunched team), so the
+// second half pins that: a NEW door that launches a team must come here and be declared.
+{
+  const byName = new Map(callables.map((c) => [c.name, c]));
+  const missing: string[] = [];
+  const unguarded: string[] = [];
+  for (const name of DRAFT_REFUSED_CALLABLES) {
+    const c = byName.get(name);
+    if (!c) { missing.push(name); continue; }
+    if (!/\bassertRunOpen(At)?\s*\(/.test(c.body)) unguarded.push(`${c.rel}:${c.line} ${name}`);
+  }
+  ok(missing.length === 0, `C7: every DRAFT_REFUSED_CALLABLES entry is a callable — stale: ${missing.join(', ')}`);
+  ok(unguarded.length === 0, `C7: every draft-refused callable calls assertRunOpen — unguarded: ${unguarded.join(', ')}`);
+  const launchers = callables
+    // Comments stripped: a body can run on into a helper whose comment says "launched:true".
+    .filter((c) => /\blaunched:\s*(true|selfStart)\b/.test(c.body.replace(/\/\/[^\n]*/g, '')))
+    .map((c) => c.name).sort();
+  // startInstantPlay creates its OWN live self-guided run, so it never meets a draft.
+  const KNOWN_LAUNCHERS = ['joinRun', 'startInstantPlay', 'startTeams'];
+  ok(launchers.join() === KNOWN_LAUNCHERS.join(),
+    `C7: the doors that start a team are exactly ${KNOWN_LAUNCHERS.join(', ')} — found ${launchers.join(', ')}`);
+  const join = byName.get('joinRun');
+  ok(!!join && /run\.status\s*!==\s*'draft'/.test(join.body), 'C7: joinRun never self-starts a team on a prepared run');
 }
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} callable hardening: ${passed} passed, ${failed} failed`);

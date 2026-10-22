@@ -73,12 +73,48 @@ function isBlockedIPv4(ip) {
   return false;
 }
 
-/** Reserved / non-public IPv6, including v4-mapped forms. */
+/**
+ * An IPv6 address as its eight 16-bit groups, or null when it is not one.
+ * Accepts `::` compression, a trailing dotted IPv4 tail and a `%zone` suffix.
+ */
+function ipv6Groups(text) {
+  const bare = text.replace(/%.*$/, '');
+  let head = bare;
+  let tail = [];
+  const dotted = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(bare);
+  if (dotted) {
+    const o = dotted[2].split('.').map(Number);
+    if (o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    head = dotted[1].endsWith('::') ? dotted[1] : dotted[1].slice(0, -1);
+    tail = [(o[0] << 8) | o[1], (o[2] << 8) | o[3]];
+  }
+  const halves = head.split('::');
+  if (halves.length > 2) return null;
+  const parse = (h) => (h === '' ? [] : h.split(':').map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN)));
+  const left = parse(halves[0]);
+  const right = halves.length === 2 ? parse(halves[1]) : [];
+  if ([...left, ...right].some(Number.isNaN)) return null;
+  const known = left.length + right.length + tail.length;
+  if (halves.length === 1 ? known !== 8 : known > 7) return null;
+  return [...left, ...new Array(8 - known).fill(0), ...right, ...tail];
+}
+
+/** Reserved / non-public IPv6, including every form that embeds an IPv4 address. */
 function isBlockedIPv6(ip) {
   const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
-  // ::ffff:1.2.3.4 and ::ffff:0102:0304 both mean an IPv4 address; judge it as one.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped) return isBlockedIPv4(mapped[1]);
+  // Judge the PARSED address, never its spelling (security audit 2026-10-22). The
+  // regex that stood here matched `::ffff:1.2.3.4` only, but the WHATWG URL parser
+  // rewrites that literal to `::ffff:102:304`, so `http://[::ffff:169.254.169.254]/`
+  // reached the metadata address. Unparseable ⇒ blocked, like every other shape.
+  const g = ipv6Groups(lower);
+  if (!g) return true;
+  const v4 = (hi, lo) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  const zeros = (from, to) => g.slice(from, to).every((x) => x === 0);
+  // ::ffff:a.b.c.d (v4-mapped) and ::ffff:0:a.b.c.d (v4-translated) mean an IPv4 host.
+  if (zeros(0, 5) && g[5] === 0xffff) return isBlockedIPv4(v4(g[6], g[7]));
+  if (zeros(0, 4) && g[4] === 0xffff && g[5] === 0) return isBlockedIPv4(v4(g[6], g[7]));
+  // ::a.b.c.d (deprecated v4-compatible), which also covers :: and ::1.
+  if (zeros(0, 6)) return true;
   if (lower === '::' || lower === '::1') return true;      // unspecified, loopback
   if (/^fe[89ab]/.test(lower)) return true;                // fe80::/10 link-local
   if (/^f[cd]/.test(lower)) return true;                   // fc00::/7 unique-local

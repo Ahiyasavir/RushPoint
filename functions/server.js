@@ -29,7 +29,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
 const fs = require('fs');
-const fsPath = require('path');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
 const VPS_UPLOAD_ORIGIN = process.env.VPS_UPLOAD_ORIGIN || '';
@@ -270,27 +269,13 @@ app.post('/ingest-url', createIngestUrlHandler({
 // the round trip has to be proven somewhere else (change: media-serving-correctness).
 app.get(/^\/uploads\/(.+)$/, mediaServing.createUploadsGetHandler({ uploadDir: UPLOAD_DIR }));
 
-// Internal: delete an upload prefix (local ops only — not for browser use).
-app.delete(/^\/uploads\/(.+)$/, async (req, res) => {
-  // Only allow from localhost / internal
-  const origin = req.headers.origin;
-  if (origin) return res.status(403).json({ error: 'External delete not allowed' });
-  const relativePath = req.params[0];
-  if (!relativePath || relativePath.includes('..')) {
-    return res.status(400).json({ error: 'Invalid path' });
-  }
-  const fullPath = fsPath.join(UPLOAD_DIR, relativePath);
-  if (!fullPath.startsWith(fsPath.resolve(UPLOAD_DIR))) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  try {
-    await fs.promises.rm(fullPath, { recursive: true, force: true });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('Delete error:', e);
-    res.status(500).json({ error: 'Delete failed' });
-  }
-});
+// There is deliberately NO `DELETE /uploads/*` route (security audit 2026-10-22).
+// One existed, "guarded" by refusing requests that carried an Origin header — but
+// only browsers send Origin, and Caddy forwards every verb from 127.0.0.1, so any
+// non-browser client could erase every participant photo and every game's media
+// without signing in. Nothing called it: media is removed in-process by the
+// purge/prune paths. Never add an unauthenticated mutating route here;
+// scripts/test-uploads-readonly.ts fails if one comes back.
 
 // Mount every callable at /<name>. `__endpoint.callableTrigger` is how a v1
 // `onCall` announces itself; anything else (triggers, schedules) is skipped.

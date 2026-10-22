@@ -1004,6 +1004,22 @@ export interface Run {
   //                     too, because it is a strict superset of the shorter sweep.
   piiPrunedAt?: string;
   answerLogPrunedAt?: string;
+  // ── A run prepared ahead of the day (change: prepared-run) ──
+  // `status: 'draft'` until openRun; these are run-scoped on purpose (the template is replayed
+  // by later runs and copied by duplicate/export/publish). Written only by
+  // updateRunEventDetails / markRunPrinted / cancelPreparedRun. See packages/shared/src/preparedRun.ts.
+  plannedStartAt?: string;
+  meetingPoint?: string;
+  /** For the organizer and staff; never sent to players. */
+  eventNote?: string;
+  /** Teams may register while the run is prepared. Absent = on; only a literal false closes it. */
+  earlyRegistration?: boolean;
+  /** What was printed and its fingerprint, so the console can say "changed since you printed". */
+  prints?: import('../preparedRun').RunPrints;
+  /** Set when a prepared run was cancelled instead of opened (status becomes 'finished'). */
+  cancelledAt?: string;
+  /** When the run was prepared, before it went live (launchedAt is stamped on open). */
+  preparedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1142,6 +1158,9 @@ export interface RunTaskRecord {
   skipCause?: SkipCause;
   /** live-task-close-rules: skipped because the organizers CLOSED the mission for the run. Earns 0. */
   closedByOrganizer?: boolean;
+  /** pause-never-strands: skipped for THIS team because it ran out of missions while this one was
+   *  paused (the stage shrank so the team could move on). Earns 0. Not a closure. */
+  setAsideWhilePaused?: boolean;
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;

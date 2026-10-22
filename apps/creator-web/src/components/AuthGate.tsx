@@ -564,7 +564,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
             <span aria-hidden="true">·</span>
             <a href="/terms" target="_blank" rel="noreferrer" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>{l.termsLink}</a>
             <span aria-hidden="true">·</span>
-            <a href="mailto:legal@rushpoint.app" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>legal@rushpoint.app</a>
+            <a href="mailto:admin.rushpoint@gmail.com" className={`${TAP_TEXT} px-1 hover:text-[--ink-1] hover:underline transition-colors`}>admin.rushpoint@gmail.com</a>
           </p>
         </footer>
       </div>

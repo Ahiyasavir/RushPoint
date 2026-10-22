@@ -25,6 +25,8 @@
 import { RUN_DATA_RETENTION_DAYS } from '@rushpoint/shared';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** How far ahead a prepared run's planned start may keep it from being read as abandoned. */
+export const PLANNED_START_HORIZON_DAYS = 366;
 
 /** Non-finished run statuses: the ones an abandoned run can be sitting in. */
 export const ABANDONABLE_RUN_STATUSES = ['draft', 'live'] as const;
@@ -36,6 +38,12 @@ export interface RunRetentionFacts {
   launchedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  /**
+   * A prepared run's planned start (change: prepared-run). A draft may be prepared weeks ahead,
+   * so the event still being ahead is evidence it is not abandoned. Counted only up to
+   * PLANNED_START_HORIZON_DAYS ahead, so a typo'd year cannot keep participant data forever.
+   */
+  plannedStartAt?: string | null;
   /** Tombstone written by pruneRunPII; makes the whole operation idempotent. */
   piiPrunedAt?: string | null;
 }
@@ -99,7 +107,11 @@ export function evaluateRunPrune(
   }
 
   const finishedMs = isoMs(run.finishedAt);
-  const activity = [isoMs(run.finishedAt), isoMs(run.updatedAt), isoMs(run.launchedAt), isoMs(run.createdAt)]
+  // A planned start counts as activity (prepared-run), but only within a horizon: beyond it is
+  // a typo, and it must not be able to veto the promise on its own.
+  const plannedMs = isoMs(run.plannedStartAt);
+  const planned = plannedMs !== null && plannedMs <= now.getTime() + PLANNED_START_HORIZON_DAYS * DAY_MS ? plannedMs : null;
+  const activity = [isoMs(run.finishedAt), isoMs(run.updatedAt), isoMs(run.launchedAt), isoMs(run.createdAt), planned]
     .filter((ms): ms is number => ms !== null);
 
   const finalized = run.status === 'finished' && finishedMs !== null;

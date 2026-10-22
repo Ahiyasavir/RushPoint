@@ -476,7 +476,7 @@ strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify vi
   is the arithmetic. `skipStage` (whole stage + its `skipAward` consolation) is unchanged — this is
   an addition, not a replacement.
 
-### Scoring — 3 automatic presets (NO human judge), see `packages/shared/scoringPresets.ts`
+### Scoring — 3 automatic presets (NO human judge), see `packages/shared/src/scoringPresets.ts`
 - `time_only` — ranked purely by completion time.
 - `fixed_points_speed` — fixed points per task + a speed bonus.
 - `smart_weighted` — sigmoid time multiplier × difficulty.
@@ -623,6 +623,24 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   server does all five; a client delete does one and leaves no tombstone for `purgeGameNow` to act
   on. `firestore.rules` is `allow delete: if false` on `users/{uid}/games/{gameId}` — the client path
   is the `deleteGame` callable.
+- **Game documents are CALLABLE-WRITTEN ONLY, and a game copy must shed template metadata**
+  (security audit 2026-10-22, `docs/SECURITY-AUDIT-2026-10-22.md`). `firestore.rules` used to let an
+  owner write their own game doc directly, which skipped every `updateGame` check AND let anyone set
+  `isTemplate: true`; `listGameTemplates` is a collectionGroup query across ALL owners, so that put a
+  stranger's game in every creator's new-game menu. The same flag also rode along on every path that
+  spreads a source game (`duplicateGame`, the share-link launch copy, `translateGame`). Now client
+  writes on `users/{uid}/games/{gameId}` are `false`, and every "this game becomes a new game" path
+  passes its source through `withoutTemplateMetadata` (`functions/src/games/templateMetadata.ts`,
+  whose test fails on a new `template*` field or a copy path that stops calling it).
+- **`/uploads/*` is read-only, at BOTH layers.** A `DELETE /uploads/*` "guarded" by refusing any
+  request with an `Origin` header let any non-browser client erase every photo unauthenticated (only
+  browsers send Origin, and Caddy forwards from 127.0.0.1, so a loopback check would not help either).
+  It is gone from `functions/server.js`, and `Caddyfile.api` proxies only GET/HEAD/OPTIONS there;
+  `scripts/test-uploads-readonly.ts` pins both. Never add an unauthenticated mutating route.
+- **An address guard must judge the PARSED address, never its spelling.** `urlIngestGuard.js` matched
+  `::ffff:1.2.3.4` only, but the WHATWG URL parser rewrites that literal to hex (`::ffff:a9fe:a9fe`),
+  so `http://[::ffff:169.254.169.254]/` reached the metadata address. It now expands IPv6 to its 8
+  groups and judges every IPv4-embedding form as the IPv4 address it carries.
 - **Rules gate documents, not fields — and never run for the Admin SDK.** The projection contract on
   world-readable `publicTasks` is enforced on the WRITE path only (`publishGame`/the seed write
   `approxLocation` via `publicTaskLocation` — now the EXACT point of every located mission, hidden

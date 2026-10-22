@@ -8,6 +8,7 @@ import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from '../obs/log';
 import { db } from '../firebase';
 import { countStagesAndTasks } from '../lib/templateCounts';
+import { withoutTemplateMetadata } from './templateMetadata';
 import * as admin from 'firebase-admin';
 import {
   type Game,
@@ -80,8 +81,9 @@ import {
 import { assertGameNotDeleted, assertNotShareLocked, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
 // Read-only share links for an unpublished game (change: game-share-link).
 import {
-  resolveShareTokenForCopy, bumpShareLinkCopyCount, deleteGameShareLinks,
+  resolveShareTokenForCopy, bumpShareLinkCopyCount, deleteGameShareLinks, shareRateKeyFor,
 } from './share';
+import { enforceRateLimit } from '../rateLimitStore';
 // What a PUBLIC GAME may say about where it is (change: surface-invisible-fields).
 // The gallery map plots publicGames by approxLocation and nothing ever wrote one, so
 // the map was permanently blank; this derives a coarse area from the game's own
@@ -930,7 +932,7 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
   // marketplace-instant-play).
   // Same for the host sheet fill-ins (issue 42): an emergency phone, staff names and notes are the
   // source owner's paperwork, and a share link or a public game can be duplicated by anyone.
-  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, hostSheetFields: _hs, ...safeSource } = sourceGame;
+  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, hostSheetFields: _hs, ...safeSource } = withoutTemplateMetadata(sourceGame);
   // Re-host the creator-authored media (change: task-media-durability). Copying the
   // DOCUMENT alone left the copy's tasks addressing `gameMedia/{srcOwner}/games/{srcGame}/…`
   // — the SOURCE game's folder. It rendered fine until the source was purged, at which
@@ -1244,7 +1246,11 @@ export const listGames = loggedCallable('listGames', async (_data, context) => {
 // an unpublished game has no publicGames doc), loads the secret task, and returns
 // ONLY { correct }. The answer key never leaves the server. No auth required —
 // this is an external acquisition surface for brand-new (signed-out) viewers.
-export const checkChallengeAnswer = loggedCallable('checkChallengeAnswer', async (data) => {
+export const checkChallengeAnswer = loggedCallable('checkChallengeAnswer', async (data, context) => {
+  // Public answer check: without a bound it was an unlimited brute-force oracle for any
+  // published game's answer key (security audit 2026-10-22). Keyed on the connection,
+  // like the other public callables, since the caller may not be signed in.
+  await enforceRateLimit(shareRateKeyFor(context), 'checkChallengeAnswer');
   const { gameId, taskId, answer } = (data ?? {}) as {
     gameId?: string; taskId?: string; answer?: string;
   };
@@ -1339,7 +1345,7 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
   // Slack/Teams webhook secret into the copy, and reset marketplace opt-in so a
   // translated copy isn't silently instant-playable/published. (Own-game-only today,
   // but keeps translateGame consistent with duplicateGame's security posture.)
-  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, ...safeNewGame } = newGame;
+  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, ...safeNewGame } = withoutTemplateMetadata(newGame);
   // Re-host the media too (change: task-media-durability) — same reasoning as
   // duplicateGame: a translated copy that borrows the source's storage folder loses
   // every picture the day the source is purged.

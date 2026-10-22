@@ -34,7 +34,7 @@ export const LEGAL_DOCS: Record<LegalDocType, Record<LegalLang, LegalDoc>> = {
       body: `
 ## 1. מבוא ותחולה
 
-RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת SaaS ליצירה והפעלה של משחקי שדה בעולם האמיתי בכתובת rushpoint.app ("השירות"). מדיניות פרטיות זו ("המדיניות") מסבירה אילו נתונים אנו אוספים, כיצד אנו מעבדים אותם, עם מי אנו משתפים אותם, וכיצד ניתן לממש את זכויותיך כנושא מידע.
+RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת SaaS ליצירה והפעלה של משחקי שדה בעולם האמיתי בכתובת rush-point.com ("השירות"). מדיניות פרטיות זו ("המדיניות") מסבירה אילו נתונים אנו אוספים, כיצד אנו מעבדים אותם, עם מי אנו משתפים אותם, וכיצד ניתן לממש את זכויותיך כנושא מידע.
 
 מדיניות זו מיושמת בהתאם לחוק הגנת הפרטיות, תשמ"א-1981 ("חוק הפרטיות"), תקנות הגנת הפרטיות (אבטחת מידע), תשע"ז-2017, וחוק התקשורת (בזק ושידורים), תשמ"ב-1982 בכל הנוגע לדיוור ישיר.
 
@@ -155,7 +155,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **עדכון רשימת ספקי המשנה:** נעדכן רשימה זו כאשר נוסיף ו/או נחליף ספק משנה מהותי, ונודיע על שינוי כאמור בהתאם לסעיף 15 (שינויים במדיניות).
 
-**הסכם עיבוד נתונים (DPA) ליוצרים:** יוצר שהוא עסק הכפוף לדין הגנת מידע זר (למשל GDPR) ואוסף מידע אישי של משתתפים דרך שדות מותאמים (סעיף 3.5) פועל כ"בקר מידע" (data controller) לגבי אותו מידע, כאשר RushPoint פועלת כ"מעבד מידע" (data processor) מטעמו. יוצר כאמור רשאי לפנות ל-**legal@rushpoint.app** לקבלת הסכם עיבוד נתונים (DPA) חתום הכולל את פרטי ספקי המשנה שלנו והתחייבויותינו כמעבד.
+**הסכם עיבוד נתונים (DPA) ליוצרים:** יוצר שהוא עסק הכפוף לדין הגנת מידע זר (למשל GDPR) ואוסף מידע אישי של משתתפים דרך שדות מותאמים (סעיף 3.5) פועל כ"בקר מידע" (data controller) לגבי אותו מידע, כאשר RushPoint פועלת כ"מעבד מידע" (data processor) מטעמו. יוצר כאמור רשאי לפנות ל-**admin.rushpoint@gmail.com** לקבלת הסכם עיבוד נתונים (DPA) חתום הכולל את פרטי ספקי המשנה שלנו והתחייבויותינו כמעבד.
 
 ## 6. אבטחת מידע
 
@@ -180,13 +180,13 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 - נתוני שימוש אנונימיים: עד 24 חודשים
 - תוכן דוא"ל סיכום ריצה: אינו נמחק על ידינו לאחר השליחה — נשמר בתיבת הדואר של הנמען בהתאם למדיניות השמירה שלו (ראה סעיף 3.7)
 
-**בקשת מחיקה:** יוצרים יכולים לבקש מחיקת חשבון וכל הנתונים הקשורים אליו על-ידי פנייה ל-privacy@rushpoint.app. ביצוע המחיקה תוך 30 יום.
+**בקשת מחיקה:** יוצרים יכולים לבקש מחיקת חשבון וכל הנתונים הקשורים אליו על-ידי פנייה ל-admin.rushpoint@gmail.com. ביצוע המחיקה תוך 30 יום.
 
 ### 7.1 בקשת מחיקה של משתתף (ללא חשבון)
 
 סעיף זה משלים את פסקת "בקשת מחיקה" שלעיל, החלה על בעלי חשבון יוצר. משתתף שהצטרף לריצה באמצעות קוד גישה, ללא יצירת חשבון, **רשאי אף הוא לבקש את מחיקת הנתונים שנאספו עליו באותה ריצה**, ובכלל זה: נתוני מיקום GPS שנאספו במהלך הריצה, תמונות שהעלה, הקלטות קול שהעלה, הודעות ששלח בצ׳אט הצוות, ושם הצוות ו/או שם התצוגה שבחר.
 
-**כיצד מגישים בקשה:** בפנייה לאותה כתובת — **privacy@rushpoint.app**. הצטרפות לריצה היא אנונימית ואינה מקושרת לשם אמיתי ו/או לכתובת דואר אלקטרוני, ולכן איננו יכולים לאתר את הנתונים לפי זהות הפונה. כדי שנוכל לאתר את הנתונים בפועל, יש לציין בפנייה פרטים מזהים של הריצה: **קוד הגישה, תאריך האירוע, ושם הצוות** (וככל שידוע — שם המשחק ו/או שם המארגן). נטפל בבקשה במסגרת הזמנים המפורטת בפסקת "בקשת מחיקה" שלעיל.
+**כיצד מגישים בקשה:** בפנייה לאותה כתובת — **admin.rushpoint@gmail.com**. הצטרפות לריצה היא אנונימית ואינה מקושרת לשם אמיתי ו/או לכתובת דואר אלקטרוני, ולכן איננו יכולים לאתר את הנתונים לפי זהות הפונה. כדי שנוכל לאתר את הנתונים בפועל, יש לציין בפנייה פרטים מזהים של הריצה: **קוד הגישה, תאריך האירוע, ושם הצוות** (וככל שידוע — שם המשחק ו/או שם המארגן). נטפל בבקשה במסגרת הזמנים המפורטת בפסקת "בקשת מחיקה" שלעיל.
 
 **דרך חלופית — פנייה למארגן:** ניתן לפנות ישירות ליוצר המשחק שהפעיל את הריצה. ליוצר יש גישה לכלי הניהול של הריצה, והוא יכול להסיר את התוכן של הצוות שלך (לרבות הסתרת תמונות מהפיד) ו/או למחוק את הריצה כולה.
 
@@ -206,7 +206,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **ניידות נתונים:** לבקשה, נספק ייצוא של המידע שלך בפורמט מובנה.
 
-לממש זכויות אלה: **privacy@rushpoint.app** · admin.rushpoint@gmail.com
+לממש זכויות אלה: **admin.rushpoint@gmail.com**
 
 ## 9. עוגיות ועקיבה
 
@@ -234,7 +234,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **משתתפים קטינים:** בשונה מיוצרים, השירות מותאם גם לאירועים שבהם המשתתפים הם קטינים (למשל קבוצות נוער, בר/בת מצווה) — זהו שימוש נפוץ וצפוי בפלטפורמה. יוצר שמפעיל אירוע כזה **חייב** להפעיל את מנגנון "הסכמת הורים" בהגדרות הריצה; במצב זה קבוצת קטין לא תוכל להתחיל לשחק ללא רישום הסכמה מפורשת של הורה ו/או אפוטרופוס (שם + חתימת אישור דיגיטלית), הנשמרת על גבי רשומת הצוות ונמחקת בהתאם לתקופת השמירה בסעיף 7. **האחריות המלאה** להפעלת מנגנון ההסכמה, ולוודא שהוא תואם את מדיניות בית הספר/הארגון ואת חוק הפרטיות, מוטלת על יוצר האירוע (ראה גם סעיף 6.1 בתנאי השימוש).
 
-אנו לא אוספים ביודעין מידע אישי של קטין מחוץ למסגרת מנגנון ההסכמה האמור. אם נודע לנו שנאסף מידע כאמור שלא כדין, נמחק אותו לאלתר. הורה ו/או אפוטרופוס המודע לאיסוף מידע על קטין שלא כדין מוזמן לפנות אלינו ל-privacy@rushpoint.app.
+אנו לא אוספים ביודעין מידע אישי של קטין מחוץ למסגרת מנגנון ההסכמה האמור. אם נודע לנו שנאסף מידע כאמור שלא כדין, נמחק אותו לאלתר. הורה ו/או אפוטרופוס המודע לאיסוף מידע על קטין שלא כדין מוזמן לפנות אלינו ל-admin.rushpoint@gmail.com.
 
 ## 12. העברות מידע בינלאומיות
 
@@ -246,7 +246,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **13.1 בסיסים חוקיים לעיבוד (סעיף 6 GDPR):** אנו מעבדים מידע על בסיס: **ביצוע חוזה** (הפעלת חשבונך, ניתוב, ניקוד) · **הסכמה** (מיקום GPS בזמן ריצה, הסכמת הורים, דיוור שיווקי — ניתנים לביטול בכל עת) · **אינטרס לגיטימי** (אבטחת מידע, מניעת הונאה, תחזוקת השירות ודוחות קריסה) · **חובה חוקית** (תגובה לצווים).
 
-**13.2 נציג באיחוד האירופי:** במידה שנדרש על-פי דין, פרטי נציג באיחוד האירופי יפורסמו בעמוד זה ו/או יימסרו לפי בקשה בכתובת privacy@rushpoint.app.
+**13.2 נציג באיחוד האירופי:** במידה שנדרש על-פי דין, פרטי נציג באיחוד האירופי יפורסמו בעמוד זה ו/או יימסרו לפי בקשה בכתובת admin.rushpoint@gmail.com.
 
 **13.3 זכויות נוספות:** זכות הגבלת עיבוד, זכות התנגדות לעיבוד מבוסס אינטרס לגיטימי, וזכות שלא להיות כפוף להחלטה אוטומטית מהותית (איננו מבצעים החלטות כאלה — ראה סעיף 4).
 
@@ -264,7 +264,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 - **זכות "לא למכור/לשתף":** **אנו לא מוכרים ולא משתפים ("sell"/"share" כהגדרתם ב-CCPA) מידע אישי** תמורת תשלום ו/או לצרכי פרסום התנהגותי חוצה-הקשרים. אין צורך לממש opt-out כי אין מכירה/שיתוף מלכתחילה.
 - **איסור אפליה:** לא נפלה לרעה בשירות ו/או במחיר בשל מימוש זכות מהזכויות שלעיל.
 
-לממש זכויות אלה: **privacy@rushpoint.app**.
+לממש זכויות אלה: **admin.rushpoint@gmail.com**.
 
 ## 15. שינויים במדיניות
 
@@ -274,7 +274,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 לכל שאלה, בקשה לעיון, תיקון, ו/או מחיקה:
 
-**דוא"ל:** privacy@rushpoint.app · admin.rushpoint@gmail.com
+**דוא"ל:** admin.rushpoint@gmail.com
 **נושא הפנייה:** יש לציין "פנייה לפי חוק הפרטיות"
 
 החברה תשיב לפניות בתוך 30 יום.
@@ -286,7 +286,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
       body: `
 ## 1. Introduction and Scope
 
-RushPoint ("the Company", "we", "us") operates a SaaS platform for building and running real-world field games at rushpoint.app ("the Service"). This Privacy Policy explains what data we collect, how we process it, with whom we share it, and how to exercise your rights as a data subject.
+RushPoint ("the Company", "we", "us") operates a SaaS platform for building and running real-world field games at rush-point.com ("the Service"). This Privacy Policy explains what data we collect, how we process it, with whom we share it, and how to exercise your rights as a data subject.
 
 This Policy is applied in accordance with Israel's Protection of Privacy Law, 5741-1981, the Privacy Protection Regulations (Data Security) 5777-2017, and the Communications Law (Telecommunications and Broadcasts) 5742-1982 regarding direct marketing.
 
@@ -407,7 +407,7 @@ We **do not sell or rent** personal data. We share data with:
 
 **Sub-processor list updates:** we will update this list whenever we add or replace a material sub-processor, and will notify users of such changes per Section 15 (Policy Changes).
 
-**Data Processing Addendum (DPA) for Creators:** a Creator who is a business subject to foreign data-protection law (e.g. the GDPR) and who collects participants' personal data via custom fields (Section 3.5) acts as the "data controller" for that data, with RushPoint acting as its "data processor." Such a Creator may contact **legal@rushpoint.app** to receive a signed Data Processing Addendum detailing our sub-processors and our obligations as processor.
+**Data Processing Addendum (DPA) for Creators:** a Creator who is a business subject to foreign data-protection law (e.g. the GDPR) and who collects participants' personal data via custom fields (Section 3.5) acts as the "data controller" for that data, with RushPoint acting as its "data processor." Such a Creator may contact **admin.rushpoint@gmail.com** to receive a signed Data Processing Addendum detailing our sub-processors and our obligations as processor.
 
 ## 6. Data Security
 
@@ -431,13 +431,13 @@ We implement security measures in accordance with the Israeli Privacy Protection
 - Anonymous usage data: up to 24 months
 - Run-summary email content: not deleted by us after sending — retained in the recipient's mailbox per their own retention settings (see Section 3.7)
 
-**Deletion request:** Creators can request deletion of their account and all associated data by contacting privacy@rushpoint.app. Deletion is carried out within 30 days.
+**Deletion request:** Creators can request deletion of their account and all associated data by contacting admin.rushpoint@gmail.com. Deletion is carried out within 30 days.
 
 ### 7.1 Participant Deletion Requests (No Account)
 
 This Section supplements the "Deletion request" paragraph above, which applies to Creator account holders. A participant who joined a run using an access code, without creating an account, **may also request deletion of the data collected about them in that run**, including: GPS location data collected during the run, photos they uploaded, audio recordings they uploaded, messages they sent in team chat, and the team name and/or display name they chose.
 
-**How to request:** contact the same address — **privacy@rushpoint.app**. Joining a run is anonymous and is not linked to a real name or email address, so we cannot locate the data from the requester's identity alone. So that we can actually find the data, please include identifying details of the run in your request: **the access code, the event date, and the team name** (and, if known, the game name and/or the organizer's name). We handle such requests within the timeframe stated in the "Deletion request" paragraph above.
+**How to request:** contact the same address — **admin.rushpoint@gmail.com**. Joining a run is anonymous and is not linked to a real name or email address, so we cannot locate the data from the requester's identity alone. So that we can actually find the data, please include identifying details of the run in your request: **the access code, the event date, and the team name** (and, if known, the game name and/or the organizer's name). We handle such requests within the timeframe stated in the "Deletion request" paragraph above.
 
 **Alternative — ask the organizer:** you may instead contact the Creator who ran the event directly. The Creator has access to the run's management tools and can remove your team's content (including hiding photos from the feed) and/or delete the entire run.
 
@@ -457,7 +457,7 @@ Under Israel's Protection of Privacy Law, 5741-1981, you have the following righ
 
 **Data portability:** upon request, we will provide an export of your data in a structured format.
 
-To exercise these rights: **privacy@rushpoint.app** · admin.rushpoint@gmail.com
+To exercise these rights: **admin.rushpoint@gmail.com**
 
 ## 9. Cookies and Tracking
 
@@ -485,7 +485,7 @@ In accordance with the Communications Law (Telecommunications and Broadcasts) Am
 
 **Minor participants:** unlike Creators, the Service is also designed for events where participants are minors (e.g. youth groups, bar/bat mitzvah events) — this is a common and expected use of the platform. A Creator running such an event **must** enable the "guardian consent" mechanism in the run's settings; with it enabled, a minor's team cannot start playing until a parent and/or guardian records explicit consent (name + digital confirmation), which is stored on the team record and deleted per the retention schedule in Section 7. **Full responsibility** for enabling this mechanism, and for ensuring it satisfies applicable school/organizational policy and privacy law, rests with the event's Creator (see also Section 6.1 of the Terms of Service).
 
-We do not knowingly collect a minor's personal data outside this consent mechanism. If we become aware that such data was collected unlawfully, we will delete it immediately. A parent or guardian aware of unlawful data collection about a minor is invited to contact us at privacy@rushpoint.app.
+We do not knowingly collect a minor's personal data outside this consent mechanism. If we become aware that such data was collected unlawfully, we will delete it immediately. A parent or guardian aware of unlawful data collection about a minor is invited to contact us at admin.rushpoint@gmail.com.
 
 ## 12. International Data Transfers
 
@@ -497,7 +497,7 @@ If you are located in the EU, the EEA, the UK, and/or another jurisdiction with 
 
 **13.1 Legal bases for processing (GDPR Art. 6):** we process data based on: **contract performance** (running your account, routing, scoring) · **consent** (in-run GPS location, guardian consent, marketing communications — withdrawable at any time) · **legitimate interest** (data security, fraud prevention, service maintenance and crash reports) · **legal obligation** (responding to court orders).
 
-**13.2 EU representative:** where required by law, EU representative details will be published on this page and/or provided on request at privacy@rushpoint.app.
+**13.2 EU representative:** where required by law, EU representative details will be published on this page and/or provided on request at admin.rushpoint@gmail.com.
 
 **13.3 Additional rights:** the right to restrict processing, the right to object to processing based on legitimate interest, and the right not to be subject to a solely automated decision with legal effect (we do not make such decisions — see Section 4).
 
@@ -515,7 +515,7 @@ If you are a California resident, in addition to the rights in Section 8 you hav
 - **Right not to be "sold"/"shared":** **we do not sell or share ("sell"/"share" as defined by the CCPA) personal data** for money and/or for cross-context behavioral advertising. There is no need to exercise an opt-out because there is no sale/sharing in the first place.
 - **Non-discrimination:** we will not discriminate in service and/or pricing for exercising any of the above rights.
 
-To exercise these rights: **privacy@rushpoint.app**.
+To exercise these rights: **admin.rushpoint@gmail.com**.
 
 ## 15. Policy Changes
 
@@ -525,7 +525,7 @@ For material changes, we will notify users via an in-platform notice at least 14
 
 For any question, access request, correction, or deletion request:
 
-**Email:** privacy@rushpoint.app · admin.rushpoint@gmail.com
+**Email:** admin.rushpoint@gmail.com
 **Subject:** please include "Privacy Rights Request"
 
 The Company will respond to requests within 30 days.
@@ -786,7 +786,7 @@ The Company will respond to requests within 30 days.
 
 לכל שאלה, הבהרה, ו/או פנייה משפטית:
 
-**דוא"ל:** legal@rushpoint.app · admin.rushpoint@gmail.com
+**דוא"ל:** admin.rushpoint@gmail.com
       `,
     },
     en: {
@@ -1041,7 +1041,7 @@ The parties waive jurisdiction of foreign courts and the application of foreign 
 
 For any question, clarification, and/or legal inquiry:
 
-**Email:** legal@rushpoint.app · admin.rushpoint@gmail.com
+**Email:** admin.rushpoint@gmail.com
       `,
     },
   },

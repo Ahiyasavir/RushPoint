@@ -198,5 +198,8 @@ export * from './senderQuiet';
 export * from './mediaResend';
 // When may a live team map move its own camera? (issue 52)
 export * from './liveMapFraming';
+// A run prepared ahead of the day: phase, open/registration verdicts, event details, the
+// "ready for the day" checklist (change: prepared-run).
+export * from './preparedRun';
 // Waiting for a station stops the team's clock (change: station-wait-clock).
 export * from './stationWait';

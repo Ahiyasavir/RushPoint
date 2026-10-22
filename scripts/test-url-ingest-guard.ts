@@ -39,6 +39,14 @@ const MUST_BLOCK = [
   'ff02::1',                           // multicast
   '::ffff:127.0.0.1',                  // v4-mapped loopback
   '::ffff:169.254.169.254',            // v4-mapped metadata
+  // HEX forms of the same (security audit 2026-10-22). The WHATWG URL parser REWRITES
+  // `[::ffff:169.254.169.254]` to `[::ffff:a9fe:a9fe]`, so the dotted form above is
+  // not what the guard actually sees for a literal host. Both were allowed before.
+  '::ffff:a9fe:a9fe', '::ffff:7f00:1', '::FFFF:7F00:0001',
+  '0:0:0:0:0:ffff:7f00:1',             // fully expanded v4-mapped
+  '::ffff:0:7f00:1',                   // v4-translated (SIIT)
+  '::7f00:1', '::127.0.0.1',           // deprecated v4-compatible
+  'fe80::1%eth0',                      // zoned link-local
   '2130706433',                        // decimal-encoded 127.0.0.1
   '0177.0.0.1',                        // octal-encoded loopback
   'not-an-ip', '', '   ',              // unparseable ⇒ refuse, never guess
@@ -48,7 +56,9 @@ for (const ip of MUST_BLOCK) {
 }
 pass(`every reserved / non-routable address is blocked :: ${MUST_BLOCK.length} address(es)`);
 
-const MUST_ALLOW = ['1.1.1.1', '8.8.8.8', '93.184.216.34', '31.70.107.184', '2606:4700:4700::1111'];
+const MUST_ALLOW = ['1.1.1.1', '8.8.8.8', '93.184.216.34', '31.70.107.184', '2606:4700:4700::1111',
+  '::ffff:1.1.1.1', '::ffff:101:101',  // v4-mapped PUBLIC addresses stay allowed in both spellings
+  '2a00:1450:4001:82a::200e'];
 for (const ip of MUST_ALLOW) {
   assert.equal(isBlockedAddress(ip), false, `must allow ${ip}`);
 }
@@ -59,6 +69,15 @@ pass(`public addresses are allowed :: ${MUST_ALLOW.length} address(es)`);
 // check) and conflating them would block a legitimate re-host of our own media.
 assert.equal(isBlockedAddress('31.70.107.184'), false);
 pass('the VPS public IP is not special-cased here (ownership does that job)');
+
+// End to end through the URL parser, which is what turns a dotted mapped literal into hex.
+{
+  const v = validateIngestUrl('http://[::ffff:169.254.169.254]/latest/meta-data/');
+  assert.ok(!v.ok, `a v4-mapped metadata literal must be refused, got host ${v.ok ? v.url.hostname : ''}`);
+  const w = validateIngestUrl('http://[::ffff:7f00:1]/');
+  assert.ok(!w.ok, 'a hex v4-mapped loopback literal must be refused');
+}
+pass('a v4-mapped literal host is refused after the URL parser rewrites it to hex');
 
 // ── URL shape ────────────────────────────────────────────────────────────────
 const BAD_URLS: Array<[string, string]> = [

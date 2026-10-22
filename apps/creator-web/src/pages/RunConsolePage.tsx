@@ -3347,41 +3347,26 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
     return () => { alive = false; };
   }, [ctx.gameId]);
 
-  async function apply(taskId: string, status: StationStatus, force = false) {
+  async function apply(taskId: string, status: StationStatus) {
     // live-task-close-rules: a closure is final for every team already playing, so it is said
     // before it happens, naming the mission.
-    if (status === 'closed' && !force) {
+    if (status === 'closed') {
       const title = stages?.flatMap((st) => st.tasks).find((tk) => tk.id === taskId)?.title ?? '';
       const ok = await dialog.confirm(rc.taskAvailCloseConfirm({ title }), rc.confirmCta.closeTask, true, { title: rc.confirmTitle });
       if (!ok) return;
     }
     setBusyTaskId(taskId);
     try {
-      const res = await setRunTaskStatus({ ...ctx, taskId, status, ...(force ? { force: true } : {}) });
+      const res = await setRunTaskStatus({ ...ctx, taskId, status });
       const notes = [rc.taskAvailUpdated];
       if (status === 'closed' && (res.teamsMoved ?? 0) > 0) notes.push(rc.taskAvailClosedMoved({ n: res.teamsMoved ?? 0 }));
       if (status === 'paused' && res.teamsHolding > 0) notes.push(rc.taskAvailHolding({ n: res.teamsHolding }));
       if (status === 'paused' && (res.dependentsLocked?.length ?? 0) > 0) notes.push(rc.taskAvailPausedLocks({ n: res.dependentsLocked?.length ?? 0 }));
+      // pause-never-strands: a pause the stage cannot spare is no longer refused; a team that runs
+      // out of missions because of it moves on past it. Say so, so nobody waits for it to "unlock".
+      if (status === 'paused' && res.stageUnwinnable) notes.push(rc.taskAvailPausedMovesOn);
       toast.success(notes.join('. '));
     } catch (e) {
-      // The server refuses a change that would leave the stage unable to yield the
-      // tasks it requires. Show the numbers it returned and let the organizer decide,
-      // rather than letting them find out through stuck teams.
-      const details = (e as { details?: { code?: string; availableCount?: number; requiredCount?: number; stageTitle?: string } }).details;
-      if (details?.code === 'stageUnwinnable' && !force) {
-        const ok = await dialog.confirm(
-          rc.taskAvailUnwinnable({
-            stage: details.stageTitle ?? '',
-            available: details.availableCount ?? 0,
-            required: details.requiredCount ?? 0,
-          }),
-          rc.taskAvailForce,
-          true,
-        );
-        setBusyTaskId(null);
-        if (ok) await apply(taskId, status, true);
-        return;
-      }
       reportFailure(e, 'setRunTaskStatus');
     } finally {
       setBusyTaskId(null);
