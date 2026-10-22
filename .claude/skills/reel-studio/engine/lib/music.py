@@ -527,6 +527,10 @@ def make_music(out, total: float, style: str = "funk", bpm: float = 100.0, energ
     if style not in STYLES:   # street-200 styles live in their own file (2026-10-16)
         from .music_street import STYLES_STREET
         STYLES.update(STYLES_STREET)
+        from .music_camp import STYLES_CAMP   # reel 24 (2026-10-22)
+        STYLES.update(STYLES_CAMP)
+        from .music_comeback import STYLES_COMEBACK   # reel 23 (2026-10-22)
+        STYLES.update(STYLES_COMEBACK)
     STYLES[style](bus, total, bpm, lvl, list(accents))
     x = np.stack([bus.L, bus.R])
     for a, b in drops:

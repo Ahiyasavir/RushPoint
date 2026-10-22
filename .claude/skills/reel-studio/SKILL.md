@@ -13,10 +13,10 @@ happened because something already written was not read.
 
 ## Step 0 · Read before the first command (every time)
 
-1. `references/founder-rules.md`: his standing rules (55). They outrank any brief.
-2. `references/lessons-2026-10-17.md` (newest: v2 to v3 of five reels; look at every freeze, ship each reel as its chain finishes, the four notes that became rules 79 to 82, backspaces that blinded two checks, captions from the final cut, no faces in git), `lessons-2026-10-16.md` (street interviews, WhatsApp audio decoded in float, the measured field chain, an exact countdown, parallel work; worked example `engine/examples/street-200/`), `lessons-2026-10-13.md` (white background, the voice chain that keeps his timbre, three pass ingest), `lessons-2026-10-05.md` and `lessons-2026-10-02.md`: what went wrong and the fix.
+1. `references/founder-rules.md`: his standing rules (over 90). They outrank any brief.
+2. `references/lessons-2026-10-17.md` (newest: v2 to v3 of five reels; look at every freeze, ship each reel as its chain finishes, the four notes that became rules 79 to 82, backspaces that blinded two checks, captions from the final cut, no faces in git), `lessons-2026-10-16.md` (street interviews, WhatsApp audio decoded in float, the measured field chain, an exact countdown, parallel work; worked example `engine/examples/street-200/`), `lessons-2026-10-13.md` (white background, the voice chain that keeps his timbre, three pass ingest; section 8 is reel 17: six script rounds, a screen insert hook, his real room cleaned, a retouch, and two 20 minute batches thrown away), `lessons-2026-10-05.md` and `lessons-2026-10-02.md`: what went wrong and the fix.
 3. `references/pre-delivery-checklist.md`: the zero notes checklist. **Every cut passes it before it is sent.**
-4. `references/kill-criteria.md`: the six question test.
+4. `references/kill-criteria.md`: the seven question test (the seventh: what does the VIEWER get?).
 5. `references/gotchas.md` + `~/.claude/toolkits/video-editing/README.md` (the long list).
 6. For words (script, hook, caption): the `video-script` skill, `.claude/skills/video-script/`.
 7. **The footage library**: `docs/marketing/footage/library/README.md` (94 trimmed clips on 2026-10-13:
@@ -25,9 +25,16 @@ happened because something already written was not read.
 
 ## Step 1 · Concept gate (before ANY editing)
 
-Run the six questions in `kill-criteria.md` on the idea or script. Under 4 of 6: do not
+Run the seven questions in `kill-criteria.md` on the idea or script. Under 5 of 7: do not
 start a timeline. Tell him in Hebrew, three options (drop / reshoot with a shot list / one
 specific fix), recommend one. A brief relayed by another session (אודי) gets the same test.
+
+**When he sends an inspiration video, name its mechanism in one line and keep it** (the outline you
+pause on, the confession that turns out harmless, the list he edits). His own structure beats any
+structure you invent: on reel 17 he described it himself ("I hesitate, press, the phones burst onto
+the map, then we start") after five of mine were rejected. **After two rejected versions, stop and
+ask what exactly bothers him** (the questions? the hook? not him?), then build that. A third guess
+costs him more than the question.
 
 ## Step 2 · Research, then script and shot list
 
@@ -44,12 +51,24 @@ A line that needs a picture (him typing, climbing stairs, the booth, a player do
 phone showing the app) probably has one already; name the library file in the script's ROLL. He has
 little time to film (rule 51), and a real clip of his beats stock.
 
+**A promo reel (rules 83 to 86)**: the viewer gets something (what the app is, what they can do with
+it, that it is free), says nothing about the app failing, shows no mission content and no quiz, and
+assumes the viewer never heard of RushPoint. Humanity comes from who it was built for, not from fear.
+
 Use the `video-script` skill (structure by name, hook last, beats with timecodes, ROLL,
 CAPTION, RISK). Write the shot list as what he can film on a phone in one afternoon. Ask him
 for his OWN photos and clips of real things (he has rappelling, robotics, FIRST, park
 workouts); stock only with his OK; never icons for real things.
 
 ## Step 3 · Ingest what he sends, READ the transcript, then cut
+
+**What he films is often not what the shot list asked for** (reel 17: a profile shot of a hand held
+phone, not the phone flat on a table from above). Plan the tool around what arrived, measure it
+(where the finger lands, how the phone moves) and say in one line what changed. Do not ask him to
+reshoot what a tool can solve.
+
+**He restarts a phrase when the first try was bad** ("אבל כל אחד פה ... אבל כל אחד פה"). A whole take
+transcription merges the two; look for a repeated opening inside every cut line and keep the second.
 
 Field clips carry side talk (mic setup, English, chatter after the take), walk ins and head turns at
 both ends. The transcript is the cut list: keep from the first scripted word to the last scripted
@@ -120,10 +139,29 @@ under the next one, lower third titles, app recordings on white, a RushPoint out
 
 **Where a talking shot ends is decided by his EYES, not by the sound** (rule 56, the note he gave on
 every shot of reel 16 v1). Run `tails.py`, mute the talking clips, lay each line's voice as its own
-file, never make a shot longer than its clip, cut hard. **A background he asks for** (white, a colour)
-is `lib/whitebg.py`: look at a frame of every take first, run ONE shot to the final file and measure
-it, then start the 25 minute batch. Shared 9:16 helpers are `engine/lib/portrait.py`: `GRADE` (apply it to flat
+file, never make a shot longer than its clip, cut hard.
+
+**Behind him: his real room, tidied, by default** (rule 87). `lib/whitebg.clean_room_rvm(src, dst, a=, b=,
+retouch=True)` keeps the footage as shot and rebuilds only where something sits on the wall (sockets,
+a cupboard, cables, clutter at the frame edge). A pure white cut out (`whiten_rvm`) and a designed
+colour background (`whiten_rvm(bg=)`) were BOTH rejected on reel 17 ("לא נראה טוב, אני רוצה שזה יראה
+טבעי"); use them only when he asks. **`retouch=True` always** (rule 91): a light frequency separation
+skin retouch, invisible as such.
+
+**Any look decision he has not already approved gets ONE proof frame sent to him before the batch.**
+Matting the lines of a 40 s reel takes about 20 minutes on this laptop; on reel 17 a white batch and
+a colour batch were each thrown away because the look was chosen for him. A side by side jpg costs a
+minute. Also: look at a frame of every take, run ONE shot to the final file and measure it, then
+start the batch. Shared 9:16 helpers are `engine/lib/portrait.py`: `GRADE` (apply it to flat
 takes and stock, rule 46), `phone_shot()` (big centred phone), `placeholder()`, `png()` (cached).
+
+**A hook that happens on a phone screen** (`examples/reel17-button/hook/`): film the phone BLACK, then
+`track.py` (the phone's edges, frame by frame), `tip.py` (where the finger lands, in screen
+coordinates: put the button there), `ui.py` (the screen as HTML) and `comp.py` (corner pin, real
+fingers in front, the glass's own reflections kept, a time remapped hesitation, a push in, and a dive
+INTO the screen). **Phones bursting onto the real map** of a route: `examples/reel17-button/map/`.
+**A payoff word needs a beat after it**: `HOLD_AFTER` in that `make_timeline.py`, with the clip cut
+longer by `l8_tail.py`, so a stamp is on screen long enough to read.
 
 `python setup_workspace.py <reel>` (from `engine/`), then write `timeline.json` from a
 small Python script that computes every time from measured values (landings, speech
@@ -146,7 +184,11 @@ T=~/.claude/toolkits/video-editing/tools
 python $T/phone_preview.py build/<reel>_A.mp4 <scratch>/preview.jpg 8   # frames with the IG/TikTok UI drawn on
 python $T/muted_watch.py   build/<reel>_A.mp4                          # stretches with nothing new, sound OFF
 ```
-Read the preview jpg. Nothing readable may touch a zone. Then extract 6 to 10 frames at the
+Read the preview jpg. Nothing readable may touch a zone, and **the hero object** (the phone, the
+button, the stamp) sits clear of the zones too: on reel 17 v1 the phone being pressed was half under
+the like/comment column. `muted_watch.py` does not count a framing change on the same person as
+"new"; read its DEAD list against the shot list, not as a verdict. QA now also fails a title or label
+over a face (`faces`, mediapipe on the shot's own clip) and a mix far from -14 LUFS (`loudness`). Then extract 6 to 10 frames at the
 moments that matter (`ffmpeg -ss t -frames:v 1`), read them, and measure what QA cannot see.
 Tile the LAST frame of every talking shot into one sheet and look at it: this is where v1 of reel 16
 failed, and no number caught all of it.
@@ -182,6 +224,11 @@ tools only. Covers and clips are faces (most of them minors) and the repo is PUB
 explicit OK. Files go to him in the chat; text for WhatsApp goes to the אודי session, which posts in
 the group "תוכן" (it cannot open files on this machine).
 
+**"Send it to my phone"**: SendUserFile reaches his phone only under 30 MiB, and a master is ~80 MB. Send
+a phone copy made to fit (`python engine/phone_copy.py <master> <scratch>/<name>-phone.mp4`, about 26 MB,
+same picture to the eye), keep the master on the laptop, and say which is which. The build masters the
+mix to -14 LUFS itself (`build.master_loudness`); do not add gain at export.
+
 ## Step 8 · Close the loop
 
 Before saying "done": add any new gotcha to `references/gotchas.md`, any new rule to
@@ -198,11 +245,14 @@ quiz screens with a live countdown, progress dots, answer reveal · title cards 
 pill or a comment arrow · receipt slips with a slamming stamp · text written behind a
 person (occlusion against an empty plate) · moving circular face blur · crop, freeze, rewind,
 slow push, zoom in, dissolves, progress bar · voice prep (profiled denoise, pause trim,
-1.12x, two pass loudness) · eight synthesised music styles with sidechain ducking (the newest,
-`kickoff`, is the upbeat one) · SFX
+1.12x, two pass loudness) · his real room tidied behind him (`whitebg.clean_room_rvm`) and an invisible
+skin retouch (`whitebg.retouch_skin`) · a screen insert on a black phone with a dive into it and
+phones bursting onto a real map (`examples/reel17-button`) · nine synthesised music styles with
+sidechain ducking (`kickoff` upbeat, `heartdrop` a heartbeat into a warm drop) · SFX
 (land, ding, whoosh, pop, hit, riser, tick, register, close, type, buzz, print) · QA:
 format, length, pace, safe zone, platform UI zone, dashes, loop, TODOs, music presence and
-uniqueness, voice continuity, lip sync, frozen last frames, eyes at the cut, measured white.
+uniqueness, voice continuity, lip sync, frozen last frames, eyes at the cut, measured white, titles
+over a face, loudness.
 
 ## Installed tools (verify before installing anything)
 ffmpeg 9 full (libass, fribidi, harfbuzz, xfade, sidechaincompress) · Python 3.11 with

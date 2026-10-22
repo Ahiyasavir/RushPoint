@@ -107,3 +107,22 @@ fix away.
 - **Bash heredocs that contain Python with `\n` escapes break** (twice today). Write such files with the editor tool.
 
 - **`qa.py`'s date check was half blind** (found 2026-10-17): its regex held two literal BACKSPACE bytes where `\b` was meant, so numeric dates ("15.10", "22/10") never matched and the line still printed "0 captions carry a date". Fixed by byte value. **The fix hit the same trap**: writing `\b` through a heredoc'd Python string produced a backspace again. Edit such bytes with `bytes([92, 98])`, then grep the file for `[\x00-\x08]` to prove it. `scripts/test-source-control-chars.ts` (in `npm test`) scans `.claude/skills` since the same day, `lib/` included.
+
+## 2026-10-13 evening (reel 17, the button)
+- **A background job chained with `&` loses the `cd`**: `cd X && A && (B) & (C); wait` runs C in the
+  ORIGINAL directory (the `&` backgrounds the whole `cd && ...` list). `assemble.py` "ran" in the repo
+  root, failed in a second, and 15 minutes passed before anyone noticed. One job per Bash call, `cd` inside it.
+- **Waiting on a log that already existed reads the OLD verdict.** Three times a wait loop saw yesterday's
+  `QA=` or `HOOK=` line and reported the new build done. Delete the log first, or wait on a new file name
+  or on the output file's mtime, and check the result belongs to this run (shot count, length).
+- **A path with `\U` inside a Python string in a heredoc is a unicode escape error**, and the whole patch
+  script dies, so the batch that follows runs on the UNPATCHED code (a 20 minute matting batch wasted).
+  Write patch scripts with the Write tool, and gate the batch on the patch's own success (`&&`).
+- **`muted_watch.py` does not count a framing change on the same person as new**: it reported 9 s "dead"
+  over five shots. Read its list against the shot list.
+- **SendUserFile reaches his phone only under 30 MiB**; an 80 MB master shows only on this laptop.
+  `engine/phone_copy.py`.
+- **The toolkit already had `face_retouch_mediapipe.py`** when I wrote `whitebg.retouch_skin`. Grep the
+  toolkit (`~/.claude-account2/toolkits/video-editing`) before building any picture tool.
+- **Mixed timing in Hebrew captions: whisper's word list and the caption text differ by a word**
+  ("ראש פוינט" is two words, "RushPoint" one): map by position (`word_times` in reel17 `make_timeline.py`).

@@ -129,25 +129,25 @@ contradicts one, follow the rule and tell him in one line.
     icon springs in, wordmark, orange underline, on white). Rule 43 (no logo) still holds for reels unless he asks.
 59. **A white background behind him means measured white** in the final file, every shot (see lessons-2026-10-13).
 
-## From 2026-10-13 evening (reel 16 "the button", the morning of the race) · details in lessons-2026-10-13.md section 4
-56. **The viewer must GET something.** A video that only asks them to care about him was "אין שם כלום, למה שיתנו לי
+## From 2026-10-13 evening (reel 17 "the button", the morning of the race) · details in lessons-2026-10-13.md section 8 (renumbered 83 to 93: 56 to 60 were taken by the afternoon session)
+83. **The viewer must GET something.** A video that only asks them to care about him was "אין שם כלום, למה שיתנו לי
     לייק". Say what the app is and what they can do with it (build a game for a class, a פעולה, friends, free).
-57. **No mission content and no quiz questions in a promo reel**: "זה לא מעניין אנשים". (Riddles as their own format are fine.)
-58. **Show that the app is good, never that it might break.** No "if it falls", no bugs, no "what I could not test".
+84. **No mission content and no quiz questions in a promo reel**: "זה לא מעניין אנשים". (Riddles as their own format are fine.)
+85. **Show that the app is good, never that it might break.** No "if it falls", no bugs, no "what I could not test".
     Humanity comes from who it was built for (his grandmother), not from fear.
-59. **Assume the viewer never heard of RushPoint**: one plain sentence of what it is, then how it works, shown on screen.
-60. **Clean the room, keep it NATURAL**: sockets, cupboards, cables and clutter behind him are removed, but the wall stays
+86. **Assume the viewer never heard of RushPoint**: one plain sentence of what it is, then how it works, shown on screen.
+87. **Clean the room, keep it NATURAL**: sockets, cupboards, cables and clutter behind him are removed, but the wall stays
     his real wall with its own light (`lib/whitebg.clean_room_rvm`). A white cut out and a designed colour background were
     both rejected the same night ("הרקע מאחורי לא נראה טוב, אני רוצה שזה יראה טבעי"). White is only for when he asks for white.
-61. **Something changes in the frame at least every 3 seconds** (a framing jump, an insert, a graphic), and he wants
+88. **Something changes in the frame at least every 3 seconds** (a framing jump, an insert, a graphic), and he wants
     visible jumps between framings, not one long locked shot.
-62. **The hook is designed frame by frame** and has to look real: a screen insert must track, keep his fingers in
+89. **The hook is designed frame by frame** and has to look real: a screen insert must track, keep his fingers in
     front, and be impossible to tell from a lit phone.
-63. **Two rejected versions of an idea = stop and ask what bothers him**, then follow HIS structure; do not guess a third.
-64. **A light, invisible skin retouch on every take of him** ("יותר חתיך, אבל אני לגמרי, שלא ישימו לב"):
+90. **Two rejected versions of an idea = stop and ask what bothers him**, then follow HIS structure; do not guess a third.
+91. **A light, invisible skin retouch on every take of him** ("יותר חתיך, אבל אני לגמרי, שלא ישימו לב"):
     `whitebg.retouch_skin` (middle frequency band only, skin only). Never a beauty filter look.
-65. **Music present and pleasant**: around -8.5, warm chords, soft hats; a hard trap bed at -11 was "not prominent, not pleasant".
-66. **He restarts a phrase when the first try was bad**: listen for a repeated opening ("אבל כל אחד פה ... אבל כל אחד פה")
+92. **Music present and pleasant**: around -8.5, warm chords, soft hats; a hard trap bed at -11 was "not prominent, not pleasant".
+93. **He restarts a phrase when the first try was bad**: listen for a repeated opening ("אבל כל אחד פה ... אבל כל אחד פה")
     inside one cut and keep only the second.
 60. **The footage library is fed after every shoot and read before every script** (2026-10-13):
     `docs/marketing/footage/library/`. Every clip there is a short cut of the main thing (not a raw
@@ -182,3 +182,9 @@ contradicts one, follow the rule and tell him in one line.
 80. **An insert must not show a different event** (2026-10-16): the Race to Zion route map ("מוצא") came out of 19 and 21; a city wide race gets a map of the city (`maps/map-jerusalem-zoom.mp4`), not another race's route.
 81. **The end is excitement, not a polite reaction** (2026-10-17, reel 20: a sarcastic "יאיי"). Never end on a line whose tone you cannot vouch for; end on the loudest real moment (their pick shouted), and make the picture and the sound celebrate it: a riser into it, a colour freeze with a hard shake and flash, a big headline (`T.big`), a register. `s200-mystery-girls` v3.
 82. **When the camera shows someone other than the speaker, label it** (2026-10-17, reel 22 "מבולגן, לא ברור"): a viewer reads the face on screen as the voice. Switch the pill when the camera turns ("משכנע עובר אורח"), keep one idea per beat, and drop every voice that is not the story's. Fewer, clearer beats beat more material: 22 went from 31 s to 18.6 s.
+
+## From 2026-10-22 (reel 24, for counselors, sent in WhatsApp)
+94. **A video that is SENT, not scrolled, needs no scroll stopper; it needs a thumbnail that makes them open it** ("זה לא יהיה
+    סרטון שגוללים, זה סרטון ששולחים בווצאפ... מי שפותח יראה כנראה עד הסוף, פשוט צריך לפתוח"). WhatsApp shows frame 0: put
+    who it is for, what it is and "free" on it, over his face, and drop lines like "אל תדלגו על זה". Ask where a video will
+    be shared before choosing the hook. Example: `drafts/24-madrichim`.

@@ -22,7 +22,7 @@ result first hook, receipt as thermal paper, text written on the steps behind hi
 
 ## The pre-flight test (run on the SCRIPT and on the first ingest, before any timeline)
 
-Score each 0 or 1. **Under 4 of 6 = do not edit it; say so and propose a reshoot or a drop.**
+Score each 0 or 1. **Under 5 of 7 = do not edit it; say so and propose a reshoot or a drop.**
 
 | # | Question | Stairs | AI reel |
 |---|---|---|---|
@@ -32,8 +32,13 @@ Score each 0 or 1. **Under 4 of 6 = do not edit it; say so and propose a reshoot
 | 4 | Is the subject at least a third of the frame height for most of the video? | 0 (first half) | 1 |
 | 5 | Is the strongest fact in the first 5 seconds? | 0 (hours came late) | 1 |
 | 6 | Is there his voice, or a format that needs none (quiz, list with answers)? | 0 | 1 |
+| 7 | What does the VIEWER get (something to use, learn, feel or try), not only a reason to care about him? | 0 | 1 (an assistant they can picture) |
 
-The stairs scored 0 of 6 before the first edit. The riddles: 6. The AI reel: 6.
+The stairs scored 0 of 7 before the first edit. The riddles: 7. The AI reel: 7.
+
+Question 7 was added after reel 17 (2026-10-13): "צריך להוסיף שם איזו תרומה או משהו מעניין לאנשים, למה
+שהם יתנו לי לייק על זה? אין שם כלום". A script about his big day scored 6 of 6 and still gave the viewer
+nothing. What fixed it was one plain sentence of what RushPoint is and "anyone can build one, free".
 
 ## Early warning signs during editing
 
@@ -47,3 +52,16 @@ The stairs scored 0 of 6 before the first edit. The riddles: 6. The AI reel: 6.
 (1) drop it, (2) reshoot with a concrete shot list that fixes the failing criteria,
 (3) one last edit, with the specific criterion it fixes. Recommend one. Do not silently
 start version N+1.
+
+## Script rounds (reel 17, 2026-10-13: six versions before one was accepted)
+
+The versions that failed, in order, so the next script does not repeat them:
+1. a backstory opening ("half a year ago I built an app for one race"): nothing happens in the frame;
+2. a button and "I don't sleep tonight": still only about him, the viewer gets nothing;
+3. a quiz with real race questions (biblical directions): "השאלות האלה לא באמת יעבדו", school, not feed;
+4. three missions he demonstrates: "אל תכניס שם משימות, זה לא מעניין אנשים";
+5. "you have a button like this too": not understood; the app might fail: the opposite of what he wants said.
+
+The one he accepted was HIS structure, said in one breath (hesitate, press, phones burst onto the map,
+then explain the app). **After the second rejection, ask the one question that splits the options**
+("what bothers you most: the questions, the button, or that it is not you?"), and build from his answer.

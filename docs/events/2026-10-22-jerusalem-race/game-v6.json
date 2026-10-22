@@ -1,0 +1,2609 @@
+{
+  "format": "rushpoint.game",
+  "schemaVersion": 1,
+  "exportedAt": "2026-10-19T19:54:29.835Z",
+  "game": {
+    "title": "המירוץ העירוני, ירושלים 22.10 (גרסה 6)",
+    "description": "מירוץ לילי בירושלים, זוגות של קבוצות יריבות. התכנסות ב 19:00 בתחנה המרכזית, סיום בכיכר ציון בכ 22:00.",
+    "mode": "team",
+    "scoringPreset": "fixed_points_speed",
+    "instructions": {
+      "title": "החוקים",
+      "bodyHe": "התכנסות ב 19:00 במרכזית. יוצאים ב 19:40. סיום בכיכר ציון עד 22:00.\nברגל או ברכבת הקלה. בלי מוניות, אופניים וקורקינטים. לכל אחד רב קו.\nכל הקבוצה ביחד. לא יורדים מהרכבת אחרי \"העירייה\", ולא נכנסים לעיר העתיקה.\nאין מגע בין בנים לבנות. לא נוגעים באנשים, ולא מצלמים מי שלא הסכים.\nלא רצים. אף משימה לא שווה את זה.\nהצלם שלכם שופט. הוא מקליד את הקוד, ואין ויכוחים.\nאפשר לוותר על כל משימה. SOS מגיע לצוות מיד."
+    },
+    "stages": [
+      {
+        "id": "v6-gather",
+        "order": 0,
+        "title": "ההתכנסות",
+        "isFinal": false,
+        "narrative": {
+          "intro": {
+            "title": "19:00, המרכזית",
+            "bodyHe": "ערב טוב. תקשיבו פעם אחת, כי לא נחזור על זה. העיר הזאת כותבת על הקירות שלה: שנים על שערים, פסוקים על אבנים, דברים שאף אחד לא קורא. הלילה אתם קוראים. הצלם שלכם הוא השופט, ומה שהוא מקליד זה מה שיש. לא רצים, וחוצים רק במעבר."
+          }
+        },
+        "tasks": [
+          {
+            "id": "harp",
+            "title": "כמה מיתרים יש לנבל",
+            "type": "numeric",
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 200,
+            "coordinates": {
+              "lat": 31.78732,
+              "lng": 35.19937
+            },
+            "difficulty": 3,
+            "estimatedMinutes": 8,
+            "expectedDurationMinutes": 5,
+            "pointValue": 200,
+            "maxConcurrentTeams": 12,
+            "unmatchedPoints": 0,
+            "description": "הגשר שמולכם נבנה בצורת נבל. תספרו לו את המיתרים.\nסופרים מהמדרכה בלבד. מי שיורד לכביש, כל הקבוצה נפסלת.\nמספר אחד, ניסיון אחד.",
+            "answerOutcomes": [
+              {
+                "id": "exact",
+                "label": "66",
+                "range": {
+                  "min": 66,
+                  "max": 66
+                },
+                "points": 200,
+                "message": "בדיוק."
+              },
+              {
+                "id": "close-lo",
+                "label": "64 עד 65",
+                "range": {
+                  "min": 64,
+                  "max": 65
+                },
+                "points": 120,
+                "message": "קרוב."
+              },
+              {
+                "id": "close-hi",
+                "label": "67 עד 68",
+                "range": {
+                  "min": 67,
+                  "max": 68
+                },
+                "points": 120,
+                "message": "קרוב."
+              },
+              {
+                "id": "near-lo",
+                "label": "58 עד 63",
+                "range": {
+                  "min": 58,
+                  "max": 63
+                },
+                "points": 60,
+                "message": "בערך."
+              },
+              {
+                "id": "near-hi",
+                "label": "69 עד 74",
+                "range": {
+                  "min": 69,
+                  "max": 74
+                },
+                "points": 60,
+                "message": "בערך."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "v6-night",
+        "order": 1,
+        "title": "הלילה",
+        "isFinal": false,
+        "requiredTaskCount": 7,
+        "narrative": {
+          "intro": {
+            "title": "FACE OFF",
+            "bodyHe": "שש קבוצות של שתיים. אתם והיריבים עוברים באותו מסלול, וזה נגמר בכיכר ציון. רואים רק את התחנה הבאה. הצלם שלכם הוא השופט."
+          },
+          "outro": {
+            "title": "סגרתם",
+            "bodyHe": "כולם לכיכר ציון."
+          }
+        },
+        "tasks": [
+          {
+            "id": "card-A",
+            "title": "FACE OFF: מסלול הסוחרים",
+            "description": "FACE OFF.\nהקלף שלכם: מסלול הסוחרים. עוד קבוצה אחת קיבלה בדיוק אותו, והיא תהיה איתכם עד כיכר ציון.\nתבחרו נציג. יש לו 10 שניות להגיד מי אתם ולמה הלילה שלכם.\nאחר כך נציג מול נציג, פנים מול פנים, בלי לגעת. מי שמוריד מבט ראשון, הפסיד.\nהצלמים מקלידים את התוצאה אחרי 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "מקלידים רק אחרי 19:35, אחרי שכל הקבוצות קיבלו קלף. קלפים עודפים נסגרים לפני 19:30."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "6950"
+                ],
+                "points": 200,
+                "message": "לקחתם."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "5522"
+                ],
+                "points": 150,
+                "message": "בלי יריבים, עדיין נחשב."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "6045"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו."
+              }
+            ]
+          },
+          {
+            "id": "card-B",
+            "title": "FACE OFF: מסלול איש הקשר",
+            "description": "FACE OFF.\nהקלף שלכם: מסלול איש הקשר. עוד קבוצה אחת קיבלה בדיוק אותו, והיא תהיה איתכם עד כיכר ציון.\nתבחרו נציג. יש לו 10 שניות להגיד מי אתם ולמה הלילה שלכם.\nאחר כך נציג מול נציג, פנים מול פנים, בלי לגעת. מי שמוריד מבט ראשון, הפסיד.\nהצלמים מקלידים את התוצאה אחרי 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "מקלידים רק אחרי 19:35, אחרי שכל הקבוצות קיבלו קלף. קלפים עודפים נסגרים לפני 19:30."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "7519"
+                ],
+                "points": 200,
+                "message": "לקחתם."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "2139"
+                ],
+                "points": 150,
+                "message": "בלי יריבים, עדיין נחשב."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "8424"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו."
+              }
+            ]
+          },
+          {
+            "id": "card-C",
+            "title": "FACE OFF: מסלול השער",
+            "description": "FACE OFF.\nהקלף שלכם: מסלול השער. עוד קבוצה אחת קיבלה בדיוק אותו, והיא תהיה איתכם עד כיכר ציון.\nתבחרו נציג. יש לו 10 שניות להגיד מי אתם ולמה הלילה שלכם.\nאחר כך נציג מול נציג, פנים מול פנים, בלי לגעת. מי שמוריד מבט ראשון, הפסיד.\nהצלמים מקלידים את התוצאה אחרי 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "מקלידים רק אחרי 19:35, אחרי שכל הקבוצות קיבלו קלף. קלפים עודפים נסגרים לפני 19:30."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "3232"
+                ],
+                "points": 200,
+                "message": "לקחתם."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "8612"
+                ],
+                "points": 150,
+                "message": "בלי יריבים, עדיין נחשב."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "2327"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו."
+              }
+            ]
+          },
+          {
+            "id": "card-D",
+            "title": "FACE OFF: מסלול הנגן",
+            "description": "FACE OFF.\nהקלף שלכם: מסלול הנגן. עוד קבוצה אחת קיבלה בדיוק אותו, והיא תהיה איתכם עד כיכר ציון.\nתבחרו נציג. יש לו 10 שניות להגיד מי אתם ולמה הלילה שלכם.\nאחר כך נציג מול נציג, פנים מול פנים, בלי לגעת. מי שמוריד מבט ראשון, הפסיד.\nהצלמים מקלידים את התוצאה אחרי 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "מקלידים רק אחרי 19:35, אחרי שכל הקבוצות קיבלו קלף. קלפים עודפים נסגרים לפני 19:30."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "8633"
+                ],
+                "points": 200,
+                "message": "לקחתם."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "5013"
+                ],
+                "points": 150,
+                "message": "בלי יריבים, עדיין נחשב."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "4490"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו."
+              }
+            ]
+          },
+          {
+            "id": "card-E",
+            "title": "FACE OFF: מסלול הקיסר",
+            "description": "FACE OFF.\nהקלף שלכם: מסלול הקיסר. עוד קבוצה אחת קיבלה בדיוק אותו, והיא תהיה איתכם עד כיכר ציון.\nתבחרו נציג. יש לו 10 שניות להגיד מי אתם ולמה הלילה שלכם.\nאחר כך נציג מול נציג, פנים מול פנים, בלי לגעת. מי שמוריד מבט ראשון, הפסיד.\nהצלמים מקלידים את התוצאה אחרי 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "מקלידים רק אחרי 19:35, אחרי שכל הקבוצות קיבלו קלף. קלפים עודפים נסגרים לפני 19:30."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "2746"
+                ],
+                "points": 200,
+                "message": "לקחתם."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "4174"
+                ],
+                "points": 150,
+                "message": "בלי יריבים, עדיין נחשב."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "6889"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו."
+              }
+            ]
+          },
+          {
+            "id": "card-F",
+            "title": "FACE OFF: מסלול העירייה",
+            "description": "FACE OFF.\nהקלף שלכם: מסלול העירייה. עוד קבוצה אחת קיבלה בדיוק אותו, והיא תהיה איתכם עד כיכר ציון.\nתבחרו נציג. יש לו 10 שניות להגיד מי אתם ולמה הלילה שלכם.\nאחר כך נציג מול נציג, פנים מול פנים, בלי לגעת. מי שמוריד מבט ראשון, הפסיד.\nהצלמים מקלידים את התוצאה אחרי 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "מקלידים רק אחרי 19:35, אחרי שכל הקבוצות קיבלו קלף. קלפים עודפים נסגרים לפני 19:30."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "4859"
+                ],
+                "points": 200,
+                "message": "לקחתם."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "3431"
+                ],
+                "points": 150,
+                "message": "בלי יריבים, עדיין נחשב."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "9716"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו."
+              }
+            ]
+          },
+          {
+            "id": "A-grams",
+            "title": "100 גרם נגד היד של המוכר",
+            "description": "המוכר הזה שוקל ביד כבר שנים. קודם הוא חופן 100 גרם בלי משקל, ואתם רואים כמה יצא לו.\nעכשיו אתם: המשקל מכוסה, כל אחד מוסיף לפחות פרי אחד, לפחות 4 סוגים. ניסיון אחד.\nתהיו קרובים יותר מהיד שלו.",
+            "coordinates": {
+              "lat": 31.7848,
+              "lng": 35.21294
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 23,
+            "expectedDurationMinutes": 8,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "card-A"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "משקל"
+            ],
+            "type": "numeric",
+            "unmatchedPoints": 60,
+            "answerOutcomes": [
+              {
+                "id": "exact",
+                "label": "100",
+                "range": {
+                  "min": 100,
+                  "max": 100
+                },
+                "points": 300,
+                "message": "100 בדיוק."
+              },
+              {
+                "id": "lo2",
+                "label": "98 עד 99.9",
+                "range": {
+                  "min": 98,
+                  "max": 99.99
+                },
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "hi2",
+                "label": "100.1 עד 102",
+                "range": {
+                  "min": 100.01,
+                  "max": 102
+                },
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "lo5",
+                "label": "95 עד 97.9",
+                "range": {
+                  "min": 95,
+                  "max": 97.99
+                },
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "hi5",
+                "label": "102.1 עד 105",
+                "range": {
+                  "min": 102.01,
+                  "max": 105
+                },
+                "points": 120,
+                "message": "כסף."
+              }
+            ]
+          },
+          {
+            "id": "A-davidka",
+            "title": "19:34",
+            "description": "על האבן בכיכר כתוב פסוק על העיר הזאת.\nהפרק והפסוק שלו, ארבע ספרות, זה הקוד.\nפה רק עונים. בלי מערכונים.",
+            "coordinates": {
+              "lat": 31.7845,
+              "lng": 35.21509
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 8,
+            "expectedDurationMinutes": 4,
+            "pointValue": 120,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "A-grams"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "פסוק"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "numeric",
+            "numericAnswer": 1934,
+            "numericTolerance": 0,
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "A-falafel",
+            "title": "הדו קרב",
+            "description": "פה פוגשים את היריבים, והשעון שלכם עוצר. אין סיבה למהר.\n20 כדורים, 2 דקות. 4 אוכלים, עד 5 לאחד. כדור אחד בפה, מים על השולחן. בצפירה יש 30 שניות לסיים בנחת.\nהמנצחים בוחרים ליריבים קללה. אתם יודעים מה התחנה הבאה שלהם.",
+            "coordinates": {
+              "lat": 31.78175,
+              "lng": 35.219
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 21,
+            "expectedDurationMinutes": 12,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "A-davidka"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "אוכל"
+            ],
+            "pausesTimer": true,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מאיש הצוות בשולחן",
+              "adminNotes": "מפעיל: איש הצוות בשולחן. למה פה: כיכר ציון: הפלאפל של המרכז. קאץ': קודים בכרטיס: אלוף 250, סולו 150, כבוד 100. קללות: הולכים בטור, כל אחד סוחב תיק של מישהו אחר, או מדברים רק בשאלות. מי שמשתעל עוצר ולא נפסל. זהב אלוף, כסף סולו, ארד כבוד. מתוכנן 20:20 עד 20:32."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "אלוף"
+                ],
+                "points": 250,
+                "message": "לקחתם. תבחרו להם קללה."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "סולו"
+                ],
+                "points": 150,
+                "message": "לבד מול השעון."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "כבוד"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו. הקללה בדרך."
+              }
+            ]
+          },
+          {
+            "id": "A-petition",
+            "title": "עצומה לראש העיר",
+            "description": "בבניין הזה יושב ראש העיר, והלילה הוא מקבל מכם מכתב.\nהעצומה: להחזיר לשער יפו את מגדל השעון שהבריטים פירקו. שורה אחת של נימוק, ואתם כותבים אותה.\n8 דקות. כל מי שחותם שומע קודם את הנימוק. שם פרטי בלבד.\nהצלם מקליד את התוצאה.",
+            "coordinates": {
+              "lat": 31.78032,
+              "lng": 35.22373
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 17,
+            "expectedDurationMinutes": 8,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "A-falafel"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "עצומה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "numeric",
+            "unmatchedPoints": 0,
+            "answerOutcomes": [
+              {
+                "id": "r0",
+                "label": "15 עד 500",
+                "range": {
+                  "min": 15,
+                  "max": 500
+                },
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "r1",
+                "label": "10 עד 14",
+                "range": {
+                  "min": 10,
+                  "max": 14
+                },
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "r2",
+                "label": "1 עד 9",
+                "range": {
+                  "min": 1,
+                  "max": 9
+                },
+                "points": 60,
+                "message": "ארד."
+              }
+            ]
+          },
+          {
+            "id": "A-pitch",
+            "title": "פיץ' בקניון",
+            "description": "יש לכם 30 שניות לשכנע מבוגר אחד לקנות מוצר שהמצאתם עכשיו.\nהמוצר חייב לפתור בעיה אמיתית שראיתם הערב במסלול.\nאומר שהיה קונה? זהב. מסרב? תודה, וממשיכים.",
+            "coordinates": {
+              "lat": 31.77753,
+              "lng": 35.22435
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 13,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "A-petition"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "פיץ'"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: ממילא: רחוב הקניות הכי יקר בעיר. קאץ': לא מצלמים את השומע בלי הסכמה. לא חוסמים כניסות לחנויות. זהב היה קונה, כסף אולי, ארד לא. מתוכנן 20:55 עד 21:02."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "6960"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "7044"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "6055"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "4245"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "A-jump",
+            "title": "כולם באוויר",
+            "description": "כולכם באוויר באותו פריים, והחומות מאחוריכם.\n3 ניסיונות. מספיק שאחד נוגע ברצפה, והפריים לא נחשב.\nזה הפריים שיוקרן בגמר.",
+            "coordinates": {
+              "lat": 31.77501,
+              "lng": 35.22641
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 13,
+            "expectedDurationMinutes": 6,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "A-pitch"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "קפיצה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: פארק טדי: החומות המוארות ברקע. קאץ': הצלם סופר כמה באוויר בפריים הכי טוב. רק על ריצוף שטוח. זהב 5 / 7 / 9 באוויר, כסף 4 / 5 / 6, ארד פחות. מתוכנן 21:09 עד 21:15."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "6192"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "2572"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "5287"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "3477"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "B-spice",
+            "title": "איש הקשר בדוכן התבלינים",
+            "description": "בדוכן התבלינים מחכה איש קשר. תגידו לו: \"באנו לקחת את החלק של השוק\".\nהוא ישאל שאלה אחת, והתשובה כתובה על שלט בסביבה. בלי תשובה, אין המשך.\nעם התשובה: שלוש כוסות סגורות. מריחים בלבד ומזהים.",
+            "coordinates": {
+              "lat": 31.78492,
+              "lng": 35.2126
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 22,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "card-B"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "איש קשר"
+            ],
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהמוכר",
+              "adminNotes": "מפעיל: המוכר. למה פה: שוק: דוכן תבלינים, והשלטים של הרחובות. קאץ': השאלה: \"רחוב האגס קיבל שם של משפחה. איזו?\" (בנאי). ⚠ לוודא מול השלט. הדרגה לפי כמה תבלינים זוהו. זהב 3 תבלינים, כסף 2, ארד 1. מתוכנן 19:55 עד 20:02."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "1993"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "7373"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "6850"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "6468"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "B-squid",
+            "title": "סקוויד גיים, נחלאות",
+            "description": "סקוויד גיים, גרסת נחלאות.\nהצלם בסוף הסמטה, עם הגב. שומע משהו, מסתובב. מי שזז כשהוא מסתכל, חוזר להתחלה.\n2 דקות. גרים פה אנשים, אז מי שמדבר, נפסל.",
+            "coordinates": {
+              "lat": 31.78243,
+              "lng": 35.21312
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 12,
+            "expectedDurationMinutes": 6,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "B-spice"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "התגנבות"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: נחלאות: גרים פה אנשים, אז השקט הוא החוק. קאץ': הצלם מסתובב על כל רעש, לא לפי זמן. זהב 4 / 6 / 8 הגיעו, כסף 2 / 4 / 5, ארד פחות. מתוכנן 20:08 עד 20:14."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "1093"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "2521"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "1998"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "2712"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "B-busker",
+            "title": "תשירו לי את המילה",
+            "description": "בראש המדרחוב מחכה הנגן של הלילה. תגידו לו \"באנו לשמוע את השיר\".\nהוא מנגן לכם וליריבים ביחד, בלי מילים ובקצב לא נכון. הקוד הוא המילה האחרונה בפזמון.\nלא זוכרים? תשכנעו את הרחוב לשיר. Shazam עולה 5 דקות.",
+            "coordinates": {
+              "lat": 31.78148,
+              "lng": 35.21648
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 14,
+            "expectedDurationMinutes": 7,
+            "pointValue": 150,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "B-squid"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "שיר"
+            ],
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהנגן",
+              "adminNotes": "מפעיל: הנגן. למה פה: בן יהודה: המדרחוב של הנגנים. קאץ': \"ירושלים של זהב\" כמו מארש. הקוד: כינור. מי שמקליד ראשון: 50 בונוס. זהב קוד נכון, כסף -, ארד -. מתוכנן 20:21 עד 20:28.",
+              "secretCode": "כינור"
+            }
+          },
+          {
+            "id": "B-og",
+            "title": "האצבע של עוג",
+            "description": "בבור הזה שוכב עמוד שחצבו לפני 2,000 שנה. הוא נסדק, ומאז הוא פה.\nקודם תמדדו אותו בצעדים, מבחוץ לגדר: כמה מטר הוא?\nאחר כך אחד מכם הקבלן. 20 שניות למצלמה: למה הוא יהיה מוכן אחרי החגים, עם המספר שמדדתם.",
+            "coordinates": {
+              "lat": 31.78155,
+              "lng": 35.22286
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 19,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "B-busker"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "מדידה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: מגרש הרוסים: העמוד שנסדק לפני 2,000 שנה. קאץ': בערך 12 מטר. זהב: 10 עד 14 ומערכון בלי לצחוק. זהב 10 עד 14 מ', בלי לצחוק, כסף אחד משניהם, ארד עשיתם. מתוכנן 20:40 עד 20:47."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "3857"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "3941"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "8714"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "3036"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "B-truthMyth",
+            "title": "אמת, חצי אמת או מיתוס",
+            "description": "שלוש טענות על השער הזה. לכל אחת: אמת, חצי אמת או מיתוס.\nהטלפונים בכיס.\nטעות עולה בזמן.",
+            "coordinates": {
+              "lat": 31.7769,
+              "lng": 35.2269
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 16,
+            "expectedDurationMinutes": 4,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "B-og"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "מיתוס"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "sequence",
+            "steps": [
+              {
+                "id": "s1",
+                "prompt": "\"הפילו את החומה בשביל הקיסר.\" אמת, חצי אמת או מיתוס?",
+                "answer": "חצי אמת"
+              },
+              {
+                "id": "s2",
+                "prompt": "\"הגנרל הבריטי נכנס ברגל.\" אמת, חצי אמת או מיתוס?",
+                "answer": "אמת"
+              },
+              {
+                "id": "s3",
+                "prompt": "\"מגדל השעון נעלם בבת אחת.\" אמת, חצי אמת או מיתוס?",
+                "answer": "מיתוס"
+              }
+            ],
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "B-waiters",
+            "title": "מרוץ מלצרים",
+            "description": "המסעדה נותנת לכם מגש עם 3 כוסות מים מלאות.\nכל אחד לוקח אותו 20 מטר ובחזרה, ומעביר לבא. בלי ריצה.\nנשפך? מתחילים מההתחלה.",
+            "coordinates": {
+              "lat": 31.7774,
+              "lng": 35.2242
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 12,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "B-truthMyth"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "מלצרים"
+            ],
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהמסעדה",
+              "adminNotes": "מפעיל: המסעדה. למה פה: ממילא: שורה של מסעדות. קאץ': מלצר אמיתי שופט אם נשפך. הצלם מודד זמן. זהב עד 40 / 70 / 100 שניות, כסף עד 70 / 110 / 150, ארד סיימתם. מתוכנן 21:08 עד 21:15."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "1044"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "9960"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "5187"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "1865"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "C-falafel",
+            "title": "הדו קרב",
+            "description": "פה פוגשים את היריבים, והשעון שלכם עוצר. אין סיבה למהר.\n20 כדורים, 2 דקות. 4 אוכלים, עד 5 לאחד. כדור אחד בפה, מים על השולחן. בצפירה יש 30 שניות לסיים בנחת.\nהמנצחים בוחרים ליריבים קללה. אתם יודעים מה התחנה הבאה שלהם.",
+            "coordinates": {
+              "lat": 31.78175,
+              "lng": 35.219
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 29,
+            "expectedDurationMinutes": 12,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "card-C"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "אוכל"
+            ],
+            "pausesTimer": true,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מאיש הצוות בשולחן",
+              "adminNotes": "מפעיל: איש הצוות בשולחן. למה פה: כיכר ציון: הפלאפל של המרכז. קאץ': קודים בכרטיס: אלוף 250, סולו 150, כבוד 100. קללות: הולכים בטור, כל אחד סוחב תיק של מישהו אחר, או מדברים רק בשאלות. מי שמשתעל עוצר ולא נפסל. זהב אלוף, כסף סולו, ארד כבוד. מתוכנן 19:57 עד 20:09."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "אלוף"
+                ],
+                "points": 250,
+                "message": "לקחתם. תבחרו להם קללה."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "סולו"
+                ],
+                "points": 150,
+                "message": "לבד מול השעון."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "כבוד"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו. הקללה בדרך."
+              }
+            ]
+          },
+          {
+            "id": "C-newWord",
+            "title": "המילה שעוד לא הומצאה",
+            "description": "הרחוב הזה נקרא על שם האיש שהמציא מילים בעברית כשלא היו.\nתמציאו מילה לדבר שעוד אין לו מילה בעברית. שורש אמיתי, משקל אמיתי.\nעובר אורח שמנחש מה היא אומרת רק מלשמוע אותה, זהב.",
+            "coordinates": {
+              "lat": 31.7816,
+              "lng": 35.21791
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 10,
+            "expectedDurationMinutes": 8,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "C-falafel"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "מילה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: בן יהודה: האיש שהחזיר את העברית לדיבור והמציא מילים. קאץ': כסף: הצלם של היריבה מאשר שזה נשמע כמו עברית. זהב זר ניחש, כסף נשמע כמו עברית, ארד עשיתם. מתוכנן 20:11 עד 20:19."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "3106"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "4534"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "7249"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "7963"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "C-jump",
+            "title": "כולם באוויר",
+            "description": "כולכם באוויר באותו פריים, והחומות מאחוריכם.\n3 ניסיונות. מספיק שאחד נוגע ברצפה, והפריים לא נחשב.\nזה הפריים שיוקרן בגמר.",
+            "coordinates": {
+              "lat": 31.77501,
+              "lng": 35.22641
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 27,
+            "expectedDurationMinutes": 6,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "C-newWord"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "קפיצה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: פארק טדי: החומות המוארות ברקע. קאץ': הצלם סופר כמה באוויר בפריים הכי טוב. רק על ריצוף שטוח. זהב 5 / 7 / 9 באוויר, כסף 4 / 5 / 6, ארד פחות. מתוכנן 20:40 עד 20:46."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "1790"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "9362"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "9885"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "3791"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "C-kaiser",
+            "title": "שתי כניסות",
+            "description": "ב 1898 פתחו את החומה ליד השער הזה כדי שקיסר גרמניה ייכנס בכרכרה. 19 שנה אחר כך גנרל בריטי נכנס פה ברגל, בכוונה.\nמבזק של 30 שניות, ברצינות מלאה: מה ההבדל בין שתי הכניסות.\nכתב אחד, השאר עדים. עובר אורח שמסכים להגיד משפט מעלה לזהב.",
+            "coordinates": {
+              "lat": 31.7769,
+              "lng": 35.2269
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 11,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "C-jump"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "כתבה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: שער יפו: הקיסר נכנס בכרכרה, אלנבי ברגל. קאץ': זהב רק עם שתי העובדות ועובר אורח. זהב שתי העובדות ועובר אורח, כסף שתי העובדות, ארד עשיתם. מתוכנן 20:50 עד 20:57."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "7405"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "8833"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "8310"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "9024"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "C-shutters",
+            "title": "הפנים על התריסים",
+            "description": "כשהשוק נסגר, על התריסים יש מאות פרצופים.\nתמצאו את ראש הממשלה שמצויר הפוך, ואת המשוררת שכתבה את \"ירושלים של זהב\".\nליד כל אחד, כולכם בתנוחה שלו. את ראש הממשלה מצלמים הפוך.",
+            "coordinates": {
+              "lat": 31.7848,
+              "lng": 35.2125
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 30,
+            "expectedDurationMinutes": 8,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "C-kaiser"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "פרצופים"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: שוק בלילה: התריסים של שלמה סוזה. קאץ': בן גוריון ההפוך, ונעמי שמר. זהב שניהם, כסף אחד, ארד -. מתוכנן 21:19 עד 21:27."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "8756"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "1184"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "3899"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "2089"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "C-davidka",
+            "title": "19:34",
+            "description": "על האבן בכיכר כתוב פסוק על העיר הזאת.\nהפרק והפסוק שלו, ארבע ספרות, זה הקוד.\nפה רק עונים. בלי מערכונים.",
+            "coordinates": {
+              "lat": 31.7845,
+              "lng": 35.21509
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 9,
+            "expectedDurationMinutes": 4,
+            "pointValue": 120,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "C-shutters"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "פסוק"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "numeric",
+            "numericAnswer": 1934,
+            "numericTolerance": 0,
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "D-busker",
+            "title": "תשירו לי את המילה",
+            "description": "בראש המדרחוב מחכה הנגן של הלילה. תגידו לו \"באנו לשמוע את השיר\".\nהוא מנגן לכם וליריבים ביחד, בלי מילים ובקצב לא נכון. הקוד הוא המילה האחרונה בפזמון.\nלא זוכרים? תשכנעו את הרחוב לשיר. Shazam עולה 5 דקות.",
+            "coordinates": {
+              "lat": 31.78148,
+              "lng": 35.21648
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 26,
+            "expectedDurationMinutes": 7,
+            "pointValue": 150,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "card-D"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "שיר"
+            ],
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהנגן",
+              "adminNotes": "מפעיל: הנגן. למה פה: בן יהודה: המדרחוב של הנגנים. קאץ': \"ירושלים של זהב\" כמו מארש. הקוד: כינור. מי שמקליד ראשון: 50 בונוס. זהב קוד נכון, כסף -, ארד -. מתוכנן 19:59 עד 20:06.",
+              "secretCode": "כינור"
+            }
+          },
+          {
+            "id": "D-silentFilm",
+            "title": "הקולנוע שקרס",
+            "description": "לכיכר קוראים על שם קולנוע שעמד פה. הבניין הראשון היה צריף, ומשהו מהשמיים הפיל אותו.\nתנחשו מה, ותצלמו סרט אילם של 15 שניות על הלילה ההוא. שחור לבן, בלי מילה בקול.\nסרט עם הסיבה הנכונה, זהב.",
+            "coordinates": {
+              "lat": 31.78197,
+              "lng": 35.21957
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 15,
+            "expectedDurationMinutes": 9,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "D-busker"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "סרט"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: כיכר ציון: נקראת על שם קולנוע שעמד פה. קאץ': שלג כבד. לא לשאול על השנה, המקורות סותרים. זהב שלג, וסרט טוב, כסף סרט טוב, ארד עשיתם. מתוכנן 20:12 עד 20:21."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "4206"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "9586"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "3301"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "2919"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "D-truthMyth",
+            "title": "אמת, חצי אמת או מיתוס",
+            "description": "שלוש טענות על השער הזה. לכל אחת: אמת, חצי אמת או מיתוס.\nהטלפונים בכיס.\nטעות עולה בזמן.",
+            "coordinates": {
+              "lat": 31.7769,
+              "lng": 35.2269
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 21,
+            "expectedDurationMinutes": 4,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "D-silentFilm"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "מיתוס"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "sequence",
+            "steps": [
+              {
+                "id": "s1",
+                "prompt": "\"הפילו את החומה בשביל הקיסר.\" אמת, חצי אמת או מיתוס?",
+                "answer": "חצי אמת"
+              },
+              {
+                "id": "s2",
+                "prompt": "\"הגנרל הבריטי נכנס ברגל.\" אמת, חצי אמת או מיתוס?",
+                "answer": "אמת"
+              },
+              {
+                "id": "s3",
+                "prompt": "\"מגדל השעון נעלם בבת אחת.\" אמת, חצי אמת או מיתוס?",
+                "answer": "מיתוס"
+              }
+            ],
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "D-waiters",
+            "title": "מרוץ מלצרים",
+            "description": "המסעדה נותנת לכם מגש עם 3 כוסות מים מלאות.\nכל אחד לוקח אותו 20 מטר ובחזרה, ומעביר לבא. בלי ריצה.\nנשפך? מתחילים מההתחלה.",
+            "coordinates": {
+              "lat": 31.7774,
+              "lng": 35.2242
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 12,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "D-truthMyth"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "מלצרים"
+            ],
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהמסעדה",
+              "adminNotes": "מפעיל: המסעדה. למה פה: ממילא: שורה של מסעדות. קאץ': מלצר אמיתי שופט אם נשפך. הצלם מודד זמן. זהב עד 40 / 70 / 100 שניות, כסף עד 70 / 110 / 150, ארד סיימתם. מתוכנן 20:47 עד 20:54."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "9310"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "5690"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "8405"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "9119"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "D-davidka",
+            "title": "19:34",
+            "description": "על האבן בכיכר כתוב פסוק על העיר הזאת.\nהפרק והפסוק שלו, ארבע ספרות, זה הקוד.\nפה רק עונים. בלי מערכונים.",
+            "coordinates": {
+              "lat": 31.7845,
+              "lng": 35.21509
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 19,
+            "expectedDurationMinutes": 4,
+            "pointValue": 120,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "D-waiters"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "פסוק"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "numeric",
+            "numericAnswer": 1934,
+            "numericTolerance": 0,
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "D-shutters",
+            "title": "הפנים על התריסים",
+            "description": "כשהשוק נסגר, על התריסים יש מאות פרצופים.\nתמצאו את ראש הממשלה שמצויר הפוך, ואת המשוררת שכתבה את \"ירושלים של זהב\".\nליד כל אחד, כולכם בתנוחה שלו. את ראש הממשלה מצלמים הפוך.",
+            "coordinates": {
+              "lat": 31.7848,
+              "lng": 35.2125
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 13,
+            "expectedDurationMinutes": 8,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "D-davidka"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "פרצופים"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: שוק בלילה: התריסים של שלמה סוזה. קאץ': בן גוריון ההפוך, ונעמי שמר. זהב שניהם, כסף אחד, ארד -. מתוכנן 21:18 עד 21:26."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "9331"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "9415"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "5188"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "5986"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "E-kaiser",
+            "title": "שתי כניסות",
+            "description": "ב 1898 פתחו את החומה ליד השער הזה כדי שקיסר גרמניה ייכנס בכרכרה. 19 שנה אחר כך גנרל בריטי נכנס פה ברגל, בכוונה.\nמבזק של 30 שניות, ברצינות מלאה: מה ההבדל בין שתי הכניסות.\nכתב אחד, השאר עדים. עובר אורח שמסכים להגיד משפט מעלה לזהב.",
+            "coordinates": {
+              "lat": 31.7769,
+              "lng": 35.2269
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 31,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "card-E"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "כתבה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: שער יפו: הקיסר נכנס בכרכרה, אלנבי ברגל. קאץ': זהב רק עם שתי העובדות ועובר אורח. זהב שתי העובדות ועובר אורח, כסף שתי העובדות, ארד עשיתם. מתוכנן 20:04 עד 20:11."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "2899"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "1471"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "7756"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "8138"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "E-jump",
+            "title": "כולם באוויר",
+            "description": "כולכם באוויר באותו פריים, והחומות מאחוריכם.\n3 ניסיונות. מספיק שאחד נוגע ברצפה, והפריים לא נחשב.\nזה הפריים שיוקרן בגמר.",
+            "coordinates": {
+              "lat": 31.77501,
+              "lng": 35.22641
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 10,
+            "expectedDurationMinutes": 6,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "E-kaiser"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "קפיצה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: פארק טדי: החומות המוארות ברקע. קאץ': הצלם סופר כמה באוויר בפריים הכי טוב. רק על ריצוף שטוח. זהב 5 / 7 / 9 באוויר, כסף 4 / 5 / 6, ארד פחות. מתוכנן 20:15 עד 20:21."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "8180"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "2800"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "3323"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "3705"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "E-squid",
+            "title": "סקוויד גיים, נחלאות",
+            "description": "סקוויד גיים, גרסת נחלאות.\nהצלם בסוף הסמטה, עם הגב. שומע משהו, מסתובב. מי שזז כשהוא מסתכל, חוזר להתחלה.\n2 דקות. גרים פה אנשים, אז מי שמדבר, נפסל.",
+            "coordinates": {
+              "lat": 31.78243,
+              "lng": 35.21312
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 34,
+            "expectedDurationMinutes": 6,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "E-jump"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "התגנבות"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: נחלאות: גרים פה אנשים, אז השקט הוא החוק. קאץ': הצלם מסתובב על כל רעש, לא לפי זמן. זהב 4 / 6 / 8 הגיעו, כסף 2 / 4 / 5, ארד פחות. מתוכנן 20:49 עד 20:55."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "9804"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "2232"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "4947"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "2041"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "E-davidka",
+            "title": "19:34",
+            "description": "על האבן בכיכר כתוב פסוק על העיר הזאת.\nהפרק והפסוק שלו, ארבע ספרות, זה הקוד.\nפה רק עונים. בלי מערכונים.",
+            "coordinates": {
+              "lat": 31.7845,
+              "lng": 35.21509
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 10,
+            "expectedDurationMinutes": 4,
+            "pointValue": 120,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "E-squid"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "פסוק"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "numeric",
+            "numericAnswer": 1934,
+            "numericTolerance": 0,
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "E-debate",
+            "title": "ויכוח בכיכר",
+            "description": "נושא אחד, שני צדדים: להחזיר את מגדל השעון לשער יפו, או להשאיר את השער כמו שהוא.\nנציג מכל קבוצה, 40 שניות לכל אחד, בלי לרדת על אף אחד.\nמי שעובר ושומע מצביע ברגליים: הוא נעמד מאחורי מי ששכנע אותו.",
+            "coordinates": {
+              "lat": 31.78197,
+              "lng": 35.21957
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 18,
+            "expectedDurationMinutes": 8,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "E-davidka"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "ויכוח"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: כיכר ציון: יש קהל. קאץ': מגדל השעון עמד ליד השער ופורק בתקופת הבריטים. הצלם של היריבה מקליד. זהב ניצחון, כסף לבד, ארד הפסד. מתוכנן 21:15 עד 21:23."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "5025"
+                ],
+                "points": 200,
+                "message": "לקחתם."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "3597"
+                ],
+                "points": 150,
+                "message": "בלי יריבים, עדיין נחשב."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "9882"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו."
+              }
+            ]
+          },
+          {
+            "id": "E-falafel",
+            "title": "הדו קרב",
+            "description": "פה פוגשים את היריבים, והשעון שלכם עוצר. אין סיבה למהר.\n20 כדורים, 2 דקות. 4 אוכלים, עד 5 לאחד. כדור אחד בפה, מים על השולחן. בצפירה יש 30 שניות לסיים בנחת.\nהמנצחים בוחרים ליריבים קללה. אתם יודעים מה התחנה הבאה שלהם.",
+            "coordinates": {
+              "lat": 31.78175,
+              "lng": 35.219
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 14,
+            "expectedDurationMinutes": 12,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "E-debate"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "אוכל"
+            ],
+            "pausesTimer": true,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מאיש הצוות בשולחן",
+              "adminNotes": "מפעיל: איש הצוות בשולחן. למה פה: כיכר ציון: הפלאפל של המרכז. קאץ': קודים בכרטיס: אלוף 250, סולו 150, כבוד 100. קללות: הולכים בטור, כל אחד סוחב תיק של מישהו אחר, או מדברים רק בשאלות. מי שמשתעל עוצר ולא נפסל. זהב אלוף, כסף סולו, ארד כבוד. מתוכנן 21:25 עד 21:37."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "אלוף"
+                ],
+                "points": 250,
+                "message": "לקחתם. תבחרו להם קללה."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "סולו"
+                ],
+                "points": 150,
+                "message": "לבד מול השעון."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "כבוד"
+                ],
+                "points": 100,
+                "message": "הפעם הם לקחו. הקללה בדרך."
+              }
+            ]
+          },
+          {
+            "id": "F-waiters",
+            "title": "מרוץ מלצרים",
+            "description": "המסעדה נותנת לכם מגש עם 3 כוסות מים מלאות.\nכל אחד לוקח אותו 20 מטר ובחזרה, ומעביר לבא. בלי ריצה.\nנשפך? מתחילים מההתחלה.",
+            "coordinates": {
+              "lat": 31.7774,
+              "lng": 35.2242
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 28,
+            "expectedDurationMinutes": 7,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "card-F"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "מלצרים"
+            ],
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהמסעדה",
+              "adminNotes": "מפעיל: המסעדה. למה פה: ממילא: שורה של מסעדות. קאץ': מלצר אמיתי שופט אם נשפך. הצלם מודד זמן. זהב עד 40 / 70 / 100 שניות, כסף עד 70 / 110 / 150, ארד סיימתם. מתוכנן 20:01 עד 20:08."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "2272"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "7652"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "1367"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "7461"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "F-truthMyth",
+            "title": "אמת, חצי אמת או מיתוס",
+            "description": "שלוש טענות על השער הזה. לכל אחת: אמת, חצי אמת או מיתוס.\nהטלפונים בכיס.\nטעות עולה בזמן.",
+            "coordinates": {
+              "lat": 31.7769,
+              "lng": 35.2269
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 9,
+            "expectedDurationMinutes": 4,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "F-waiters"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "מיתוס"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "sequence",
+            "steps": [
+              {
+                "id": "s1",
+                "prompt": "\"הפילו את החומה בשביל הקיסר.\" אמת, חצי אמת או מיתוס?",
+                "answer": "חצי אמת"
+              },
+              {
+                "id": "s2",
+                "prompt": "\"הגנרל הבריטי נכנס ברגל.\" אמת, חצי אמת או מיתוס?",
+                "answer": "אמת"
+              },
+              {
+                "id": "s3",
+                "prompt": "\"מגדל השעון נעלם בבת אחת.\" אמת, חצי אמת או מיתוס?",
+                "answer": "מיתוס"
+              }
+            ],
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "F-squid",
+            "title": "סקוויד גיים, נחלאות",
+            "description": "סקוויד גיים, גרסת נחלאות.\nהצלם בסוף הסמטה, עם הגב. שומע משהו, מסתובב. מי שזז כשהוא מסתכל, חוזר להתחלה.\n2 דקות. גרים פה אנשים, אז מי שמדבר, נפסל.",
+            "coordinates": {
+              "lat": 31.78243,
+              "lng": 35.21312
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 29,
+            "expectedDurationMinutes": 6,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "F-truthMyth"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "התגנבות"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: נחלאות: גרים פה אנשים, אז השקט הוא החוק. קאץ': הצלם מסתובב על כל רעש, לא לפי זמן. זהב 4 / 6 / 8 הגיעו, כסף 2 / 4 / 5, ארד פחות. מתוכנן 20:40 עד 20:46."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "3009"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "1581"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "7866"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "1772"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "F-twoHalls",
+            "title": "שתי עיריות",
+            "description": "מהכיכר רואים שני בנייני עירייה. לאחד, מ 1930, יש פינה מעוגלת.\nתמצאו נקודה ששניהם נכנסים בה לאותו פריים, ותצלמו.\nבלי טלפון: מי שילם על הבניין הישן?",
+            "coordinates": {
+              "lat": 31.78032,
+              "lng": 35.22373
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 23,
+            "expectedDurationMinutes": 6,
+            "pointValue": 120,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "F-squid"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "עירייה"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "quiz",
+            "choices": [
+              "בנק",
+              "כנסייה",
+              "הסולטן"
+            ],
+            "answers": [
+              "בנק"
+            ],
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "F-vanish",
+            "title": "המילוט הגדול",
+            "description": "הצלם סופר עד 60 עם הגב, ואתם נבלעים בתוך הכיכר. הליכה בלבד.\nיש לו 15 שניות לתפוס אתכם.\nכל מי שלא נמצא, נקודה.",
+            "coordinates": {
+              "lat": 31.78197,
+              "lng": 35.21957
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 15,
+            "expectedDurationMinutes": 6,
+            "pointValue": 200,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "radius",
+            "unlockAfterTaskIds": [
+              "F-twoHalls"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "מחבואים"
+            ],
+            "geofenceRadiusMeters": 75,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הצלם מקליד",
+              "adminNotes": "שופט: הצלם. למה פה: כיכר ציון: מלאה אנשים. קאץ': אסור להתחבא מאחורי משהו, רק בתוך אנשים. זהב 3 / 5 / 6 לא נמצאו, כסף 2 / 3 / 4, ארד פחות. מתוכנן 21:18 עד 21:24."
+            },
+            "answerOutcomes": [
+              {
+                "id": "gold",
+                "label": "זהב",
+                "accepts": [
+                  "7268"
+                ],
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "silver",
+                "label": "כסף",
+                "accepts": [
+                  "1888"
+                ],
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "bronze",
+                "label": "ארד",
+                "accepts": [
+                  "2411"
+                ],
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "none",
+                "label": "לא בוצע",
+                "accepts": [
+                  "2793"
+                ],
+                "points": 0,
+                "message": "לא נספר. ממשיכים."
+              }
+            ]
+          },
+          {
+            "id": "F-busker",
+            "title": "תשירו לי את המילה",
+            "description": "בראש המדרחוב מחכה הנגן של הלילה. תגידו לו \"באנו לשמוע את השיר\".\nהוא מנגן לכם וליריבים ביחד, בלי מילים ובקצב לא נכון. הקוד הוא המילה האחרונה בפזמון.\nלא זוכרים? תשכנעו את הרחוב לשיר. Shazam עולה 5 דקות.",
+            "coordinates": {
+              "lat": 31.78148,
+              "lng": 35.21648
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 13,
+            "expectedDurationMinutes": 7,
+            "pointValue": 150,
+            "maxConcurrentTeams": 2,
+            "triggerMode": "instant",
+            "unlockAfterTaskIds": [
+              "F-vanish"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "שיר"
+            ],
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהנגן",
+              "adminNotes": "מפעיל: הנגן. למה פה: בן יהודה: המדרחוב של הנגנים. קאץ': \"ירושלים של זהב\" כמו מארש. הקוד: כינור. מי שמקליד ראשון: 50 בונוס. זהב קוד נכון, כסף -, ארד -. מתוכנן 21:30 עד 21:37.",
+              "secretCode": "כינור"
+            }
+          }
+        ],
+        "exclusiveGroups": [
+          {
+            "id": "cards",
+            "taskIds": [
+              "card-A",
+              "card-B",
+              "card-C",
+              "card-D",
+              "card-E",
+              "card-F"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "v6-zion",
+        "order": 2,
+        "title": "כיכר ציון",
+        "isFinal": true,
+        "narrative": {
+          "intro": {
+            "title": "כיכר ציון",
+            "bodyHe": "הגעתם. עוד צעקה אחת."
+          },
+          "outro": {
+            "title": "זהו",
+            "bodyHe": "נשארים בכיכר. ב 22:00 ההכרזה."
+          }
+        },
+        "tasks": [
+          {
+            "id": "final",
+            "title": "הצעקה האחרונה",
+            "type": "numeric",
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 80,
+            "coordinates": {
+              "lat": 31.78197,
+              "lng": 35.21957
+            },
+            "difficulty": 3,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 3,
+            "pointValue": 200,
+            "maxConcurrentTeams": 12,
+            "unmatchedPoints": 0,
+            "description": "שם הקבוצה, 3 צעקות, הצלם מודד בדציבלים.\nמי שהכי קרוב ל 90 לוקח. לא מי שהכי חזק.\nהצלם מקליד את המספר.",
+            "answerOutcomes": [
+              {
+                "id": "r0",
+                "label": "88 עד 92",
+                "range": {
+                  "min": 88,
+                  "max": 92
+                },
+                "points": 200,
+                "message": "זהב."
+              },
+              {
+                "id": "r1",
+                "label": "85 עד 87.99",
+                "range": {
+                  "min": 85,
+                  "max": 87.99
+                },
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "r2",
+                "label": "92.01 עד 95",
+                "range": {
+                  "min": 92.01,
+                  "max": 95
+                },
+                "points": 120,
+                "message": "כסף."
+              },
+              {
+                "id": "r3",
+                "label": "80 עד 84.99",
+                "range": {
+                  "min": 80,
+                  "max": 84.99
+                },
+                "points": 60,
+                "message": "ארד."
+              },
+              {
+                "id": "r4",
+                "label": "95.01 עד 100",
+                "range": {
+                  "min": 95.01,
+                  "max": 100
+                },
+                "points": 60,
+                "message": "ארד."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

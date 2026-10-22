@@ -419,6 +419,8 @@ def build(reel: str, opening: str | None, final: bool, quiet: bool = False) -> P
     mixwav = bdir / f"{reel}_{op}_mix.wav"
     run([FF, "-y", "-v", "error", *ainputs, "-filter_complex", ";".join(amix), "-map", "[aout]",
          "-c:a", "pcm_s16le", mixwav.name], cwd=bdir)
+    if not tl.get("mix_loudnorm"):
+        master_loudness(bdir / mixwav.name)
     inputs += ["-i", mixwav.name]
     out = bdir / f"{reel}_{op}.mp4"
     run([FF, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(fc),
@@ -433,6 +435,30 @@ def build(reel: str, opening: str | None, final: bool, quiet: bool = False) -> P
         if missing:
             print(f"  placeholders/missing ({len(missing)}): see {out.stem}.missing.txt")
     return out
+
+
+def master_loudness(wav: Path) -> None:
+    """Bring the finished mix to the platform level with ONE linear gain and a limiter (reel 17,
+    2026-10-13: the mix came out at -19 LUFS, quieter than every reel around it in the feed, and was
+    fixed by hand at export). Linear, so the voice/music balance the timeline set is untouched."""
+    import json as _j
+    import re as _re
+    import subprocess as _sp
+    target, tp = float(CFG["video"]["audio_lufs"]), float(CFG["video"]["audio_tp"])
+    p = _sp.run([FF, "-hide_banner", "-i", str(wav), "-af", f"loudnorm=I={target}:TP={tp}:print_format=json", "-f", "null", "-"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace")
+    found = _re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", p.stderr)
+    if not found:
+        return
+    i_in = float(_j.loads(found[-1])["input_i"])
+    if i_in < -60:
+        return                                  # silence: nothing to master
+    gain = max(min(target - i_in, 14.0), -14.0)
+    lim = 10 ** ((tp - 3.0) / 20)               # 3 dB under the true peak target: the AAC encode adds overs (measured 0.0 dBTP at -0.5, -0.7 at -2.2)
+    tmp = wav.with_name(wav.stem + "_m.wav")
+    run([FF, "-y", "-v", "error", "-i", str(wav), "-af", f"volume={gain:.2f}dB,alimiter=limit={lim:.3f}:attack=3:release=60:level=disabled",
+         "-c:a", "pcm_s16le", str(tmp)])
+    tmp.replace(wav)
 
 
 def main():

@@ -31,6 +31,12 @@ Extract frames at: 0.2 s, every cut ±0.1 s, every insert, the last second. Then
 - [ ] **A white (or any flat) background**: measured in the FINAL file, in every shot, not in the clips
       (`"white_background": true` → `qa.py`). No grey corners on the cropped shots.
 - [ ] **Titles on close shots**: nothing sits on his chin or mouth. Lower third over the chest.
+      `qa.py` fails a title, label or stamp over a face (`faces`); a label beside his head fits only
+      on the WIDE framing (reel 17: "RushPoint" on his forehead, "בחינם" on his mouth).
+- [ ] **The hero object is clear of the platform UI**, not only the text: the phone being pressed,
+      the button, a stamp (`phone_preview.py`; reel 17 v1 had the phone under the like column).
+- [ ] **Behind him: his real room, tidied** (`clean_room_rvm`), unless he asked for white or a colour.
+      Every take of him has the light retouch (`retouch=True`).
 - [ ] **No logo. No dates.**
 - [ ] **Last frame**: ends on the last scripted line, nothing after; if it loops, first and last
       shots in the same place and framing.
@@ -48,7 +54,10 @@ Extract frames at: 0.2 s, every cut ±0.1 s, every insert, the last second. Then
       (`bench13b.py`). A clean lav take gets the minimal chain, no enhancer.
 - [ ] I cannot hear the file. The message says so and names what waits for his ear.
 - [ ] Background noise tamed but natural (DeepFilterNet ≤ 12 dB).
-- [ ] Music: present from 0, loud enough (~-11), ducks under speech, unique style for this reel.
+- [ ] Music: present from 0, loud enough (~-8.5 for a promo, he asked for "more present"), warm, ducks
+      under speech, unique style for this reel.
+- [ ] **Loudness**: -14 LUFS, true peak under -1 dBTP (`build` masters it, `qa.py` checks `loudness`).
+- [ ] **No phrase said twice** in one cut line (he restarts a bad opening and says it again).
 - [ ] Sound effects only where they mean something (the hook hit, a timer tick, a reveal).
 
 ## 4. Content and safety
@@ -67,3 +76,6 @@ Extract frames at: 0.2 s, every cut ±0.1 s, every insert, the last second. Then
       hashtags including #RushPoint and #רשפוינט, and no ex partners' tags.
 - [ ] The caption was written from THIS version and quotes only lines that are still in it.
 - [ ] Several reels: each one is sent as soon as its own chain passes, not held for the batch.
+
+## 5. Sending
+- [ ] To his phone: a copy under 30 MiB (`engine/phone_copy.py`), the master stays on the laptop.

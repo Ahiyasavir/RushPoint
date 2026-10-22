@@ -1,0 +1,1630 @@
+{
+  "format": "rushpoint.game",
+  "schemaVersion": 1,
+  "exportedAt": "2026-10-18T20:37:20.442Z",
+  "game": {
+    "title": "המירוץ העירוני, ירושלים 22.10 (גרסה 3)",
+    "description": "מירוץ לילי בירושלים לזוגות של קבוצות יריבות: התכנסות ב 19:00 בתחנה המרכזית, וסיום בכיכר ציון בכ 22:00. מותר ללכת ברגל ולנסוע ברכבת הקלה.",
+    "mode": "team",
+    "scoringPreset": "fixed_points_speed",
+    "instructions": {
+      "title": "החוקים",
+      "bodyHe": "התכנסות ב 19:00 בתחנה המרכזית. זינוק ב 19:40, אחרי התדריך. מסיימים בכיכר ציון עד 22:00.\nמתניידים ברגל או ברכבת הקלה בלבד. בלי מוניות, בלי אופניים, בלי קורקינטים. לכל אחד רב קו.\nכל הקבוצה ביחד, כל הזמן. לא יורדים מהרכבת אחרי תחנת \"העירייה\". לעיר העתיקה לא נכנסים.\nלא נוגעים בזרים, לא מצלמים מי שלא הסכים, ולא מצלמים שוטרים או מאבטחים. בנים ובנות לא נוגעים זה בזה במשימות.\nלא רצים ליד הרכבת ובמעברי חצייה. אף משימה לא שווה את זה.\nבלי אלכוהול, בלי Shazam, בלי מסכות ובלי חפצים שנראים כמו נשק.\nבכל רגע אפשר לוותר על משימה. ב SOS הצוות רואה אתכם מיד."
+    },
+    "stages": [
+      {
+        "id": "v3-gather",
+        "order": 0,
+        "title": "ההתכנסות",
+        "isFinal": false,
+        "narrative": {
+          "intro": {
+            "title": "ערב טוב",
+            "bodyHe": "התחנה המרכזית, 19:00. עוד חצי שעה מתחיל המירוץ. עד אז, משימה אחת, ואתם כבר יודעים שאנחנו רציניים."
+          }
+        },
+        "tasks": [
+          {
+            "id": "gather",
+            "title": "כריזה",
+            "type": "photo",
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 150,
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 3,
+            "estimatedMinutes": 10,
+            "expectedDurationMinutes": 5,
+            "pointValue": 100,
+            "maxConcurrentTeams": 12,
+            "description": "הקליטו הודעת כריזה רשמית על האיחור של הקבוצה שלכם, כמו בתחנה המרכזית: \"קבוצת ___ מעדכנת כי...\" 15 שניות, בטון של מוקד שירות. אסור לחייך. מי שמחייך, מתחילים מהתחלה.",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 30,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #1. מחוץ לבניין, לא בכניסה של הבידוק."
+            }
+          }
+        ]
+      },
+      {
+        "id": "v3-night",
+        "order": 1,
+        "title": "הלילה",
+        "isFinal": false,
+        "requiredTaskCount": 7,
+        "narrative": {
+          "intro": {
+            "title": "הקלפים חולקו",
+            "bodyHe": "שש קבוצות של שתיים. כל זוג הולך באותו מסלול, ורק אחת יוצאת ממנו עם יותר נקודות. המסלול שלכם נפתח תחנה אחרי תחנה, ואת התחנה הבאה רואים רק כשמסיימים את הנוכחית. רוב התחנות נפתחות רק כשמגיעים אליהן."
+          },
+          "outro": {
+            "title": "כמעט",
+            "bodyHe": "סיימתם את המסלול. כולם נפגשים בכיכר ציון."
+          }
+        },
+        "tasks": [
+          {
+            "id": "card-A",
+            "title": "קלף A: מסלול הסוחרים",
+            "description": "זה הקלף שלכם להערב: מסלול הסוחרים.\n\nעל אותו קלף יש עוד קבוצה אחת בלבד, והיא היריבה שלכם עד הסוף. אתם עוברים באותן תחנות, באותו סדר, ובחלק מהן נלחמים ראש בראש. מצאו אותה ברחבה, ועמדו מולה 5 שניות של מבט לפני קרב, בלי לצחוק ובלי לגעת.\n\nאת הקוד שמסיים את המשימה הזאת יקריאו בתדריך, ב 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 0,
+            "maxConcurrentTeams": 2,
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "יריבים",
+              "codeInputLabel": "הקוד מהתדריך",
+              "adminNotes": "הקוד מוקרא בתדריך ב 19:35, רק אחרי שכל הקבוצות קיבלו קלף. קלף שלא צריך (פחות מ 12 קבוצות) נסגר לפני 19:30."
+            }
+          },
+          {
+            "id": "card-B",
+            "title": "קלף B: מסלול השקט",
+            "description": "זה הקלף שלכם להערב: מסלול השקט.\n\nעל אותו קלף יש עוד קבוצה אחת בלבד, והיא היריבה שלכם עד הסוף. אתם עוברים באותן תחנות, באותו סדר, ובחלק מהן נלחמים ראש בראש. מצאו אותה ברחבה, ועמדו מולה 5 שניות של מבט לפני קרב, בלי לצחוק ובלי לגעת.\n\nאת הקוד שמסיים את המשימה הזאת יקריאו בתדריך, ב 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 0,
+            "maxConcurrentTeams": 2,
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "יריבים",
+              "codeInputLabel": "הקוד מהתדריך",
+              "adminNotes": "הקוד מוקרא בתדריך ב 19:35, רק אחרי שכל הקבוצות קיבלו קלף. קלף שלא צריך (פחות מ 12 קבוצות) נסגר לפני 19:30."
+            }
+          },
+          {
+            "id": "card-C",
+            "title": "קלף C: מסלול הדו קרב",
+            "description": "זה הקלף שלכם להערב: מסלול הדו קרב.\n\nעל אותו קלף יש עוד קבוצה אחת בלבד, והיא היריבה שלכם עד הסוף. אתם עוברים באותן תחנות, באותו סדר, ובחלק מהן נלחמים ראש בראש. מצאו אותה ברחבה, ועמדו מולה 5 שניות של מבט לפני קרב, בלי לצחוק ובלי לגעת.\n\nאת הקוד שמסיים את המשימה הזאת יקריאו בתדריך, ב 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 0,
+            "maxConcurrentTeams": 2,
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "יריבים",
+              "codeInputLabel": "הקוד מהתדריך",
+              "adminNotes": "הקוד מוקרא בתדריך ב 19:35, רק אחרי שכל הקבוצות קיבלו קלף. קלף שלא צריך (פחות מ 12 קבוצות) נסגר לפני 19:30."
+            }
+          },
+          {
+            "id": "card-D",
+            "title": "קלף D: מסלול הנגן",
+            "description": "זה הקלף שלכם להערב: מסלול הנגן.\n\nעל אותו קלף יש עוד קבוצה אחת בלבד, והיא היריבה שלכם עד הסוף. אתם עוברים באותן תחנות, באותו סדר, ובחלק מהן נלחמים ראש בראש. מצאו אותה ברחבה, ועמדו מולה 5 שניות של מבט לפני קרב, בלי לצחוק ובלי לגעת.\n\nאת הקוד שמסיים את המשימה הזאת יקריאו בתדריך, ב 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 0,
+            "maxConcurrentTeams": 2,
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "יריבים",
+              "codeInputLabel": "הקוד מהתדריך",
+              "adminNotes": "הקוד מוקרא בתדריך ב 19:35, רק אחרי שכל הקבוצות קיבלו קלף. קלף שלא צריך (פחות מ 12 קבוצות) נסגר לפני 19:30."
+            }
+          },
+          {
+            "id": "card-E",
+            "title": "קלף E: מסלול הקיסר",
+            "description": "זה הקלף שלכם להערב: מסלול הקיסר.\n\nעל אותו קלף יש עוד קבוצה אחת בלבד, והיא היריבה שלכם עד הסוף. אתם עוברים באותן תחנות, באותו סדר, ובחלק מהן נלחמים ראש בראש. מצאו אותה ברחבה, ועמדו מולה 5 שניות של מבט לפני קרב, בלי לצחוק ובלי לגעת.\n\nאת הקוד שמסיים את המשימה הזאת יקריאו בתדריך, ב 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 0,
+            "maxConcurrentTeams": 2,
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "יריבים",
+              "codeInputLabel": "הקוד מהתדריך",
+              "adminNotes": "הקוד מוקרא בתדריך ב 19:35, רק אחרי שכל הקבוצות קיבלו קלף. קלף שלא צריך (פחות מ 12 קבוצות) נסגר לפני 19:30."
+            }
+          },
+          {
+            "id": "card-F",
+            "title": "קלף F: מסלול המרגלים",
+            "description": "זה הקלף שלכם להערב: מסלול המרגלים.\n\nעל אותו קלף יש עוד קבוצה אחת בלבד, והיא היריבה שלכם עד הסוף. אתם עוברים באותן תחנות, באותו סדר, ובחלק מהן נלחמים ראש בראש. מצאו אותה ברחבה, ועמדו מולה 5 שניות של מבט לפני קרב, בלי לצחוק ובלי לגעת.\n\nאת הקוד שמסיים את המשימה הזאת יקריאו בתדריך, ב 19:35.",
+            "type": "smart_station",
+            "triggerMode": "instant",
+            "coordinates": {
+              "lat": 31.78922,
+              "lng": 35.20322
+            },
+            "difficulty": 1,
+            "estimatedMinutes": 5,
+            "expectedDurationMinutes": 5,
+            "pointValue": 0,
+            "maxConcurrentTeams": 2,
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "יריבים",
+              "codeInputLabel": "הקוד מהתדריך",
+              "adminNotes": "הקוד מוקרא בתדריך ב 19:35, רק אחרי שכל הקבוצות קיבלו קלף. קלף שלא צריך (פחות מ 12 קבוצות) נסגר לפני 19:30."
+            }
+          },
+          {
+            "id": "A-vendor",
+            "title": "הסוחר החדש",
+            "description": "בחרו שחקן אחד. עכשיו. לפני שאתם ממשיכים לקרוא.\n\nהשחקן שבחרתם עובד עכשיו בדוכן. יש לו 5 דקות למכור 3 פריטים לקונים אמיתיים, בקריאות שוק בלבד. הספק הוא השופט היחיד, והוא זה שנותן את הקוד. שאר הקבוצה לא עוזרת ולא מוכרת. מותר לה למחוא כפיים.",
+            "coordinates": {
+              "lat": 31.7856,
+              "lng": 35.212
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 22,
+            "expectedDurationMinutes": 9,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "card-A"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "סחורה",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "שת\"פ: ספק ירקות. בנק המחקר #9. מתוכנן: הגעה 19:53, יציאה 20:02."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "A-word",
+            "title": "מילה אחת",
+            "description": "מצאו מוכר שמדבר עוד שפה חוץ מעברית. בקשו ממנו ללמד אתכם מילה אחת שהוא אוהב. כל הקבוצה חוזרת עליה עד שהוא מאשר שזה נשמע נכון.\n\nהוא בפריים רק אם הסכים. אם לא, מצלמים רק אתכם.",
+            "coordinates": {
+              "lat": 31.7853,
+              "lng": 35.2123
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 8,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "A-vendor"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #12. מתוכנן: הגעה 20:03, יציאה 20:10."
+            }
+          },
+          {
+            "id": "A-falafel",
+            "title": "הדו קרב",
+            "description": "כאן נפגשים עם הקבוצה היריבה. השעון שלכם עוצר כאן עד שתסיימו, אז אין שום סיבה למהר להגיע לפני הדו קרב.\n\nהכללים: 20 כדורים לכל קבוצה, 2 דקות. אוכלים בדיוק 4 מכל קבוצה, ולא יותר מ 5 כדורים לאחד. כדור אחד בפה בכל פעם, ופותחים פה לפני הבא. בצפירה יש 30 שניות לסיים את הכדור שבפה, בנחת, והוא נחשב. מי שמשתעל עוצר, והכדורים שלו לא נפסלים. יש מים על השולחן.\n\nבסוף איש הצוות נותן לכל קבוצה כרטיס עם קוד. מקלידים אותו.",
+            "coordinates": {
+              "lat": 31.78175,
+              "lng": 35.219
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 26,
+            "expectedDurationMinutes": 12,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "A-word"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "pausesTimer": true,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהכרטיס",
+              "adminNotes": "שת\"פ: פלאפליה. בנק המחקר #48. מתוכנן: הגעה 20:24, יציאה 20:36. קודים: ניצחון=אלוף, הפסד=כבוד, לבד מול השעון=סולו. איש צוות ליד השולחן, יודע היימליך, לא מצלם."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "אלוף"
+                ],
+                "points": 250,
+                "message": "ניצחתם את היריבים."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "כבוד"
+                ],
+                "points": 100,
+                "message": "הפסדתם בכבוד."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "סולו"
+                ],
+                "points": 150,
+                "message": "אכלתם לבד מול השעון."
+              }
+            ]
+          },
+          {
+            "id": "A-russian",
+            "title": "האצבע",
+            "description": "במגרש הרוסים, בתוך בור מגודר, שוכב עמוד ענק שמעולם לא הוקם. הוא שם כבר 2,000 שנה, ונסדק לפני שסיימו אותו.\n\nלעמוד יש שם: \"האצבע של ___\". מי הענק? אחר כך: אחד מכם מסביר למצלמה, בתור קבלן, למה העמוד יהיה מוכן אחרי החגים.",
+            "coordinates": {
+              "lat": 31.78155,
+              "lng": 35.22286
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 14,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "A-falafel"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "quiz",
+            "answers": [
+              "עוג",
+              "האצבע של עוג"
+            ]
+          },
+          {
+            "id": "A-auction",
+            "title": "מכירה פומבית",
+            "description": "מצאו בממילא חלון ראווה שאף אחד לא היה קונה ממנו כלום. ערכו לו מכירה פומבית: אחד הכרוז, וכל השאר מציעים מחירים מגוחכים ומתחרים זה בזה. 20 שניות, עד \"נמכר!\".\n\nלא מצלמים קונים ולא מצלמים את המוכרים בפנים.",
+            "coordinates": {
+              "lat": 31.77753,
+              "lng": 35.22435
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 16,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "A-russian"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #35. מתוכנן: הגעה 20:59, יציאה 21:06."
+            }
+          },
+          {
+            "id": "A-breach",
+            "title": "הפרצה",
+            "description": "ליד שער יפו יש פרצה רחבה בחומה, ורכבים נכנסים דרכה. מספרים שפרצו אותה כדי שקיסר גרמניה ייכנס לעיר בכרכרה.\n\nבאיזו שנה הוא הגיע?",
+            "coordinates": {
+              "lat": 31.77656,
+              "lng": 35.22727
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 12,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "A-auction"
+            ],
+            "tags": [
+              "22.10",
+              "route-A",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "hint": "וילהלם השני. סוף המאה ה 19.",
+            "hintPenalty": 40,
+            "hintAutoRevealMinutes": 8,
+            "type": "numeric",
+            "numericAnswer": 1898,
+            "numericTolerance": 0
+          },
+          {
+            "id": "B-nachlaot",
+            "title": "מבצע שקט",
+            "description": "מהרגע הזה אף אחד לא מדבר, גם לא בלחישה. רק סימנים.\n\nבחצר הזאת כתוב על הקיר מספר. המספר הוא הקוד. מי שדיבר, הקבוצה מחכה 2 דקות לפני שמקלידה.",
+            "coordinates": {
+              "lat": 31.78243,
+              "lng": 35.21312
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 29,
+            "expectedDurationMinutes": 10,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "card-B"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 45,
+            "hideLocation": true,
+            "locationClueHe": "מאחורי השוק יש שכונה שנבנתה בשביל להתפלל, ויש לה שם של אוהל. כאן גרים אנשים. מכאן אתם לא מדברים.",
+            "hint": "החצר הכי קרובה לתחילת הסמטה, מימין.",
+            "hintPenalty": 40,
+            "hintAutoRevealMinutes": 8,
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "0000",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "⚠ לבחור בחזרה את החצר, לעדכן את המספר, את הרמז ואת הנעץ. בנק המחקר #16. מתוכנן: הגעה 19:59, יציאה 20:09."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "B-fruit",
+            "title": "100 גרם. לא גרם יותר.",
+            "description": "המשקל מכוסה. אתם צריכים להגיע בדיוק ל 100 גרם של פירות יבשים.\n\nכללים: כל אחד מכם מוסיף לפחות פרי אחד, בתורות. לפחות 4 סוגים שונים. ניסיון אחד. כשאתם מוכנים צועקים \"שוקל!\", הספק מוריד את הכיסוי, ואתם מקלידים את המספר. 100 בדיוק שווה כפול.",
+            "coordinates": {
+              "lat": 31.7848,
+              "lng": 35.21294
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 14,
+            "expectedDurationMinutes": 9,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "B-nachlaot"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "numeric",
+            "unmatchedPoints": 0,
+            "revealOutcomePoints": false,
+            "answerOutcomes": [
+              {
+                "id": "exact",
+                "label": "100 בדיוק",
+                "range": {
+                  "min": 100,
+                  "max": 100
+                },
+                "points": 200,
+                "message": "100 בדיוק. הספק לא מאמין."
+              },
+              {
+                "id": "close-lo",
+                "label": "98 עד 99.9",
+                "range": {
+                  "min": 98,
+                  "max": 99.99
+                },
+                "points": 120,
+                "message": "כמעט."
+              },
+              {
+                "id": "close-hi",
+                "label": "100.1 עד 102",
+                "range": {
+                  "min": 100.01,
+                  "max": 102
+                },
+                "points": 120,
+                "message": "כמעט."
+              },
+              {
+                "id": "near-lo",
+                "label": "95 עד 97.9",
+                "range": {
+                  "min": 95,
+                  "max": 97.99
+                },
+                "points": 60,
+                "message": "קרוב."
+              },
+              {
+                "id": "near-hi",
+                "label": "102.1 עד 105",
+                "range": {
+                  "min": 102.01,
+                  "max": 105
+                },
+                "points": 60,
+                "message": "קרוב."
+              }
+            ]
+          },
+          {
+            "id": "B-busker",
+            "title": "תשירו לי את המילה",
+            "description": "בראש המדרחוב עומד הנגן הרשמי של המירוץ. אמרו לו: \"באנו לשמוע את השיר\".\n\nהוא ינגן לשתי הקבוצות ביחד שיר מוכר, בלי מילים ומהר מדי. הקוד הוא המילה האחרונה בפזמון. לא זוכרים? שאלו את הרחוב, ומי שיודע ישיר לכם. אף אחד לא חייב לשיר סולו. בלי Shazam: מי שנתפס, הקבוצה מחכה 5 דקות.\n\nהקבוצה הראשונה שמקלידה נכון מקבלת יותר.",
+            "coordinates": {
+              "lat": 31.78148,
+              "lng": 35.21648
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 17,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "B-fruit"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "כינור",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "שת\"פ: נגן רחוב. בנק המחקר #21. מתוכנן: הגעה 20:33, יציאה 20:40."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "B-safra",
+            "title": "בקשה לעירייה",
+            "description": "בבניין הזה יושבת עיריית ירושלים. בחרו דובר, והוא מגיש לה עכשיו בקשה רשמית לשנות את השם של הרכבת הקלה. 15 שניות, בטון של ישיבת מועצה, והשאר מהנהנים ברצינות מאחוריו.\n\nמצלמים עם הגב לבניין, ושומרים מרחק מהמאבטחים.",
+            "coordinates": {
+              "lat": 31.78032,
+              "lng": 35.22373
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 20,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "B-busker"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #33. מתוכנן: הגעה 20:53, יציאה 21:00."
+            }
+          },
+          {
+            "id": "B-kaiser",
+            "title": "הקיסר מגיע",
+            "description": "אחד מכם הוא הקיסר וילהלם. כל השאר הם הפמליה: שומרים, משרתים, חצוצרן. כניסה טקסית של 10 מטר בפארק, כשהחומות מאחוריכם.\n\nבלי צחוק. מי שצוחק, הקיסר מוציא אותו להורג במבט.",
+            "coordinates": {
+              "lat": 31.77501,
+              "lng": 35.22641
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 19,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "B-safra"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #38. מתוכנן: הגעה 21:12, יציאה 21:19."
+            }
+          },
+          {
+            "id": "B-archaeo",
+            "title": "ממילא, 3026",
+            "description": "השנה היא 3026, ואתם ארכיאולוגים שחפרו וגילו את ממילא. הדריכו 15 שניות של סיור על מה האנשים פה עשו, לדעתכם. בטון רציני, עם הסברים שגויים לגמרי.",
+            "coordinates": {
+              "lat": 31.77753,
+              "lng": 35.22435
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 14,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "B-kaiser"
+            ],
+            "tags": [
+              "22.10",
+              "route-B",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #36. מתוכנן: הגעה 21:26, יציאה 21:33."
+            }
+          },
+          {
+            "id": "C-falafel",
+            "title": "הדו קרב",
+            "description": "כאן נפגשים עם הקבוצה היריבה. השעון שלכם עוצר כאן עד שתסיימו, אז אין שום סיבה למהר להגיע לפני הדו קרב.\n\nהכללים: 20 כדורים לכל קבוצה, 2 דקות. אוכלים בדיוק 4 מכל קבוצה, ולא יותר מ 5 כדורים לאחד. כדור אחד בפה בכל פעם, ופותחים פה לפני הבא. בצפירה יש 30 שניות לסיים את הכדור שבפה, בנחת, והוא נחשב. מי שמשתעל עוצר, והכדורים שלו לא נפסלים. יש מים על השולחן.\n\nבסוף איש הצוות נותן לכל קבוצה כרטיס עם קוד. מקלידים אותו.",
+            "coordinates": {
+              "lat": 31.78175,
+              "lng": 35.219
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 29,
+            "expectedDurationMinutes": 12,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "card-C"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "pausesTimer": true,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהכרטיס",
+              "adminNotes": "שת\"פ: פלאפליה. בנק המחקר #48. מתוכנן: הגעה 19:57, יציאה 20:09. קודים: ניצחון=אלוף, הפסד=כבוד, לבד מול השעון=סולו. איש צוות ליד השולחן, יודע היימליך, לא מצלם."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "אלוף"
+                ],
+                "points": 250,
+                "message": "ניצחתם את היריבים."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "כבוד"
+                ],
+                "points": 100,
+                "message": "הפסדתם בכבוד."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "סולו"
+                ],
+                "points": 150,
+                "message": "אכלתם לבד מול השעון."
+              }
+            ]
+          },
+          {
+            "id": "C-poll",
+            "title": "משאל עם",
+            "description": "השאלה: \"פלאפל או שווארמה, לכל החיים?\"\n\nקודם כתבו בצ'אט של הקבוצה מה הרוב יגיד, ורק אחר כך שאלו 5 מבוגרים במדרחוב. מצלמים רק אתכם ואת הלוח. אם הניחוש שלכם נכון, הראו את זה למצלמה כאילו זכיתם בבחירות.",
+            "coordinates": {
+              "lat": 31.7816,
+              "lng": 35.21791
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 10,
+            "expectedDurationMinutes": 8,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "C-falafel"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #26. מתוכנן: הגעה 20:11, יציאה 20:19."
+            }
+          },
+          {
+            "id": "C-breach",
+            "title": "הפרצה",
+            "description": "ליד שער יפו יש פרצה רחבה בחומה, ורכבים נכנסים דרכה. מספרים שפרצו אותה כדי שקיסר גרמניה ייכנס לעיר בכרכרה.\n\nבאיזו שנה הוא הגיע?",
+            "coordinates": {
+              "lat": 31.77656,
+              "lng": 35.22727
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 26,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "C-poll"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "hint": "וילהלם השני. סוף המאה ה 19.",
+            "hintPenalty": 40,
+            "hintAutoRevealMinutes": 8,
+            "type": "numeric",
+            "numericAnswer": 1898,
+            "numericTolerance": 0
+          },
+          {
+            "id": "C-auction",
+            "title": "מכירה פומבית",
+            "description": "מצאו בממילא חלון ראווה שאף אחד לא היה קונה ממנו כלום. ערכו לו מכירה פומבית: אחד הכרוז, וכל השאר מציעים מחירים מגוחכים ומתחרים זה בזה. 20 שניות, עד \"נמכר!\".\n\nלא מצלמים קונים ולא מצלמים את המוכרים בפנים.",
+            "coordinates": {
+              "lat": 31.77753,
+              "lng": 35.22435
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 13,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "C-breach"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #35. מתוכנן: הגעה 20:51, יציאה 20:58."
+            }
+          },
+          {
+            "id": "C-spice",
+            "title": "האף",
+            "description": "בחרו שחקן אחד עם האף הכי טוב בקבוצה.\n\nהספק שם לפניו שלוש כוסות סגורות. מריחים בלבד, עם עיניים עצומות. מי שטועם, נפסל. על כל תבלין שהוא מזהה נכון, הספק נותן לכם אות אחת. שלוש אותיות, מילה אחת, זה הקוד. אם טעיתם, מבקשים מהספק אות בתמורה לשיר אחד שכל הקבוצה שרה לו.",
+            "coordinates": {
+              "lat": 31.78492,
+              "lng": 35.2126
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 27,
+            "expectedDurationMinutes": 8,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "C-auction"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "זעפרן",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "שת\"פ: תבלינים. בנק המחקר #8. מתוכנן: הגעה 21:17, יציאה 21:25."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "C-shutters",
+            "title": "הפנים על התריסים",
+            "description": "כשהשוק נסגר, התריסים הופכים לגלריה. מצאו שלושה מהם:\n1. הפיזיקאי שהציעו לו להיות נשיא המדינה, והוא סירב.\n2. ראש הממשלה שצויר הפוך.\n3. מישהו שאתם בטוחים שלא תמצאו פה, ומצאתם.\n\nסרטון אחד: בכל תריס כל הקבוצה עומדת בדיוק בתנוחה שלו. את התריס של ראש הממשלה מצלמים הפוך. הטלפון מתהפך, לא אתם.",
+            "coordinates": {
+              "lat": 31.7848,
+              "lng": 35.2125
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 9,
+            "expectedDurationMinutes": 8,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "C-spice"
+            ],
+            "tags": [
+              "22.10",
+              "route-C",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #13. מתוכנן: הגעה 21:26, יציאה 21:34."
+            }
+          },
+          {
+            "id": "D-busker",
+            "title": "תשירו לי את המילה",
+            "description": "בראש המדרחוב עומד הנגן הרשמי של המירוץ. אמרו לו: \"באנו לשמוע את השיר\".\n\nהוא ינגן לשתי הקבוצות ביחד שיר מוכר, בלי מילים ומהר מדי. הקוד הוא המילה האחרונה בפזמון. לא זוכרים? שאלו את הרחוב, ומי שיודע ישיר לכם. אף אחד לא חייב לשיר סולו. בלי Shazam: מי שנתפס, הקבוצה מחכה 5 דקות.\n\nהקבוצה הראשונה שמקלידה נכון מקבלת יותר.",
+            "coordinates": {
+              "lat": 31.78148,
+              "lng": 35.21648
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 26,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "card-D"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "כינור",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "שת\"פ: נגן רחוב. בנק המחקר #21. מתוכנן: הגעה 19:59, יציאה 20:06."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "D-russian",
+            "title": "האצבע",
+            "description": "במגרש הרוסים, בתוך בור מגודר, שוכב עמוד ענק שמעולם לא הוקם. הוא שם כבר 2,000 שנה, ונסדק לפני שסיימו אותו.\n\nלעמוד יש שם: \"האצבע של ___\". מי הענק? אחר כך: אחד מכם מסביר למצלמה, בתור קבלן, למה העמוד יהיה מוכן אחרי החגים.",
+            "coordinates": {
+              "lat": 31.78155,
+              "lng": 35.22286
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 19,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "D-busker"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "quiz",
+            "answers": [
+              "עוג",
+              "האצבע של עוג"
+            ]
+          },
+          {
+            "id": "D-breach",
+            "title": "הפרצה",
+            "description": "ליד שער יפו יש פרצה רחבה בחומה, ורכבים נכנסים דרכה. מספרים שפרצו אותה כדי שקיסר גרמניה ייכנס לעיר בכרכרה.\n\nבאיזו שנה הוא הגיע?",
+            "coordinates": {
+              "lat": 31.77656,
+              "lng": 35.22727
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 19,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "D-russian"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "hint": "וילהלם השני. סוף המאה ה 19.",
+            "hintPenalty": 40,
+            "hintAutoRevealMinutes": 8,
+            "type": "numeric",
+            "numericAnswer": 1898,
+            "numericTolerance": 0
+          },
+          {
+            "id": "D-archaeo",
+            "title": "ממילא, 3026",
+            "description": "השנה היא 3026, ואתם ארכיאולוגים שחפרו וגילו את ממילא. הדריכו 15 שניות של סיור על מה האנשים פה עשו, לדעתכם. בטון רציני, עם הסברים שגויים לגמרי.",
+            "coordinates": {
+              "lat": 31.77753,
+              "lng": 35.22435
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 13,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "D-breach"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #36. מתוכנן: הגעה 20:50, יציאה 20:57."
+            }
+          },
+          {
+            "id": "D-fruit",
+            "title": "100 גרם. לא גרם יותר.",
+            "description": "המשקל מכוסה. אתם צריכים להגיע בדיוק ל 100 גרם של פירות יבשים.\n\nכללים: כל אחד מכם מוסיף לפחות פרי אחד, בתורות. לפחות 4 סוגים שונים. ניסיון אחד. כשאתם מוכנים צועקים \"שוקל!\", הספק מוריד את הכיסוי, ואתם מקלידים את המספר. 100 בדיוק שווה כפול.",
+            "coordinates": {
+              "lat": 31.7848,
+              "lng": 35.21294
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 28,
+            "expectedDurationMinutes": 9,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "D-archaeo"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "numeric",
+            "unmatchedPoints": 0,
+            "revealOutcomePoints": false,
+            "answerOutcomes": [
+              {
+                "id": "exact",
+                "label": "100 בדיוק",
+                "range": {
+                  "min": 100,
+                  "max": 100
+                },
+                "points": 200,
+                "message": "100 בדיוק. הספק לא מאמין."
+              },
+              {
+                "id": "close-lo",
+                "label": "98 עד 99.9",
+                "range": {
+                  "min": 98,
+                  "max": 99.99
+                },
+                "points": 120,
+                "message": "כמעט."
+              },
+              {
+                "id": "close-hi",
+                "label": "100.1 עד 102",
+                "range": {
+                  "min": 100.01,
+                  "max": 102
+                },
+                "points": 120,
+                "message": "כמעט."
+              },
+              {
+                "id": "near-lo",
+                "label": "95 עד 97.9",
+                "range": {
+                  "min": 95,
+                  "max": 97.99
+                },
+                "points": 60,
+                "message": "קרוב."
+              },
+              {
+                "id": "near-hi",
+                "label": "102.1 עד 105",
+                "range": {
+                  "min": 102.01,
+                  "max": 105
+                },
+                "points": 60,
+                "message": "קרוב."
+              }
+            ]
+          },
+          {
+            "id": "D-word",
+            "title": "מילה אחת",
+            "description": "מצאו מוכר שמדבר עוד שפה חוץ מעברית. בקשו ממנו ללמד אתכם מילה אחת שהוא אוהב. כל הקבוצה חוזרת עליה עד שהוא מאשר שזה נשמע נכון.\n\nהוא בפריים רק אם הסכים. אם לא, מצלמים רק אתכם.",
+            "coordinates": {
+              "lat": 31.7853,
+              "lng": 35.2123
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 9,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "D-fruit"
+            ],
+            "tags": [
+              "22.10",
+              "route-D",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #12. מתוכנן: הגעה 21:27, יציאה 21:34."
+            }
+          },
+          {
+            "id": "E-kaiser",
+            "title": "הקיסר מגיע",
+            "description": "אחד מכם הוא הקיסר וילהלם. כל השאר הם הפמליה: שומרים, משרתים, חצוצרן. כניסה טקסית של 10 מטר בפארק, כשהחומות מאחוריכם.\n\nבלי צחוק. מי שצוחק, הקיסר מוציא אותו להורג במבט.",
+            "coordinates": {
+              "lat": 31.77501,
+              "lng": 35.22641
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 34,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "card-E"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #38. מתוכנן: הגעה 20:07, יציאה 20:14."
+            }
+          },
+          {
+            "id": "E-breach",
+            "title": "הפרצה",
+            "description": "ליד שער יפו יש פרצה רחבה בחומה, ורכבים נכנסים דרכה. מספרים שפרצו אותה כדי שקיסר גרמניה ייכנס לעיר בכרכרה.\n\nבאיזו שנה הוא הגיע?",
+            "coordinates": {
+              "lat": 31.77656,
+              "lng": 35.22727
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 10,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "E-kaiser"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "hint": "וילהלם השני. סוף המאה ה 19.",
+            "hintPenalty": 40,
+            "hintAutoRevealMinutes": 8,
+            "type": "numeric",
+            "numericAnswer": 1898,
+            "numericTolerance": 0
+          },
+          {
+            "id": "E-spice",
+            "title": "האף",
+            "description": "בחרו שחקן אחד עם האף הכי טוב בקבוצה.\n\nהספק שם לפניו שלוש כוסות סגורות. מריחים בלבד, עם עיניים עצומות. מי שטועם, נפסל. על כל תבלין שהוא מזהה נכון, הספק נותן לכם אות אחת. שלוש אותיות, מילה אחת, זה הקוד. אם טעיתם, מבקשים מהספק אות בתמורה לשיר אחד שכל הקבוצה שרה לו.",
+            "coordinates": {
+              "lat": 31.78492,
+              "lng": 35.2126
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 31,
+            "expectedDurationMinutes": 8,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "E-breach"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "זעפרן",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "שת\"פ: תבלינים. בנק המחקר #8. מתוכנן: הגעה 20:47, יציאה 20:55."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "E-shukCall",
+            "title": "קריאת שוק",
+            "description": "בשוק צועקים על עגבניות. אתם תצעקו על משהו שאי אפשר לקנות: שקט, תור קצר בקופת חולים, סוללה של 3 אחוז, או משהו טוב יותר שתמציאו.\n\nכל הקבוצה ביחד, באותו קצב, 10 שניות, כאילו זה הדוכן שלכם כבר 40 שנה. מי שצוחק, מתחילים מההתחלה.",
+            "coordinates": {
+              "lat": 31.78424,
+              "lng": 35.21192
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 8,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "E-spice"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #11. מתוכנן: הגעה 20:57, יציאה 21:03."
+            }
+          },
+          {
+            "id": "E-poll",
+            "title": "משאל עם",
+            "description": "השאלה: \"פלאפל או שווארמה, לכל החיים?\"\n\nקודם כתבו בצ'אט של הקבוצה מה הרוב יגיד, ורק אחר כך שאלו 5 מבוגרים במדרחוב. מצלמים רק אתכם ואת הלוח. אם הניחוש שלכם נכון, הראו את זה למצלמה כאילו זכיתם בבחירות.",
+            "coordinates": {
+              "lat": 31.7816,
+              "lng": 35.21791
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 20,
+            "expectedDurationMinutes": 8,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "E-shukCall"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #26. מתוכנן: הגעה 21:15, יציאה 21:23."
+            }
+          },
+          {
+            "id": "E-falafel",
+            "title": "הדו קרב",
+            "description": "כאן נפגשים עם הקבוצה היריבה. השעון שלכם עוצר כאן עד שתסיימו, אז אין שום סיבה למהר להגיע לפני הדו קרב.\n\nהכללים: 20 כדורים לכל קבוצה, 2 דקות. אוכלים בדיוק 4 מכל קבוצה, ולא יותר מ 5 כדורים לאחד. כדור אחד בפה בכל פעם, ופותחים פה לפני הבא. בצפירה יש 30 שניות לסיים את הכדור שבפה, בנחת, והוא נחשב. מי שמשתעל עוצר, והכדורים שלו לא נפסלים. יש מים על השולחן.\n\nבסוף איש הצוות נותן לכל קבוצה כרטיס עם קוד. מקלידים אותו.",
+            "coordinates": {
+              "lat": 31.78175,
+              "lng": 35.219
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 14,
+            "expectedDurationMinutes": 12,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "E-poll"
+            ],
+            "tags": [
+              "22.10",
+              "route-E",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "pausesTimer": true,
+            "type": "smart_station",
+            "wrongAnswerPenalty": "off",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "codeInputLabel": "הקוד מהכרטיס",
+              "adminNotes": "שת\"פ: פלאפליה. בנק המחקר #48. מתוכנן: הגעה 21:25, יציאה 21:37. קודים: ניצחון=אלוף, הפסד=כבוד, לבד מול השעון=סולו. איש צוות ליד השולחן, יודע היימליך, לא מצלם."
+            },
+            "answerOutcomes": [
+              {
+                "id": "win",
+                "label": "ניצחון",
+                "accepts": [
+                  "אלוף"
+                ],
+                "points": 250,
+                "message": "ניצחתם את היריבים."
+              },
+              {
+                "id": "lose",
+                "label": "הפסד",
+                "accepts": [
+                  "כבוד"
+                ],
+                "points": 100,
+                "message": "הפסדתם בכבוד."
+              },
+              {
+                "id": "solo",
+                "label": "לבד",
+                "accepts": [
+                  "סולו"
+                ],
+                "points": 150,
+                "message": "אכלתם לבד מול השעון."
+              }
+            ]
+          },
+          {
+            "id": "F-archaeo",
+            "title": "ממילא, 3026",
+            "description": "השנה היא 3026, ואתם ארכיאולוגים שחפרו וגילו את ממילא. הדריכו 15 שניות של סיור על מה האנשים פה עשו, לדעתכם. בטון רציני, עם הסברים שגויים לגמרי.",
+            "coordinates": {
+              "lat": 31.77753,
+              "lng": 35.22435
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 27,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "card-F"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #36. מתוכנן: הגעה 20:00, יציאה 20:07."
+            }
+          },
+          {
+            "id": "F-breach",
+            "title": "הפרצה",
+            "description": "ליד שער יפו יש פרצה רחבה בחומה, ורכבים נכנסים דרכה. מספרים שפרצו אותה כדי שקיסר גרמניה ייכנס לעיר בכרכרה.\n\nבאיזו שנה הוא הגיע?",
+            "coordinates": {
+              "lat": 31.77656,
+              "lng": 35.22727
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 12,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "F-archaeo"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "hint": "וילהלם השני. סוף המאה ה 19.",
+            "hintPenalty": 40,
+            "hintAutoRevealMinutes": 8,
+            "type": "numeric",
+            "numericAnswer": 1898,
+            "numericTolerance": 0
+          },
+          {
+            "id": "F-nachlaot",
+            "title": "מבצע שקט",
+            "description": "מהרגע הזה אף אחד לא מדבר, גם לא בלחישה. רק סימנים.\n\nבחצר הזאת כתוב על הקיר מספר. המספר הוא הקוד. מי שדיבר, הקבוצה מחכה 2 דקות לפני שמקלידה.",
+            "coordinates": {
+              "lat": 31.78243,
+              "lng": 35.21312
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 34,
+            "expectedDurationMinutes": 10,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "F-breach"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 45,
+            "hideLocation": true,
+            "locationClueHe": "מאחורי השוק יש שכונה שנבנתה בשביל להתפלל, ויש לה שם של אוהל. כאן גרים אנשים. מכאן אתם לא מדברים.",
+            "hint": "החצר הכי קרובה לתחילת הסמטה, מימין.",
+            "hintPenalty": 40,
+            "hintAutoRevealMinutes": 8,
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "0000",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "⚠ לבחור בחזרה את החצר, לעדכן את המספר, את הרמז ואת הנעץ. בנק המחקר #16. מתוכנן: הגעה 20:43, יציאה 20:53."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "F-shukCall",
+            "title": "קריאת שוק",
+            "description": "בשוק צועקים על עגבניות. אתם תצעקו על משהו שאי אפשר לקנות: שקט, תור קצר בקופת חולים, סוללה של 3 אחוז, או משהו טוב יותר שתמציאו.\n\nכל הקבוצה ביחד, באותו קצב, 10 שניות, כאילו זה הדוכן שלכם כבר 40 שנה. מי שצוחק, מתחילים מההתחלה.",
+            "coordinates": {
+              "lat": 31.78424,
+              "lng": 35.21192
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 11,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "F-nachlaot"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #11. מתוכנן: הגעה 20:58, יציאה 21:04."
+            }
+          },
+          {
+            "id": "F-busker",
+            "title": "תשירו לי את המילה",
+            "description": "בראש המדרחוב עומד הנגן הרשמי של המירוץ. אמרו לו: \"באנו לשמוע את השיר\".\n\nהוא ינגן לשתי הקבוצות ביחד שיר מוכר, בלי מילים ומהר מדי. הקוד הוא המילה האחרונה בפזמון. לא זוכרים? שאלו את הרחוב, ומי שיודע ישיר לכם. אף אחד לא חייב לשיר סולו. בלי Shazam: מי שנתפס, הקבוצה מחכה 5 דקות.\n\nהקבוצה הראשונה שמקלידה נכון מקבלת יותר.",
+            "coordinates": {
+              "lat": 31.78148,
+              "lng": 35.21648
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 17,
+            "expectedDurationMinutes": 7,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "F-shukCall"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "partner"
+            ],
+            "triggerMode": "instant",
+            "type": "smart_station",
+            "smart": {
+              "enabled": true,
+              "verificationType": "code_verification",
+              "secretCode": "כינור",
+              "codeInputLabel": "הקוד",
+              "adminNotes": "שת\"פ: נגן רחוב. בנק המחקר #21. מתוכנן: הגעה 21:14, יציאה 21:21."
+            },
+            "wrongAnswerPenalty": "gentle"
+          },
+          {
+            "id": "F-slow",
+            "title": "המירוץ האיטי בעולם",
+            "description": "אתם באמצע מירוץ, אז עכשיו תעשו את ההפך. כל הקבוצה בשורה אחת, לאורך 20 מטר בצד המדרחוב, הכי לאט שאפשר, בלי לעצור לרגע.\n\nמי שעוצר, כל השורה חוזרת להתחלה. מצלמים מהצד, כמו גמר אולימפי.",
+            "coordinates": {
+              "lat": 31.7816,
+              "lng": 35.21791
+            },
+            "difficulty": 5,
+            "estimatedMinutes": 9,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 2,
+            "unlockAfterTaskIds": [
+              "F-busker"
+            ],
+            "tags": [
+              "22.10",
+              "route-F",
+              "street"
+            ],
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 75,
+            "type": "photo",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 8,
+              "videoMaxSeconds": 45,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #28. מתוכנן: הגעה 21:24, יציאה 21:30."
+            }
+          }
+        ],
+        "exclusiveGroups": [
+          {
+            "id": "cards",
+            "taskIds": [
+              "card-A",
+              "card-B",
+              "card-C",
+              "card-D",
+              "card-E",
+              "card-F"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "v3-zion",
+        "order": 2,
+        "title": "כיכר ציון",
+        "isFinal": true,
+        "narrative": {
+          "intro": {
+            "title": "כיכר ציון",
+            "bodyHe": "הגעתם. עוד משימה אחת, ואז ההכרזה."
+          },
+          "outro": {
+            "title": "זהו",
+            "bodyHe": "נשארים בכיכר. בעוד כמה דקות מכריזים על הזוכים."
+          }
+        },
+        "tasks": [
+          {
+            "id": "final",
+            "title": "מסיבת עיתונאים",
+            "type": "photo",
+            "triggerMode": "radius",
+            "geofenceRadiusMeters": 80,
+            "coordinates": {
+              "lat": 31.78197,
+              "lng": 35.21957
+            },
+            "difficulty": 3,
+            "estimatedMinutes": 8,
+            "expectedDurationMinutes": 6,
+            "pointValue": 100,
+            "maxConcurrentTeams": 12,
+            "description": "מסיבת עיתונאים אחרי המירוץ. דובר אחד מסביר למה הקבוצה הפסידה, גם אם היא ניצחה. כל השאר כתבים, ושואלים אותו שאלות קשות. 20 שניות. מי שצוחק, מתחילים מההתחלה.",
+            "smart": {
+              "enabled": true,
+              "verificationType": "photo_upload",
+              "captureKind": "video",
+              "videoMinSeconds": 10,
+              "videoMaxSeconds": 40,
+              "autoApprove": true,
+              "adminNotes": "בנק המחקר #23 (בלי היונה: בלילה הן ישנות)."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

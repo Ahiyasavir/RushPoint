@@ -61,6 +61,87 @@ def frame(video: Path, at: str, tmp: Path, name: str) -> np.ndarray:
     return np.asarray(Image.open(p).convert("L")).astype(float)
 
 
+def loudness(video: Path):
+    import re as _re
+    import subprocess as _sp
+    p = _sp.run([ffmpeg_bin(), "-hide_banner", "-i", str(video), "-af", "ebur128=peak=true", "-f", "null", "-"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace")
+    i = _re.findall(r"I:\s+(-?[\d.]+) LUFS", p.stderr)
+    pk = _re.findall(r"Peak:\s+(-?[\d.]+) dBFS", p.stderr)
+    return (float(i[-1]), float(pk[-1])) if i and pk else None
+
+
+_LANDMARKER = None
+
+
+def _faces(rgb: np.ndarray) -> list[tuple[int, int, int, int]]:
+    """Face boxes (x0, y0, x1, y1) in the frame's pixels, from the toolkit's mediapipe face landmarker."""
+    global _LANDMARKER
+    import os
+    if _LANDMARKER is None:
+        import mediapipe as mp
+        from mediapipe.tasks import python as mpp
+        from mediapipe.tasks.python import vision
+        model = Path.home() / ".claude-account2" / "toolkits" / "video-editing" / "models" / "face_landmarker.task"
+        if not model.exists():
+            model = Path.home() / ".claude" / "toolkits" / "video-editing" / "models" / "face_landmarker.task"
+        here = os.getcwd()
+        os.chdir(model.parent)                   # mediapipe reads the model through an ASCII relative path
+        try:
+            _LANDMARKER = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
+                base_options=mpp.BaseOptions(model_asset_path=model.name), num_faces=3))
+        finally:
+            os.chdir(here)
+        _LANDMARKER._mp = mp
+    mp = _LANDMARKER._mp
+    h, w = rgb.shape[:2]
+    res = _LANDMARKER.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb)))
+    out = []
+    for lm in res.face_landmarks:
+        xs, ys = [p.x * w for p in lm], [p.y * h for p in lm]
+        out.append((int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))))
+    return out
+
+
+def faces_under_overlays(tl: dict, rdir: Path, rtl: dict):
+    """(problems, how many overlays were checked) or ([], None) when mediapipe is not available."""
+    import subprocess as _sp
+    try:
+        import mediapipe  # noqa: F401
+    except Exception:
+        return [], None
+    bad, checked = [], 0
+    for o in rtl.get("overlays", []):
+        if o.get("kind", "text") != "text":
+            continue
+        tm = (float(o["start"]) + float(o["end"])) / 2
+        sh = next((s for s in tl["shots"] if s.get("clip") and s["start"] <= tm < s["end"]), None)
+        if not sh or not (rdir / sh["clip"]).exists():
+            continue
+        t_in = float(sh.get("in", 0) if isinstance(sh.get("in", 0), (int, float)) else 0) + (tm - sh["start"]) * float(sh.get("speed", 1.0))
+        vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
+        if sh.get("crop"):
+            x, y, cw, ch = map(int, sh["crop"])
+            vf += f",crop={cw}:{ch}:{x}:{y},scale={W}:{H}"
+        raw = _sp.run([ffmpeg_bin(), "-v", "error", "-ss", f"{t_in:.3f}", "-i", str(rdir / sh["clip"]), "-frames:v", "1",
+                       "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+        if len(raw) < W * H * 3:
+            continue
+        faces = _faces(np.frombuffer(raw, np.uint8)[: W * H * 3].reshape(H, W, 3))
+        if not faces:
+            continue
+        checked += 1
+        ovp = Path(o["png"])
+        a = np.asarray(Image.open(ovp if ovp.is_absolute() else rdir / ovp).convert("RGBA").resize((W, H)))[:, :, 3] > 16
+        for x0, y0, x1, y1 in faces:
+            area = max((x1 - x0) * (y1 - y0), 1)
+            cover = a[max(y0, 0):max(y1, 0), max(x0, 0):max(x1, 0)].sum() / area
+            if cover > 0.06:
+                bad.append(f"{ovp.name} @{tm:.1f}s covers {cover:.0%} of a face")
+                break
+    return bad, checked
+
+
 def check(reel: str, opening: str | None, final: bool) -> int:
     rdir = reel_dir(reel)
     tl = apply_opening(load_timeline(reel), opening)
@@ -311,6 +392,21 @@ def check(reel: str, opening: str | None, final: bool) -> int:
             if corner < 247:
                 grey.append(f"{s_['id']} {corner:.0f}")
         (fails if grey else ok).append(f"white background: {len(grey)} of {len(talk)} talking shots under 247 at the top corners (y 180..230) {grey or ''}")
+
+    # (d) a title, a label or a stamp over his face (reel 17, 2026-10-13: a "RushPoint" label sat on his
+    #     forehead and the "בחינם" stamp on his mouth; both were caught only by eye). The face is found
+    #     in the shot's own clip at the overlay's middle, with the shot's crop applied.
+    fbad, fchecked = faces_under_overlays(tl, rdir, rtl)
+    if fchecked is not None:
+        (fails if fbad else ok).append(f"faces: {len(fbad)} of {fchecked} titles/labels over a talking shot cover a face {fbad or ''}")
+
+    # (e) loudness of the delivered mix: the platforms play everything at about -14 LUFS, and a quiet
+    #     reel is the one people scroll past (reel 17 came out at -19 and was fixed by hand)
+    ln = loudness(video)
+    if ln:
+        li, ltp = ln
+        good = -15.5 <= li <= -12.5 and ltp <= -0.8
+        (ok if good else (fails if final else warns)).append(f"loudness: {li:.1f} LUFS, true peak {ltp:.1f} dBTP (want -14 ±1.5, peak ≤ -1)")
 
     # todo + placeholders
     t = todos(tl)

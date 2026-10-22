@@ -97,3 +97,20 @@ points, `--check` round trip, the voice chain in `RP_VOICE_CHAIN`), `tails.py` (
 leave), `make_timeline.py` (`picture_end()`, `held()`, `outro()`, white theme: `box` captions,
 lower third titles, white phone ground), `bench13.py` / `bench13b.py` (voice chains scored by
 DNSMOS and timbre drift; run with the `clearvoice` venv from `_audio-lab/`).
+
+## 2026-10-13 evening (reel 17, the button)
+- `lib/whitebg.clean_room_rvm(src, dst, a=, b=, retouch=True, proof=)`: his real room tidied. Pass one
+  mattes 8 sampled frames, fits the wall as a cubic colour surface and marks what departs from it (the
+  mask is saved beside the proof as `_mask.jpg`); pass two keeps every pixel as shot except inside that
+  mask, where the wall is rebuilt behind the matte of him. About 25 s of footage per minute here.
+- `lib/whitebg.retouch_skin(rgb)`: frequency separation on skin only (the 4 to 15 px band), plus a little
+  less shine. `whiten_rvm(..., bg=PNG, retouch=)` also takes any background image.
+- `build.master_loudness`: the mix is brought to `audio_lufs` (-14) with one linear gain and a limiter.
+- `qa.py`: `faces` (a text overlay over a face found by the face landmarker in the shot's own clip) and
+  `loudness`.
+- `phone_copy.py <master> <out>`: a copy under 30 MiB for his phone.
+- Music style `heartdrop` (level 0 a heartbeat, then a warm F major half time drop).
+- `examples/reel17-button/`: `hook/` (track a black phone, find the fingertip, the screen as HTML, the
+  corner pin composite with a dive into the screen), `map/` (phones bursting onto a real route map),
+  `assemble.py` (clean room cuts), `make_timeline.py` (labels beside his head on wide framings, word
+  cards, `HOLD_AFTER` a payoff word), `l8_tail.py` (a clip cut longer than its voice).
