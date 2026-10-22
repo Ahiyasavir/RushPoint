@@ -79,7 +79,9 @@ const staffSrc = readFileSync(join(__dirname, '..', 'apps', 'play-web', 'src', '
 check('the staff console tells the classifier who is signed in, at every call site',
   !/classifyStaffError\(e\)/.test(staffSrc) && /signedInAsPlayer:/.test(staffSrc));
 check('... and re-decides the wording from the LIVE identity (the switch signs out first, so the error arrives while nobody is signed in)',
-  /onAuthStateChanged\(auth/.test(staffSrc) && /readErr\.sessionExpired && playerHere \? 'signedInAsPlayer'/.test(staffSrc));
+  // onPlayerIdentity (change: signup-quota-fallback) is the same live listener, and also knows a
+  // player who came in through startPlayerSession, who is not anonymous.
+  /onAuthStateChanged\(auth|onPlayerIdentity\(/.test(staffSrc) && /readErr\.sessionExpired && playerHere \? 'signedInAsPlayer'/.test(staffSrc));
 
 // LEAK GUARD: message text is never classified, so it can never be echoed.
 check('a raw English message with NO code is generic (never classified by text)',

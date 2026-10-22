@@ -327,6 +327,8 @@ export interface RunTeamRow {
   held?: boolean;
   /** ISO: every station open to the team is full and its clock is stopped (station-wait-clock). */
   waitingForStationSince?: string | null;
+  /** change: route-after-waits. The mission queued "after this mission" for this team, not reached yet. */
+  queuedRouteTaskId?: string | null;
   /** Taken out of the game by the organizer (team-lifecycle-controls). */
   removed?: boolean;
 }

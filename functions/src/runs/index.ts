@@ -156,7 +156,7 @@ import {
 import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSeconds, teamClockNowMs } from '@rushpoint/shared';
 import { settleStationWait, stationWaitStamp, teamStationWaitMs } from '@rushpoint/shared';
 import { teamAdvanceRefusal, rankableTeams } from '@rushpoint/shared';
-import { routeBlockers, acceptsAll, type RouteBlockers, type HardBlocker, type WaivableKind } from '@rushpoint/shared';
+import { routeBlockers, acceptsAll, queuedRouteVerdict, type RouteBlockers, type HardBlocker, type WaivableKind } from '@rushpoint/shared';
 import { arrivalGateApplies, missionPins, resumedStartedAt } from '@rushpoint/shared';
 // Test mode (change: test-mode-hidden-scoring) — the seal predicate, the participant
 // team projection (the SECURITY boundary for the sealed payload, not chrome) and the
@@ -2687,21 +2687,25 @@ async function routeTeamWithWaivers(a: {
 /**
  * "After this mission": hand the queued mission to a team that has just become free, with the
  * waiver the operator confirmed — but only if that waiver still covers everything in the way.
- * Otherwise the queue is dropped (audited) and normal routing runs. Never throws.
+ * A station that filled up since the click is not a reason to give up on it: the team WAITS for it
+ * (waiting: the caller stops its clock), and the queue stays (queuedRouteVerdict). Anything else
+ * new in the way drops the queue (audited) and normal routing runs. Never throws.
  */
 async function consumeQueuedRoute(
   ownerUid: string, gameId: string, runId: string, teamId: string, game: Game, team: RunTeam,
-): Promise<string | null> {
+): Promise<{ routed?: string; waiting?: true }> {
   const q = team.queuedRoute;
-  if (!q || typeof q.taskId !== 'string') return null;
+  if (!q || typeof q.taskId !== 'string') return {};
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
   const now = new Date().toISOString();
   try {
     const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
     const run = runSnap.data() as Run;
     const blockers = routeBlockers({ game, team, run, taskId: q.taskId, nowMs: Date.now() });
-    const stillCovered = blockers.hard.length === 0 && acceptsAll(blockers, q.waived ?? []);
-    if (!stillCovered) {
+    const verdict = queuedRouteVerdict(blockers, q.waived ?? []);
+    if (verdict === 'wait') return { waiting: true };
+    if (verdict === 'drop') {
+      functions.logger.info('queuedRoute.dropped', { runId, teamId, taskId: q.taskId, hard: blockers.hard.map((b) => b.kind), waivable: blockers.waivable.map((b) => b.kind), waived: q.waived ?? [] });
       await teamRef.update({ queuedRoute: FieldValue.delete(), updatedAt: now });
       await auditBestEffort({
         ownerUid, gameId, runId, teamId, operatorId: q.by ?? '',
@@ -2709,20 +2713,27 @@ async function consumeQueuedRoute(
         reason: blockers.hard[0]?.kind ?? `blocked:${blockers.waivable.map((b) => b.kind).join(',')}`,
         taskId: q.taskId,
       });
-      return null;
+      return {};
     }
     const waived = blockers.waivable.map((b) => b.kind);
-    await applyRoute({ ownerUid, gameId, runId, teamId, teamRef, game, run, team, taskId: q.taskId, waived, operatorId: q.by ?? '', now });
+    try {
+      await applyRoute({ ownerUid, gameId, runId, teamId, teamRef, game, run, team, taskId: q.taskId, waived, operatorId: q.by ?? '', now });
+    } catch (e) {
+      // The last place was taken between the check and the claim: the same wait, not a drop.
+      const fresh = routeBlockers({ game, team, run, taskId: q.taskId, nowMs: Date.now() });
+      if (queuedRouteVerdict(fresh, q.waived ?? []) === 'wait') return { waiting: true };
+      throw e;
+    }
     await teamRef.update({ queuedRoute: FieldValue.delete() }).catch(() => undefined);
     await auditBestEffort({
       ownerUid, gameId, runId, teamId, operatorId: q.by ?? '',
       actionType: AUDIT_TASK_ROUTED, previousValue: '', newValue: q.taskId, reason: 'queued', taskId: q.taskId, waived,
     });
-    return q.taskId;
+    return { routed: q.taskId };
   } catch (e) {
     functions.logger.warn('consumeQueuedRoute failed; routing normally', { runId, teamId, err: String(e) });
     await teamRef.update({ queuedRoute: FieldValue.delete() }).catch(() => undefined);
-    return null;
+    return {};
   }
 }
 
@@ -5053,6 +5064,9 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       removed: t.removed === true,
       // station-wait-clock: every station open to this team is full and its clock is stopped.
       waitingForStationSince: !t.finishedAt && typeof t.stationWaitSince === 'string' ? t.stationWaitSince : null,
+      // The mission an organizer sent this team to "after this mission" and that it has not reached yet
+      // (while its station is full the team waits for it, so the row can say for WHICH mission).
+      queuedRouteTaskId: !t.finishedAt && typeof t.queuedRoute?.taskId === 'string' ? t.queuedRoute.taskId : null,
     };
   });
 
@@ -5774,10 +5788,15 @@ export async function assignNextInActiveStage(
   if (inFlight) return { taskId: inFlight.taskId };
 
   // "After this mission": the operator's queued route goes first (never throws; drops itself
-  // when what blocks it has changed beyond what was confirmed).
+  // when what blocks it has changed beyond what was confirmed). A station that filled up since is
+  // waited for, with the clock stopped, exactly like a team for which every station is full.
   if (team.queuedRoute?.taskId) {
-    const routed = await consumeQueuedRoute(ownerUid, gameId, runId, teamId, game, team);
-    if (routed) return { taskId: routed };
+    const q = await consumeQueuedRoute(ownerUid, gameId, runId, teamId, game, team);
+    if (q.routed) return { taskId: q.routed };
+    if (q.waiting) {
+      await stampStationWait(db.doc(teamPath(ownerUid, gameId, runId, teamId)), now);
+      return { reason: 'stationsFull' };
+    }
   }
 
   const unassigned = stageRec.tasks.filter((t) => t.status === 'unassigned');

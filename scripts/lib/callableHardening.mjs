@@ -64,6 +64,13 @@ export const PUBLIC_CALLABLES = {
     + 'anything the caller sends, and a projection that copies fields out by name so no server '
     + 'secret can reach the response by default. It returns a read-only view and never the '
     + 'owner uid; taking a COPY is a different callable and does require an account.',
+  startPlayerSession:
+    'The way into a game once Firebase stops creating accounts (change: signup-quota-fallback): '
+    + 'Firebase allows 100 new accounts an hour per IP address, and a venue WiFi is one address, so '
+    + 'the caller is exactly a phone that could not sign in. What authentication would carry is '
+    + 'carried by the join code, which must resolve to a live run that is not revoked or trashed, '
+    + 'a budget keyed on the CONNECTION and never on the payload, and a budget per run. It returns '
+    + 'only a token for a NEW empty player account (claim player), never staff claims or any data.',
 };
 
 /**

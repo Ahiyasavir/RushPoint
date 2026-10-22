@@ -393,6 +393,8 @@ const ALLOWED_RUN_TEAM_ROW_KEYS = new Set([
   'held', 'removed',
   // station-wait-clock: an instant, not a place or a person. Every open station is full.
   'waitingForStationSince',
+  // route-after-waits: the mission queued "after this mission", not reached yet (a task id, no PII).
+  'queuedRouteTaskId',
   // late-joiner-autostart: WHEN the team joined. Consciously classified rather than
   // waved through: it is a timestamp the organizer already sees as "joined at" in
   // their own console, it is not a position, not an answer key and not a guardian
@@ -14943,6 +14945,95 @@ async function main() {
       stranger.call('reportClientEvent', { kind: 'authLost', outcome: 'reinstated', phase: 'join', msSinceSignIn: 1, userAgent: 'x' }),
       { codeIn: ['functions/unauthenticated'] });
   }); // scenario: reportClientEvent
+
+  await scenario('route after: a full station waits for its slot, never vanishes', async () => {
+    // Found by the 8 team load sim (22.10, 2 runs in 7): a team sent to a station "after this mission"
+    // found it full when it became free, the queue dropped itself in silence, the team was handed
+    // another mission and finished the stage without the station the organizer sent it to. Now the
+    // team WAITS for that station (its clock stops, as for any full station), the console sees it.
+    const OWNER = creatorCred.user.uid;
+    const SPOT = { lat: 31.7800, lng: 35.2100 };
+    const q = (id, extra) => ({ id, title: `Mission ${id}`, type: 'quiz', choices: ['Yes', 'No'], answers: ['Yes'],
+      coordinates: { ...SPOT }, geofenceRadiusMeters: 40, difficulty: 1, estimatedMinutes: 2, pointValue: 10, maxConcurrentTeams: 9, ...extra });
+    const { gameId: wg } = await creator.call('createGame', { title: 'Route Wait Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: wg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'w1', order: 0, title: 'Stations', requiredTaskCount: 2, tasks: [q('w-a'), q('w-b'), q('w-f', { maxConcurrentTeams: 1 })] },
+      { id: 'w2', order: 1, title: 'End', isFinal: true, tasks: [q('w-end')] },
+    ] });
+    const { runId: wr, accessCode: wc } = await creator.call('launchRun', { gameId: wg });
+    const W = { ownerUid: OWNER, gameId: wg, runId: wr };
+    const join = async (name) => { const p = makeParty(name); await signInAnonymously(p.auth); await p.call('joinRun', { code: wc, displayName: name }); return { p, uid: p.auth.currentUser.uid }; };
+    const A = await join('Station Holder'); const B = await join('Sent After');
+    await creator.call('startTeams', { gameId: wg, runId: wr });
+    const doc = async (uid) => (await creator.getDocAt(`users/${OWNER}/games/${wg}/runs/${wr}/teams/${uid}`)).data ?? {};
+    const routeNow = async (uid, taskId) => {
+      const dry = await creator.call('forceAssignTask', { ...W, teamId: uid, taskId, dryRun: true });
+      return creator.call('forceAssignTask', { ...W, teamId: uid, taskId, accept: (dry?.blockers?.waivable ?? []).map((w) => w.kind) });
+    };
+    const finish = async (party, taskId) => {
+      await party.call('reportArrival', { taskId, ...SPOT, accuracyMeters: 10, code: wc });
+      return party.call('submitTaskAnswer', { ...W, taskId, answer: 'yes', ...SPOT, accuracyMeters: 10 });
+    };
+    if ((await doc(A.uid)).activeTaskId !== 'w-b') await routeNow(A.uid, 'w-b');
+    if ((await doc(B.uid)).activeTaskId !== 'w-a') await routeNow(B.uid, 'w-a');
+    // The station is free when the organizer queues B to it: nothing to confirm.
+    const queued = await creator.call('forceAssignTask', { ...W, teamId: B.uid, taskId: 'w-f', accept: [], when: 'after' });
+    check('route wait precondition: B is queued to the station, nothing to confirm', queued?.queued === true && (queued?.waived ?? []).length === 0, JSON.stringify(queued));
+    // Then another team takes the one place at the station.
+    await routeNow(A.uid, 'w-f');
+    check('route wait precondition: A now holds the only place at the station', (await doc(A.uid)).activeTaskId === 'w-f');
+    const bDone = await finish(B.p, 'w-a');
+    const b1 = await doc(B.uid);
+    check('route wait: B is NOT handed another mission in place of the station it was sent to',
+      !b1.activeTaskId && b1.queuedRoute?.taskId === 'w-f', JSON.stringify({ next: bDone?.nextTaskId, active: b1.activeTaskId, queued: b1.queuedRoute }));
+    check('route wait: B waits for the station with its clock stopped', typeof b1.stationWaitSince === 'string', String(b1.stationWaitSince));
+    const ask = await B.p.call('requestNextTask', { code: wc, ...SPOT });
+    check('route wait: B asking again hears "the station is full", the queue still in place',
+      !ask?.taskId && ask?.reason === 'stationsFull' && (await doc(B.uid)).queuedRoute?.taskId === 'w-f', JSON.stringify(ask));
+    const row = ((await creator.call('listRunTeams', { gameId: wg, runId: wr }))?.teams ?? []).find((t) => t.id === B.uid);
+    check('route wait: the console row says B is waiting, and for which mission',
+      !!row?.waitingForStationSince && row?.queuedRouteTaskId === 'w-f', JSON.stringify({ w: row?.waitingForStationSince, q: row?.queuedRouteTaskId }));
+    // The station frees up: B gets it on its next ask, and the wait is settled.
+    await finish(A.p, 'w-f');
+    const got = await B.p.call('requestNextTask', { code: wc, ...SPOT });
+    const b2 = await doc(B.uid);
+    check('route wait: once the place frees up, B gets the station it was sent to',
+      got?.taskId === 'w-f' && b2.activeTaskId === 'w-f' && !b2.queuedRoute, JSON.stringify({ got, active: b2.activeTaskId, queued: b2.queuedRoute }));
+    check('route wait: the wait is settled into the clock credit', !b2.stationWaitSince && typeof b2.stationWaitMs === 'number', JSON.stringify({ since: b2.stationWaitSince, ms: b2.stationWaitMs }));
+    await finish(B.p, 'w-f');
+    const b3 = await doc(B.uid);
+    check('route wait: B finished the stage WITH the station it was sent to',
+      b3.stages?.[0]?.tasks?.some((t) => t.taskId === 'w-f' && t.status === 'completed') && b3.stages?.[0]?.status === 'completed',
+      JSON.stringify(b3.stages?.[0]?.tasks?.map((t) => `${t.taskId}:${t.status}`)));
+  }); // scenario: route after waits
+
+  await scenario('startPlayerSession (past Firebase sign-up quota)', async () => {
+    // change: signup-quota-fallback. Firebase makes at most 100 accounts an hour per IP; on a venue WiFi
+    // every phone shares one. The API then makes the account for a LIVE join code and the phone signs
+    // in with the token. The emulator enforces no quota, so this proves the path, not the quota.
+    const { gameId: sg } = await creator.call('createGame', { title: 'Session Fallback Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: sg, stages: [{ id: 'ss1', order: 0, title: 'Only', isFinal: true, tasks: [
+      { id: 'ss-t', title: 'Say yes', type: 'quiz', choices: ['Yes', 'No'], answers: ['Yes'], locationless: true, difficulty: 1, estimatedMinutes: 2, pointValue: 10 },
+    ] }] });
+    const { runId: sr, accessCode: sc } = await creator.call('launchRun', { gameId: sg });
+    const phone = makeParty('session-fallback-phone'); // never signed in: the quota refused it
+    const res = await phone.call('startPlayerSession', { code: sc.toLowerCase() });
+    check('startPlayerSession: a live code gives a signed-out phone a token', typeof res?.token === 'string' && res.token.length > 20);
+    const cred = await signInWithCustomToken(phone.auth, res.token);
+    const claims = (await cred.user.getIdTokenResult()).claims;
+    check('startPlayerSession: the identity is a player, never staff', claims.player === true && !claims.staff, JSON.stringify(claims));
+    const joined = await phone.call('joinRun', { code: sc, displayName: 'Came In Past The Quota' });
+    check('startPlayerSession: that phone joins as its own team (uid == teamId)', joined?.teamId === cred.user.uid, JSON.stringify(joined));
+    const res2 = await makeParty('session-fallback-phone-2').call('startPlayerSession', { code: sc });
+    check('startPlayerSession: every call is a NEW identity (one per phone)', typeof res2?.token === 'string' && res2.token !== res.token);
+    await expectError('startPlayerSession: an unknown code is refused',
+      phone.call('startPlayerSession', { code: 'ZZZZZZ' }), { codeIn: ['functions/not-found'] });
+    await expectError('startPlayerSession: a malformed code is refused',
+      phone.call('startPlayerSession', { code: 42 }), { codeIn: ['functions/invalid-argument'] });
+    await creator.call('finalizeRun', { gameId: sg, runId: sr });
+    await expectError('startPlayerSession: a finished run makes no more identities',
+      makeParty('session-fallback-late').call('startPlayerSession', { code: sc }), { codeIn: ['functions/failed-precondition'] });
+  }); // scenario: startPlayerSession
 
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();

@@ -1846,9 +1846,17 @@ export default function RunConsolePage() {
                       {team.heldForConsent && (
                         <div className="mt-1 text-[13px] text-ink-amber">{rc.heldForConsentBadge}</div>
                       )}
-                      {/* station-wait-clock: every station open to this team is full. */}
+                      {/* station-wait-clock: every station open to this team is full. route-after-waits: or the
+                          one station the organizer sent it to "after this mission" is, and the badge names it. */}
                       {!!team.waitingForStationSince && !team.finished && (
-                        <div className="mt-1 text-[13px] text-ink-amber">{rc.waitingForStationBadge}</div>
+                        <div className="mt-1 text-[13px] text-ink-amber">
+                          {team.queuedRouteTaskId && taskTitles.get(team.queuedRouteTaskId)
+                            ? rc.waitingForRoutedStationBadge({ title: taskTitles.get(team.queuedRouteTaskId) ?? '' })
+                            : rc.waitingForStationBadge}
+                        </div>
+                      )}
+                      {!!team.queuedRouteTaskId && !!taskTitles.get(team.queuedRouteTaskId) && !team.waitingForStationSince && !team.finished && (
+                        <div className="mt-1 text-[13px] text-[--ink-3]" dir="auto">{rc.queuedRouteBadge({ title: taskTitles.get(team.queuedRouteTaskId) ?? '' })}</div>
                       )}
                       {/* One badge, carrying the REASON: "needs attention" with
                           no cause is a puzzle, not a signal. Suppressed when the

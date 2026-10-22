@@ -148,6 +148,9 @@ export {
 // finalizeRun's critical path (perf: run-perf-scale, Task 9). Re-exported
 // explicitly, alongside the callables above, so Firebase discovers it.
 export { onRunFinalized } from './runs/index';
+// change: signup-quota-fallback. PUBLIC: a phone past Firebase's per-IP sign-up quota gets its
+// account from the API (see runs/playerSession.ts).
+export { startPlayerSession } from './runs/playerSession';
 
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────

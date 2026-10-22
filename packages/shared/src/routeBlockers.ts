@@ -105,3 +105,27 @@ export function acceptsAll(blockers: RouteBlockers, accepted: readonly string[] 
   const ok = new Set(Array.isArray(accepted) ? accepted : []);
   return blockers.waivable.every((b) => ok.has(b.kind));
 }
+
+/**
+ * A queued route ("after this mission") meets the team when it becomes free. What the organizer
+ * confirmed was checked against the blockers AT THE CLICK, so the world may have moved since:
+ * - nothing new in the way: route.
+ * - the ONLY new obstacle is a full station: wait for it. A full station is temporary, and dropping
+ *   the queue there handed the team another mission and let it finish the stage without the station
+ *   it was sent to, in silence (found by the 8 team load sim, 22.10). The caller stops the team's
+ *   clock while it waits, as for any full station.
+ * - anything else new (a prerequisite, a closed mission): drop. That is a different decision, and
+ *   the organizer did not make it.
+ * Total: a malformed `waived` counts as nothing confirmed.
+ */
+export type QueuedRouteVerdict = 'route' | 'wait' | 'drop';
+export function queuedRouteVerdict(
+  blockers: { hard: readonly { kind: string }[]; waivable: readonly { kind: string }[] },
+  waived: readonly string[] | null | undefined,
+): QueuedRouteVerdict {
+  if (blockers.hard.length > 0) return 'drop';
+  const ok = new Set(Array.isArray(waived) ? waived : []);
+  const uncovered = blockers.waivable.filter((b) => !ok.has(b.kind)).map((b) => b.kind);
+  if (uncovered.length === 0) return 'route';
+  return uncovered.every((k) => k === 'stationFull') ? 'wait' : 'drop';
+}
