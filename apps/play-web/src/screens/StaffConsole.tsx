@@ -3,8 +3,7 @@ import { normalizeJoinCodeInput } from '../lib/joinCode';
 import { useWideLayout } from '../lib/useWideLayout';
 import { STAFF_PHONE_ORDER, staffDesktopLayout, staffDeskCounts, teamWaitsForStation, type StaffSection } from '../lib/staffLayout';
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db, signInStaff, uid } from '../services/firebase';
+import { auth, db, signInStaff, uid, isPlayerIdentity, onPlayerIdentity } from '../services/firebase';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { useStaffAccess } from '../hooks/useStaffAccess';
 // Live photo feed moderation (live-photo-feed): lazy, loads on first open.
@@ -75,10 +74,11 @@ import { feedback } from '../lib/sound';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { classifyStaffError, announcementPayload, type StaffFailure } from '../lib/failureCopy';
 
-// Issue #16: an anonymous user here means a player joined in another tab of this browser and
-// replaced the staff identity (the console's custom-token user is never anonymous).
+// Issue #16: a player identity here means a player joined in another tab of this browser and
+// replaced the staff identity. A player is anonymous, or (past Firebase's sign-up quota) holds a
+// session the API made with the player claim (change: signup-quota-fallback).
 function staffIdentityHint() {
-  return { signedInAsPlayer: auth.currentUser?.isAnonymous === true };
+  return { signedInAsPlayer: isPlayerIdentity(auth.currentUser) };
 }
 import { missionSpots, type MissionSpot } from '../lib/staffMap';
 import { hasMoreActions, staffTeamActions } from '../lib/staffTeamActions';
@@ -344,7 +344,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // Issue #16: the identity can change AFTER the error arrived (switching a browser to a player signs
   // out first, so the listeners fail while nobody is signed in). Decide the wording when it is shown.
   const [playerHere, setPlayerHere] = useState(false);
-  useEffect(() => onAuthStateChanged(auth, (u) => setPlayerHere(u?.isAnonymous === true)), []);
+  useEffect(() => onPlayerIdentity(setPlayerHere), []);
   // A score adjustment used to land with NO feedback at all: the buttons sat ~4px
   // apart with no confirm and no undo, so a mis-tapped -5 was indistinguishable
   // from nothing happening. Confirm AFTER the callable resolves (never before —

@@ -5,7 +5,7 @@
 // opens after X and Y and they already did X, only 'Y not done' is waived; X is left alone".
 // The old override was one boolean that waived release time, expiry and prerequisites together.
 // routeBlockers is the exact list the organizer sees and confirms, and the server re-checks.
-import { routeBlockers, type RouteBlockerInput } from '../packages/shared/src/routeBlockers';
+import { routeBlockers, queuedRouteVerdict, type RouteBlockerInput } from '../packages/shared/src/routeBlockers';
 
 let failures = 0;
 function eq(label: string, actual: unknown, expected: unknown): void {
@@ -113,6 +113,26 @@ eq('no team stages ⇒ still answers', kinds(routeBlockers(input({ team: {} as n
   (base.game.stages[1].tasks[0] as Record<string, unknown>).releaseAt = '2026-09-28T11:00:00.000Z';
   eq('fixed order: otherStage, notReleased, expired, prerequisites, stationFull',
     kinds(routeBlockers(base).waivable), ['otherStage', 'notReleased', 'stationFull']);
+}
+
+console.log('\n— a queued route ("after this mission") when the team becomes free —');
+// Found by the 8 team load sim (22.10): a station that filled up between the organizer's click and
+// the moment the team became free made the queue drop itself in silence, and the team finished the
+// stage without the station it was sent to. A full station is temporary: the team waits for it.
+{
+  const none = { hard: [], waivable: [] } as const;
+  const full = { hard: [], waivable: [{ kind: 'stationFull', count: 3, cap: 3 }] } as const;
+  const fullAndPrereq = { hard: [], waivable: [{ kind: 'prerequisites', missing: ['y'] }, { kind: 'stationFull', count: 3, cap: 3 }] } as const;
+  const prereq = { hard: [], waivable: [{ kind: 'prerequisites', missing: ['y'] }] } as const;
+  const closed = { hard: [{ kind: 'missionClosed' }], waivable: [{ kind: 'stationFull', count: 3, cap: 3 }] } as const;
+  eq('nothing in the way: route', queuedRouteVerdict(none, []), 'route');
+  eq('in the way, but confirmed by the organizer: route', queuedRouteVerdict(prereq, ['prerequisites']), 'route');
+  eq('a full station the organizer confirmed: route (over the cap, as confirmed)', queuedRouteVerdict(full, ['stationFull']), 'route');
+  eq('a full station nobody confirmed: WAIT, never drop', queuedRouteVerdict(full, []), 'wait');
+  eq('confirmed prerequisites plus a newly full station: wait', queuedRouteVerdict(fullAndPrereq, ['prerequisites']), 'wait');
+  eq('a new prerequisite nobody confirmed: drop (that is a different decision)', queuedRouteVerdict(prereq, []), 'drop');
+  eq('a mission closed meanwhile: drop', queuedRouteVerdict(closed, ['stationFull']), 'drop');
+  eq('malformed waived list: treated as nothing confirmed', queuedRouteVerdict(full, null), 'wait');
 }
 
 console.log('');

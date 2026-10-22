@@ -1711,6 +1711,10 @@ const HE = {
     // Held-team visibility: which team the start held back, not just how many.
     heldForConsentBadge: 'מעוכבים עד לאישור הורה, לא יצאו לדרך',
     waitingForStationBadge: 'מחכים לתחנה פנויה, השעון שלהם עצור',
+    // change: route-after-waits. Sent somewhere "after this mission": while that station is full the team
+    // waits for it (and says for which), otherwise it is simply queued.
+    waitingForRoutedStationBadge: ({ title }: { title: string }) => `מחכים למקום פנוי ב${title}, לשם שלחתם אותם. השעון שלהם עצור`,
+    queuedRouteBadge: ({ title }: { title: string }) => `אחרי המשימה הנוכחית: ${title}`,
     waitingForStationToast: ({ team }: { team: string }) => `${team} מחכים לתחנה פנויה. השעון שלהם נעצר עד שתתפנה תחנה`,
     letBackIn: 'החזרה למשחק',
     letBackInAria: ({ team }: { team: string }) => `החזרת ${team} למשחק`,
@@ -5030,6 +5034,8 @@ const EN: typeof HE = {
     // Held-team visibility: which team the start held back, not just how many.
     heldForConsentBadge: 'Held for guardian approval, not started',
     waitingForStationBadge: 'Waiting for a free station, their clock is stopped',
+    waitingForRoutedStationBadge: ({ title }: { title: string }) => `Waiting for a free place at ${title}, where you sent them. Their clock is stopped`,
+    queuedRouteBadge: ({ title }: { title: string }) => `After the current mission: ${title}`,
     waitingForStationToast: ({ team }: { team: string }) => `${team} is waiting for a free station. Their clock is stopped until one frees up`,
     letBackIn: 'Let back in',
     letBackInAria: ({ team }: { team: string }) => `Let ${team} back into the game`,

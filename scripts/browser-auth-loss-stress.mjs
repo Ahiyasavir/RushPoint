@@ -49,6 +49,14 @@ function audit(label, cond, detail) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let seed = Number(process.env.STRESS_SEED) || 20261021;
+// STRESS_SLOW_MS=N: weak reception. Every request the page makes waits a random 0..N ms first
+// (page.route works in WebKit too, where CDP throttling does not exist). Waits scale with it.
+const SLOW_MS = Math.max(0, Number(process.env.STRESS_SLOW_MS) || 0);
+const W = SLOW_MS ? 3 : 1;
+// STRESS_QUOTA=1: Firebase's sign-up quota is spent (100 accounts an hour per IP; a venue WiFi is one IP).
+// Every anonymous sign-up the page sends is answered the way Firebase answers it at the limit, so the
+// phone must get in through startPlayerSession (change: signup-quota-fallback).
+const QUOTA = process.env.STRESS_QUOTA === '1';
 const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
 async function waitUntil(fn, { timeout = 30_000, interval = 300, label = 'condition' } = {}) {
   const start = Date.now();
@@ -124,10 +132,13 @@ async function wipeStoredSignIn(page) {
 }
 
 async function round(i, ctx, launchers) {
-  const [browserName, launcher, profile] = launchers[i % launchers.length];
+  // STRESS_ONLY_ENGINE=webkit|chromium and STRESS_ONLY_MODE=<mode> narrow a run to one combination.
+  const onlyEngine = process.env.STRESS_ONLY_ENGINE;
+  const pool = onlyEngine ? launchers.filter((l) => l[0].startsWith(onlyEngine)) : launchers;
+  const [browserName, launcher, profile] = pool[i % pool.length];
   const onlyPath = process.env.STRESS_ONLY_PATH;
   const path = onlyPath || (Math.floor(i / launchers.length) % 2 === 0 ? 'attach' : 'found');
-  const mode = MODES[Math.floor(i / (launchers.length * 2)) % MODES.length];
+  const mode = process.env.STRESS_ONLY_MODE || MODES[Math.floor(i / (launchers.length * 2)) % MODES.length];
   const key = `${browserName}|${path}|${mode}`;
   tally[key] ??= { ok: 0, bad: 0 };
   const tag = `[#${i + 1} ${browserName} ${path} ${mode}]`;
@@ -146,6 +157,9 @@ async function round(i, ctx, launchers) {
   const browser = await launcher.launch({ headless: true });
   const context = await browser.newContext({ ...profile, locale: 'he-IL' });
   const page = await context.newPage();
+  if (SLOW_MS) await page.route('**/*', async (r) => { await new Promise((res) => setTimeout(res, Math.random() * SLOW_MS)); await r.continue().catch(() => undefined); });
+  let refusedSignUps = 0;
+  if (QUOTA) await page.route(/accounts:signUp/, (r) => { refusedSignUps++; return r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { code: 400, message: 'TOO_MANY_ATTEMPTS_TRY_LATER', errors: [] } }) }); });
   const calls = [];
   let prodHit = null;
   page.on('request', (req) => {
@@ -154,12 +168,21 @@ async function round(i, ctx, launchers) {
     if (req.method() !== 'POST' || !m) return;
     calls.push({ name: m[1], uid: uidFromAuthHeader(req.headers()['authorization']), at: Date.now() });
   });
+  // What the page did, printed only when a round fails, so a failure explains itself.
+  const trail = [];
+  const at0 = Date.now();
+  const note = (s) => trail.push(`+${((Date.now() - at0) / 1000).toFixed(1)}s ${s}`);
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) note(`nav ${f.url().slice(0, 90)}`); });
+  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') note(`${m.type()}: ${m.text().slice(0, 180)}`); });
+  page.on('pageerror', (e) => note(`PAGEERROR ${String(e.message).slice(0, 220)}`));
+  page.on('requestfailed', (r) => note(`REQFAIL ${r.url().slice(0, 110)} ${r.failure()?.errorText ?? ''}`));
+  page.on('request', (r) => { if (/\.js(\?|$)/.test(r.url()) || /us-central1|api\.rush-point/.test(r.url())) note(`req ${r.url().split('/').pop().slice(0, 60)}`); });
   let stormTimer = null;
   let ok = true;
   try {
     const url = path === 'attach' ? `${PLAY_URL}/?code=${ctx.accessCode}&join=${team.deviceJoinCode}` : `${PLAY_URL}/?code=${ctx.accessCode}`;
     await page.goto(url);
-    await waitUntil(() => calls.some((c) => c.name === 'getJoinInfo' && c.uid), { timeout: 40_000, label: 'code check' });
+    await waitUntil(() => calls.some((c) => c.name === 'getJoinInfo' && c.uid), { timeout: 40_000 * W, label: 'code check' });
     if (mode === 'storm') stormTimer = setInterval(() => { void wipeStoredSignIn(page); }, 300);
 
     let cta;
@@ -171,13 +194,13 @@ async function round(i, ctx, launchers) {
       // between "is it there" and the press. Press it only if it is still there, briefly.
       const cont = page.getByRole('button', { name: 'המשך' });
       if (await cont.isVisible().catch(() => false)) await cont.click({ timeout: 3000 }).catch(() => undefined);
-      await page.getByTestId('join-team-name').fill(teamName, { timeout: 40_000 });
+      await page.getByTestId('join-team-name').fill(teamName, { timeout: 40_000 * W });
       // A team game asks for the members; the first member row may need "add member" to appear.
       if ((await page.getByTestId('join-member').count()) === 0) await page.getByRole('button', { name: /הוספת חבר/ }).click();
       await page.getByTestId('join-member').first().fill('Kid');
       cta = page.getByRole('button', { name: JOIN_CTA_HE });
     }
-    await cta.waitFor({ state: 'visible', timeout: 40_000 });
+    await cta.waitFor({ state: 'visible', timeout: 40_000 * W });
 
     if (mode === 'beforeTap' || mode === 'twice') {
       await wipeStoredSignIn(page);
@@ -189,10 +212,17 @@ async function round(i, ctx, launchers) {
       await wipeStoredSignIn(page);
     }
     const outcome = await Promise.race([
-      page.getByText(IN_RE).first().waitFor({ state: 'visible', timeout: 35_000 }).then(() => 'in').catch(() => null),
-      page.getByText(ERR_RE).first().waitFor({ state: 'visible', timeout: 35_000 }).then(() => 'error').catch(() => null),
+      page.getByText(IN_RE).first().waitFor({ state: 'visible', timeout: 35_000 * W }).then(() => 'in').catch(() => null),
+      page.getByText(ERR_RE).first().waitFor({ state: 'visible', timeout: 35_000 * W }).then(() => 'error').catch(() => null),
     ]) || 'timeout';
     if (stormTimer) { clearInterval(stormTimer); stormTimer = null; }
+    if (outcome !== 'in') {
+      const html = (await page.content().catch((e) => `content() failed: ${e.message}`)).replace(/\s+/g, ' ').slice(0, 600);
+      await page.screenshot({ path: `${process.env.TEMP || '.'}/stressfail-${i + 1}.png` }).catch(() => undefined);
+      console.log(`  TRAIL ${tag}:`);
+      for (const line of trail) console.log(`    ${line}`);
+      console.log(`  DOM: ${html}`);
+    }
     const shown = outcome === 'in' ? '' : (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
 
     const joinName = path === 'attach' ? 'joinTeamAsDevice' : 'joinRun';
@@ -214,6 +244,12 @@ async function round(i, ctx, launchers) {
       if (outcome === 'in') ok = audit(`${tag} the team is the page's identity`, mine.length === 1 && mine[0].id === joinedUid, `${mine[0]?.id} vs ${joinedUid}`) && ok;
     }
     ok = audit(`${tag} no request went to production`, !prodHit, prodHit ?? '') && ok;
+    if (QUOTA) {
+      // A pass must not come from the refusal never firing: the page really was refused, and really
+      // came in through the API's session.
+      ok = audit(`${tag} Firebase refused this phone's sign-up (the quota)`, refusedSignUps > 0, `${refusedSignUps} refused`) && ok;
+      ok = audit(`${tag} the phone came in through startPlayerSession`, calls.some((c) => c.name === 'startPlayerSession'), calls.map((c) => c.name).join(',')) && ok;
+    }
   } catch (e) {
     const screen = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
     const why = String(e.message).split(/\r?\n/).filter((l) => /intercepts|not visible|not stable|outside|waiting for|resolved to|retrying/.test(l)).slice(-5).join(' | ');

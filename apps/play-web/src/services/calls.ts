@@ -1,4 +1,10 @@
-import { callable } from './firebase';
+import { callable, rememberJoinCode } from './firebase';
+
+// change: signup-quota-fallback. The join calls record the code they carry, so a phone past Firebase's
+// sign-up quota can ask the API for a session for THAT game even when the code was typed by hand.
+function withJoinCode<Req extends { code: string }, Res>(fn: (data?: Req) => Promise<Res>): (data?: Req) => Promise<Res> {
+  return (data?: Req) => { rememberJoinCode(data?.code); return fn(data); };
+}
 import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay, RehearsalReveal, DevicePresence, MissionPin, RouteBlockers, WaivableKind } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
@@ -38,7 +44,7 @@ export interface JoinInfo {
   // The team's display name, or null when the code matches no team. Nothing else about it.
   deviceTeam?: { displayName: string } | null;
 }
-export const getJoinInfo = callable<{ code: string; deviceCode?: string }, JoinInfo>('getJoinInfo');
+export const getJoinInfo = withJoinCode(callable<{ code: string; deviceCode?: string }, JoinInfo>('getJoinInfo'));
 
 // Challenge-a-friend teaser: server-checked, non-scoring answer. Returns only
 // whether the answer is correct — the key never reaches the client.
@@ -76,10 +82,10 @@ export const getRunRecap = callable<{ code: string }, RunRecapResult>('getRunRec
 export interface JoinResult {
   teamId: string; runId: string; gameId: string; ownerUid: string; alreadyJoined: boolean;
 }
-export const joinRun = callable<
+export const joinRun = withJoinCode(callable<
   { code: string; displayName: string; registrationData?: Record<string, unknown>; memberNames?: string[] },
   JoinResult
->('joinRun');
+>('joinRun'));
 
 // Sanitized task shape returned to participants — every answer key is stripped
 // server-side (secretCode, hint text, quiz answers, numeric target, step answers).
@@ -368,12 +374,12 @@ export const sendTeamChatMessage = callable<
 // ── Shared team devices (change: shared-team-devices) ──
 // Attach this phone to an existing team via the run access code + the team's
 // device join code (shown on the phones already attached).
-export const joinTeamAsDevice = callable<
+export const joinTeamAsDevice = withJoinCode(callable<
   // replacesUid (change: rejoin-replaces-lost-phone): the identity this phone held before it lost its
   // sign-in. The server swaps it for the new one instead of adding a phone.
   { code: string; teamCode: string; memberName?: string; replacesUid?: string },
   { ownerUid: string; gameId: string; runId: string; teamId: string; role: 'controller' | 'viewer' | null; alreadyAttached: boolean; replaced?: boolean }
->('joinTeamAsDevice');
+>('joinTeamAsDevice'));
 
 // ── Everyone does their part (change: every-member-plays) ──
 // The ONLY mutation a non-controller device may make. It records that THIS phone did

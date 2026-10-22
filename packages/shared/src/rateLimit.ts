@@ -179,6 +179,11 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   getRecommendedTasks: { max: 60, windowMs: MIN },
   getRunDiscoveryPois: { max: 60, windowMs: MIN }, // poll; reads a whole subcollection
   getJoinInfo: { max: 30, windowMs: MIN },
+  // change: signup-quota-fallback. The phone's way in once Firebase stops making accounts (100 an hour
+  // per IP; a venue WiFi is one IP). Per CONNECTION: well above a 100 team event on one address, with
+  // reopens. Per RUN: bounds what a leaked code can mint.
+  startPlayerSession: { max: 1500, windowMs: 60 * MIN },
+  startPlayerSessionRun: { max: 3000, windowMs: 60 * MIN },
   updateLocation: { max: 120, windowMs: MIN }, // a live ping every few seconds is fine
 
   // Public, unauthenticated-audience reads. These are the only callables an

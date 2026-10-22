@@ -20,6 +20,7 @@ import {
 } from 'firebase/auth';
 import { authLossVerdict, afterFailedReinstate } from '../lib/authRecovery';
 import { loadSession } from '../store';
+import { shouldUseServerSession, joinCodeFromSearch } from '../lib/signUpFallback';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import {
   getStorage,
@@ -301,7 +302,7 @@ async function confirmSignedIn(): Promise<void> {
     return;
   }
   if (afterFailedReinstate({ hasSession: loadSession() !== null }) === 'freshSignIn') {
-    await signInAnonymously(auth);
+    await signInFreshPlayer();
     queueAuthLossReport('freshSignIn');
     setRecoveryState('ok');
     return;
@@ -339,13 +340,71 @@ export async function startFreshIdentity(): Promise<void> {
   setRecoveryState('ok');
 }
 
+// ── Past Firebase's sign-up quota (change: signup-quota-fallback) ─────────────────────────────────
+// Firebase creates at most 100 accounts an hour from one IP address; on a venue WiFi every phone shares
+// one. Refused with auth/too-many-requests, the phone asks the API to create the account instead
+// (startPlayerSession vouches for it with the game's join code) and signs in with the token it returns.
+// Anonymous sign-in stays first: it is the path proven in the field. The decision is pure in
+// lib/signUpFallback.ts (scripts/test-signup-fallback.ts).
+let rememberedJoinCode: string | null = null;
+/** The join wrappers record the code they use, so a code typed by hand counts as a hint too. */
+export function rememberJoinCode(code: unknown): void {
+  if (typeof code === 'string' && code.trim()) rememberedJoinCode = code.trim().toUpperCase();
+}
+function knownJoinCode(): string | null {
+  const fromUrl = typeof window !== 'undefined' ? joinCodeFromSearch(window.location.search) : null;
+  return fromUrl ?? rememberedJoinCode ?? loadSession()?.code ?? null;
+}
+async function signInFreshPlayer(): Promise<void> {
+  try {
+    await signInAnonymously(auth);
+  } catch (e) {
+    const code = knownJoinCode();
+    if (!shouldUseServerSession(e, code)) throw e;
+    // Unauthenticated by design, so this bypasses callable()'s ensureAuth (which is what is failing).
+    const res = await withTimeout(
+      httpsCallable<{ code: string }, { token: string }>(functions, 'startPlayerSession')({ code: code as string }),
+      CALLABLE_TIMEOUT_MS,
+      'functions/deadline-exceeded',
+    );
+    await signInWithCustomToken(auth, res.data.token);
+  }
+}
+
+/** A player identity: anonymous, or a session the API made (claim player). Never a staff identity. */
+let playerClaim = false;
+const playerListeners = new Set<(isPlayer: boolean) => void>();
+function announcePlayer() {
+  const v = isPlayerIdentity(auth.currentUser);
+  for (const cb of Array.from(playerListeners)) { try { cb(v); } catch { /* a listener must not break sign-in */ } }
+}
+onAuthStateChanged(auth, (u) => {
+  playerClaim = false;
+  announcePlayer();
+  if (u && !u.isAnonymous) {
+    void u.getIdTokenResult()
+      .then((r) => { if (auth.currentUser === u) { playerClaim = r.claims.player === true; announcePlayer(); } })
+      .catch(() => undefined);
+  }
+});
+export function isPlayerIdentity(u: User | null | undefined): boolean {
+  if (!u) return false;
+  return u.isAnonymous || (u === auth.currentUser && playerClaim);
+}
+/** Calls back now and on every change of whether a PLAYER (not staff) is signed in on this page. */
+export function onPlayerIdentity(cb: (isPlayer: boolean) => void): () => void {
+  playerListeners.add(cb);
+  cb(isPlayerIdentity(auth.currentUser));
+  return () => { playerListeners.delete(cb); };
+}
+
 export function ensureAuth(): Promise<void> {
   if (!authReady) {
     authReady = new Promise<void>((resolve, reject) => {
       const unsub = onAuthStateChanged(auth, (user) => {
         unsub();
         if (user) { resolve(); return; }
-        signInAnonymously(auth).then(() => resolve(), reject);
+        signInFreshPlayer().then(() => resolve(), reject);
       });
     }).catch((e) => {
       // A transient failure (network blip on the first anonymous sign-in) must

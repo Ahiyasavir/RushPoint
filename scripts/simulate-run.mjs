@@ -299,7 +299,7 @@ async function main() {
   if (routedTeams.length > 0) {
     const missed = routedTeams.map((p) => states[teams.indexOf(p)])
       .filter((st) => !(st?.team?.stages ?? []).flatMap((s) => s.tasks ?? []).some((t) => t.taskId === ROUTE_TO && t.status === 'completed'))
-      .map((st) => st?.team?.displayName);
+      .map((st) => { const r = (st?.team?.stages ?? []).flatMap((s) => s.tasks ?? []).find((t) => t.taskId === ROUTE_TO); return `${st?.team?.displayName} (${ROUTE_TO}: ${r?.status ?? 'none'}${r?.skipCause ? '/' + r.skipCause : ''}, queued: ${st?.team?.queuedRoute?.taskId ?? 'none'})`; });
     audit(`routed teams ("after this mission") all did ${ROUTE_TO}`, missed.length === 0, missed.join(',') || `${routedTeams.length} teams`);
   }
 
