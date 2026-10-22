@@ -90,9 +90,13 @@ console.log('a bank that is mostly one family still composes, using just one mem
     key: `clone-${i}`,
     family: 'clone-family',
   }));
-  // One real bookend pair kept so the game can still open and close.
-  const opener = TASK_BANK.find((e) => e.tags.includes('start'))!;
-  const finale = TASK_BANK.find((e) => e.tags.includes('finish'))!;
+  // One real bookend pair kept so the game can still open and close. Both must be
+  // playable from anywhere, because that is the setting composed below: this used
+  // to take "the first finale in the bank", which only worked while that happened
+  // to be a placeless one (youth-israeli-pride, removed 2026-10-21).
+  const placeless = (e: TaskBankEntry) => e.tags.includes('fromAnywhere');
+  const opener = TASK_BANK.find((e) => e.tags.includes('start') && placeless(e))!;
+  const finale = TASK_BANK.find((e) => e.tags.includes('finish') && placeless(e))!;
   const bank = [...clones, opener, finale];
 
   const r = composeGame(bank, {

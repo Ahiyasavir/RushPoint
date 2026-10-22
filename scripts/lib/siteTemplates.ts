@@ -228,9 +228,13 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     // One 45 minute period, with the six minutes every lesson loses at the start.
     sessionMinutes: [40, 55],
     stages: [
-      { title: 'מתחילים', keys: ['open-team-pact'] },
-      { title: 'לדבר בלי לדבר', keys: ['silent-briefing', 'blind-describe'] },
-      { title: 'חשיבה', keys: ['disarm-the-device', 'vault-combination-riddle', 'invention-order'] },
+      // open-team-pact and silent-briefing were deleted by the founder on the admin page
+      // (2026-10-22); replaced with a no-prep indoor opener and a silent mission.
+      { title: 'מתחילים', keys: ['official-photo'] },
+      { title: 'לדבר בלי לדבר', keys: ['blind-describe', 'forty-seconds'] },
+      // The riddles that stood here left the bank (2026-10-21/22: googleable, or
+      // nobody solves them). These need thought on the spot, indoors and with no prep.
+      { title: 'חשיבה', keys: ['sign-cipher', 'anagram-medium', 'oldest-thing-here'] },
       { title: 'השעון נעצר', keys: ['thinking-room'] },
       { title: 'סיכום', keys: ['finish-what-we-didnt-know'] },
     ],
@@ -265,9 +269,9 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     sessionMinutes: [40, 65],
     stages: [
       { title: 'מתחממים', keys: ['height-line-up', 'one-colour-five-things'] },
-      { title: 'הבית נראה אחרת', keys: ['family-photo-remake', 'forced-perspective'] },
+      { title: 'הבית נראה אחרת', keys: ['family-photo-remake', 'blanket-fort'] },
       { title: 'ביחד', keys: ['blind-describe', 'living-room-obstacle'] },
-      { title: 'סיום', keys: ['finish-the-credits'] },
+      { title: 'סיום', keys: ['finish-all-or-nothing'] },
     ],
   },
 
@@ -301,7 +305,7 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     // Real work, so the ceiling is higher and stage two is a fine place to stop.
     sessionMinutes: [45, 75],
     stages: [
-      { title: 'מתחילים', keys: ['open-team-pact', 'chore-sock-pairs'] },
+      { title: 'מתחילים', keys: ['open-everyone-airborne', 'chore-sock-pairs'] },
       { title: 'סבב הבית', keys: ['chore-ten-things', 'chore-bin-round'] },
       { title: 'צריך להחליט', keys: ['chore-fridge-audit'] },
       { title: 'הגדולה', keys: ['chore-the-drawer'] },
@@ -342,9 +346,11 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     // Ninety minutes is the researched sweet spot for a team hunt.
     sessionMinutes: [75, 110],
     stages: [
-      { title: 'מתחילים', keys: ['open-team-pact'] },
-      { title: 'לתאם', keys: ['silent-briefing', 'team-decision-drill'] },
-      { title: 'התפנית', keys: ['thinking-room', 'puzzle-code'] },
+      // open-team-pact and silent-briefing were deleted by the founder (2026-10-22);
+      // who-goes-alone keeps a decision taken without information in the same slot.
+      { title: 'מתחילים', keys: ['official-photo'] },
+      { title: 'לתאם', keys: ['who-goes-alone', 'record-board'] },
+      { title: 'התפנית', keys: ['thinking-room', 'four-places'] },
       { title: 'בשטח', keys: ['corporate-landmark-navigate', 'blind-describe', 'teach-a-stranger'] },
       // The climax and then the debrief, in that order. Experiential-learning
       // research is blunt about this: learning happens in the REFLECTION on the
@@ -383,8 +389,8 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     // Games fill 30-50% of a two hour party.
     sessionMinutes: [35, 60],
     stages: [
-      { title: 'חימום', keys: ['height-line-up', 'count-the-candles', 'backwards-name'] },
-      { title: 'האירוע המרכזי', keys: ['mystery-gift', 'everyone-hidden', 'statue-remake', 'celebrants-favorites-ranking'] },
+      { title: 'חימום', keys: ['height-line-up', 'backwards-name', 'cap-toss'] },
+      { title: 'האירוע המרכזי', keys: ['mystery-gift', 'everyone-hidden', 'waiters-race', 'celebrants-favorites-ranking'] },
       { title: 'סיום', keys: ['birthday-wish'] },
     ],
   },
@@ -418,11 +424,11 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
       { title: 'מתחילים', keys: ['height-line-up'] },
       {
         title: 'בוחרים שלוש',
-        keys: ['family-photo-remake', 'two-truths-one-lie', 'forced-perspective',
+        keys: ['family-photo-remake', 'historic-speech', 'twelve-thumbs',
           'one-colour-five-things', 'blind-describe'],
         requiredCount: 3,
       },
-      { title: 'סיום', keys: ['finish-what-we-didnt-know'] },
+      { title: 'סיום', keys: ['birthday-wish'] },
     ],
   },
 
@@ -455,8 +461,8 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     sessionMinutes: [30, 60],
     stages: [
       { title: 'מתחילים', keys: ['height-line-up'] },
-      { title: 'מסתובבים', keys: ['two-truths-one-lie', 'teach-a-stranger', 'honest-compliment'] },
-      { title: 'תמונה אחת אחרונה', keys: ['forced-perspective', 'finish-the-credits'] },
+      { title: 'מסתובבים', keys: ['teach-a-stranger', 'honest-compliment', 'twelve-thumbs'] },
+      { title: 'תמונה אחת אחרונה', keys: ['family-photo-remake', 'couple-wish'] },
     ],
   },
 
@@ -491,7 +497,7 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     sessionMinutes: [45, 80],
     stages: [
       { title: 'פתיחה', keys: ['open-one-take-intro'] },
-      { title: 'גוף הפעולה', keys: ['silent-briefing', 'human-letter', 'blind-describe', 'drift-three-turns'] },
+      { title: 'גוף הפעולה', keys: ['longest-line', 'human-letter', 'blind-describe', 'historic-speech'] },
       { title: 'השיא', keys: ['thinking-room'] },
       { title: 'סיכום', keys: ['finish-what-we-didnt-know'] },
     ],

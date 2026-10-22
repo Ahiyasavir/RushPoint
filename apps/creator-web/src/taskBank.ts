@@ -113,9 +113,10 @@
 //   6. If there is a target or a spotlight, WHOSE is it? A number on one named
 //      person in public is a threat, not a goal.                     → rule 69
 //
-//   7. Does a stranger appear in it? Then the text asks their permission and
-//      says what the picture is for — and does not script their refusal.
-//                                                                → rules 71, 49
+//   7. Does a stranger appear in it? Then the text does not script their
+//      refusal. (Asking before photographing a stranger is NOT written into the
+//      mission text: the founder ruled on 2026-10-22 that it is self-evident, and
+//      the rule 71 gate that demanded it was removed.)                → rule 49
 //
 //   8. Read it back OUT LOUD. Delete the sentence that handles failure, the one
 //      that sets a size nothing enforces, and the one that grants permission —
@@ -127,9 +128,8 @@
 //      away. "A photo of themselves standing still" is not an ending.
 //                                                                    → rule 55
 //
-// DELIBERATELY ABSENT: the tag laws (rules 41-42), the unpayable-bonus check
-// (rule 60's second half) and the public-photography ask (rule 71's) are all
-// enforced by scripts/test-task-bank-tag-laws.ts. A machine already runs them on
+// DELIBERATELY ABSENT: the tag laws (rules 41-42) and the unpayable-bonus check
+// (rule 60's second half) are enforced by scripts/test-task-bank-tag-laws.ts. A machine already runs them on
 // every commit, so spending a human's attention there would buy nothing and cost
 // two of the nine slots.
 //
@@ -2711,7 +2711,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-start-point',
     sourceTemplateKey: 'youth-missions',
-    tags: ['start', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'easy', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school'],
+    tags: ['start', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'easy', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school', 'calm'],
     difficulty: 2,
     // The gathering point. Everyone walks to it before the clock matters, so it
     // is the one sited mission that costs no transit.
@@ -2729,12 +2729,10 @@ export const TASK_BANK: TaskBankEntry[] = [
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
-
-  // ══ משחק לנוער — משימות גיבוש קבוצה ═══════════════════════════════════════
   {
     key: 'youth-winning-rap',
     sourceTemplateKey: 'youth-missions',
-    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium'],
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium', 'performance', 'music', 'humor', 'againstClock'],
     difficulty: 5,
     build: () => anywhere({
       title: 'ראפ מנצח',
@@ -2752,7 +2750,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // owner's curation pass. Rule 82 — shown the pair he removed the weaker one
     // rather than relying on the family to keep them apart, and the survivor is
     // the harvested half (rule 80).
-    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium'],
+    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'performance', 'humor'],
     difficulty: 5,
     build: () => anywhere({
       title: 'המילוט הגדול',
@@ -2776,7 +2774,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // from a game that really ran with teenagers (rule 80), so the honest fix is
     // the second — NARROW the audience and keep it. `mixed` is a claim that a
     // corporate offsite would climb on each other in public, and it is false.
-    tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium', 'park', 'beach', 'forest', 'school'],
+    tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium', 'park', 'beach', 'forest', 'school', 'physical', 'building'],
     difficulty: 5,
     build: () => anywhere({
       title: 'פירמידה אנושית',
@@ -2785,6 +2783,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload(),
     }),
   },
+
+  // ══ משחק לנוער — משימות גיבוש קבוצה ═══════════════════════════════════════
 
   // ══ משחק לנוער — משימות תחרות ═════════════════════════════════════════════
   {
@@ -2796,14 +2796,14 @@ export const TASK_BANK: TaskBankEntry[] = [
     // act (deduce where the CAMERA stood, not where the subject is). Two
     // different mechanics must not be mutually exclusive: pairing them adds
     // variety rather than repeating it (rule 12).
-    tags: ['thinking', 'action', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach'],
+    tags: ['thinking', 'action', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach', 'navigation', 'puzzle'],
     difficulty: 5,
     // A real leg of the route: the whole mission is getting there.
     transitMinutes: 8,
     setup: [PLACE_IT, ATTACH_PHOTO],
     build: () => sited({
       title: 'תמצאו את המקום הראשון',
-      description: 'תסתכלו טוב על התמונה שמצורפת למשימה, ותלכו למקום שרואים בה.',
+      description: 'תלכו למקום שבתמונה.',
       type: 'geofence',
       estimatedMinutes: 8,
       // A public spot, not a shared object — any number of teams can arrive.
@@ -2815,7 +2815,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'youth-missions',
     // The creator writes the emoji line themselves — the mission has no content
     // at all until they do, which is `needsSetup`, not `noPrep` (rule 30).
-    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'hard', 'neighborhood', 'cityCenter', 'park'],
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'hard', 'neighborhood', 'cityCenter', 'park', 'navigation', 'puzzle'],
     difficulty: 8,
     transitMinutes: 8,
     setup: [
@@ -2828,7 +2828,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'חידת אימוג׳ים',
-      description: 'תפענחו את שורת האימוג׳ים ותלכו למקום שהיא מתארת: [הוראות ליוצר: תכתבו כאן את שורת האימוג׳ים, אימוג׳י אחד לכל מילה].',
+      description: 'תלכו למקום שהאימוג׳ים האלה מתארים: [הוראות ליוצר: תכתבו כאן את שורת האימוג׳ים, אימוג׳י אחד לכל מילה].',
       type: 'geofence',
       difficulty: 8,
       estimatedMinutes: 5,
@@ -2840,9 +2840,10 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'youth-breaking-news',
+    family: 'genre-parody',
     spot: 'bench',
     sourceTemplateKey: 'youth-missions',
-    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'park'],
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'park', 'performance', 'humor'],
     difficulty: 5,
     build: () => anywhere({
       title: 'כתבת חדשות דחופה',
@@ -2864,10 +2865,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     // geofence verification, a genuinely different act (rule 12), and it is
     // harder than the original — hence difficulty 7 and `hard`.
     key: 'photo-vantage-point',
+    family: 'photo-spot',
     sourceTemplateKey: 'youth-missions',
-    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor',
-      'youth', 'adults', 'corporate', 'mixed', 'hard',
-      'neighborhood', 'cityCenter', 'park', 'forest', 'beach', 'historic'],
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'adults', 'corporate', 'mixed', 'hard', 'neighborhood', 'cityCenter', 'park', 'forest', 'beach', 'historic', 'navigation', 'observation', 'puzzle'],
     difficulty: 7,
     transitMinutes: 8,
     setup: [
@@ -2884,7 +2884,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'מאיפה צולמה התמונה',
-      description: 'התמונה שמצורפת לא מראה לאן ללכת. היא צולמה מהנקודה שאתם צריכים להגיע אליה. תסתכלו מה רואים בה, מה קרוב ומה רחוק, ותבינו איפה עמד מי שצילם. תלכו לשם.',
+      description: 'תגיעו לנקודה המדויקת שממנה צולמה התמונה.',
       type: 'geofence',
       difficulty: 7,
       estimatedMinutes: 7,
@@ -2898,7 +2898,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'youth-absurd-petition',
     sourceTemplateKey: 'youth-missions',
-    tags: ['action', 'camera', 'teamwork', 'creative', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'medium', 'cityCenter', 'mall', 'neighborhood', 'beach'],
+    tags: ['action', 'camera', 'teamwork', 'creative', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'medium', 'cityCenter', 'mall', 'neighborhood', 'beach', 'strangers', 'humor', 'dare', 'crowded'],
     difficulty: 5,
     // Needs a crowd, so the team walks to where people actually are.
     transitMinutes: 5,
@@ -2914,15 +2914,13 @@ export const TASK_BANK: TaskBankEntry[] = [
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
-
-  // ══ משחק לנוער — סיום ═════════════════════════════════════════════════════
   {
     key: 'youth-israeli-pride',
     sourceTemplateKey: 'youth-missions',
     // The placeless finale, for the same reason the pyramid is the placeless
     // opener. Building something together and photographing it is a real closing
     // beat, and it is the last mission of the source template's own final stage.
-    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school'],
+    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school', 'building', 'hunt'],
     difficulty: 5,
     build: () => anywhere({
       title: 'גאווה ישראלית',
@@ -2932,10 +2930,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload(),
     }),
   },
+
+  // ══ משחק לנוער — סיום ═════════════════════════════════════════════════════
   {
     key: 'youth-finish-point',
     sourceTemplateKey: 'youth-missions',
-    tags: ['finish', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school'],
+    tags: ['finish', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'forest', 'beach', 'school', 'calm'],
     difficulty: 5,
     // The last leg home, and usually the longest single walk of the game.
     transitMinutes: 10,
@@ -2959,7 +2959,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'challenge-missions',
     // needsSetup, and it is the real thing: somebody has to hand each team a box
     // with a bottle of shampoo in it before the game starts.
-    tags: ['action', 'camera', 'creative', 'teamwork', 'needsSetup', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'mall', 'neighborhood', 'beach'],
+    tags: ['action', 'camera', 'creative', 'teamwork', 'needsSetup', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'mall', 'neighborhood', 'beach', 'strangers', 'dare', 'performance', 'crowded'],
     difficulty: 5,
     setup: [{
       field: 'description',
@@ -2968,7 +2968,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'שיווק שמפו',
-      description: 'בקופסה שקיבלתם יש שמפו. תמכרו אותו לאדם זר בלפחות 10 שקלים, תספרו לו שזה חלק ממשחק, ותבקשו רשות להצטלם איתו.',
+      description: 'תמכרו את השמפו שבקופסה לאדם זר בלפחות 10 שקלים, ותצטלמו איתו.',
       type: 'photo',
       // Re-priced 2 → 9 (rule 75). Harvested at 2 from the source template and
       // never checked: this is find a willing stranger, pitch, agree a price,
@@ -2994,7 +2994,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Same mission as `statue-remake` in different clothes: recreate a famous
     // image with your bodies. One game, one of them.
     family: 'recreate-famous-image',
-    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood'],
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'performance'],
     difficulty: 5,
     // The source game attached the reference shot. Bank missions carry no media
     // (see the header), and the instruction names the photo well enough to stand
@@ -3041,75 +3041,15 @@ export const TASK_BANK: TaskBankEntry[] = [
 
   // ── Openers, playable anywhere ────────────────────────────────────────────
   {
-    // "Battle cry" reads as camp/youth-group, not something a work team or a
-    // group of adults would do without visible discomfort — it was tagged for
-    // both anyway, which is a content mismatch, not a filtering one: the
-    // composer would have picked this AS the honest best fit for an adult
-    // opener, not despite one. Narrowed to the audience it actually suits.
-    key: 'open-team-name',
-    siting: 'never',
-    sourceTemplateKey: 'authored',
-    tags: ['start', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'easy'],
-    difficulty: 2,
-    build: () => anywhere({
-      title: 'השם של הקבוצה',
-      // Rule 33: the old version was "choose a name and a battle cry", which one
-      // loud member supplies while everyone else shouts along. Now every member
-      // contributes a word and the NAME contains all of them, so a member who
-      // did not take part is visible in the result rather than merely quiet in
-      // it. The old closing nudge ("the less embarrassed you are, the better it
-      // comes out") was also dropped: it pressures exactly the people the
-      // team-building research says already opt out.
-      //
-      // 2026-09-06: the battle cry went too, title included. Rule 1 names
-      // "שם וקריאת קרב" in its own list of rejected summer-camp reflexes, and
-      // this entry was still carrying it as a SECOND invented artefact bolted
-      // onto a mission that already worked — rule 81's additive-constraint
-      // failure exactly. Shouting the name they just built keeps the energy and
-      // removes the manufactured thing to be embarrassed about.
-      description: 'כל אחד מכם אומר מילה אחת, ומהמילים האלה אתם מרכיבים שם לקבוצה. כשהשם מוכן, תצעקו אותו יחד מול המצלמה.',
-      type: 'photo',
-      difficulty: 2,
-      estimatedMinutes: 3,
-      pointValue: 60,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 20 }),
-    }),
-  },
-  {
-    // The adults/corporate placeless opener open-team-name can no longer cover.
-    key: 'open-team-motto',
-    siting: 'never',
-    sourceTemplateKey: 'authored',
-    tags: [
-      'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'adults', 'corporate',
-      'easy', 'youth', 'office', 'mall', 'cityCenter', 'neighborhood', 'park', 'beach', 'forest',
-      'indoor', 'outdoor', 'educational', 'finish'],
-    difficulty: 2,
-    build: () => anywhere({
-      title: 'המוטו של הצוות',
-      // Rule 33, same fix as `open-team-name`: "agree on one sentence" is
-      // something one person writes and the rest nod at. Sourcing the sentence
-      // from a word per member makes the agreement real work.
-      description: 'כל אחד מכם אומר מילה אחת שמתארת את הצוות היום. עכשיו תרכיבו מהמילים משפט אחד שכולכם עומדים מאחוריו, ותגידו אותו יחד מול המצלמה.',
-      type: 'photo',
-      difficulty: 2,
-      estimatedMinutes: 3,
-      pointValue: 60,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 20 }),
-    }),
-  },
-  {
     key: 'open-everyone-airborne',
+    family: 'all-airborne',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-    tags: [
-      'start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids',
-      'youth', 'medium', 'indoor', 'outdoor', 'forest', 'beach', 'park', 'neighborhood',
-      'cityCenter', 'mall', 'office', 'school'],
+    tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth', 'medium', 'indoor', 'outdoor', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'adults', 'crowded', 'historic', 'physical'],
     difficulty: 4,
     build: () => anywhere({
       title: 'כולם באוויר',
-      description: 'תמונה אחת שבה כולכם באוויר בו זמנית. שתי הרגליים באוויר, בלי רמאויות. כמה ניסיונות שצריך.',
+      description: 'תמונה אחת שבה כל חברי הקבוצה באוויר בו זמנית.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 4,
@@ -3121,9 +3061,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'finish-podium',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-        tags: [
-          'finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed',
-          'kids', 'easy'],
+        tags: ['finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'easy', 'humor', 'performance'],
     difficulty: 2,
     build: () => anywhere({
       title: 'טקס הניצחון',
@@ -3146,14 +3084,13 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Play from anywhere: the gap that capped no-venue games ────────────────
   {
     key: 'rock-cairn',
+    family: 'cairn',
     spot: 'anyCorner',
     sourceTemplateKey: 'authored',
     // A stone cairn needs actual stones, so it prefers outdoor natural terrain —
     // a soft area preference, not a hard filter, so it still plays anywhere
     // stones can be found.
-    tags: ['camera', 'action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor',
-      'forest', 'park', 'beach',
-      'mixed', 'youth', 'kids', 'corporate', 'medium'],
+    tags: ['camera', 'action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'park', 'beach', 'mixed', 'youth', 'kids', 'corporate', 'medium', 'building', 'nature', 'record'],
     difficulty: 5,
     build: () => anywhere({
       title: 'רוג׳ום',
@@ -3169,9 +3106,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'human-letter',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-        tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'mixed',
-      'youth', 'kids', 'corporate', 'medium', 'forest', 'beach', 'park', 'neighborhood',
-      'school', 'indoor', 'outdoor'],
+        tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'youth', 'kids', 'corporate', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'school', 'indoor', 'outdoor', 'physical'],
     difficulty: 4,
     build: () => anywhere({
       title: 'האות האנושית',
@@ -3180,31 +3115,6 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 4,
       estimatedMinutes: 7,
       pointValue: 110,
-      smart: upload(),
-    }),
-  },
-  {
-    // Replaced the whisper-down-the-lane version: passing a silly sentence by
-    // charades reads as a kids'-party game, not something a work team or a
-    // group of adults does without visible discomfort. This version is the
-    // same constraint — convey something complex with no verbal handoff — but
-    // the content is a spatial instruction, not a phrase, which is the shape a
-    // real team-communication exercise actually takes. Fully self-contained: no
-    // creator prep, so no `needsSetup`.
-    key: 'silent-briefing',
-    siting: 'never',
-    sourceTemplateKey: 'authored',
-        tags: ['camera', 'teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'youth', 'adults', 'corporate', 'medium', 'forest', 'beach', 'park',
-      'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 6,
-    build: () => anywhere({
-      title: 'תדרוך בלי מילים',
-      description: 'אחד מכם קורא בשקט: "תבנו מגדל מחפצים שיש לכם, אבל הפוך: הבסיס הרחב למעלה, לא למטה." בלי מילים, רק בציור, תעבירו את ההוראה לצוות. הם בונים לפי מה שהבינו. עכשיו תקריאו את ההוראה המקורית בקול ותשוו למה שנבנה: קלעתם? תצלמו את התוצאה ואת הציור זה לצד זה.',
-      type: 'photo',
-      difficulty: 6,
-      estimatedMinutes: 8,
-      pointValue: 130,
       smart: upload(),
     }),
   },
@@ -3249,10 +3159,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // own, because folding the row in removed the thing that was compensating for
     // it. scripts/test-bank-overlay-tag-laws.ts was added here to assert that
     // repair over the real bank rather than over a three-entry fixture.
-    tags: [
-      'thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'forest',
-      'neighborhood', 'office', 'school', 'mixed', 'youth', 'adults', 'corporate', 'medium',
-      'kids', 'historic', 'cityCenter', 'home', 'beach', 'creative', 'action', 'camera'],
+    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'forest', 'neighborhood', 'office', 'school', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'kids', 'historic', 'cityCenter', 'home', 'beach', 'creative', 'action', 'hunt', 'puzzle'],
     difficulty: 6,
     transitMinutes: 5,
     setup: [
@@ -3276,15 +3183,23 @@ export const TASK_BANK: TaskBankEntry[] = [
         required: true,
         prompt: 'תחליפו את הסוגריים במה שהמפתח פותח (תיבה, מנעול, שער). אל תמחקו את שאר ההוראות.\n\nReplace the brackets with what the key opens (a box, a padlock, a gate). Don\'t delete the rest of the instructions.',
       },
+      {
+        field: 'smart.secretCode',
+        required: true,
+        prompt: 'תשימו בתוך מה שהמפתח פותח פתק עם קוד, ותכתבו כאן את אותו קוד.\n\nPut a note with a code inside whatever the key opens, and enter that same code here.',
+      },
     ],
     build: () => sited({
       title: 'המפתח החבוי',
-      description: 'מוסתר כאן מפתח שפותח [הוראות ליוצר: מה בדיוק נעול]. תמצאו אותו, תפתחו את התיבה ותצטלמו איתה פתוחה. בסוף מחזירים את המפתח בדיוק למקום.',
-      type: 'photo',
+      description: 'תמצאו את המפתח שפותח את [הוראות ליוצר: מה בדיוק נעול], ותכתבו כאן את הקוד שבפנים. אחר כך תחזירו את המפתח בדיוק למקום.',
+      // A code entry since 2026-10-22: the founder's own edit on the admin page asks
+      // the team to type "the code you found" inside the box, while the mission still
+      // asked for a photo, so production showed one instruction and checked another.
+      type: 'smart_station',
       difficulty: 6,
       estimatedMinutes: 9,
       pointValue: 150,
-      smart: upload(),
+      smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
       hideLocation: true,
       locationClue: '',
       hint: 'רמז: הוראות קצרות (ימינה, שמאלה, קרוב) עובדות יותר טוב ממשפטים ארוכים.\n\nHint: short directions (left, right, closer) work better than long sentences.',
@@ -3297,10 +3212,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'ad-for-nothing',
+    family: 'genre-parody',
     sourceTemplateKey: 'authored',
-        tags: [
-          'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'youth',
-          'adults', 'corporate', 'medium'],
+        tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'performance', 'humor'],
     difficulty: 5,
     build: () => anywhere({
       title: 'פרסומת למוצר שלא קיים',
@@ -3317,9 +3231,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'exact-count',
     sourceTemplateKey: 'authored',
     family: 'count-estimate',
-    tags: [
-      'thinking', 'needsSetup', 'locationBased', 'outdoor', 'neighborhood', 'cityCenter', 'park',
-      'beach', 'mixed', 'youth', 'kids', 'adults', 'medium', 'mall'],
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'neighborhood', 'cityCenter', 'park', 'beach', 'mixed', 'youth', 'kids', 'adults', 'medium', 'mall', 'observation', 'splitUp'],
     difficulty: 5,
     transitMinutes: 4,
     setup: [
@@ -3356,10 +3268,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'sign-cipher',
+    family: 'sign-cipher',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor',
-      'neighborhood', 'cityCenter', 'school',
-      'mixed', 'youth', 'adults', 'hard'],
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'neighborhood', 'cityCenter', 'school', 'mixed', 'youth', 'adults', 'hard', 'puzzle', 'observation'],
     difficulty: 7,
     transitMinutes: 6,
     setup: [
@@ -3392,9 +3303,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'odd-one-planted',
     sourceTemplateKey: 'authored',
-    tags: [
-      'thinking', 'camera', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park',
-      'neighborhood', 'school', 'office', 'mall', 'mixed', 'kids', 'youth', 'medium'],
+    tags: ['thinking', 'camera', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'neighborhood', 'school', 'office', 'mall', 'mixed', 'kids', 'youth', 'medium', 'hunt', 'observation'],
     difficulty: 5,
     transitMinutes: 4,
     setup: [
@@ -3422,12 +3331,10 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Strangers: the missions people remember a week later ──────────────────
   {
     key: 'thirty-second-interview',
+    family: 'stranger-question',
     spot: 'bench',
     sourceTemplateKey: 'authored',
-    tags: [
-      'action', 'camera', 'creative', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall',
-      'neighborhood', 'beach', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded',
-      'educational', 'indoor', 'outdoor', 'school', 'office', 'park'],
+    tags: ['action', 'camera', 'creative', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'beach', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded', 'educational', 'indoor', 'outdoor', 'school', 'office', 'park', 'strangers'],
     difficulty: 6,
     build: () => anywhere({
       title: 'ראיון של שלושים שניות',
@@ -3443,15 +3350,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'honest-compliment',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: [
-      'action', 'camera', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'beach',
-      'mixed', 'youth', 'medium', 'crowded', 'educational'],
-    difficulty: 5,
+    tags: ['action', 'camera', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'beach', 'mixed', 'youth', 'easy', 'crowded', 'educational', 'kids', 'strangers', 'kindness', 'dare'],
+    difficulty: 2,
     build: () => anywhere({
       title: 'מחמאה אמיתית',
-      description: 'תנו מחמאה כנה לאדם זר, על משהו שבאמת שמתם לב אליו. בסוף תבקשו רשות לסלפי משותף.',
+      description: 'תנו מחמאה כנה לאדם זר. על משהו שבאמת שמתם לב אליו, בקשו סלפי משותף.',
       type: 'photo',
-      difficulty: 5,
+      difficulty: 2,
       estimatedMinutes: 6,
       pointValue: 120,
       smart: upload(),
@@ -3464,9 +3369,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // finish line.
     key: 'trade-up',
     sourceTemplateKey: 'authored',
-    tags: [
-      'action', 'teamwork', 'creative', 'needsSetup', 'fromAnywhere', 'cityCenter', 'mall',
-      'neighborhood', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'crowded', 'camera'],
+    tags: ['action', 'teamwork', 'creative', 'needsSetup', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'crowded', 'camera', 'kids', 'strangers', 'dare'],
     difficulty: 8,
     setup: [{
       field: 'description',
@@ -3475,7 +3378,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'סחר חליפין',
-      description: 'קיבלתם חפץ קטן. כל חילוף נעשה על ידי מישהו אחר מכם, בתורות. תציעו אותו לאנשים ברחוב, ותקבלו כל הצעה שמציעים לכם, לא משנה מה. תמשיכו להחליף עד שמישהו נותן לכם טוש. תצלמו את הטוש בידכם.',
+      description: 'הציעו את החפץ שבידכם לאנשים ברחוב, וקבלו כל הצעת חילופין, לא משנה מה. תמשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
       type: 'photo',
       difficulty: 8,
       estimatedMinutes: 15,
@@ -3494,9 +3397,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     sourceTemplateKey: 'authored',
     // `needsSetup`, not `noPrep`: the address clue is the ENTIRE mission, and
     // the creator has to write it (rule 30).
-    tags: [
-      'thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'neighborhood',
-      'cityCenter', 'park', 'mixed', 'youth', 'adults', 'hard', 'crowded'],
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'neighborhood', 'cityCenter', 'park', 'mixed', 'youth', 'adults', 'hard', 'crowded', 'navigation', 'strangers'],
     difficulty: 7,
     transitMinutes: 9,
     setup: [
@@ -3509,7 +3410,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'ניווט אנושי',
-      description: 'תגיעו לנקודה הזאת בלי אפליקציית ניווט ובלי מפה. יש לכם רק את הכתובת. מותר רק לשאול אנשים בדרך.',
+      description: 'הגיעו לנקודה הזאת בלי אפליקציית ניווט ובלי מפה. יש לכם רק את הכתובת. מותר רק לשאול אנשים בדרך.',
       type: 'geofence',
       difficulty: 7,
       estimatedMinutes: 4,
@@ -3531,10 +3432,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The vendor is the exclusive resource: one person can only hand the code
     // to one team at a time (see TaskBankEntry.exclusiveStation).
     exclusiveStation: true,
-    tags: [
-      'action', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor', 'cityCenter',
-      'mall', 'neighborhood', 'beach', 'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy',
-      'crowded', 'creative', 'thinking'],
+    tags: ['action', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor', 'cityCenter', 'mall', 'neighborhood', 'beach', 'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'crowded', 'creative', 'thinking', 'strangers', 'puzzle'],
     difficulty: 3,
     transitMinutes: 7,
     setup: [
@@ -3547,8 +3445,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
     ],
     build: () => codeStation({
-      title: 'המנה הסודית',
-      description: 'תחליטו יחד מי מכם הולך. תלכו אל [הוראות ליוצר: תכתבו כאן את שם המקום] ותבקשו מיץ גזר עם לימון. תקבלו איתו קוד, תכתבו אותו כאן.',
+      title: 'מנת השף',
+      description: 'לכו ל[הוראות ליוצר: הדוכן או המקום] ובקשו מיץ גזר עם לימון. תקבלו איתו קוד, הקלידו אותו כאן.',
       difficulty: 3,
       estimatedMinutes: 6,
       pointValue: 110,
@@ -3560,14 +3458,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'one-colour-five-things',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
-    tags: [
-      'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'mall', 'office',
-      'school', 'neighborhood', 'mixed', 'kids', 'corporate', 'easy', 'youth', 'forest', 'park',
-      'cityCenter'],
+    tags: ['camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'mall', 'office', 'school', 'neighborhood', 'mixed', 'kids', 'corporate', 'easy', 'forest', 'park', 'cityCenter', 'hunt'],
     difficulty: 3,
     build: () => anywhere({
       title: 'חמישה דברים, צבע אחד',
-      description: 'תבחרו צבע, לא שחור ולא לבן. תאספו חמישה חפצים בדיוק באותו צבע ותצלמו אותם בפריים אחד.',
+      description: 'בחרו צבע, לא שחור ולא לבן. אספו חמישה חפצים באותו צבע וצלמו אותם בפריים אחד. ככל שהצבע מדויק יותר, כך טוב יותר. חסר חפץ? אפשר לבקש בהשאלה מאנשים בסביבה.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -3578,13 +3473,11 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'office-olympics',
     sourceTemplateKey: 'authored',
-    tags: [
-      'action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'corporate',
-      'adults', 'mixed', 'medium', 'camera'],
+    tags: ['action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'corporate', 'adults', 'mixed', 'medium', 'camera', 'humor', 'physical'],
     difficulty: 5,
     build: () => anywhere({
       title: 'אולימפיאדת המשרד',
-      description: 'תמציאו ענף ספורט חדש שאפשר לשחק רק בציוד משרדי. תגדירו חוק אחד, תשחקו סיבוב שלם, ותצלמו את הזוכה חוגג.',
+      description: 'תמציאו ענף ספורט חדש שאפשר לשחק רק בציוד משרדי. הגדירו חוק אחד, שחקו סיבוב שלם, וצלמו את הזוכה חוגג.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 9,
@@ -3596,9 +3489,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'elevator-pitch',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: [
-      'creative', 'thinking', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'mall',
-      'cityCenter', 'corporate', 'medium', 'camera', 'youth'],
+    tags: ['creative', 'thinking', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'mall', 'cityCenter', 'corporate', 'medium', 'camera', 'youth', 'strangers', 'performance', 'dare', 'againstClock', 'crowded'],
     difficulty: 6,
     build: () => anywhere({
       title: 'נאום המעלית',
@@ -3612,11 +3503,9 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'oldest-thing-here',
+    family: 'oldest-find',
     sourceTemplateKey: 'authored',
-    tags: [
-      'thinking', 'camera', 'noPrep', 'fromAnywhere', 'home', 'office', 'school',
-      'mall', 'neighborhood', 'cityCenter', 'corporate', 'adults', 'mixed', 'medium', 'historic',
-      'creative', 'youth'],
+    tags: ['thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'neighborhood', 'cityCenter', 'corporate', 'adults', 'mixed', 'medium', 'historic', 'creative', 'youth', 'hunt', 'observation', 'history'],
     difficulty: 4,
     build: () => anywhere({
       title: 'הדבר הכי ותיק כאן',
@@ -3624,7 +3513,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       // field the photo-submission flow never had — the guess and the reason
       // were never captured anywhere. Saying it on camera, appraiser-style,
       // keeps the same content and actually makes it more fun to watch back.
-      description: 'תמצאו את הדבר הכי ותיק שיש כאן. תצלמו אותו בווידאו, ותוך כדי תגידו בקול בן כמה אתם חושבים שהוא ולמה, כמו שמאים אמיתיים.',
+      description: 'מצאו את החפץ הכי הישן שאתם מצליחים למצוא במקום הזה. תצלמו אותו בווידאו, ותוך כדי הצילום הגידו בקול רם בן כמה אתם חושבים שהוא, ולמה, כמו שמאי אמיתי.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
@@ -3636,9 +3525,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'rainbow-hunt',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
-    tags: [
-      'camera', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'forest',
-      'beach', 'neighborhood', 'kids', 'mixed', 'easy'],
+    tags: ['camera', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'forest', 'beach', 'neighborhood', 'kids', 'mixed', 'easy', 'hunt'],
     difficulty: 3,
     build: () => anywhere({
       title: 'ציד הקשת',
@@ -3648,24 +3535,6 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 8,
       pointValue: 100,
       smart: upload(),
-    }),
-  },
-  {
-    key: 'silliest-walk',
-    spot: 'openGrass',
-    sourceTemplateKey: 'authored',
-    tags: [
-      'action', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'park', 'school',
-      'beach', 'neighborhood', 'kids', 'mixed', 'easy'],
-    difficulty: 2,
-    build: () => anywhere({
-      title: 'ההליכה הכי מצחיקה',
-      description: 'תמציאו ביחד הליכה מצחיקה אחת, ותלכו בה עשרה מטרים. כל הקבוצה, אותה הליכה, באותו זמן. תצלמו מהצד.',
-      type: 'photo',
-      difficulty: 2,
-      estimatedMinutes: 5,
-      pointValue: 80,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
     }),
   },
 
@@ -3678,13 +3547,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     // is a real skill (interviewing, judging a source) rather than a photo op.
     key: 'local-legend',
     sourceTemplateKey: 'authored',
-    tags: [
-      'thinking', 'action', 'creative', 'noPrep', 'fromAnywhere', 'neighborhood', 'cityCenter',
-      'beach', 'historic', 'adults', 'corporate', 'mixed', 'hard', 'educational', 'camera'],
+    // Same act as humans-of-the-city: ask a stranger one question, film the answer.
+    family: 'stranger-question',
+    tags: ['thinking', 'action', 'creative', 'noPrep', 'fromAnywhere', 'neighborhood', 'cityCenter', 'beach', 'historic', 'adults', 'corporate', 'mixed', 'hard', 'educational', 'camera', 'strangers', 'history', 'crowded'],
     difficulty: 7,
     build: () => anywhere({
       title: 'האגדה המקומית',
-      description: 'תמצאו מישהו שגר או עובד כאן הרבה זמן. תבקשו ממנו סיפור מוזר או מפתיע על המקום, ותבקשו פרט אחד שאפשר לבדוק: שם, שנה או אירוע. תבקשו רשות לצלם, תצלמו את התשובה, ותחזרו על הפרט בקול בסוף הסרטון.',
+      description: 'תמצאו מישהו שגר או עובד כאן הרבה שנים, ותבקשו ממנו סיפור מוזר על המקום. תצלמו אותו מספר.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -3698,9 +3567,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'two-truths-one-lie',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: [
-      'teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'office',
-      'mall', 'park', 'beach', 'corporate', 'youth', 'mixed', 'easy', 'kids', 'adults'],
+    tags: ['teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'easy', 'kids', 'calm'],
     difficulty: 3,
     build: () => anywhere({
       title: 'שתי אמיתות ושקר',
@@ -3731,9 +3598,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'how-many-steps',
     sourceTemplateKey: 'authored',
     family: 'count-estimate',
-    tags: ['thinking', 'teamwork', 'action', 'needsSetup', 'locationBased', 'outdoor',
-      'park', 'neighborhood', 'school', 'beach', 'cityCenter',
-      'mixed', 'kids', 'youth', 'easy'],
+    tags: ['thinking', 'teamwork', 'action', 'needsSetup', 'locationBased', 'outdoor', 'park', 'neighborhood', 'school', 'beach', 'cityCenter', 'mixed', 'kids', 'youth', 'easy', 'observation'],
     difficulty: 3,
     transitMinutes: 5,
     setup: [
@@ -3750,8 +3615,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
     ],
     build: () => sited({
-      title: 'כמה צעדים',
-      description: 'מנקודת ההתחלה שקיבלתם, תנחשו כמה צעדים יש עד כאן. אחר כך תתחלקו לשניים, כל צד סופר בדרך בנפרד, ותכתבו רק כששניכם הגעתם לאותו מספר.',
+      title: 'הליכה',
+      description: 'כמה צעדים לוקח לכם להגיע מ[הוראות ליוצר: נקודה ראשונה] ל[הוראות ליוצר: נקודה שנייה]?',
       type: 'numeric',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -3760,71 +3625,6 @@ export const TASK_BANK: TaskBankEntry[] = [
       numericTolerance: 8,
       // The pin stays put for every team — nothing to queue for.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
-    }),
-  },
-  {
-    // A flat trivia question has one honest move if you don't know it: search.
-    // Banning the search and requiring a real person instead turns three idle
-    // seconds of typing into an actual small social task, and it is what makes
-    // the mission belong in a FIELD game rather than a pub quiz.
-    key: 'trivia-bones',
-    sourceTemplateKey: 'authored',
-    family: 'trivia-fact',
-    tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
-      'school', 'office', 'mall', 'park',
-      'mixed', 'youth', 'kids', 'adults', 'medium'],
-    difficulty: 4,
-    build: () => anywhere({
-      title: 'שאלת חימום',
-      description: 'כמה עצמות יש בגוף של אדם מבוגר? אסור לחפש בגוגל. תשאלו אנשים סביבכם עד שמישהו יודע. תשובה אחת, מספר אחד.',
-      type: 'quiz',
-      difficulty: 4,
-      estimatedMinutes: 3,
-      pointValue: 90,
-      answers: ['206'],
-      choices: ['201', '206', '215', '224'],
-      hint: 'רמז: תשאלו רופא, אח, סטודנט לרפואה, או פשוט שלושה אנשים שונים.',
-      hintPenalty: 15,
-    }),
-  },
-  {
-    key: 'trivia-longest-river',
-    sourceTemplateKey: 'authored',
-    family: 'trivia-fact',
-    tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
-      'school', 'office', 'mall', 'park',
-      'mixed', 'youth', 'adults', 'medium'],
-    difficulty: 5,
-    build: () => anywhere({
-      title: 'שאלת הנהר',
-      description: 'איזה נהר נחשב לארוך בעולם? אסור לחפש בגוגל. תשאלו אנשים סביבכם עד שמישהו יודע.',
-      type: 'quiz',
-      difficulty: 5,
-      estimatedMinutes: 3,
-      pointValue: 100,
-      // Rule 19: the Nile/Amazon question genuinely has two defensible answers,
-      // and a mission that sends teams to ask strangers will collect both. Failing
-      // a team for the one their passer-by gave them is the defect that rule names.
-      answers: ['הנילוס', 'נילוס', 'אמזונס', 'האמזונס', 'אמזונאס'],
-      choices: ['הנילוס', 'האמזונס', 'הירדן', 'המיסיסיפי'],
-      hint: 'רמז: תשאלו מישהו שנראה כאילו הוא אוהב גיאוגרפיה, או פשוט כמה אנשים.',
-      hintPenalty: 15,
-    }),
-  },
-  {
-    key: 'do-someone-a-favour',
-    sourceTemplateKey: 'authored',
-    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere',
-      'neighborhood', 'cityCenter', 'mall', 'park', 'beach',
-      'mixed', 'youth', 'adults', 'corporate', 'easy', 'crowded'],
-    difficulty: 3,
-    build: () => anywhere({
-      title: 'טובה אחת',
-      description: 'תעשו טובה אמיתית לאדם שלא מכיר אתכם. להחזיק דלת, לעזור לסחוב, להרים משהו שנפל. בלי לצלם אותו ובלי לספר לו שזו משימה. כשסיימתם, תסמנו כאן.',
-      type: 'self_report',
-      difficulty: 3,
-      estimatedMinutes: 6,
-      pointValue: 100,
     }),
   },
   // "רגע של אוויר" removed outright — a rest-break survey with no real content
@@ -3838,30 +3638,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   // post-run feedback screen recovers as accurately.
 
   // ── Indoor depth: a mall and a school are not just "not outdoors" ─────────
-  {
-    key: 'window-story',
-    spot: 'sign',
-    sourceTemplateKey: 'authored',
-    // Rule 12/48: the same mechanic as `the-broken-sign` — find a thing, point a
-    // camera at it, and invent the human story behind it in 30 seconds. They
-    // differ in feel and in venue coverage (a shop window versus a sign, which
-    // every mall, office and school has), so this is what `family` is for rather
-    // than a deletion: a composed game gets one of them, never both.
-    family: 'invent-a-backstory',
-    tags: ['creative', 'thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor',
-      'mall', 'cityCenter',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 5,
-    build: () => anywhere({
-      title: 'הסיפור שבחלון',
-      description: 'תעצרו מול חלון ראווה ותבחרו בו פריט אחד. תצלמו את החלון ותספרו בווידאו של 30 שניות, כל אחד מכם משפט אחד: מי האדם שקנה דווקא אותו, ולמה. חייבים להזכיר פרט אחד שבאמת רואים בחלון.',
-      type: 'photo',
-      difficulty: 5,
-      estimatedMinutes: 7,
-      pointValue: 120,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
-    }),
-  },
   // ── `count-the-shops` was deleted here on 2026-09-06 ─────────────────────
   //
   // Rule 34 already named it as its own negative example — "a chore with a
@@ -3874,54 +3650,17 @@ export const TASK_BANK: TaskBankEntry[] = [
   // `crossing-signal-words` all cover counting, and the last two provoke
   // something. The family keeps three members.
 
-  {
-    key: 'school-then-and-now',
-    sourceTemplateKey: 'authored',
-    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
-      'school', 'neighborhood', 'cityCenter',
-      'kids', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'historic', 'educational'],
-    difficulty: 4,
-    build: () => anywhere({
-      title: 'פעם והיום',
-      description: 'תמצאו במקום פינה שנראית כאילו לא השתנתה שנים. תצלמו אותה, ותביימו בתוכה תמונה שנראית כאילו צולמה לפני שלושים שנה.',
-      type: 'photo',
-      difficulty: 4,
-      estimatedMinutes: 8,
-      pointValue: 120,
-      smart: upload(),
-    }),
-  },
 
   // ── A few more to keep repeat generations apart ───────────────────────────
-  {
-    key: 'forced-perspective',
-    spot: 'openGrass',
-    sourceTemplateKey: 'authored',
-    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
-      'park', 'school', 'office', 'beach', 'mall', 'cityCenter',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 4,
-    build: () => anywhere({
-      title: 'אשליית הגודל',
-      description: 'תצלמו תמונה אחת שבה אחד מכם נראה ענק והשאר זעירים לידו, רק בעזרת מרחק וזווית מצלמה. בלי עריכה, בלי חיתוך ובלי פילטרים.',
-      type: 'photo',
-      difficulty: 4,
-      estimatedMinutes: 7,
-      pointValue: 110,
-      smart: upload(),
-    }),
-  },
   {
     key: 'everyone-hidden',
     spot: 'bigTree',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
-      'park', 'forest', 'beach', 'neighborhood', 'school',
-      'mixed', 'kids', 'youth', 'medium'],
+    tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'park', 'forest', 'beach', 'neighborhood', 'school', 'mixed', 'kids', 'medium', 'humor'],
     difficulty: 5,
     build: () => anywhere({
-      title: 'כולם בתמונה, אף אחד לא נראה',
-      description: 'תצלמו תמונה שכל הקבוצה נמצאת בה ואי אפשר לזהות אף אחד: לא פנים ולא סימן מזהה. מאחורי עצים, מתחת לשמיכה, רק צללים.',
+      title: 'כולם ואף אחד',
+      description: 'תצלמו תמונה שאפשר לספור בה את כל הקבוצה, אבל אי אפשר לזהות אף אחד מכם: בלי פנים ובלי שום סימן מזהה.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 7,
@@ -3933,9 +3672,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'guess-the-height',
     sourceTemplateKey: 'authored',
     family: 'count-estimate',
-    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor',
-      'cityCenter', 'neighborhood', 'park', 'forest',
-      'mixed', 'youth', 'adults', 'medium'],
+    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'neighborhood', 'park', 'forest', 'mixed', 'kids', 'medium', 'observation', 'puzzle'],
     difficulty: 5,
     transitMinutes: 4,
     setup: [
@@ -3943,7 +3680,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'תכתבו איזה מבנה או עץ בדיוק מודדים, כך שאי אפשר להתבלבל בינו לבין משהו אחר מהנקודה הזאת.\n\nWrite exactly which building or tree is being measured, so it cannot be mistaken for another one from this spot.',
+        prompt: 'תחליפו את הסוגריים במבנה או בעץ שמודדים, כך שאי אפשר להתבלבל בינו לבין משהו אחר מהנקודה הזאת.\n\nReplace the brackets with the building or tree being measured, so it cannot be mistaken for another one from this spot.',
       },
       {
         field: 'numericAnswer',
@@ -3953,7 +3690,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'כמה זה גבוה',
-      description: 'כמה גבוה מה שסומן לכם? כל אחד מכם מנחש לבד במטרים, ורק אז תשוו ותגישו תשובה אחת. בלי למדוד ובלי לחפש באינטרנט.',
+      description: 'כמה מטרים גובה [הוראות ליוצר: המבנה או העץ]? מותר לחשב בכל דרך, רק לא לטפס.',
       type: 'numeric',
       difficulty: 5,
       estimatedMinutes: 5,
@@ -3977,22 +3714,20 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'corporate-landmark-navigate',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor',
-      'cityCenter', 'neighborhood', 'park',
-      'corporate', 'adults', 'hard'],
+    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'neighborhood', 'park', 'corporate', 'adults', 'youth', 'hard', 'navigation', 'puzzle'],
     difficulty: 7,
     transitMinutes: 10,
     setup: [
       PLACE_IT,
       {
-        field: 'locationClue',
+        field: 'description',
         required: true,
-        prompt: 'תכתבו רמז למקום בלי להגיד את השם שלו. אין סיכה על המפה. תבדקו שאפשר לפענח אותו מנקודת הפתיחה.\n\nWrite a clue to the place without naming it. There is no pin on the map. Make sure it can be worked out from the starting point.',
+        prompt: 'תחליפו את הסוגריים ברמז למקום, בלי השם שלו, למשל "שבו נשבעים לשמור על העיר". תבדקו שאפשר לפענח אותו מנקודת הפתיחה.\n\nReplace the brackets with a clue to the place, without its name. Make sure it can be worked out from the starting point.',
       },
     ],
     build: () => sited({
       title: 'ניווט לפי רמז',
-      description: 'קיבלתם רמז למקום, לא כתובת. תפענחו אותו כצוות ותגיעו לשם ביחד. אין סיכה על המפה.',
+      description: 'תנווטו למקום ש[הוראות ליוצר: הרמז, בלי שם המקום].',
       type: 'geofence',
       difficulty: 7,
       estimatedMinutes: 6,
@@ -4006,101 +3741,21 @@ export const TASK_BANK: TaskBankEntry[] = [
     }),
   },
   {
-    key: 'vendor-order-by-number',
-    sourceTemplateKey: 'authored',
-    family: 'vendor-code',
-    // The vendor is the exclusive resource: one person can only hand the code
-    // to one team at a time (see TaskBankEntry.exclusiveStation).
-    exclusiveStation: true,
-    tags: ['action', 'teamwork', 'needsPartner', 'locationBased', 'indoor', 'outdoor',
-      'mall', 'cityCenter', 'neighborhood',
-      'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded'],
-    difficulty: 4,
-    transitMinutes: 6,
-    setup: [
-      PLACE_IT,
-      SET_CODE,
-      {
-        field: 'description',
-        required: true,
-        prompt: 'תכתבו לאיזה בית עסק להגיע ומה בדיוק להזמין "לפי המספר". תתאמו עם בעל העסק מראש שיחלק את הקוד כשמזמינים בשם הזה.\n\nWrite which business to go to and exactly what to order "by the number". Agree in advance with the owner that they will hand out the code for that order.',
-      },
-    ],
-    build: () => codeStation({
-      title: 'הזמנה לפי מספר',
-      description: 'תחליטו יחד מי מכם הולך. תלכו למקום שסוכם ותבקשו "מנה מספר" לפי המספר שקיבלתם. תקבלו את המנה ואיתה קוד. תכתבו אותו כאן.',
-      difficulty: 4,
-      estimatedMinutes: 7,
-      pointValue: 120,
-    }),
-  },
-  {
-    key: 'team-decision-drill',
-    siting: 'never',
-    sourceTemplateKey: 'authored',
-    tags: ['teamwork', 'thinking', 'needsSetup', 'fromAnywhere', 'home', 'indoor',
-      'office', 'mall', 'park', 'school',
-      'corporate', 'adults', 'medium'],
-    difficulty: 5,
-    setup: [{
-      field: 'steps',
-      required: true,
-      prompt: 'בצעד השני, תחליפו את התשובה במשהו שמשמעותי אצלכם: ערך ארגוני, מוצר, או כל מילה שהצוות אמור להגיע אליה יחד.\n\nIn step two, replace the answer with something that matters to you: a company value, a product, or any word the team should arrive at together.',
-    }],
-    build: () => anywhere({
-      title: 'תרגיל ההחלטה',
-      description: 'שלושה צעדים לפי הסדר. אי אפשר לעבור לצעד הבא לפני שכולכם מסכימים על הקודם. כולם, לא רוב.',
-      type: 'sequence',
-      difficulty: 5,
-      estimatedMinutes: 9,
-      pointValue: 140,
-      steps: [
-        { id: uuid(), prompt: 'תוציאו את כל מה שיש לכם בכיסים ובתיקים. תבחרו פה אחד את הפריט האחד שהכי יעזור לצוות בשעה הקרובה. תסמנו כשכולם מסכימים.' },
-        { id: uuid(), prompt: 'מה הערך האחד שהצוות שלנו באמת מתנהל לפיו? תסכימו עליו פה אחד ותכתבו אותו.', answer: '' },
-        { id: uuid(), prompt: 'תחליטו פה אחד מי מכם מוביל את המשימה הבאה, ותגידו בקול למה דווקא הוא. תסמנו לסיום.' },
-      ],
-    }),
-  },
-  {
-    key: 'the-hard-riddle',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'crowded',
-      'office', 'school', 'mall', 'park', 'cityCenter',
-      'adults', 'corporate', 'youth', 'hard'],
-    difficulty: 8,
-    build: () => anywhere({
-      title: 'החידה שלא מוותרת',
-      description: 'יש לי ערים אבל בלי בתים, יערות בלי עצים, ומים בלי דגים. מה אני? אסור לחפש בגוגל. אם נתקעתם, תפנו לאנשים סביבכם ותנו להם לנסות, עד שמישהו פותר.',
-      type: 'quiz',
-      difficulty: 8,
-      estimatedMinutes: 5,
-      pointValue: 150,
-      answers: ['מפה', 'מפת עולם'],
-      hint: 'רמז: תשאלו שלושה אנשים שונים. מישהו מהם ייתן לכם את המילה.',
-      hintPenalty: 25,
-    }),
-  },
-  {
     key: 'price-target',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'fromAnywhere', 'crowded',
-      'mall', 'cityCenter', 'neighborhood',
-      'adults', 'corporate', 'youth', 'hard', 'educational'],
+    // Was `numeric` ("write how close you got"): a team could type the target
+    // itself and nothing could tell (lessons L1). The price tags in one photo
+    // are the proof now, and a fixed window replaces the creator's target.
+    tags: ['thinking', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'crowded', 'mall', 'cityCenter', 'neighborhood', 'adults', 'corporate', 'youth', 'hard', 'educational', 'hunt', 'puzzle'],
     difficulty: 7,
-    setup: [{
-      field: 'numericAnswer',
-      required: true,
-      prompt: 'תקבעו את סכום היעד בשקלים ותכתבו אותו כאן. סכום שדורש לצרף כמה מוצרים עובד הכי טוב.\n\nSet the target amount in shekels and enter it here. An amount that needs a few items combined works best.',
-    }],
     build: () => anywhere({
       title: 'סכום היעד',
-      description: 'בלי לקנות כלום ובלי להוציא שקל. תמצאו שלושה מוצרים שהמחירים שלהם ביחד הכי קרובים לסכום שקיבלתם, ותכתבו לכמה הגעתם.',
-      type: 'numeric',
+      description: 'תמצאו שלושה מוצרים שביחד עולים בדיוק בין 99 ל 100 שקלים. תצלמו את שלושתם יחד, כך שרואים את המחירים.',
+      type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
       pointValue: 170,
-      numericAnswer: 100,
-      numericTolerance: 5,
+      smart: upload(),
       hint: 'רמז: תמצאו קודם שני מוצרים שסכומם קרוב ליעד, ואז תשלימו עם מוצר שלישי וזול שמצמצם את הפער.',
       hintPenalty: 25,
     }),
@@ -4113,9 +3768,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // can only hand the code to one team at a time (see
     // TaskBankEntry.exclusiveStation).
     exclusiveStation: true,
-    tags: ['thinking', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor',
-      'park', 'school', 'mall', 'neighborhood',
-      'kids', 'youth', 'easy'],
+    tags: ['thinking', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor', 'park', 'school', 'mall', 'neighborhood', 'kids', 'easy', 'strangers', 'crowded'],
     difficulty: 3,
     transitMinutes: 5,
     setup: [
@@ -4124,12 +3777,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'תסגרו מראש עם מישהו שיעמוד בנקודה: מה הסיסמה שהצוות אומר לו, ואיזה קוד הוא נותן בחזרה. תעדכנו כאן את הסיסמה.\n\nArrange in advance with someone who will be standing at the spot: what passphrase the team says, and which code they hand back. Set the passphrase here.',
+        prompt: 'תסגרו מראש עם מישהו שיעמוד בנקודה: מה הסיסמה שהצוות אומר לו, ואיזה קוד הוא נותן בחזרה. תחליפו את הסוגריים בסיסמה.\n\nArrange in advance with someone who will be standing at the spot: what passphrase the team says, and which code they hand back. Replace the brackets with the passphrase.',
       },
     ],
     build: () => codeStation({
       title: 'מסירת הסיסמה',
-      description: 'בנקודה הזאת מחכה לכם איש הקשר. תחליטו יחד מי מכם ניגש, ותגידו לו את הסיסמה בדיוק כמו שקיבלתם. אם אמרתם נכון, הוא ייתן לכם קוד. תכתבו אותו כאן.',
+      description: 'תגידו לאיש הקשר שעומד כאן את הסיסמה: [הוראות ליוצר: הסיסמה]. תכתבו את הקוד שהוא ייתן לכם.',
       difficulty: 3,
       estimatedMinutes: 5,
       pointValue: 90,
@@ -4144,49 +3797,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   // gap on their own merits: both are indoor by nature, need no creator prep and
   // no map pin, and each turns a building itself into the thing being examined.
 
-  {
-    key: 'the-broken-sign',
-    spot: 'sign',
-    sourceTemplateKey: 'authored',
-    // Paired with `window-story` — see the family note there.
-    family: 'invent-a-backstory',
-    tags: ['thinking', 'camera', 'creative', 'noPrep', 'fromAnywhere', 'indoor',
-      'mall', 'office', 'school', 'cityCenter', 'neighborhood',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 5,
-    build: () => anywhere({
-      title: 'השלט השבור',
-      // "Find a sign with a real mistake" had no guaranteed answer: a building
-      // may simply not contain one, and the team has no way to know whether to
-      // keep looking (rule 5). A sign saying what is FORBIDDEN is somewhere in
-      // every mall, office and school, so the search always terminates — and
-      // inventing the person it was hung for is a better beat than proofreading.
-      description: 'תמצאו שלט שכתוב עליו משהו שאסור לעשות. תצלמו אותו בווידאו, ותספרו בקול את הסיפור של האדם שבגללו תלו דווקא את השלט הזה. אסור להמציא שלט בעצמכם.',
-      type: 'photo',
-      difficulty: 5,
-      estimatedMinutes: 8,
-      pointValue: 120,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 25 }),
-    }),
-  },
-  {
-    key: 'escape-route',
-    spot: 'entrance',
-    sourceTemplateKey: 'authored',
-    tags: ['camera', 'thinking', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'indoor',
-      'mall', 'office', 'school',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'educational', 'medium'],
-    difficulty: 4,
-    build: () => anywhere({
-      title: 'מסלול המילוט',
-      description: 'תמצאו את מפת המילוט על הקיר. תסתכלו עליה 30 שניות, ואז תלכו יחד ליציאת החירום הקרובה, בלי להסתכל שוב ובלי לשאול. תצלמו את היציאה שהגעתם אליה, ואז תחזרו למפה ותבדקו: באמת הגעתם לקרובה ביותר?',
-      type: 'photo',
-      difficulty: 4,
-      estimatedMinutes: 7,
-      pointValue: 110,
-      smart: upload(),
-    }),
-  },
 
   // ── Two mission kinds the bank never actually filled ──────────────────────
   //
@@ -4197,97 +3807,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   // earns its place per rule 4 (the constraint IS the mission) — a survey with
   // a real creator payoff, and an audio mission that could not just be a photo
   // mission with the word "record" swapped in.
-  {
-    // A real payoff for the CREATOR, not just a stat filled in: every other
-    // mission scores the team, but this is the one moment the platform asks
-    // the team what they actually enjoyed, mid-run, while it is still fresh —
-    // data no post-run feedback survey ever recovers as accurately. No-prep by
-    // definition (`survey` type has no answer key to configure) and it plays
-    // from literally any stage of any game, which is exactly why the bank
-    // could not skip it any longer.
-    key: 'best-moment-so-far',
-    siting: 'never',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth',
-      'adults', 'corporate', 'easy', 'forest', 'beach', 'park', 'neighborhood',
-      'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 2,
-    build: () => anywhere({
-      title: 'הרגע הכי טוב עד עכשיו',
-      description: 'תעצרו לרגע. כל אחד בתורו אומר בקול מה היה הרגע הכי כיף שלו במשחק עד עכשיו, ולמה דווקא הוא. אחרי שכולם דיברו, תבחרו יחד את התשובה שהכי מתאימה לכם.',
-      type: 'survey',
-      difficulty: 2,
-      estimatedMinutes: 2,
-      pointValue: 50,
-      surveyChoices: [
-        'משימה עם זרים ברחוב',
-        'המשימה הכי יצירתית',
-        'התחרות הפנימית בינינו',
-        'סתם להיות ביחד בחוץ',
-      ],
-    }),
-  },
-  {
-    // A photo asks "what did this look like"; this asks "what did this sound
-    // like" — a genuinely different sense, not a video mission wearing a
-    // different label. The two-different-sounds rule keeps "record five
-    // seconds of silence and call it done" from being the easy way out.
-    key: 'soundscape',
-    sourceTemplateKey: 'authored',
-        tags: ['camera', 'thinking', 'creative', 'noPrep', 'fromAnywhere', 'home', 'mixed',
-      'kids', 'youth', 'adults', 'corporate', 'easy', 'forest', 'beach', 'park',
-      'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 3,
-    build: () => anywhere({
-      title: 'נוף הקול',
-      description: 'תקליטו עשר שניות מהצליל של המקום, בלי לדבר ובלי מוזיקה. צריך לשמוע בהקלטה לפחות שני צלילים שונים.',
-      type: 'photo',
-      difficulty: 3,
-      estimatedMinutes: 4,
-      pointValue: 90,
-      smart: upload({ captureKind: 'audio' }),
-    }),
-  },
-  {
-    // Every quiz in the bank so far is answers/choices; `orderItems` (change:
-    // quiz-ordering) is a real, shipped mechanic with zero representation.
-    // Chosen content is deliberately checkable general knowledge, not local
-    // trivia a bank mission cannot know — five inventions with a real,
-    // undisputed chronological order, same "ask around, no Googling" rule the
-    // other trivia missions use so it stays a field-game beat, not a quiz app.
-    key: 'invention-order',
-    // NOT tagged family: 'trivia-fact' — that family groups the pick-an-answer
-    // quizzes (trivia-bones, trivia-longest-river), which really are one
-    // mechanic with different questions. Dragging five items into
-    // chronological order is a different verb entirely; excluding it from
-    // appearing alongside a fact quiz would remove a pairing that adds
-    // variety, not one that repeats it (see rule 12 — family is for true
-    // mechanical duplicates, not shared theming).
-    //
-    // IS tagged family: 'ordering-quiz', added 2026-08-26 alongside
-    // celebrants-favorites-ranking — that IS the same mechanic (orderItems),
-    // just ranking a preference instead of a chronology (see rule 21), so a
-    // composed game must never show both.
-    family: 'ordering-quiz',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'noPrep', 'fromAnywhere', 'crowded',
-      'school', 'office', 'mall', 'park',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 6,
-    build: () => anywhere({
-      title: 'לפי הסדר הנכון',
-      description: 'תסדרו את חמשת ההמצאות לפי סדר ההמצאה שלהן, מהוותיקה לחדשה. אסור לחפש בגוגל. תשאלו אנשים סביבכם עד שמישהו עוזר לכם לסדר נכון.',
-      type: 'quiz',
-      difficulty: 6,
-      estimatedMinutes: 6,
-      pointValue: 140,
-      // The authored order IS the answer key (server-secret; sanitized to a
-      // per-team shuffled copy) — oldest first, exactly as it must be graded.
-      orderItems: ['הדפוס', 'הטלגרף', 'הטלפון', 'הרדיו', 'הטלוויזיה'],
-      hint: 'רמז: ההמצאה שפועלת בחשמל קדמה להמצאה שמעבירה קול, שקדמה להמצאה שמעבירה תמונה.',
-      hintPenalty: 20,
-    }),
-  },
   {
     // A self-serve `smart_station`: the code lives on a sign/sticker the
     // creator writes and hides themselves — no business owner, no staff
@@ -4303,9 +3822,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // file header warns about, and the same fix as the-hidden-key:
     // `hideLocation` + a separate, honestly-rough `locationClue`.
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
-      'park', 'neighborhood', 'school', 'office',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'neighborhood', 'school', 'office', 'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'hunt'],
     difficulty: 3,
     transitMinutes: 4,
     setup: [
@@ -4333,7 +3850,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'הקוד הנסתר',
-      description: 'מוסתר כאן קוד בן 4 ספרות, כתוב או מודבק. תמצאו אותו ותכתבו אותו כאן. אל תזיזו אותו, הקבוצה הבאה צריכה אותו במקום.',
+      description: 'תמצאו את הקוד בן 4 הספרות שמוסתר כאן, ותכתבו אותו. אל תזיזו אותו, הקבוצה הבאה צריכה אותו.',
       type: 'smart_station',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -4359,18 +3876,18 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'paper-airplane-trial',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-    tags: ['action', 'creative', 'camera', 'needsSetup', 'fromAnywhere',
-      'home', 'park', 'kids', 'youth', 'adults', 'mixed', 'easy'],
+    // No `home`: 10 steps of flight does not fit in a living room.
+    tags: ['action', 'creative', 'camera', 'needsSetup', 'fromAnywhere', 'park', 'kids', 'mixed', 'easy', 'building', 'physical'],
     difficulty: 3,
     minAge: 6,
     setup: [{
       field: 'description',
       required: false,
-      prompt: 'המשימה צריכה דף נייר לכל קבוצה, תחלקו אותו מראש בהרשמה או בעמדת פתיחה. אפשר גם לערוך את המשימה כך שהיעד יהיה להטיס את המטוס מנקודה אחת לשנייה שתבחרו, במקום מדידה בכפות רגליים.\n\nThis mission needs one sheet of paper per team, hand it out at registration or a start station. You can also edit it so the goal is flying the plane from one point to another you choose, instead of measuring in foot lengths.',
+      prompt: 'המשימה צריכה דף נייר לכל קבוצה, תחלקו אותו מראש בהרשמה או בעמדת פתיחה. אפשר גם לערוך את המשימה כך שהיעד יהיה להטיס את המטוס מנקודה אחת לשנייה שתבחרו, במקום ספירת צעדים.\n\nThis mission needs one sheet of paper per team, hand it out at registration or a start station. You can also edit it so the goal is flying the plane from one point to another you choose, instead of counting steps.',
     }],
     build: () => anywhere({
       title: 'מבחן הטיסה',
-      description: 'תקפלו מטוס נייר ותזרקו אותו. הטיסה צריכה לעבור לפחות חמישה אורכי כף רגל, עקב לבוהן, מנקודת הזריקה. תצלמו בווידאו את הזריקה ואת המדידה.',
+      description: 'תקפלו מטוס נייר שעף לפחות 10 צעדים גדולים מנקודת הזריקה. תצלמו בסרטון אחד את הזריקה ואת ספירת הצעדים.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -4386,23 +3903,18 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'waiters-race',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-    tags: ['camera', 'action', 'needsSetup', 'fromAnywhere',
-      'home', 'park', 'kids', 'youth', 'adults', 'mixed', 'easy'],
+    // A bottle standing on an open palm needs nothing the team does not carry.
+    tags: ['camera', 'action', 'noPrep', 'fromAnywhere', 'home', 'park', 'kids', 'mixed', 'easy', 'physical'],
     difficulty: 3,
     minAge: 6,
-    setup: [{
-      field: 'description',
-      required: false,
-      prompt: 'המשימה עובדת הכי טוב עם מגש, צלחת או ספר וחפץ קטן ולא שביר לכל קבוצה. אפשר לחלק אותם מראש, או לתת לקבוצות למצוא בעצמן משהו מתאים.\n\nWorks best with a tray, plate, or book and a small unbreakable object per team. Hand them out in advance, or let teams find something suitable on their own.',
-    }],
     build: () => anywhere({
       title: 'מרוץ המלצרים',
-      description: 'תושיטו יד אחת קדימה לגמרי, כף היד פונה למעלה. תניחו עליה משטח שטוח (מגש, צלחת או ספר) ועליו חפץ קטן. היד השנייה נשארת בכיס. תלכו 20 צעדים ותספרו אותם בקול, בלי לרוץ ובלי לייצב עם היד השנייה. נפל? תתחילו מצעד 0. תצלמו הכול בווידאו.',
+      description: 'כל אחד מכם הולך 20 צעדים עם בקבוק עומד על כף היד הפתוחה, והיד השנייה בכיס. נפל? מתחילים מאפס. סרטון אחד.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 6,
       pointValue: 90,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
     }),
   },
 
@@ -4414,8 +3926,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     // youth-find-place-one already uses — so nothing needs to happen live.
     key: 'kims-game',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'locationBased', 'indoor', 'outdoor',
-      'home', 'kids', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
+    // Kids and families only: spot the difference is a kids' game (L23).
+    tags: ['thinking', 'needsSetup', 'locationBased', 'indoor', 'outdoor', 'home', 'kids', 'mixed', 'medium',
+      'observation', 'puzzle'],
     difficulty: 5,
     transitMinutes: 3,
     setup: [
@@ -4438,7 +3951,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'משחק קים',
-      description: 'תסתכלו על התמונה שמצורפת למשימה. ככה המקום נראה קודם. עכשיו תסתכלו על מה שלפניכם ותמצאו מה השתנה.',
+      description: 'מה השתנה כאן מאז שצולמה התמונה?',
       type: 'quiz',
       difficulty: 5,
       estimatedMinutes: 6,
@@ -4454,63 +3967,8 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
 
   // ── Honesty-based by design — see rule 29 on why no video is required here ─
-  {
-    // The shell game itself has no server-checkable answer (rule 14) — accepted
-    // as fully honesty-based, same footing as do-someone-a-favour. Backed by
-    // real supervision context rather than a video requirement: a birthday
-    // party has an organizer naturally nearby, which is the actual
-    // accountability here (rule 29).
-    key: 'wheres-the-ball',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'action', 'needsSetup', 'fromAnywhere',
-      'home', 'kids', 'youth', 'mixed', 'medium'],
-    difficulty: 4,
-    setup: [{
-      field: 'description',
-      required: false,
-      prompt: 'המשימה צריכה שלוש כוסות אטומות זהות וחפץ קטן לכל קבוצה. אפשר לחלק אותם מראש, או לכתוב כאן במה להשתמש במקום.\n\nThis one needs three identical opaque cups and a small object per team. Hand them out in advance, or write here what to use instead.',
-    }],
-    build: () => anywhere({
-      title: 'איפה הכדור',
-      description: 'תשחקו במשחק הכוסות: אחד מכם מניח חפץ קטן מתחת לאחת משלוש כוסות, מערבב לפחות חמש פעמים, והשאר מנחשים איפה הוא. תשחקו שלושה סיבובים, ותסמנו כאן שסיימתם.',
-      type: 'self_report',
-      difficulty: 4,
-      estimatedMinutes: 6,
-      pointValue: 90,
-    }),
-  },
 
   // ── Real, specific, and survey-able — not genericized away (rule 20) ──────
-  {
-    key: 'crossing-signal-words',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor',
-      'neighborhood', 'cityCenter', 'youth', 'adults', 'mixed', 'medium'],
-    difficulty: 6,
-    transitMinutes: 5,
-    setup: [
-      PLACE_IT,
-      {
-        field: 'numericAnswer',
-        required: true,
-        prompt: 'תלחצו בעצמכם על כפתור הרמזור הנגיש שסימנתם, ותספרו כמה מילים ההכרזה הקולית אומרת. תכתבו כאן את המספר האמיתי.\n\nPress the accessible crossing signal button you marked yourself, and count how many words its voice announcement speaks. Enter the real number here.',
-      },
-    ],
-    build: () => sited({
-      title: 'כמה מילים אומר הרמזור',
-      description: 'תמצאו את הרמזור הנגיש שסומן לכם ותלחצו על הכפתור שלו. תספרו בקול כמה מילים ההכרזה הקולית אומרת, ותכתבו את המספר.',
-      type: 'numeric',
-      difficulty: 6,
-      estimatedMinutes: 5,
-      pointValue: 130,
-      numericAnswer: 4,
-      numericTolerance: 1,
-      hint: 'רמז: יש רעש רקע? תבקשו מהעוברים והשבים לשתוק לרגע ותלחצו שוב.',
-      hintPenalty: 20,
-      // A public fixture, not a shared object — any number of teams can press it.
-      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
-    }),
-  },
 
   // ── A ranking, not a fake timeline — rule 21 ────────────────────────────────
   {
@@ -4521,10 +3979,8 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Same real mechanic as invention-order (orderItems), different content and
     // a genuinely different ordering RELATION (preference, not chronology) —
     // family groups them so a composed game never shows both.
-    family: 'ordering-quiz',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'fromAnywhere',
-      'home', 'kids', 'youth', 'mixed', 'medium'],
+    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'youth', 'mixed', 'medium', 'calm'],
     difficulty: 5,
     setup: [{
       field: 'orderItems',
@@ -4550,13 +4006,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     // "החוגג/ת" — there is no celebrant at a team offsite. See TaskBankEntry.occasions.
     occasions: ['birthday', 'mitzvah'],
     sourceTemplateKey: 'authored',
-        tags: ['action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'youth', 'adults',
-      'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall',
-      'office', 'school', 'indoor', 'outdoor'],
+        // Kids: a spelling game for a party table (L23).
+        tags: ['action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor', 'humor'],
     difficulty: 2,
     build: () => anywhere({
       title: 'מבחן המראה',
-      description: 'כל אחד מכם אומר את השם של החוגג/ת הפוך, אות אחר אות, בקול מול המצלמה. מי שטועה מתחיל מהתחלה.',
+      description: 'תגידו כולם ביחד, בקול מול המצלמה, את השם של החוגג/ת הפוך, אות אחר אות. מישהו טעה? מתחילים מהתחלה.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 3,
@@ -4573,12 +4028,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     // team-building game could end on it.
     occasions: ['birthday', 'mitzvah'],
     sourceTemplateKey: 'authored',
-    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
-      'home', 'kids', 'youth', 'adults', 'mixed', 'easy'],
+    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'kids', 'youth', 'adults', 'mixed', 'easy', 'kindness', 'calm'],
     difficulty: 2,
     build: () => anywhere({
       title: 'איחול לחוגג/ת',
-      description: 'כל אחד מכם כותב שורה אחת של איחול לחוגג/ת, וכל השורות נכנסות פנימה. עכשיו תקראו את האיחול המלא מול המצלמה, שורה אחרי שורה, כל אחד את שלו.',
+      description: 'כל אחד מכם כותב שורה אחת של איחול לחוגג/ת. תקראו את האיחול מול המצלמה, כל אחד את השורה שלו.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 4,
@@ -4587,20 +4041,22 @@ export const TASK_BANK: TaskBankEntry[] = [
     }),
   },
   {
-    key: 'count-the-candles',
-    // A real cake with candles on it. Birthday only.
-    occasions: ['birthday'],
-    sourceTemplateKey: 'authored',
-    tags: ['camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    // birthday-wish for a wedding: the clip is a gift the couple actually keeps,
+    // which is the point of a cocktail-hour finale. Locked to weddings.
+    key: 'couple-wish',
+    siting: 'never',
+    occasions: ['wedding'],
+    sourceTemplateKey: 'mission-studio',
+    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'adults', 'mixed', 'easy', 'kindness', 'calm'],
     difficulty: 2,
     build: () => anywhere({
-      title: 'ספירת הנרות',
-      description: 'תמצאו את העוגה של החוגג/ת. תצלמו אותה בווידאו, ותוך כדי תספרו בקול כמה נרות יש עליה.',
+      title: 'איחול לזוג',
+      description: 'כל אחד מכם כותב שורה אחת של איחול לזוג. תקראו את האיחול מול המצלמה, כל אחד את השורה שלו.',
       type: 'photo',
       difficulty: 2,
-      estimatedMinutes: 3,
-      pointValue: 70,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 20 }),
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
     }),
   },
 
@@ -4615,9 +4071,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'height-line-up',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'teamwork', 'action', 'camera', 'noPrep', 'fromAnywhere',
-      'park', 'school', 'beach', 'neighborhood', 'home',
-      'kids', 'youth', 'mixed', 'easy'],
+    // Kids and families only: lining up is a kids' game; teens read it as a gym drill (lessons L6).
+    tags: ['start', 'teamwork', 'action', 'camera', 'noPrep', 'fromAnywhere', 'park', 'school', 'beach',
+      'neighborhood', 'home', 'kids', 'mixed', 'easy', 'calm'],
     difficulty: 2,
     build: () => anywhere({
       title: 'שורה לפי גובה',
@@ -4631,58 +4087,6 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload(),
     }),
   },
-  {
-    // The bank had no mission built around a picture the CREATOR supplies, even
-    // though attaching one is a control the Builder has always had. It ships
-    // with a real, famous default (rule 24 — Quick Setup replaces a working
-    // default, never supplies a missing one), so it is fully playable with zero
-    // prep, and the optional step lets a creator swap in a statue that actually
-    // stands where they are playing.
-    key: 'statue-remake',
-    spot: 'anyCorner',
-    sourceTemplateKey: 'authored',
-    family: 'recreate-famous-image',
-    tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
-      'park', 'school', 'home', 'mall', 'cityCenter',
-      'kids', 'youth', 'mixed', 'easy'],
-    difficulty: 3,
-    setup: [{
-      field: 'media',
-      prompt: 'אפשר לצרף תמונה של פסל או של תמונה מפורסמת שתרצו שהקבוצות ישחזרו. בלי תמונה המשימה עובדת כמו שהיא.\n\nOptional: attach a photo of a statue or a famous picture for the teams to recreate. Without one the mission works exactly as written.',
-    }],
-    build: () => anywhere({
-      title: 'פסל חי',
-      description: 'תשחזרו בגופכם את הפסל "החושב" של רודן: ישיבה כפופה, מרפק על הברך, אגרוף מתחת לסנטר. אחד מכם הפסל והשאר מבקרים במוזיאון שמצלמים אותו. אם צורפה למשימה תמונה, תשחזרו את מה שרואים בה במקום.',
-      type: 'photo',
-      difficulty: 3,
-      estimatedMinutes: 5,
-      pointValue: 80,
-      smart: upload(),
-    }),
-  },
-  {
-    // The bonding beat the bank never had: not a stunt, not a puzzle, just the
-    // group hearing something about each other. "Sit down and tell us how it is
-    // going" was cut from this bank as padding (rule 11), and rightly — the
-    // difference is the constraints: one sentence each, no repeated topic, and
-    // everyone has to be in the frame, so it ends somewhere definite.
-    key: 'story-round',
-    siting: 'never',
-    sourceTemplateKey: 'authored',
-    tags: ['teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere',
-      'park', 'school', 'home', 'beach', 'neighborhood',
-      'kids', 'youth', 'mixed', 'easy'],
-    difficulty: 3,
-    build: () => anywhere({
-      title: 'סיבוב סיפורים',
-      description: 'סרטון אחד: כל אחד מכם מספר במשפט אחד על משהו מצחיק שקרה לו. כולם מופיעים בסרטון.',
-      type: 'photo',
-      difficulty: 3,
-      estimatedMinutes: 6,
-      pointValue: 90,
-      smart: upload({ captureKind: 'video', videoMinSeconds: 20, videoMaxSeconds: 60 }),
-    }),
-  },
 
   // ── A real payoff behind the puzzle, not an arbitrary word (rule 23) ──────
   // Three difficulty levels of the same mechanic, one real authored anagram
@@ -4692,9 +4096,8 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'anagram-easy',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
-        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'youth', 'mixed', 'easy',
-      'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school',
-      'indoor', 'outdoor'],
+    // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
+        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'office', 'school', 'indoor', 'puzzle', 'calm'],
     difficulty: 3,
     build: () => anywhere({
       title: 'חידת האותיות הקצרה',
@@ -4712,9 +4115,8 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'anagram-medium',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
-        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'mixed',
-      'medium', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office',
-      'school', 'indoor', 'outdoor'],
+    // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
+        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'office', 'school', 'indoor', 'puzzle', 'calm'],
     difficulty: 5,
     build: () => anywhere({
       title: 'חידת האותיות',
@@ -4732,9 +4134,8 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'anagram-hard',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
-        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'adults', 'corporate', 'mixed',
-      'hard', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office',
-      'school', 'indoor', 'outdoor'],
+    // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
+        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'hard', 'office', 'school', 'indoor', 'puzzle', 'calm'],
     difficulty: 7,
     build: () => anywhere({
       title: 'חידת האותיות הארוכה',
@@ -4754,8 +4155,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'the-combination-lock',
     family: 'combination-lock',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor',
-      'cityCenter', 'neighborhood', 'adults', 'corporate', 'hard'],
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'neighborhood', 'adults', 'corporate', 'youth', 'hard', 'puzzle', 'observation'],
     difficulty: 7,
     transitMinutes: 6,
     setup: [
@@ -4773,7 +4173,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'מנעול המספרים',
-      description: 'בשטח מחכות לכם שלוש בדיקות: [הוראות ליוצר: תתארו כאן בדיוק מה לספור או לקרוא בכל אחת]. תעשו את כולן ותחברו את התוצאות לקוד בן שלוש ספרות.',
+      description: 'תרכיבו קוד בן שלוש ספרות: [הוראות ליוצר: מה לספור או לקרוא לכל ספרה, לפי הסדר].',
       type: 'quiz',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -4786,33 +4186,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     }),
   },
   {
-    // Identical-kit-per-team, same precedent as challenge-shampoo-pitch — no
-    // hunting, no scarcity, every team assembles their own copy.
-    key: 'puzzle-code',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'home', 'adults', 'corporate', 'hard'],
-    difficulty: 7,
-    setup: [{
-      field: 'answers',
-      required: true,
-      prompt: 'תדפיסו תמונה זהה לכל קבוצה ותגזרו אותה לשישה עד שמונה חלקים. תכתבו תו אחד בפינת הגב של כל חלק, ותקבעו מראש סדר קריאה. תכתבו כאן את הקוד שמתקבל מהרכבה נכונה.\n\nPrint an identical image per team and cut it into 6 to 8 pieces. Write one character in the back corner of each piece, and decide a reading order in advance. Enter the code a correct assembly produces here.',
-    }],
-    build: () => anywhere({
-      title: 'פאזל הקוד',
-      description: 'תרכיבו את הפאזל שקיבלתם לתמונה שלמה. תהפכו את החלקים ותקראו את הסימנים שבגב, לפי סדר ההרכבה. תכתבו כאן את הקוד שיצא.',
-      type: 'quiz',
-      difficulty: 7,
-      estimatedMinutes: 10,
-      pointValue: 160,
-      answers: ['ABCD1234'],
-      hint: 'רמז: תרכיבו קודם לפי הצבעים והצורות שבתמונה, ורק אז תהפכו לקרוא את הקוד.',
-      hintPenalty: 20,
-    }),
-  },
-  {
     key: 'mystery-gift',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'puzzle', 'calm'],
     difficulty: 3,
     minAge: 6,
     setup: [{
@@ -4822,7 +4198,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'מתנת התעלומה',
-      description: 'קיבלתם חבילה עטופה. מותר למשש, להרים ולנער בעדינות. אסור לפתוח. יש לכם ניחוש אחד: תכתבו מה אתם חושבים שיש בפנים.',
+      description: 'מה יש בחבילה העטופה? מותר למשש, להרים ולנער בעדינות, אבל לא לפתוח. יש לכם ניחוש אחד.',
       type: 'quiz',
       difficulty: 3,
       estimatedMinutes: 4,
@@ -4837,7 +4213,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // there is never a "which one is correct" ambiguity for the team.
     key: 'balloon-message',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'medium'],
+    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'medium', 'hunt'],
     difficulty: 4,
     setup: [
       {
@@ -4853,7 +4229,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => anywhere({
       title: 'הודעת הבלון',
-      description: 'בין כל הבלונים, תמצאו בלון בצבע [הוראות ליוצר: תכתבו כאן את הצבע שבחרתם]. תפוצצו אותו או תפתחו את הקשר, איך שבא לכם, ותוציאו את הפתק. תאספו אחריכם את השאריות. תכתבו כאן את הקוד שעל הפתק.',
+      description: 'בין כל הבלונים, תמצאו בלון בצבע [הוראות ליוצר: תכתבו כאן את הצבע שבחרתם]. בפנים יש פתק עם קוד, תכתבו אותו כאן ותאספו את השאריות.',
       type: 'quiz',
       difficulty: 4,
       estimatedMinutes: 5,
@@ -4870,8 +4246,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'color-code-trail',
     family: 'combination-lock',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
-      'home', 'park', 'kids', 'mixed', 'medium'],
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'home', 'park', 'kids', 'mixed', 'medium', 'hunt', 'puzzle'],
     difficulty: 5,
     transitMinutes: 5,
     setup: [
@@ -4916,93 +4291,13 @@ export const TASK_BANK: TaskBankEntry[] = [
   // see rule 15 (ship the real content, not a mechanic label).
   // ══════════════════════════════════════════════════════════════════════════
   {
-    // Rule 23 (a riddle needs a payoff): the classic echo riddle's answer is the
-    // one thing in the room that can genuinely answer back — teams that read it
-    // aloud usually hear it before they solve it.
-    key: 'echo-riddle',
-    sourceTemplateKey: 'authored',
-        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate',
-      'mixed', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall',
-      'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 4,
-    build: () => anywhere({
-      title: 'חידת ההד',
-      description: 'מדבר בלי פה, שומע בלי אוזניים, נולד מהרים ומת בשקט. מי אני? אסור לחפש בגוגל. תכתבו את התשובה במילה אחת.',
-      type: 'quiz',
-      difficulty: 4,
-      estimatedMinutes: 3,
-      pointValue: 110,
-      answers: ['הד'],
-      hint: 'רמז: תצעקו במקום ריק וסגור, ותקשיבו למה שחוזר אליכם.',
-      hintPenalty: 15,
-    }),
-  },
-  {
-    // A real lateral-thinking calculation with one committed answer, not a
-    // decorative "add these up" — the two facts it leans on (spider legs, days
-    // in a week) are true for every reader, so nothing here can come out
-    // ambiguous the way a venue-dependent count could (rule 8/31).
-    key: 'vault-combination-riddle',
-    sourceTemplateKey: 'authored',
-        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults', 'corporate',
-      'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall',
-      'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 3,
-    build: () => anywhere({
-      title: 'פיצוח הכספת',
-      description: 'הקוד של הכספת הוא מספר הרגליים של עכביש ועוד מספר הימים בשבוע. תחברו אותם ותכתבו את התוצאה.',
-      type: 'numeric',
-      difficulty: 3,
-      estimatedMinutes: 2,
-      pointValue: 90,
-      numericAnswer: 15,
-      numericTolerance: 0,
-      hint: 'רמז: לעכביש יש 8 רגליים. בשבוע יש 7 ימים.',
-      hintPenalty: 10,
-    }),
-  },
-  {
-    // The bank's `sequence` type had exactly ONE representative
-    // (team-decision-drill) across 87 entries before this one — and that entry
-    // needs a required setup step (a real value to arrive at), so there was no
-    // zero-prep sequence mission at all. This one needs nothing from the creator.
-    //
-    // It also shipped UNSOLVABLE and stayed that way (rule 77): step 2 demanded a
-    // secret code word that appeared nowhere — not in the prompt, the
-    // description, a hint, media or a setup field — in a `sequence`, the one type
-    // where a wall on one step blocks every step after it. The briefing now
-    // carries the word, which is what the fiction wanted anyway, and the
-    // difficulty is re-priced from 5 to 3 (rule 75): what is left is doing three
-    // things in the right order.
-    key: 'disarm-the-device',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'adults',
-      'corporate', 'mixed', 'easy', 'forest', 'beach', 'park', 'neighborhood',
-      'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 3,
-    build: () => anywhere({
-      title: 'נטרול המנגנון',
-      description: 'שלושה סוכנים לפניכם נכשלו כאן. מילת הקוד לנטרול היא "פרוטוקול". תעשו את שלושת השלבים בדיוק לפי הסדר.',
-      type: 'sequence',
-      difficulty: 3,
-      estimatedMinutes: 4,
-      pointValue: 120,
-      steps: [
-        { id: uuid(), prompt: 'שלב 1: תחברו את החוט הכחול. תסמנו כשסיימתם.' },
-        { id: uuid(), prompt: 'שלב 2: תכתבו את מילת הקוד הסודית.', answer: 'פרוטוקול' },
-        { id: uuid(), prompt: 'שלב 3: תיקחו נשימה עמוקה, ותסמנו לנטרול סופי.' },
-      ],
-    }),
-  },
-  {
     // A classic riddle whose answer is guaranteed to exist wherever this is
     // played (rule 31): every home, office and school bathroom holds one. The
     // youngest-friendly entry of the three, and the only one carrying `home`.
     key: 'household-riddle-comb',
     sourceTemplateKey: 'authored',
-        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'forest',
-      'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor',
-      'outdoor'],
+    // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
+        tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'office', 'school', 'indoor', 'puzzle', 'hunt'],
     difficulty: 2,
     minAge: 6,
     build: () => anywhere({
@@ -5025,7 +4320,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'blanket-fort',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'building'],
     difficulty: 3,
     minAge: 6,
     build: () => anywhere({
@@ -5057,27 +4352,6 @@ export const TASK_BANK: TaskBankEntry[] = [
 
   // ── Finales: the pool goes 5 → 8, and from one flavour to three ───────────
   {
-    // The cinematic one. Rule 33: every member has their own beat (each peels
-    // off separately), so a member who did not participate is visible in the
-    // result rather than merely absent from it — and the clip is the thing a
-    // team actually keeps, which is what a finale is for.
-    key: 'finish-the-credits',
-    sourceTemplateKey: 'authored',
-    tags: ['finish', 'camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home',
-      'park', 'beach', 'forest', 'school', 'neighborhood', 'cityCenter',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 4,
-    build: () => anywhere({
-      title: 'הקרדיטים',
-      description: 'תצלמו את סצנת הסיום של הסרט שלכם: כל הקבוצה הולכת יחד מהמצלמה והלאה, לאט, בלי להסתכל אחורה. כל כמה שניות אחד מכם פורש הצידה ונעצר, עד שנשאר אחד. הוא מסתובב למצלמה ואומר משפט אחד לסיום.',
-      type: 'photo',
-      difficulty: 4,
-      estimatedMinutes: 6,
-      pointValue: 130,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
-    }),
-  },
-  {
     // The high-stakes one, and the finale a 14-17 action game was missing. Rule
     // 37: the team CHOOSES the move before it knows whether it can land it five
     // times in a row. Rule 33: it completes only when every member has done it,
@@ -5086,19 +4360,17 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'finish-all-or-nothing',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-    tags: ['finish', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home',
-      'park', 'beach', 'school', 'neighborhood',
-      'mixed', 'kids', 'youth', 'adults', 'medium'],
+    tags: ['finish', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'park', 'beach', 'school', 'neighborhood', 'mixed', 'kids', 'medium', 'physical'],
     difficulty: 6,
     build: () => anywhere({
       title: 'כולם או אף אחד',
-      description: 'תבחרו יחד פעולה פיזית אחת שכל אחד מכם מסוגל לעשות: קפיצה על רגל אחת, סיבוב שלם באוויר, מסירה מאחורי הגב. עכשיו כל אחד מכם עושה אותה בזה אחר זה ברצף אחד, בלי הפסקה ובלי חיתוך. מישהו פספס? חוזרים לראשון. תצלמו את הסיבוב שהצליח.',
+      description: 'סרטון אחד בלי חיתוך: כל אחד מכם בתורו תופס מאחורי הגב חפץ שזורקים לו. מישהו פספס? חוזרים לראשון.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 8,
       pointValue: 160,
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
-      hint: 'רמז: תבחרו את הפעולה לפי החלש ביותר בקבוצה ולא לפי החזק. תנועה מרשימה שנופלת בניסיון החמישי שווה פחות מתנועה פשוטה שעוברת.',
+      hint: 'רמז: חפץ רך, זריקה בקשת גבוהה ואיטית, ושתי ידיים פתוחות מאחורי הגב כמו סל.',
       hintPenalty: 20,
     }),
   },
@@ -5110,16 +4382,16 @@ export const TASK_BANK: TaskBankEntry[] = [
     // go-around-the-circle mechanic with a shorter unit (rule 12).
     key: 'finish-what-we-didnt-know',
     siting: 'never',
+    // A debrief belongs to a peula or a team day, never to a competitive race (lessons L26).
+    occasions: ['youthGroup', 'teamBuilding'],
     sourceTemplateKey: 'authored',
     // `closing-round` dissolved: its other half, `finish-one-word-each`, was deleted
     // in the owner's curation pass (rule 82).
-        tags: ['finish', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'forest', 'beach', 'park',
-      'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
+        tags: ['finish', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor', 'calm', 'kindness'],
     difficulty: 3,
     build: () => anywhere({
       title: 'הדבר שלא ידענו',
-      description: 'תעמדו במעגל ותצלמו. כל אחד בתורו אומר משפט אחד על מישהו אחר בקבוצה: דבר אחד שגילה עליו היום ולא ידע קודם. כל אחד מדבר פעם אחת, ועל כל אחד נאמר משהו.',
+      description: 'סרטון אחד במעגל: כל אחד אומר משפט על מישהו אחר בקבוצה, דבר שגילה עליו היום. על כל אחד נאמר משהו.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 5,
@@ -5130,29 +4402,6 @@ export const TASK_BANK: TaskBankEntry[] = [
 
   // ── Openers: 6 → 8, and the first one that asks the team to decide ────────
   {
-    // Every existing opener warms the group up; none asks it to DECIDE anything
-    // (rule 37). This is a real commitment made before any outcome is known, and
-    // consensus is the gate (rule 33) so the loudest member cannot supply it
-    // alone. The "something you give up" clause is rule 17: without it every
-    // team writes three rules it was going to follow anyway.
-    key: 'open-team-pact',
-    siting: 'never',
-    sourceTemplateKey: 'authored',
-        tags: ['start', 'teamwork', 'thinking', 'creative', 'camera', 'noPrep', 'fromAnywhere',
-      'home', 'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'forest', 'beach',
-      'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
-    difficulty: 3,
-    build: () => anywhere({
-      title: 'הסכם הצוות',
-      description: 'לפני שמתחילים: תסכימו על שלושה כללים שהקבוצה שלכם משחקת לפיהם היום. אחד מהם חייב להיות משהו שאתם מוותרים עליו, לא רק משהו שאתם עושים. תכתבו אותם על מה שיש לכם (דף, היד, פתק בטלפון), כולם חותמים, ותצלמו.',
-      type: 'photo',
-      difficulty: 3,
-      estimatedMinutes: 5,
-      pointValue: 90,
-      smart: upload(),
-    }),
-  },
-  {
     // The placeless ACTION opener for teenagers, the exact band the composed
     // game that triggered this pass was serving. Rule 33: one continuous shot
     // with a fixed per-member unit, so five players produce a visibly different
@@ -5160,9 +4409,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'open-one-take-intro',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'action', 'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home',
-      'park', 'school', 'neighborhood', 'beach', 'cityCenter',
-      'mixed', 'youth', 'kids', 'adults', 'medium'],
+    tags: ['start', 'action', 'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'neighborhood', 'beach', 'cityCenter', 'mixed', 'youth', 'kids', 'adults', 'medium', 'performance', 'humor'],
     difficulty: 4,
     build: () => anywhere({
       title: 'טייק אחד',
@@ -5187,13 +4434,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'rare-triple-plate',
     sourceTemplateKey: 'authored',
     family: 'rare-find',
-    tags: ['action', 'thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
-      'neighborhood', 'cityCenter', 'mall',
-      'mixed', 'kids', 'youth', 'adults', 'corporate', 'medium'],
+    tags: ['action', 'thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'neighborhood', 'cityCenter', 'mall', 'mixed', 'kids', 'youth', 'corporate', 'medium', 'hunt', 'observation'],
     difficulty: 5,
     build: () => anywhere({
       title: 'שלוש זהות',
-      description: 'תתפצלו לחפש ברחובות שונים, עד שתמצאו רכב חונה שבלוחית הרישוי שלו מופיעה אותה ספרה שלוש פעמים לפחות. תצטלמו ליד הרכב, כך שרואים את הלוחית בבירור.',
+      description: 'מצאו רכב חונה שבלוחית הרישוי שלו מופיעה אותה ספרה שלוש פעמים לפחות וצלמו.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 9,
@@ -5212,13 +4457,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'namesake-stranger',
     sourceTemplateKey: 'authored',
     family: 'rare-find',
-    tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded',
-      'cityCenter', 'mall', 'neighborhood', 'beach',
-      'mixed', 'youth', 'adults', 'corporate', 'hard'],
+    tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'cityCenter', 'mall', 'neighborhood', 'beach', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'strangers', 'hunt'],
     difficulty: 7,
     build: () => anywhere({
       title: 'שם משותף',
-      description: 'תתפצלו ותשאלו אנשים שונים בשמם, עד שתמצאו אדם זר שקוראים לו בדיוק כמו אחד מכם. תציגו את עצמכם, תספרו לו שאתם באמצע משחק ולמה אתם שואלים, ותבקשו רשות לתמונה שלו עם מי שקוראים לו אותו דבר.',
+      description: 'תמצאו מישהו עם שם זהה לאחד מכם ותצטלמו איתו.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -5237,13 +4480,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     // (rule 40) — the team can see for itself whether it actually taught it.
     key: 'teach-a-stranger',
     sourceTemplateKey: 'authored',
-    tags: ['action', 'creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'crowded',
-      'cityCenter', 'mall', 'neighborhood', 'beach', 'park',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
+    tags: ['action', 'creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'crowded', 'cityCenter', 'mall', 'neighborhood', 'beach', 'park', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'strangers', 'dare'],
     difficulty: 6,
     build: () => anywhere({
       title: 'תלמידים לרגע',
-      description: 'תמציאו עכשיו לחיצת יד משלכם: כל אחד מכם מוסיף בתורו תנועה אחת, וכולן נשארות בפנים. תלמדו אותה לאדם זר עד שהוא עושה את כל התנועות נכון לבד. תבקשו ממנו רשות לצלם אותו למשחק, ותצלמו אותו עושה אותה בלי שאתם מובילים.',
+      description: 'המציאו עכשיו לחיצת יד משלכם עם אדם זר של לפחות 4 תנועות.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 10,
@@ -5255,28 +4496,6 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
 
   // ── Rule 34: provocation with zero authoring cost ─────────────────────────
-  {
-    // The Situationist dérive — the constraint generates the experience, so the
-    // mission needs no pin, no prep and nothing planted, and still puts the team
-    // somewhere they would never have chosen. Tilden's provocation at its
-    // cheapest. Bounded to three turns AND a return leg on purpose: an unbounded
-    // drift would swallow the route it is embedded in.
-    key: 'drift-three-turns',
-    sourceTemplateKey: 'authored',
-    tags: ['thinking', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere',
-      'neighborhood', 'cityCenter', 'park',
-      'mixed', 'youth', 'adults', 'corporate', 'medium'],
-    difficulty: 5,
-    build: () => anywhere({
-      title: 'שלוש פניות',
-      description: 'מכאן: פנייה ראשונה ימינה, אחר כך ראשונה שמאלה, אחר כך ראשונה ימינה שוב. תעצרו בדיוק איפה שנגמרה השלישית. תצלמו את מה שמולכם ותגידו במשפט אחד למה לא הייתם מגיעים לכאן לבד. ואז תחזרו.',
-      type: 'photo',
-      difficulty: 5,
-      estimatedMinutes: 9,
-      pointValue: 120,
-      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
-    }),
-  },
 
   // ── The bank's first `pausesTimer` mission ────────────────────────────────
   {
@@ -5289,9 +4508,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // mechanic label.
     key: 'thinking-room',
     sourceTemplateKey: 'authored',
-    tags: [
-      'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'park',
-      'mixed', 'youth', 'adults', 'corporate', 'hard', 'educational'],
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'park', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'educational', 'puzzle', 'calm'],
     difficulty: 8,
     build: () => anywhere({
       title: 'חדר החשיבה',
@@ -5325,9 +4542,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'family-photo-remake',
     sourceTemplateKey: 'authored',
     family: 'recreate-famous-image',
-        tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home',
-      'mixed', 'kids', 'youth', 'adults', 'medium', 'forest', 'beach', 'park',
-      'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor'],
+        tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth', 'adults', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor', 'humor', 'performance'],
     difficulty: 4,
     build: () => anywhere({
       title: 'התמונה מלפני שנים',
@@ -5350,9 +4565,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'living-room-obstacle',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: [
-      'action', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'kids', 'medium', 'mixed'],
+    tags: ['action', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'kids', 'medium', 'mixed', 'building', 'physical'],
     difficulty: 5,
     build: () => anywhere({
       title: 'מסלול המכשולים מהסלון',
@@ -5378,9 +4591,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'blind-describe',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: [
-      'thinking', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'office', 'school', 'mall', 'mixed', 'kids', 'youth', 'corporate', 'medium', 'adults'],
+    tags: ['thinking', 'teamwork', 'creative', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'office', 'school', 'mall', 'mixed', 'kids', 'youth', 'corporate', 'medium', 'adults', 'puzzle'],
     difficulty: 6,
     build: () => anywhere({
       title: 'תתארו לי בלי להגיד',
@@ -5455,13 +4666,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'chore-reset',
-    tags: ['chores', 'camera', 'action', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'mixed', 'kids', 'youth', 'adults', 'easy'],
+    tags: ['chores', 'camera', 'action', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'mixed', 'kids', 'youth', 'adults', 'easy', 'kindness'],
     difficulty: 3,
     minAge: 5,
     build: () => anywhere({
       title: 'לפני ואחרי',
-      description: 'תבחרו משטח אחד שלא במיטבו: שולחן, שיש או מדף. תצלמו אותו כמו שהוא. עכשיו תפנו ותנקו אותו, ותצלמו שוב מאותה זווית בדיוק. תצטלמו לידו בסוף.',
+      description: 'תבחרו משטח אחד שלא במיטבו, כמו שולחן או שיש. תצלמו אותו, תפנו ותנקו, ותצלמו שוב מאותה זווית בדיוק.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 10,
@@ -5477,8 +4687,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chore-sock-pairs',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['chores', 'camera', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'kids', 'mixed', 'easy'],
+    tags: ['chores', 'camera', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'kids', 'mixed', 'easy', 'kindness', 'againstClock'],
     difficulty: 2,
     minAge: 5,
     build: () => anywhere({
@@ -5498,8 +4707,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'chore-reset',
-    tags: ['chores', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'kids', 'youth', 'mixed', 'easy'],
+    tags: ['chores', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'kids', 'youth', 'mixed', 'easy', 'kindness'],
     difficulty: 3,
     minAge: 5,
     build: () => anywhere({
@@ -5518,13 +4726,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chore-table-set',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['chores', 'camera', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'kids', 'mixed', 'easy'],
+    tags: ['chores', 'camera', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'kids', 'mixed', 'easy', 'kindness'],
     difficulty: 3,
     minAge: 6,
     build: () => anywhere({
       title: 'שולחן לכולם',
-      description: 'תערכו את השולחן לכל מי שנמצא עכשיו בבית: צלחת, סכום וכוס לכל אחד. אף אחד לא נשכח. תצלמו את השולחן הערוך מלמעלה.',
+      description: 'תערכו את השולחן לכל מי שנמצא בבית, ותצלמו אותו מלמעלה.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 8,
@@ -5538,13 +4745,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chore-fridge-audit',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['chores', 'thinking', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'youth', 'mixed', 'adults', 'medium'],
+    tags: ['chores', 'thinking', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'youth', 'mixed', 'adults', 'medium', 'kindness'],
     difficulty: 4,
     minAge: 8,
     build: () => anywhere({
       title: 'ביקורת במקרר',
-      description: 'תמצאו במקרר שלושה דברים שעבר זמנם. תזרקו אותם, ותנגבו את המדף שעמדו עליו. תצלמו את המדף הנקי.',
+      description: 'תעברו על התאריכים במקרר ותזרקו כל מה שעבר זמנו. תנגבו מדף אחד ותצלמו אותו נקי.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 10,
@@ -5558,13 +4764,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chore-laundry-sort',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['chores', 'teamwork', 'thinking', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'youth', 'kids', 'mixed', 'easy'],
+    tags: ['chores', 'teamwork', 'thinking', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'youth', 'kids', 'mixed', 'easy', 'kindness'],
     difficulty: 3,
     minAge: 8,
     build: () => anywhere({
       title: 'שלוש ערמות',
-      description: 'תמיינו את סל הכביסה לשלוש ערמות: לבן, כהה, צבעוני. תחלקו את העבודה ביניכם. תצלמו את שלוש הערמות זו לצד זו.',
+      description: 'תמיינו את סל הכביסה לשלוש ערמות: לבן, כהה, צבעוני. תצלמו את שלוש הערמות זו לצד זו.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 9,
@@ -5578,8 +4783,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chore-clear-the-counter',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['chores', 'action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'youth', 'kids', 'mixed', 'adults', 'medium'],
+    tags: ['chores', 'action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'youth', 'kids', 'mixed', 'adults', 'medium', 'kindness'],
     difficulty: 4,
     minAge: 8,
     build: () => anywhere({
@@ -5598,8 +4802,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chore-bin-round',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['chores', 'action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'kids', 'youth', 'mixed', 'easy'],
+    tags: ['chores', 'action', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'kids', 'youth', 'mixed', 'easy', 'kindness'],
     difficulty: 3,
     minAge: 6,
     build: () => anywhere({
@@ -5619,8 +4822,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chore-the-drawer',
     siting: 'never',
     sourceTemplateKey: 'authored',
-    tags: ['chores', 'thinking', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'youth', 'adults', 'mixed', 'medium'],
+    tags: ['chores', 'thinking', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'kindness'],
     difficulty: 5,
     minAge: 10,
     build: () => anywhere({
@@ -5640,8 +4842,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'chore-reset',
-    tags: ['chores', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor',
-      'youth', 'adults', 'mixed', 'medium'],
+    tags: ['chores', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'kindness', 'againstClock'],
     difficulty: 6,
     minAge: 10,
     build: () => anywhere({
@@ -5651,6 +4852,2061 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 6,
       estimatedMinutes: 20,
       pointValue: 160,
+      smart: upload(),
+    }),
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // mission-studio, 2026-10-21 — teen overhaul
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // Written with the mission-studio skill (.claude/skills/mission-studio) after a
+  // research pass on what teenagers engage with (docs/teen-missions-research-
+  // 2026-10-20.md). Thirteen of these were approved by the founder word for word
+  // before they were coded (the skill's gold-examples.md); the rest passed the
+  // skill's lint, its nine hard gates and four adversarial readers. The pass also
+  // removed eleven missions that failed those gates (camp warm-ups, a troll, a
+  // fact anyone could google, two riddles with nothing to solve).
+  //
+  // The categories the bank was empty in are the ones filled here: open tasks
+  // with a measurable result, physical skill, secrets, missions that run across
+  // a whole stage, and kindness that costs nothing. Every rule in these texts is
+  // enforced by what the proof shows (lessons L1), no shortcut deletes a mission
+  // (L2), the instructions name places rather than point at them (L3), and none
+  // costs the players money (L5).
+
+  {
+    key: 'official-photo',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['start', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'park', 'school', 'neighborhood', 'cityCenter', 'beach', 'office', 'humor'],
+    difficulty: 2,
+    // A serious frame is the joke, so nobody has to be funny; the no-smiling rule
+    // enforces itself, because a smile is visible in the photo it is judged on.
+    build: () => anywhere({
+      title: 'התמונה הרשמית',
+      description: 'תצלמו את הקבוצה כמו התמונה הרשמית של נבחרת לפני גמר: שורה עומדת, שורה כורעת, ידיים שלובות. אף אחד לא מחייך. מי שמחייך, מצלמים מחדש.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 3,
+      pointValue: 80,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'farthest-origin',
+    family: 'farthest',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'mall', 'neighborhood', 'school', 'office', 'home', 'hunt', 'againstClock'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'הכי רחוק בעולם',
+      description: 'יש לכם 4 דקות להביא חפץ שהגיע מהמקום הכי רחוק מכאן בעולם. תצלמו אותו עם התווית או האריזה, כך שרואים את שם המדינה.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 4,
+      timeLimitMinutes: 4,
+      pointValue: 130,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'tiny-detail',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'park', 'school', 'historic', 'observation', 'hunt'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'media',
+        required: true,
+        prompt: 'תצלמו מקרוב פרט קטן שנמצא פחות ממאה מטר מהנקודה: בורג מוזר, חלק מפסיפס, כיתוב קטן בפינה. מספיק קרוב כדי שלא יהיה ברור מה רואים.\n\nPhotograph, close up, a small detail less than a hundred metres from the pin: an odd bolt, part of a mosaic, small lettering in a corner. Close enough that it is not obvious what it is.',
+      },
+    ],
+    build: () => sited({
+      title: 'הפרט הקטן',
+      description: 'הפרט שבתמונה נמצא פחות ממאה מטר מהנקודה שבה אתם עומדים. תמצאו אותו ותצלמו אותו מאותה זווית בדיוק.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 7,
+      pointValue: 140,
+      smart: upload(),
+      // A detail on a public street; any number of teams can look for it at once.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'egg-teammate',
+    family: 'team-mascot',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'ongoing', 'humor', 'strangers', 'crowded'],
+    difficulty: 4,
+    // Jet Lag's "Egg Partner": a benign violation that lasts the whole game. Getting
+    // the egg from a stranger is the founder's own addition ("דווקא להשיג ביצה זה
+    // יותר מגניב"): it opens the mission with a small daring act.
+    build: () => anywhere({
+      title: 'ביצה בצוות',
+      description: 'תשיגו ביצה טרייה, למשל ממישהו שחוזר מקניות. מעכשיו היא חברה בקבוצה: תנו לה שם, והיא מופיעה בכל תמונה עד הסוף, שלמה.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 3,
+      pointValue: 120,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'ongoing-spoon',
+    family: 'team-mascot',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'mall', 'ongoing', 'humor'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'הכפית',
+      description: 'תשיגו כפית ותצטלמו איתה. עד סוף השלב היא מופיעה בכל תמונה שאתם שולחים, כל פעם אצל מישהו אחר ובמקום אחר על הגוף.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'movie-trailer',
+    family: 'genre-parody',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'park', 'school', 'mall', 'historic', 'performance', 'humor'],
+    difficulty: 5,
+    // The constraint (one take, a shot each) produces the creativity, and deadpan
+    // is the cover: nobody has to act, only to look very serious.
+    build: () => anywhere({
+      title: 'הטריילר',
+      description: 'טריילר של 20 שניות לסרט על המקום שאתם עומדים בו, בטייק אחד. מישהו פותח ב"בעולם שבו...", וכל אחד מופיע בשוט משלו. אין צורך לשחק, רק להיראות רציניים מאוד.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 10,
+      pointValue: 140,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'the-translator',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'hard', 'educational', 'cityCenter', 'mall', 'neighborhood', 'beach', 'strangers'],
+    difficulty: 7,
+    // The player has a role that makes the approach normal ("we are learning"),
+    // and the stranger is given the honoured one: teacher.
+    build: () => anywhere({
+      title: 'המתורגמן',
+      description: 'תמצאו מישהו שמדבר שפה שאף אחד מכם לא מדבר, ותבקשו ממנו ללמד אתכם משפט אחד ורשות לצלם. כל אחד מכם אומר את המשפט בסרטון, ובסוף המורה אומר אם זה היה נכון.',
+      type: 'photo',
+      difficulty: 7,
+      estimatedMinutes: 12,
+      pointValue: 170,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'who-goes-alone',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'home', 'school', 'park', 'neighborhood', 'cityCenter', 'dare'],
+    difficulty: 5,
+    // The Amazing Race Roadblock: the team chooses who does it BEFORE seeing what
+    // it is. A sequence shows one step at a time, so step 2 really is hidden until
+    // step 1 is confirmed.
+    build: () => anywhere({
+      title: 'מי מלכלך ידיים',
+      description: 'לפני שאתם רואים את השלב הבא, תבחרו מי מכם יעשה אותו לבד. רק אחרי זה הוא ייפתח.',
+      type: 'sequence',
+      difficulty: 5,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      steps: [
+        { id: uuid(), prompt: 'תבחרו מי מכם עושה לבד את השלב הבא, לפני שאתם יודעים מה הוא. תסמנו כשבחרתם.' },
+        { id: uuid(), prompt: 'מי שבחרתם עושה עכשיו 15 שכיבות סמיכה ברצף, וכל השאר סופרים בקול. תסמנו כשסיים.' },
+      ],
+    }),
+  },
+  {
+    key: 'longest-line',
+    // Not tagged for streets or city centres (lessons L13): a line of bags across a busy
+    // sidewalk blocks people and is easy to steal from.
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'mixed', 'medium', 'park', 'school', 'beach', 'home', 'building', 'record', 'againstClock'],
+    difficulty: 4,
+    // Taskmaster. The first draft allowed "only your own things", an honour rule
+    // the team gains from breaking (lessons L1); with every source legal, the
+    // scramble IS the game.
+    build: () => anywhere({
+      title: 'הקו הכי ארוך',
+      description: 'יש לכם 5 דקות לבנות על הרצפה שורה אחת רציפה, הכי ארוכה שאפשר, מכל דבר שאפשר להרים ולהחזיר אחר כך. כל פריט נוגע בפריט שלידו, ולא חוסמים מעבר. תצלמו את כל השורה, כשמישהו מכם עומד בכל קצה.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 6,
+      timeLimitMinutes: 5,
+      pointValue: 120,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'bottle-flip',
+    family: 'turn-rounds',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'mixed', 'medium', 'home', 'school', 'park', 'againstClock'],
+    difficulty: 4,
+    // A skill teens already have. Videos cap at 60 seconds, so the proof is one
+    // complete round rather than every attempt; the round shows the turn order.
+    build: () => anywhere({
+      title: 'הבקבוק',
+      description: 'תעשו 3 פליפים מוצלחים לבקבוק בפחות מדקה, כשכל אחד מהקבוצה מנסה. תשלחו את הסרטון.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 6,
+      pointValue: 110,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'double-agent',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['finish', 'thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'corporate', 'medium', 'ongoing', 'puzzle'],
+    difficulty: 5,
+    // Social deduction works from about fourteen. Keeping the secret is the
+    // agent's OWN interest, which is why its one honour rule holds (lessons L1).
+    minAge: 12,
+    setup: [{
+      field: 'description',
+      required: true,
+      prompt: 'אתם בוחרים את הסוכן ואת המשימה שלו. לפני המשחק תנו לשחקן אחד בכל קבוצה פתק סגור עם משימה, למשל לגרום לקבוצה לעבור ליד מקום מסוים. תרשמו לעצמכם מי קיבל מה.\n\nYou choose the agent and the mission. Before the game, give one player per team a sealed note with a mission, for example getting the team to pass a certain place. Note who got what.',
+    }],
+    build: () => anywhere({
+      title: 'הסוכן',
+      description: 'אחד מכם קיבל בתחילת המשחק פתק עם משימה סודית, ושמר אותה בסוד. עכשיו, לפני שהוא מגלה, הקבוצה אומרת מי לדעתה הסוכן ומה הייתה המשימה. אחר כך הסוכן מגלה, ותסמנו כאן.',
+      type: 'self_report',
+      difficulty: 5,
+      estimatedMinutes: 5,
+      pointValue: 120,
+    }),
+  },
+  {
+    key: 'reverse-shoplifting',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'park', 'neighborhood', 'cityCenter', 'school', 'beach', 'kindness'],
+    difficulty: 3,
+    // SF0's "reverse shoplifting". The first draft included a coin on a machine;
+    // the founder's note was that a mission should not cost the players money.
+    build: () => anywhere({
+      title: 'גניבה הפוכה',
+      description: 'תשאירו ברחוב מתנה קטנה בשביל מי שיעבור כאן אחריכם, כמו פתק עם מחמאה על ספסל או ציור על המדרכה. תצלמו אותה ותמשיכו הלאה.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 6,
+      pointValue: 100,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'four-places',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'park', 'neighborhood', 'school', 'cityCenter', 'puzzle', 'splitUp', 'againstClock', 'navigation'],
+    difficulty: 6,
+    transitMinutes: 5,
+    // Rebuilt from the founder's own note on a rejected draft: name the four
+    // places and their order, state the facts, and GRANT permission to split.
+    // Four places and a clock make splitting the smart move; the text never says so.
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תכתבו בגיר ספרה אחת בכל אחד מארבעה מקומות קרובים לנקודה, ותכתבו כאן את ארבעת המקומות לפי הסדר, למשל: הראשונה ליד השעון, השנייה על הברזייה.\n\nChalk one digit at each of four places near the pin, and write the four places here in order, for example: the first by the clock, the second on the drinking fountain.',
+      },
+      {
+        field: 'numericAnswer',
+        required: true,
+        prompt: 'תכתבו את הקוד המלא, ארבע הספרות לפי הסדר.\n\nEnter the full code, the four digits in order.',
+      },
+    ],
+    build: () => sited({
+      title: 'ארבעה מקומות',
+      description: 'הקוד הוא ארבע ספרות, וכל ספרה כתובה במקום אחר: [הוראות ליוצר: ארבעה מקומות לפי הסדר]. יש לכם 6 דקות, ומותר לכם להתפצל.',
+      type: 'numeric',
+      difficulty: 6,
+      estimatedMinutes: 7,
+      timeLimitMinutes: 6,
+      pointValue: 160,
+      numericAnswer: 4821,
+      numericTolerance: 0,
+      // Chalked digits on public ground: every team can read them at once.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'historic-speech',
+    family: 'genre-parody',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'school', 'office', 'performance', 'humor'],
+    difficulty: 4,
+    // Replaces "ראפ מנצח": the text already exists (no talent, nothing to write),
+    // and the contrast between a parking sign and a historic speech is the joke.
+    build: () => anywhere({
+      title: 'הנאום ההיסטורי',
+      description: 'תמצאו שלט, תפריט או מודעה, ותקריאו את מה שכתוב בהם כמו נאום היסטורי, הכי רציני שיש. כל אחד מכם מקריא שורה אחת. סרטון אחד.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 6,
+      pointValue: 110,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'one-to-five',
+    family: 'number-hunt',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'mall', 'hunt', 'observation'],
+    difficulty: 5,
+    // Two phases because videos cap at 60 seconds: plan and find, then film the
+    // run in one take. Planning the route together is the teamwork.
+    build: () => anywhere({
+      title: 'אחד עד חמש',
+      description: 'תמצאו את המספרים 1 עד 5 כתובים על חמישה דברים שונים ברחוב, ואז תצלמו סרטון של עד דקה שמראה את כולם לפי הסדר. כל אחד מכם מראה לפחות אחד.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 10,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'sum-to-hundred',
+    family: 'number-hunt',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'educational', 'neighborhood', 'cityCenter', 'mall', 'hunt', 'puzzle', 'observation'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'בדיוק מאה',
+      description: 'תמצאו ברחוב ארבעה מספרים כתובים שהסכום שלהם בדיוק 100, ואז תצלמו סרטון של עד דקה שמראה את ארבעתם. כל אחד מכם מראה לפחות אחד.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 12,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'forty-seconds',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'corporate', 'mixed', 'easy', 'home', 'school', 'office', 'park', 'calm'],
+    difficulty: 3,
+    // Closed eyes and the stopwatch are both in the video, so peeking shows.
+    build: () => anywhere({
+      title: 'ארבעים שניות',
+      description: 'אחד מכם מפעיל סטופר מול המצלמה, וכולם עוצמים עיניים ומתחילים לספור בשקט באותו רגע. מי שחושב שעברו 40 שניות מתיישב. עוברים אם האחרון התיישב בין 36 ל 44 שניות לפי הסטופר בסרטון.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 3,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'hand-drawn-map',
+    family: 'drawn-map',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'forest', 'navigation'],
+    difficulty: 6,
+    transitMinutes: 8,
+    // `hideLocation`: the map draws no pin, so the drawing is the only way there
+    // (bank rule 9: the product must not hand players the challenge).
+    setup: [
+      PLACE_IT,
+      {
+        field: 'media',
+        required: true,
+        prompt: 'תציירו ביד מפה עד הנקודה, ותכתבו עליה שמות של כמה מקומות בולטים בדרך, כמו חנות, מזרקה או בית ספר, כדי שיהיו להם פרופורציות. תסמנו X על היעד ותצלמו.\n\nDraw a map to the pin by hand and write the names of a few landmarks on the way, like a shop, a fountain or a school, so they have proportions. Mark the target with an X and photograph it.',
+      },
+    ],
+    build: () => sited({
+      title: 'המפה המצוירת',
+      description: 'תגיעו ל X שעל המפה.',
+      type: 'geofence',
+      difficulty: 6,
+      estimatedMinutes: 8,
+      pointValue: 140,
+      hideLocation: true,
+      locationClue: 'המפה המצוירת שמצורפת למשימה',
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'sign-word-cipher',
+    family: 'sign-cipher',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'adults', 'mixed', 'hard', 'cityCenter', 'neighborhood', 'school', 'historic', 'puzzle'],
+    difficulty: 7,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תבחרו שלט אחד ליד הנקודה, ותכתבו בדיוק איזה, ואת זוגות המספרים: כל זוג הוא מספר מילה בשלט ומספר אות בתוכה. תבדקו בשטח שהמילה יוצאת נכון.\n\nChoose one sign near the pin and write exactly which one, plus the number pairs: each pair is a word number on the sign and a letter number inside it. Check on the ground that the word comes out right.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'תכתבו את המילה שיוצאת.\n\nEnter the word it spells.',
+      },
+    ],
+    build: () => sited({
+      title: 'הצופן של השלט',
+      description: 'מישהו השאיר הודעה מוצפנת בשלט [הוראות ליוצר: איזה שלט בדיוק]: [הוראות ליוצר: זוגות המספרים, למשל 3.1 7.4 2.2]. כל זוג מסתיר אות אחת. תפענחו את המילה.',
+      type: 'quiz',
+      difficulty: 7,
+      estimatedMinutes: 8,
+      pointValue: 160,
+      answers: ['סוד'],
+      hint: 'רמז: המספר הראשון בכל זוג הוא מספר המילה בשלט, והשני הוא מספר האות בתוך המילה. סופרים מימין לשמאל.',
+      hintPenalty: 30,
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'cap-toss',
+    family: 'turn-rounds',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'mixed', 'easy', 'park', 'school', 'home', 'againstClock'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'הפקק',
+      description: 'מארבעה צעדים, תזרקו פקקי בקבוק לתוך כובע הפוך או תיק פתוח: 10 בפנים ב 30 שניות. תשלחו את הסרטון.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 5,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'nature-documentary',
+    family: 'genre-parody',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'park', 'forest', 'beach', 'neighborhood', 'cityCenter', 'performance', 'humor', 'nature'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'סרט טבע',
+      description: 'תצלמו 20 שניות של חיה שמסתובבת כאן, כמו יונה או חתול, ותקריינו כמו סרט טבע רציני בטלוויזיה. כל אחד אומר משפט אחד.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 6,
+      pointValue: 100,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'humans-of-the-city',
+    family: 'stranger-question',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'educational', 'cityCenter', 'mall', 'neighborhood', 'beach', 'park', 'strangers', 'kindness'],
+    difficulty: 6,
+    // Humans of New York: "photographer" is a role that makes the approach
+    // normal, and the stranger is asked about something good, never made a joke.
+    build: () => anywhere({
+      title: 'אנשים של העיר',
+      description: 'תשאלו מישהו זר: מה הדבר הכי טוב שקרה לך השבוע? תצלמו אותו עונה.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 8,
+      pointValue: 140,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'cairn-record',
+    family: 'cairn',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'creative', 'needsSetup', 'locationBased', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'medium', 'forest', 'park', 'beach', 'building', 'record', 'versus', 'nature'],
+    difficulty: 5,
+    transitMinutes: 5,
+    // Jet Lag's pattern: one team sets the bar and the next must beat it, here
+    // through a physical object, so it works even when teams never meet. The
+    // creator's own tower guarantees a bar for the first team to arrive.
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'לפני המשחק, תבנו בנקודה מגדל אבנים קטן, בערך בגובה הברך, כדי שגם לקבוצה הראשונה יהיה שיא לשבור. תבחרו מקום שיש בו אבנים.\n\nBefore the game, build a small stone tower at the pin, about knee high, so even the first team has a record to beat. Choose a spot that has stones.',
+      },
+    ],
+    build: () => sited({
+      title: 'השיא של הקודמים',
+      description: 'כאן כבר עומד מגדל אבנים, ואולי גם כמה שקבוצות קודמות בנו. תבנו לידם מגדל גבוה מכולם, שעומד לבד. תצלמו את כל המגדלים ביחד, ואל תפרקו אותם.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 8,
+      pointValue: 130,
+      smart: upload(),
+      // Every team builds its own tower beside the others; no one waits.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    // An arcade high-score board on a lamp post: teams never meet, but every
+    // team after the first plays against a name and a number. The board is the
+    // stake: points are the same either way, the name at the top is not.
+    key: 'record-board',
+    family: 'cairn',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'office', 'beach', 'physical', 'record', 'versus'],
+    difficulty: 5,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תדביקו בנקודה דף עם הכותרת "לוח השיאים: שכיבות סמיכה ב 30 שניות" ועט קשור אליו, ותכתבו שיא ראשון, למשל 20, כדי שגם לקבוצה הראשונה יהיה מה לשבור.\n\nTape a sheet titled "Record board: push ups in 30 seconds" at the pin with a pen tied to it, and write a first record, for example 20, so even the first team has something to beat.',
+      },
+    ],
+    build: () => sited({
+      title: 'לוח השיאים',
+      description: 'תשברו את השיא שעל הלוח: שכיבות סמיכה ב 30 שניות. אחד מכם מנסה, ואתם כותבים את התוצאה שלכם על הלוח. סרטון אחד.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 5,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+      // One sheet, but writing on it takes seconds: teams do not queue.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    // The stranger version of farthest-origin: hunting tourists is a real dare
+    // with a purpose, and "we found someone from New Zealand" is the story.
+    key: 'farthest-stranger',
+    family: 'farthest',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'historic', 'beach', 'mall', 'strangers', 'hunt', 'againstClock'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'הכי רחוק מהבית',
+      description: 'יש לכם 7 דקות למצוא מישהו שהגיע לכאן מהמדינה הכי רחוקה שתמצאו. תצטלמו איתו בסרטון כשהוא אומר מאיפה הוא.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 7,
+      timeLimitMinutes: 7,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 20 }),
+    }),
+  },
+  // ── mission-studio batch 1, 2026-10-22: approved by the founder ("הכל טוב") ──
+  {
+    // "Make someone say X", the street version: any wording is legal except the
+    // word itself, so the cleverness is the puzzle and the one minute video is the clock.
+    key: 'three-words',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'cityCenter', 'mall', 'beach', 'neighborhood', 'strangers', 'puzzle', 'humor'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'שלוש מילים',
+      description: 'בסרטון אחד של עד דקה, תגרמו לאדם זר להגיד את שלוש המילים האלה: פלמינגו, צוללת, טרמפולינה. אתם לא אומרים אף אחת מהן.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    // Akinator in the street: the stranger is the opponent, not the joke.
+    key: 'five-questions',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'cityCenter', 'mall', 'beach', 'neighborhood', 'strangers', 'puzzle'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'חמש שאלות',
+      description: 'תנחשו במה עובד אדם זר, אחרי חמש שאלות של כן או לא לכל היותר. בסוף הסרטון הוא אומר אם צדקתם.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 7,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    // Looks impossible in one take; the smart move is to recruit and line the six
+    // up first, then film. Crowded places only: a quiet street cannot supply six.
+    key: 'city-sentence',
+    family: 'stranger-chain',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'hard', 'cityCenter', 'mall', 'beach', 'strangers', 'humor'],
+    difficulty: 8,
+    build: () => anywhere({
+      title: 'המשפט של העיר',
+      description: 'סרטון אחד בלי חיתוך, שבו שישה אנשים זרים אומרים בזה אחר זה מילה אחת כל אחד, עד שיוצא המשפט "הקבוצה הזאת תנצח היום".',
+      type: 'photo',
+      difficulty: 8,
+      estimatedMinutes: 12,
+      pointValue: 200,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    // The stranger receives something: their own song back. Usually they sing.
+    key: 'song-of-then',
+    family: 'stranger-question',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'park', 'neighborhood', 'mall', 'strangers', 'music', 'kindness'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'השיר של פעם',
+      description: 'תשאלו מישהו מעל גיל 60 איזה שיר הוא הכי אהב כשהיה בגיל שלכם. תשמיעו לו אותו מהטלפון, ותצלמו את הרגע.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 8,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    // A count and a clock at a bar the creator chose, so no team arrives at a
+    // park without one (lessons L30). The strong carry, everyone counts.
+    key: 'team-pull-ups',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'adults', 'mixed', 'hard', 'park', 'neighborhood', 'beach', 'physical', 'againstClock', 'record'],
+    difficulty: 7,
+    transitMinutes: 5,
+    setup: [{
+      field: 'coordinates',
+      required: true,
+      prompt: 'תסמנו מתקן כושר עם מוט מתח, למשל בגינה ציבורית או בטיילת. בלי מוט המשימה בלתי אפשרית.\n\nMark a fitness station with a pull up bar, for example in a public garden or on a promenade. Without a bar the mission is impossible.',
+    }],
+    build: () => sited({
+      title: 'עליות מתח',
+      description: 'על המתקן כאן, כל הקבוצה ביחד עושה 15 עליות מתח בפחות מדקה. סרטון אחד.',
+      type: 'photo',
+      difficulty: 7,
+      estimatedMinutes: 5,
+      pointValue: 160,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+      // A fitness station has several bars and a team needs one for a minute.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    // The busiest spot photographed empty: wait for the gap, shoot low, shoot up.
+    // The landmark in frame stops a photo of the sky from counting.
+    key: 'empty-square',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'mall', 'historic', 'observation'],
+    difficulty: 5,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תחליפו את הסוגריים במשהו בולט שחייב להיראות בתמונה, למשל המזרקה או השעון. תבחרו מקום שבאמת עמוס בשעת המשחק.\n\nReplace the brackets with something prominent that must be in the photo, for example the fountain or the clock. Choose a place that is really busy at game time.',
+      },
+    ],
+    build: () => sited({
+      title: 'הכיכר הריקה',
+      description: 'תצלמו את המקום הזה בלי אף אדם בתמונה, כשרואים בה את [הוראות ליוצר: משהו בולט במקום].',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload(),
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    // Read roofs, pools and courtyards from above: the anchors are in the image,
+    // the difficulty is the inference (lessons L11).
+    key: 'satellite-x',
+    family: 'drawn-map',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'navigation'],
+    difficulty: 6,
+    transitMinutes: 8,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'media',
+        required: true,
+        prompt: 'תצלמו מסך של מפת לוויין סביב הנקודה, בלי שמות רחובות ובלי תוויות, ותסמנו X על היעד. שיראו בה כמה גגות, חצרות או מגרשים שאפשר לזהות.\n\nScreenshot a satellite map around the pin, with no street names or labels, and mark the target with an X. Make sure a few roofs, yards or courts can be recognised.',
+      },
+    ],
+    build: () => sited({
+      title: 'תמונת לוויין',
+      description: 'תגיעו ל X שבתמונת הלוויין.',
+      type: 'geofence',
+      difficulty: 6,
+      estimatedMinutes: 8,
+      pointValue: 140,
+      hideLocation: true,
+      locationClue: 'תמונת הלוויין שמצורפת למשימה',
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    // "We found Yossi's bakery": personal, and worth a photo. Luck decides some of it.
+    key: 'name-on-the-street',
+    family: 'rare-find',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'hunt', 'againstClock'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'השם ברחוב',
+      description: 'יש לכם 5 דקות למצוא את השם של אחד מכם כתוב ברחוב: על שלט או חנות. תצלמו אותו לידו.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 5,
+      timeLimitMinutes: 5,
+      pointValue: 130,
+      smart: upload(),
+    }),
+  },
+  {
+    // Guess first, weigh after: the gap is the tension. The clever path: a litre
+    // of water weighs a little over a kilo, so whoever knows pours some out.
+    key: 'exact-kilo',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'educational', 'cityCenter', 'neighborhood', 'mall', 'puzzle', 'strangers'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'קילו בדיוק',
+      description: 'תמצאו חפץ שלדעתכם שוקל קילו, בלי שכתוב עליו משקל, ותשקלו אותו בחנות או בדוכן. צריך לצאת בין 980 ל 1020 גרם. תצלמו את המשקל.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 8,
+      pointValue: 150,
+      smart: upload(),
+    }),
+  },
+  // ── mission-studio batches 2 to 17, 2026-10-22: every mission the founder approved in
+  //    docs/new-missions-review-2026-10-22.md (texts exactly as approved there) ──
+  {
+    key: 'elevator-race',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'needsSetup', 'locationBased', 'indoor', 'mall', 'office', 'school', 'youth', 'adults', 'corporate', 'camera', 'medium', 'physical', 'againstClock'],
+    difficulty: 5,
+    transitMinutes: 5,
+    setup: [
+      {
+        field: 'coordinates',
+        required: true,
+        prompt: 'תסמנו בניין עם מעלית ומדרגות, לפחות 3 קומות, ששחקנים יכולים להיכנס אליו.\n\nMark a building with a lift and stairs, at least 3 floors, that players can enter.',
+      },
+    ],
+    build: () => sited({
+      title: 'נגד המעלית',
+      description: 'תלחצו במעלית על הקומה העליונה ותצאו לפני שהדלת נסגרת. עכשיו כולכם במדרגות: צריך להגיע למעלה לפני שהמעלית נפתחת שם. סרטון.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 4,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'long-receipt',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'hunt', 'strangers', 'againstClock', 'crowded'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'הקבלה הארוכה',
+      description: 'יש לכם 3 דקות להשיג קבלה ארוכה יותר מהזרוע של אחד מכם. תצלמו אותה לצד הזרוע.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 3,
+      timeLimitMinutes: 3,
+      pointValue: 120,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'three-feet',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'park', 'school', 'cityCenter', 'neighborhood', 'youth', 'adults', 'mixed', 'camera', 'medium', 'physical'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'שלוש רגליים',
+      description: 'תמונה אחת של כל הקבוצה, שבה רק שלוש כפות רגליים נוגעות ברצפה.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'street-beat',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'neighborhood', 'cityCenter', 'school', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'music', 'performance'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'הקצב של הרחוב',
+      description: 'סרטון של 20 שניות: אחד מכם מתחיל לתופף קצב על פח או על ספסל, וכל 5 שניות עוד אחד מצטרף ומתופף על חפץ אחר. בשניות האחרונות כולכם מתופפים יחד.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 25 }),
+    }),
+  },
+  {
+    key: 'ten-high-fives',
+    family: 'crowd-count',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'againstClock', 'dare'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'עשרה כיפים',
+      description: 'סרטון של 30 שניות, ובו לפחות 10 כיפים מאנשים זרים שונים.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 35 }),
+    }),
+  },
+  {
+    key: 'oldest-shop',
+    family: 'oldest-find',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'educational', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'historic', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'history', 'againstClock', 'crowded'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'החנות הכי ותיקה',
+      description: 'יש לכם 4 דקות למצוא את החנות הכי ותיקה ברחוב, או בקומה אם אתם בקניון. תצלמו את המוכר שלה אומר מאיזו שנה היא פתוחה.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 4,
+      timeLimitMinutes: 4,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+    }),
+  },
+  {
+    key: 'highest-note',
+    family: 'cairn',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'school', 'cityCenter', 'office', 'youth', 'adults', 'camera', 'medium', 'physical', 'record', 'versus'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      {
+        field: 'coordinates',
+        required: true,
+        prompt: 'תדביקו על קיר בנקודה פתק דביק ראשון בגובה 2 מטר, ותשאירו לידו חבילת פתקים דביקים ועט. תסמנו כאן את הקיר.\n\nStick a first sticky note 2 metres up a wall at the pin, and leave a pad of sticky notes and a pen beside it. Mark the wall here.',
+      },
+    ],
+    build: () => sited({
+      title: 'השם הכי גבוה',
+      description: 'תכתבו את שם הקבוצה על פתק דביק ותדביקו אותו על הקיר כאן, גבוה מכל הפתקים שכבר עליו. מותר לעמוד רק אחד על השני. סרטון.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'old-word',
+    family: 'stranger-question',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'crowded', 'cityCenter', 'park', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'history', 'humor'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'המילה של פעם',
+      description: 'תבקשו ממישהו מעל גיל 60 מילה שאמרו כשהוא היה בגילכם, ושאף אחד לא אומר היום. כל אחד מכם משתמש בה במשפט, בסרטון אחד איתו.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'common-thread',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'neighborhood', 'park', 'school', 'youth', 'adults', 'corporate', 'medium', 'puzzle', 'observation'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'media',
+        required: true,
+        prompt: 'תצלמו מקרוב ארבעה פרטים בנקודה שיש להם משהו משותף, למשל כולם עם הספרה 7, ותחברו אותם לתמונה אחת.\n\nPhotograph four details at the pin that share something, for example all carry the number 7, and join them into one image.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'תכתבו את המכנה המשותף, במילה אחת או שתיים.\n\nWrite what they share, in one or two words.',
+      },
+    ],
+    build: () => sited({
+      title: 'המכנה המשותף',
+      description: 'מה משותף לארבעת הדברים שבתמונה? כולם נמצאים כאן.',
+      type: 'quiz',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      answers: ['שבע'],
+      hint: 'רמז: תפסיקו להסתכל על מה הדברים, ותסתכלו על מה כתוב או מצויר עליהם.',
+      hintPenalty: 20,
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'street-order',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'neighborhood', 'youth', 'adults', 'corporate', 'medium', 'observation', 'splitUp', 'againstClock'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'orderItems',
+        required: true,
+        prompt: 'תכתבו חמש חנויות שנמצאות ברחוב הזה, לפי הסדר שלהן מתחילת הרחוב ועד סופו.\n\nList five shops on this street, in their order from one end of the street to the other.',
+      },
+    ],
+    build: () => sited({
+      title: 'סדר ברחוב',
+      description: 'יש לכם 2 דקות לסדר את החנויות האלה לפי הסדר שלהן ברחוב, מתחילתו ועד סופו. מותר לכם להתפצל.',
+      type: 'quiz',
+      difficulty: 6,
+      estimatedMinutes: 2,
+      timeLimitMinutes: 2,
+      pointValue: 150,
+      orderItems: ['המאפייה', 'הפרחים', 'הקיוסק', 'המספרה', 'הפיצרייה'],
+      hint: 'רמז: מי שמתחיל משני הקצוות של הרחוב מסיים בחצי מהזמן.',
+      hintPenalty: 20,
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'shoe-twins',
+    family: 'rare-find',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'hunt'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'תאומי נעליים',
+      description: 'תמצאו שני אנשים זרים, שלא מכירים זה את זה, עם אותן נעליים בדיוק. תצלמו את ארבע הנעליים ביחד.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'face-in-things',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'hunt', 'humor'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'יש לו פרצוף',
+      description: 'תמצאו חפץ שיש לו פרצוף, ותצטלמו לידו כשכולכם עושים בדיוק את אותה הבעה.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'kid-drawing',
+    family: 'drawn-map',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'neighborhood', 'park', 'youth', 'adults', 'corporate', 'medium', 'navigation', 'puzzle'],
+    difficulty: 6,
+    transitMinutes: 8,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'media',
+        required: true,
+        prompt: 'תבקשו מילד קטן לצייר משהו בולט ליד הנקודה, כמו מזרקה או פסל, ותצלמו את הציור. תבדקו שמבוגר מצליח לזהות מה צויר.\n\nAsk a small child to draw something prominent near the pin, like a fountain or a statue, and photograph it. Check an adult can tell what it is.',
+      },
+    ],
+    build: () => sited({
+      title: 'ציור של ילד',
+      description: 'ילד בן 6 צייר את המקום שאליו אתם צריכים להגיע. תגיעו לשם.',
+      type: 'geofence',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      hideLocation: true,
+      locationClue: 'הציור שמצורף למשימה',
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'stranger-portrait',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'הדיוקן',
+      description: 'תבקשו מאדם זר לצייר את כל הקבוצה שלכם בדקה אחת. תצטלמו עם הציור.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'water-cup',
+    family: 'team-mascot',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'neighborhood', 'youth', 'adults', 'mixed', 'camera', 'medium', 'ongoing', 'strangers', 'crowded'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'כוס המים',
+      description: 'תשיגו ממישהו כוס מלאה במים. מעכשיו היא בכל תמונה עד סוף השלב, ובתמונה האחרונה היא עדיין מלאה לפחות עד חצי.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'six-legs',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'forest', 'youth', 'adults', 'mixed', 'camera', 'medium', 'nature', 'hunt'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'שש רגליים',
+      description: 'תצלמו חרק מקרוב, כך שרואים בתמונה את כל שש הרגליים שלו.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 120,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'three-languages',
+    family: 'stranger-chain',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'hunt'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'שלוש שפות',
+      description: 'סרטון של עד דקה: שלושה אנשים זרים אומרים לכם "שתנצחו", כל אחד בשפה אחרת שאינה עברית.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'then-and-here',
+    family: 'photo-spot',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'educational', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'historic', 'neighborhood', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'observation', 'history', 'navigation'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'media',
+        required: true,
+        prompt: 'תצרפו תמונה ישנה של המקום הזה, למשל מפיקיויקי או מארכיון עירוני, מזווית שאפשר עוד לעמוד בה היום.\n\nAttach an old photo of this place, for example from a city archive, taken from an angle someone can still stand in today.',
+      },
+    ],
+    build: () => sited({
+      title: 'פעם כאן',
+      description: 'התמונה הזאת צולמה כאן לפני עשרות שנים. תמצאו את הזווית המדויקת ותצלמו אותה שוב.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      smart: upload(),
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'pause-freeze',
+    family: 'public-freeze',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'camera', 'medium', 'dare', 'humor'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'פאוז',
+      description: '20 שניות שבהן כל הקבוצה קפואה במקום הכי עמוס כאן, כאילו מישהו לחץ על פאוז. מישהו זז? מתחילים מאפס. סרטון.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'pun-shop',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'hunt', 'humor', 'againstClock'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'משחק מילים',
+      description: 'יש לכם 5 דקות למצוא חנות שהשם שלה הוא משחק מילים, ולהצטלם מתחת לשלט.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 5,
+      timeLimitMinutes: 5,
+      pointValue: 110,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'russian-accent',
+    family: 'stage-rule',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'ongoing', 'humor', 'performance'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'המבטא',
+      description: 'מעכשיו ועד סוף השלב, בכל סרטון שאתם שולחים מדברים רק במבטא רוסי.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'pushups-stranger',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'crowded', 'park', 'cityCenter', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'physical', 'dare'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'שכיבות עם זר',
+      description: 'תגייסו אדם זר לעשות איתכם 10 שכיבות סמיכה, כולם ביחד, וסופרים בקול. סרטון.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'slow-motion',
+    family: 'public-freeze',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'camera', 'medium', 'dare', 'humor'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'הילוך איטי',
+      description: '20 שניות שבהן כל הקבוצה חוצה את המקום הכי עמוס כאן בהילוך איטי, כמו בסרט, בלי לצחוק. סרטון.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'my-letter',
+    family: 'color-hunt',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'home', 'park', 'school', 'neighborhood', 'kids', 'mixed', 'camera', 'easy', 'hunt'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'האות שלי',
+      description: 'סרטון של 30 שניות: כל אחד מכם נוגע בשלושה דברים שמתחילים באות הראשונה של השם שלו, ואומר אותם בקול.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 35 }),
+    }),
+  },
+  {
+    key: 'four-things',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'park', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'hunt', 'splitUp', 'againstClock', 'strangers', 'crowded'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'ארבעה דברים',
+      description: 'יש לכם 4 דקות להביא לכאן עלה, קבלה, פקק וכפית. מותר לכם להתפצל. תצלמו את ארבעתם.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 4,
+      timeLimitMinutes: 4,
+      pointValue: 140,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'priciest-car',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'hunt', 'againstClock'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'הרכב הכי יקר',
+      description: 'יש לכם 3 דקות למצוא את הרכב הכי יקר ברחוב או בחניון, ולהצטלם לידו בלי לגעת בו.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 3,
+      timeLimitMinutes: 3,
+      pointValue: 110,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'scytale',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'park', 'neighborhood', 'school', 'youth', 'adults', 'corporate', 'hard', 'puzzle', 'hunt'],
+    difficulty: 7,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תחליפו את הסוגריים בציון הדרך שליד העמוד. אל תמחקו את שאר ההוראות.\n\nReplace the brackets with the landmark next to the pole. Do not delete the rest.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'תלפפו רצועת נייר עבה סביב העמוד, תכתבו עליה מילה לאורכו, תשחררו ותתלו אותה עם סלוטייפ. תכתבו כאן את המילה.\n\nWrap a thick paper strip around the pole, write a word along it, unwind it and tape it up. Enter the word here.',
+      },
+    ],
+    build: () => sited({
+      title: 'הרצועה',
+      description: 'על אחד העמודים ליד [הוראות ליוצר: ציון דרך, למשל המזרקה] תלויה רצועת נייר עם אותיות. מה כתוב בה?',
+      type: 'quiz',
+      difficulty: 7,
+      estimatedMinutes: 6,
+      pointValue: 170,
+      answers: ['מירוץ'],
+      hint: 'רמז: לפעמים צריך לסובב.',
+      hintPenalty: 20,
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'pirate-map',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'park', 'cityCenter', 'neighborhood', 'kids', 'youth', 'adults', 'mixed', 'medium', 'navigation', 'puzzle'],
+    difficulty: 5,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תחליפו את הסוגריים בנקודת התחלה ובצעדים, למשל: מהספסל שליד המזרקה, 30 צעדים גדולים צפונה ואז 12 מזרחה. היעד צריך להיות גדול ויחיד.\n\nReplace the brackets with a start and the steps, e.g. from the bench, 30 big steps north then 12 east. The target must be big and unique.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'תכתבו מה עומד ביעד, במילה או שתיים.\n\nWrite what stands at the target, in a word or two.',
+      },
+    ],
+    build: () => sited({
+      title: 'מפת פיראטים',
+      description: '[הוראות ליוצר: נקודת ההתחלה והצעדים, למשל: מהספסל שליד המזרקה, 30 צעדים גדולים צפונה ואז 12 מזרחה]. מה עומד שם?',
+      type: 'quiz',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      answers: ['תיבת דואר'],
+      hint: 'רמז: הצפון במצפן של הטלפון, וצעד גדול הוא בערך מטר.',
+      hintPenalty: 20,
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'cache-swap',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'park', 'neighborhood', 'cityCenter', 'youth', 'adults', 'mixed', 'camera', 'medium', 'versus', 'hunt'],
+    difficulty: 4,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תחביאו קופסה סגורה עם חפץ ראשון ליד ציון דרך בנקודה, ותחליפו את הסוגריים בשמו. אל תמחקו את שאר ההוראות.\n\nHide a closed box with a first object by a landmark at the pin, and replace the brackets with it. Do not delete the rest.',
+      },
+    ],
+    build: () => sited({
+      title: 'החלפה במטמון',
+      description: 'בקופסה שמוסתרת כאן יש חפץ שהשאירה הקבוצה שלפניכם. תיקחו אותו ותשאירו במקומו חפץ טוב ממנו. תצלמו את שניהם.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 120,
+      smart: upload(),
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'taste-test',
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'noPrep', 'fromAnywhere', 'indoor', 'home', 'kids', 'mixed', 'camera', 'easy', 'humor'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'מבחן הטעם',
+      description: 'עם עיניים עצומות, כל אחד טועם דבר אחד מהמטבח שמישהו אחר בחר לו, ומנחש מה זה. סרטון אחד.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'shadow-puppets',
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'home', 'kids', 'mixed', 'camera', 'easy', 'humor'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'צלליות',
+      description: 'כל אחד עושה על הקיר צללית של חיה, רק עם הידיים ופנס של טלפון, והשאר מנחשים. תצלמו את הצללית הכי טובה.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'kitchen-tower',
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'indoor', 'home', 'kids', 'mixed', 'camera', 'easy', 'building', 'againstClock'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'המגדל מהמטבח',
+      description: 'יש לכם 3 דקות לבנות מגדל מכלים מהמטבח, גבוה כמו הקטן מכם, שעומד לבד 5 שניות. סרטון, ובסוף הכל חוזר לארונות.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 3,
+      timeLimitMinutes: 3,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'home-museum',
+    family: 'oldest-find',
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'home', 'kids', 'adults', 'mixed', 'camera', 'easy', 'hunt', 'history'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'מוזיאון הבית',
+      description: 'תמצאו את החפץ הכי ישן בבית, ותכינו לו שלט כמו במוזיאון: מה זה, מאיזו שנה, וסיפור במשפט אחד. תצלמו את התצוגה.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'nature-letters',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'forest', 'beach', 'kids', 'mixed', 'camera', 'easy', 'nature', 'hunt', 'building'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'אותיות בטבע',
+      description: 'תמצאו בטבע ענפים ואבנים שנראים כמו אותיות, ותסדרו מהם על האדמה את השם הכי ארוך בקבוצה. תצלמו אותו.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'mystery-sound',
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'creative', 'noPrep', 'fromAnywhere', 'indoor', 'home', 'kids', 'mixed', 'camera', 'easy', 'puzzle'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'הצליל המסתורי',
+      description: 'אחד מכם מאחורי דלת סגורה משמיע צליל עם חפץ מהבית, והשאר מנחשים מה זה. שלושה סבבים, סרטון.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'sand-wall',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'kids', 'youth', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature', 'againstClock'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'חומת חול',
+      description: 'יש לכם 4 דקות לבנות חומת חול שעומדת מול גל אחד. סרטון מהרגע שהגל מגיע.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      timeLimitMinutes: 4,
+      pointValue: 120,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+    }),
+  },
+  {
+    key: 'sand-word',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'השם בחול',
+      description: 'תכתבו בחול מילה של 4 אותיות, כשכל אות ארוכה יותר מהגבוה בקבוצה. תצלמו את כל המילה בתמונה אחת.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 120,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'sand-sculpture',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'kids', 'adults', 'mixed', 'camera', 'easy', 'building', 'strangers', 'againstClock', 'nature', 'crowded'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'פסל לזר',
+      description: 'יש לכם 3 דקות לפסל בחול חיה. אחר כך אדם זר מנחש מה זו, בסרטון.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 3,
+      timeLimitMinutes: 3,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'beach-boat',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'kids', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'סירה מהחוף',
+      description: 'תבנו סירה מענפים, עלים ופקקים שמצאתם על החוף, ותשיטו אותה על המים 10 שניות בלי שתטבע. סרטון.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 120,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'wave-jump',
+    family: 'all-airborne',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'physical', 'nature'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'קפיצה מעל גל',
+      description: 'תמונה אחת שבה כל הקבוצה באוויר, ממש מעל גל שנשבר.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'old-dance',
+    family: 'stranger-question',
+    occasions: ['mitzvah', 'wedding'],
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'music', 'kindness', 'crowded'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'הריקוד של פעם',
+      description: 'תבקשו מאורח מעל גיל 60 ללמד אתכם ריקוד שרקדו בחתונות כשהוא היה צעיר, ותרקדו אותו יחד איתו. סרטון.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 120,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'oldest-couple',
+    occasions: ['wedding'],
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'adults', 'mixed', 'camera', 'easy', 'strangers', 'kindness', 'crowded'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'הזוג הכי ותיק',
+      description: 'תמצאו את הזוג הנשוי הכי ותיק בחתונה, ותצלמו אותם נותנים לחתן ולכלה עצה אחת.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'telling-object',
+    occasions: ['teamBuilding'],
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'office', 'park', 'adults', 'corporate', 'camera', 'easy', 'calm'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'החפץ שמספר',
+      description: 'כל אחד מוציא מהתיק או מהכיס חפץ שמספר עליו משהו, ומסביר במשפט אחד. סרטון אחד.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'chain-reaction',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'home', 'school', 'office', 'park', 'kids', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'building'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'שרשרת תגובה',
+      description: 'שרשרת של 5 חפצים לפחות, בלי טלפונים, שכל אחד מפיל את הבא, בטייק אחד. מישהו נגע אחרי ההתחלה? מתחילים מחדש. סרטון.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'escalator-mannequins',
+    family: 'public-freeze',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'mall', 'office', 'crowded', 'youth', 'adults', 'corporate', 'camera', 'medium', 'dare', 'humor'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'בובות במדרגות',
+      description: 'כל הקבוצה עולה במדרגות הנעות קפואה לגמרי, כמו בובות בחלון ראווה, מלמטה ועד למעלה. סרטון.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'weirdest-product',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'mall', 'cityCenter', 'neighborhood', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor', 'crowded'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'המוצר הכי מוזר',
+      description: 'תבקשו ממוכר להראות לכם את המוצר הכי מוזר בחנות שלו, ותצלמו אותו מסביר למה בכלל הביא אותו לחנות.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'our-sign',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'neighborhood', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'hunt', 'humor'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'השלט שלנו',
+      description: 'תמצאו שלט שמתאר בדיוק את הקבוצה שלכם, ותצטלמו מתחתיו.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'whisper-chain',
+    occasions: ['youthGroup'],
+    siting: 'never',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'park', 'school', 'home', 'kids', 'mixed', 'camera', 'easy', 'humor', 'kindness'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'מחמאה בלחישה',
+      description: 'הראשון לוחש לבא אחריו מחמאה על מישהו מהקבוצה, וכל אחד לוחש לבא את מה ששמע. האחרון אומר בקול מה הגיע אליו. טייק אחד.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'shelter',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'kids', 'youth', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature', 'againstClock'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'מחסה',
+      description: 'יש לכם 7 דקות לבנות מענפים שנפלו מחסה שכולכם נכנסים לתוכו בישיבה. תצלמו אותו כשכולכם בפנים.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 7,
+      timeLimitMinutes: 7,
+      pointValue: 150,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'ninjas',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'park', 'kids', 'mixed', 'camera', 'easy', 'physical', 'nature'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'נינג\'ות',
+      description: 'כל הקבוצה הולכת 50 צעדים בשביל בלי להשמיע אף צליל. מישהו דרך על משהו שנשמע? מתחילים מאפס. סרטון.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'twenty-litter',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'beach', 'neighborhood', 'youth', 'adults', 'mixed', 'camera', 'medium', 'kindness', 'againstClock', 'nature'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'עשרים פריטים',
+      description: 'יש לכם 3 דקות לאסוף 20 פריטי פסולת. תסדרו אותם בשורה ותצלמו, ואחר כך הכל לפח.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 3,
+      timeLimitMinutes: 3,
+      pointValue: 120,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'animal-signs',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'educational', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'park', 'kids', 'mixed', 'camera', 'easy', 'nature', 'hunt', 'observation'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'מי היה כאן',
+      description: 'תמצאו סימן לחיה שלא ראיתם בעצמה, כמו עקבות, נוצה או גללים, ותצלמו אותו מקרוב.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'office-portrait',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'adults', 'corporate', 'camera', 'easy', 'building', 'humor', 'againstClock'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'דיוקן משרדי',
+      description: 'יש לכם 3 דקות להרכיב מציוד משרדי דיוקן של אחד מכם. תצטלמו עם הדיוקן ועם מי שהוא מתאר.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 3,
+      timeLimitMinutes: 3,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'next-department',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'educational', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'adults', 'corporate', 'camera', 'medium', 'strangers', 'crowded'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'המחלקה השכנה',
+      description: 'תמצאו בבניין מישהו שאף אחד מכם לא מכיר, ותבקשו שילמד אתכם בדקה משהו מהעבודה שלו. סרטון.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'street-miracle',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'kids', 'mixed', 'camera', 'easy', 'hunt', 'humor'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'הנס של הרחוב',
+      description: 'תמצאו ברחוב משהו שנראה כמו נס, כמו עץ שצומח מתוך קיר, ותצטלמו לידו בתדהמה.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'agent-in-crowd',
+    family: 'vendor-code',
+    exclusiveStation: true,
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor', 'cityCenter', 'mall', 'crowded', 'youth', 'adults', 'corporate', 'medium', 'strangers', 'observation', 'dare'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      SET_CODE,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תבקשו מחבר להסתובב בנקודה כל המשחק עם שלושה סימנים מזהים, ותחליפו את הסוגריים בהם. הוא נותן את הקוד למי שאומר את הסיסמה.\n\nAsk a friend to wander the spot all game with three identifying marks, and replace the brackets with them. They give the code to whoever says the password.',
+      },
+    ],
+    build: () => codeStation({
+      title: 'הסוכן בקהל',
+      description: 'בכיכר הזאת מסתובב הסוכן שלנו: [הוראות ליוצר: שלושה סימנים מזהים, למשל כובע ירוק וספר ביד]. תגידו לו "הציפור עפה בחצות", והוא ייתן לכם קוד.',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+    }),
+  },
+  {
+    key: 'strangers-mission',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'park', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'dare', 'crowded'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'המשימה של הזר',
+      description: 'תבקשו מאדם זר להמציא לכם משימה של חצי דקה, ותצלמו אתכם עושים אותה מולו.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'lie-about-city',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'creative', 'teamwork', 'educational', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'historic', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'history', 'crowded'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'השקר על העיר',
+      description: 'תספרו לאדם זר שלוש עובדות על המקום הזה, שתיים נכונות ואחת שהמצאתם. אם הוא לא מזהה את השקר, הצלחתם. סרטון.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'first-job',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'kindness', 'crowded'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'העבודה הראשונה',
+      description: 'תעבדו 5 דקות בשביל מישהו, מוכר או שכן, ותקבלו תשלום שהוא לא כסף. תצטלמו עם התשלום.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'five-objects',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'school', 'cityCenter', 'office', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'puzzle'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'תשימו בקופסה בנקודה חמישה חפצים שהאות הראשונה שלהם יוצרת מילה, למשל פקק, ענב, מטבע = פעם. תכתבו כאן את המילה.\n\nPut five objects in a box at the pin whose first letters spell a word. Enter the word here.',
+      },
+    ],
+    build: () => sited({
+      title: 'חמישה חפצים',
+      description: 'בקופסה שכאן יש חמישה חפצים. איזו מילה הם מסתירים?',
+      type: 'quiz',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      answers: ['פעם'],
+      hint: 'רמז: תסתכלו על האות הראשונה של כל חפץ.',
+      hintPenalty: 20,
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'silent-library',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'mall', 'school', 'home', 'kids', 'mixed', 'camera', 'easy', 'humor'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'ספרייה שקטה',
+      description: 'סרטון של 30 שניות במקום הכי שקט שתמצאו: כל אחד בתורו מנסה להצחיק את האחרים בלי קול, ואסור לאף אחד לצחוק. מישהו צחק? מתחילים מאפס.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'family-feud',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'הסקר אמר',
+      description: 'תנחשו בקול מה הדבר הראשון שרוב האנשים עושים כשהם קמים בשישי בבוקר, ואז תשאלו חמישה זרים, בסרטון אחד. מותר לעצור בין זר לזר. הניחוש שלכם היה התשובה הכי נפוצה? הצלחתם.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'what-are-you-listening',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'music'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'מה אתה שומע',
+      description: 'תשאלו מישהו עם אוזניות אם אפשר לשמוע 5 שניות ממה שהוא שומע. כולכם מנחשים את הזמר לפני שהוא אומר. סרטון.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 110,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'dead-drop',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'park', 'neighborhood', 'youth', 'adults', 'corporate', 'medium', 'hunt', 'puzzle'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תדביקו מעטפה ליד ציון דרך בנקודה, ובתוכה תמונה או ציור של מקום שני, עד 100 מטר משם, שבו כתוב הקוד. תחליפו את הסוגריים בציון הדרך.\n\nTape an envelope by a landmark at the pin, holding a picture of a second spot within 100 m where the code is written. Replace the brackets.',
+      },
+      {
+        field: 'smart.secretCode',
+        required: true,
+        prompt: 'תקבעו את הקוד שכתבתם במקום השני, כדי שהאפליקציה תזהה אותו.\n\nSet the code you wrote at the second spot, so the app recognises it.',
+      },
+    ],
+    build: () => sited({
+      title: 'תיבת המת',
+      description: 'מוסתרת מעטפה ליד [הוראות ליוצר: ציון דרך]. מה שבתוכה יוביל אתכם לקוד.',
+      type: 'smart_station',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+      hint: 'רמז: המעטפה לא אומרת איפה הקוד, היא מראה.',
+      hintPenalty: 20,
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'rolling-challenge',
+    family: 'cairn',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'creative', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'park', 'cityCenter', 'school', 'youth', 'adults', 'mixed', 'camera', 'medium', 'versus', 'dare'],
+    difficulty: 4,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תקשרו פנקס ועט לציון דרך בנקודה, ותכתבו בו אתגר ראשון, למשל 20 קפיצות של כל הקבוצה. תחליפו את הסוגריים בציון הדרך.\n\nTie a notebook and pen to a landmark at the pin and write a first challenge in it, e.g. 20 jumps by the whole team. Replace the brackets.',
+      },
+    ],
+    build: () => sited({
+      title: 'האתגר המתגלגל',
+      description: 'בפנקס שקשור ל[הוראות ליוצר: ציון דרך] יש אתגר שהשאירה הקבוצה הקודמת. תעשו אותו, ותכתבו בפנקס לבאה אתגר שעשיתם עכשיו בעצמכם. סרטון של שניהם.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 120,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    key: 'the-curse',
+    family: 'stage-rule',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'ongoing', 'physical'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'הקללה',
+      description: 'מעכשיו ועד סוף השלב, בכל תמונה שאתם שולחים לפחות אחד מכם באוויר. עכשיו תמונה ראשונה כזאת.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'stranger-charades',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'beach', 'park', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'performance', 'againstClock', 'crowded'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'פנטומימה לזר',
+      description: 'תציגו לאדם זר שם של סרט, בלי מילים, עד שהוא מנחש. יש לכם דקה. סרטון.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 1,
+      timeLimitMinutes: 1,
+      pointValue: 110,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'five-cities',
+    family: 'farthest',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'historic', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'hunt'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'חמש ערים',
+      description: 'תאספו על פתק או קבלה אחת חתימות של 5 אנשים זרים, כל אחד מעיר אחרת, ליד שם העיר שלו. תצלמו אותה.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      smart: upload(),
+    }),
+  },
+  {
+    key: 'same-pose',
+    family: 'camera-cut',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'park', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'humor'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'אותה תנוחה',
+      description: 'סרטון אחד שבו כל הקבוצה באותה תנוחה בדיוק, בשישה מקומות שונים. עוצרים את הסרטון, עוברים מקום, וממשיכים.',
+      type: 'photo',
+      difficulty: 4,
+      estimatedMinutes: 4,
+      pointValue: 120,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+    }),
+  },
+  {
+    key: 'flying-ball',
+    family: 'camera-cut',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'humor'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'הכדור המעופף',
+      description: 'סרטון אחד: אחד זורק כדור נייר אל מחוץ לפריים, עוצרים את הסרטון, ובמקום אחר מישהו תופס אותו כשממשיכים. ככה שלוש פעמים, בשלושה מקומות, כאילו זו זריקה אחת.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 130,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+    }),
+  },
+  {
+    key: 'strangers-story',
+    family: 'stranger-chain',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'סיפור של זרים',
+      description: 'סרטון אחד: חמישה אנשים זרים ממשיכים כל אחד במשפט אחד את הסיפור "פעם אחת, בדיוק במקום הזה...". מותר לעצור את הסרטון בין זר לזר.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'victory-signs',
+    family: 'rare-find',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'hunt', 'splitUp'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'ניצחון בשלטים',
+      description: 'סרטון אחד שבו מאייתים את המילה "ניצחון" מאותיות על שלטים ברחוב, כל אות משלט אחר, לפי הסדר. מותר לעצור את הסרטון בין אות לאות.',
+      type: 'photo',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 60 }),
+    }),
+  },
+  {
+    key: 'code-names',
+    family: 'stage-rule',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['start', 'camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'home', 'school', 'park', 'ongoing', 'humor'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'שמות קוד',
+      description: 'תבחרו לכל אחד מכם שם של סוכן חשאי. עד סוף השלב קוראים לכל אחד רק בשם הזה. עכשיו סרטון קצר: כל אחד מציג בשם הקוד את מי שעומד לידו.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 45 }),
+    }),
+  },
+  {
+    key: 'twelve-thumbs',
+    family: 'crowd-count',
+    sourceTemplateKey: 'mission-studio',
+    tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'mall', 'beach', 'neighborhood', 'strangers'],
+    difficulty: 6,
+    // Hands only, so no stranger's face is in the picture; the team's own hands
+    // are in their pockets, so every thumb in the frame is a stranger's.
+    build: () => anywhere({
+      title: 'שנים עשר אגודלים',
+      description: 'תמונה אחת עם 12 אגודלים מורמים של אנשים זרים, בלי אף אגודל שלכם.',
+      type: 'photo',
+      difficulty: 6,
+      estimatedMinutes: 8,
+      pointValue: 140,
       smart: upload(),
     }),
   },

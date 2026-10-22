@@ -111,6 +111,31 @@ export const BANK_TAGS = {
   corporate: { he: 'ארגוני', en: 'Corporate' },
   mixed: { he: 'כל הגילאים', en: 'All ages' },
 
+  // ── Mechanic — what KIND of game the mission is (mission-studio, 2026-10-22) ──
+  // Descriptive only: the composer does not filter or score on these yet. They
+  // exist so the founder can browse, filter and build on the bank by how a
+  // mission plays, and every entry carries every one that is true of it.
+  strangers: { he: 'זרים', en: 'Strangers' },
+  hunt: { he: 'ציד', en: 'Hunt' },
+  puzzle: { he: 'חידה', en: 'Puzzle' },
+  navigation: { he: 'ניווט', en: 'Navigation' },
+  observation: { he: 'תצפית', en: 'Observation' },
+  physical: { he: 'גופני', en: 'Physical' },
+  againstClock: { he: 'נגד השעון', en: 'Against the clock' },
+  building: { he: 'בנייה', en: 'Building' },
+  performance: { he: 'הופעה מול המצלמה', en: 'Performance' },
+  humor: { he: 'הומור', en: 'Humor' },
+  dare: { he: 'נועזות', en: 'Dare' },
+  splitUp: { he: 'מתפצלים', en: 'Split up' },
+  nature: { he: 'טבע', en: 'Nature' },
+  kindness: { he: 'חסד ונתינה', en: 'Kindness' },
+  music: { he: 'מוזיקה', en: 'Music' },
+  history: { he: 'פעם ועכשיו', en: 'Then and now' },
+  ongoing: { he: 'מתמשכת', en: 'Ongoing' },
+  versus: { he: 'נגד קבוצות אחרות', en: 'Against other teams' },
+  record: { he: 'שיא', en: 'Record' },
+  calm: { he: 'רגועה', en: 'Calm' },
+
   // ── Difficulty band — coarse. The mission's own 1-10 `difficulty` is what
   // actually drives per-stage pacing; this is for filtering and display only.
   easy: { he: 'קל', en: 'Easy' },
@@ -233,6 +258,18 @@ export const ACTIVITY_TAG_IDS = [
   'action', 'camera', 'thinking', 'teamwork', 'creative', 'educational', 'chores',
 ] as const;
 export type ActivityTagId = typeof ACTIVITY_TAG_IDS[number];
+
+/**
+ * HOW a mission plays (change: composer-v2-diversity). The composer reads these to keep a stage
+ * from repeating one mechanic ("three times ask a stranger"); every bank mission carries at least
+ * one, which scripts/test-composer-diversity.ts enforces.
+ */
+export const MECHANIC_TAG_IDS = [
+  'strangers', 'hunt', 'puzzle', 'navigation', 'observation', 'physical', 'againstClock', 'building',
+  'performance', 'humor', 'dare', 'splitUp', 'nature', 'kindness', 'music', 'history', 'ongoing',
+  'versus', 'record', 'calm',
+] as const satisfies readonly BankTagId[];
+export type MechanicTagId = typeof MECHANIC_TAG_IDS[number];
 
 /**
  * The kinds of place an event can happen in, in the order the questionnaire

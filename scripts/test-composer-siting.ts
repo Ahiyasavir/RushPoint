@@ -118,10 +118,14 @@ ok(`prep level 1 invents no pin (${level1Games} games)`, level1Games > 0 && leve
 
 // ── 2b. Riddles and trivia can be placed; conversations and chores cannot ─────
 console.log(' 2b. which missions a place can help');
-const RIDDLES = ['trivia-bones', 'trivia-longest-river', 'the-hard-riddle', 'invention-order', 'anagram-easy',
-  'anagram-medium', 'anagram-hard', 'puzzle-code', 'mystery-gift', 'balloon-message', 'echo-riddle',
-  'vault-combination-riddle', 'disarm-the-device', 'household-riddle-comb', 'thinking-room'];
-const STAY_NEVER = ['open-team-name', 'two-truths-one-lie', 'honest-compliment', 'open-team-pact', 'best-moment-so-far',
+// trivia-bones, trivia-longest-river, vault-combination-riddle and disarm-the-device
+// left the bank on 2026-10-21 (mission-studio overhaul: googleable facts, and two
+// "riddles" whose answer was printed in their own text).
+const RIDDLES = ['anagram-easy',
+  'anagram-medium', 'anagram-hard', 'mystery-gift', 'balloon-message',
+  'household-riddle-comb', 'thinking-room'];
+// best-moment-so-far left the bank on 2026-10-22 (a debrief poll, not a mission).
+const STAY_NEVER = ['two-truths-one-lie', 'honest-compliment',
   'celebrants-favorites-ranking', 'chore-sock-pairs', 'chore-room-reset'];
 const missing = [...RIDDLES, ...STAY_NEVER].filter((k) => !byKey.has(k));
 ok('every named key is in the bank', missing.length === 0, missing);

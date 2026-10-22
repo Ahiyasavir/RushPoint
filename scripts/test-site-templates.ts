@@ -255,7 +255,7 @@ console.log('\n── 9. pick-N stages ─────────────�
 // that ends on a scoreboard would be skipping the part it exists for.
 console.log('\n── 10. the learning templates end on reflection ────────────');
 {
-  const REFLECTIVE = new Set(['finish-what-we-didnt-know', 'finish-one-word-each', 'best-moment-so-far']);
+  const REFLECTIVE = new Set(['finish-what-we-didnt-know']);
   for (const key of ['site-education', 'site-team-building', 'site-youth-movement', 'site-help-at-home']) {
     const t = SITE_TEMPLATES.find((x) => x.key === key);
     if (!t) { ok(`${key} exists`, false); continue; }
