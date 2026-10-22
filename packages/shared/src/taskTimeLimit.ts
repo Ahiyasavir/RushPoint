@@ -9,6 +9,8 @@
 // instant: a phone whose clock runs slow would otherwise freeze or skip the countdown (the
 // "never ship an absolute deadline" rule). Pure and total.
 
+import { arrivalGateApplies } from './missionArrival';
+
 /** A submission in flight when the countdown hits zero still counts. */
 export const TIME_LIMIT_GRACE_MS = 5_000;
 /** Ten hours: longer than any event, short enough to catch a typo like 6000. */
@@ -25,6 +27,33 @@ function startMs(startedAt: unknown): number | null {
   if (typeof startedAt !== 'string') return null;
   const ms = Date.parse(startedAt);
   return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * The stamp a mission's countdown runs from (change: composer-v2-phase0).
+ *
+ * A mission sealed until arrival counts from the team's ARRIVAL (`arrivedAt`): counting from the
+ * moment it was given let the walk to the pin eat the clock. Before arrival it returns null, which
+ * `timeLimitRemainingMs` / `isTimeLimitUp` already read as "no countdown, never up". Every other
+ * mission (no pin, hidden, a run without the gate) counts from `startedAt`, as before.
+ *
+ * `gate` is the run's `arrivalGate`. A caller without the run passes undefined, and the gate is
+ * inferred from the arrival latch: a gated mission cannot be submitted before arrival, and an
+ * ungated run never latches `arrivedAt` on a located mission, so the inference is exact wherever a
+ * submission is judged. Pure and total.
+ */
+export function timeLimitClockStart(
+  task: Parameters<typeof arrivalGateApplies>[0] | unknown,
+  rec: { startedAt?: unknown; arrivedAt?: unknown } | null | undefined,
+  gate: boolean | undefined,
+): string | null {
+  const r = rec && typeof rec === 'object' ? rec : {};
+  const started = typeof r.startedAt === 'string' ? r.startedAt : null;
+  const arrivedAt = typeof r.arrivedAt === 'string' ? r.arrivedAt : null;
+  const t = task && typeof task === 'object' ? task as Parameters<typeof arrivalGateApplies>[0] : null;
+  const gated = arrivalGateApplies(t, { arrivalGate: gate ?? arrivedAt !== null });
+  if (!gated) return started;
+  return arrivedAt;
 }
 
 /** Milliseconds this team has left, ≥ 0; null when the mission has no limit or no start stamp. */

@@ -1,0 +1,3 @@
+- [x] 1 RED: scripts/test-composer-diversity.ts (vocabulary, caps, same draws, fewer repeats than off).
+- [x] 2 GREEN: MECHANIC_TAG_IDS; penalty and caps in fitScore; per-stage and per-game counts in the fill loop.
+- [x] 3 Every existing composer suite still green; typecheck clean.

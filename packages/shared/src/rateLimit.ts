@@ -193,6 +193,14 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // throttled. Same residual gap as the reads above: an anonymous uid is free to
   // mint, so this is a brake on casual scripting — App Check is the real fix.
   setPublicLike: { max: 30, windowMs: MIN },
+  // What creators teach the mission bank (change: composer-v2-learning): one call per launch and per
+  // regenerate. A creator pressing regenerate repeatedly is the busiest real caller.
+  recordMissionSignals: { max: 40, windowMs: MIN },
+  // Public answer-check oracle (security audit 2026-10-22): keyed on the CONNECTION, not a
+  // uid, so it is a per-caller brake on brute-forcing a published game's answer key.
+  checkChallengeAnswer: { max: 20, windowMs: MIN },
+  // Gallery copy-count bump (security audit 2026-10-22): one creator dragging missions.
+  incrementTaskCopyCount: { max: 60, windowMs: MIN },
 
   // Live-ops / creator-console reads and mutations that were enforcing against
   // an UNDEFINED bucket — i.e. silently fail-open (see rateLimitCoverage.test.ts).

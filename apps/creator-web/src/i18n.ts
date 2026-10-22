@@ -1638,9 +1638,7 @@ const HE = {
     taskAvailHolding: ({ n }: { n: number }) =>
       n === 1 ? 'קבוצה אחת נמצאת עליה עכשיו ותוכל לסיים אותה' : `${n} קבוצות נמצאות עליה עכשיו ויוכלו לסיים אותה`,
     taskAvailUpdated: 'הזמינות עודכנה',
-    taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
-      `בשלב "${stage}" יישארו ${available} משימות זמינות מתוך ${required} שנדרשות להשלמת השלב, כך שקבוצות שעדיין לא סיימו אותו ייתקעו. להשהות בכל זאת?`,
-    taskAvailForce: 'להשהות בכל זאת',
+    taskAvailPausedMovesOn: 'קבוצה שתישאר בלי משימות בשלב בגלל ההשהיה תדלג עליה ותמשיך הלאה',
     // live-task-close-rules: what a closure does, said before it happens.
     taskAvailCloseConfirm: ({ title }: { title: string }) =>
       `לסגור את "${title}" לכל שאר הריצה? קבוצה שנמצאת עליה עכשיו תעבור למשימה הבאה בלי נקודות ותקבל הודעה, משימות שחיכו לה ייפתחו, והשלב יתקצר לכל קבוצה כדי שאף אחת לא תיתקע. אם רק צריך הפסקה, עדיף להשהות.`,
@@ -2172,6 +2170,18 @@ const HE = {
     // לחיצה חוזרת מתרחקת בכוונה, ולכן הכיתוב הוא פעולה חוזרת ולא פעולה חד פעמית.
     regenerateTask: 'החלפה במשימה דומה',
     regenerateNothingLeft: 'אין כרגע משימה נוספת שמתאימה למשחק הזה. אפשר לערוך את המשימה ידנית.',
+    regenerateDone: 'המשימה הוחלפה',
+    regenerateUndo: 'בטל',
+    sentenceFillLead: 'השלימו את המשפט, כך השחקנים יקראו אותו:',
+    generateCode: 'תמציאו לי קוד',
+    zonePlanTitle: (n: number) => (n === 1 ? 'המשימות שלכם נמצאות באזור אחד' : `המשימות שלכם פזורות ב ${n} אזורים`),
+    zonePlanBody: (arrivals: number): string => arrivals > 0 ? `נסדר את המשחק כך שכל שלב הוא אזור אחד, לפי סדר ההליכה, ובאזור רחוק קודם מגיעים ואז מתחילים. ככה לא הולכים הלוך וחזור.` : `נסדר את המשחק כך שכל שלב הוא אזור אחד, לפי סדר ההליכה. ככה לא הולכים הלוך וחזור.`,
+    zonePlanApply: 'סדרו לפי אזורים',
+    zonePlanDismiss: 'לא עכשיו',
+    zonePlanDone: (n: number) => (n === 1 ? 'המשחק סודר לאזור אחד' : `המשחק סודר ל ${n} אזורים`),
+    zoneStageTitle: (n: number) => `אזור ${n}`,
+    zoneArrivalTitle: (n: number) => `מגיעים לאזור ${n}`,
+    zoneArrivalDescription: 'תלכו לאזור שמסומן במפה. המשימות של האזור ייפתחו כשתגיעו.',
     duplicatedTaskTitle: (title: string) => `${title} (עותק)`,
     hideTask: 'הוצאה מהמשחק',
     hideTaskHelp: 'המשימה נשמרת כאן, ולא תופיע באף ריצה עד שתחזירו אותה.',
@@ -4939,9 +4949,7 @@ const EN: typeof HE = {
     taskAvailHolding: ({ n }: { n: number }) =>
       n === 1 ? 'One team is on it now and can still finish it' : `${n} teams are on it now and can still finish it`,
     taskAvailUpdated: 'Availability updated',
-    taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
-      `Stage "${stage}" would be left with ${available} available missions out of the ${required} it needs to complete, so teams still in it would be stuck. Pause it anyway?`,
-    taskAvailForce: 'Pause anyway',
+    taskAvailPausedMovesOn: 'A team that runs out of missions in this stage because of the pause will skip it and move on',
     taskAvailCloseConfirm: ({ title }: { title: string }) =>
       `Close "${title}" for the rest of the run? A team on it right now moves to its next mission with no points and gets a message, missions that were waiting for it open, and each team's stage shrinks so nobody gets stuck. If you only need a break, pause it instead.`,
     taskAvailClosedMoved: ({ n }: { n: number }) => (n === 1 ? 'One team was moved to its next mission' : `${n} teams were moved to their next mission`),
@@ -5469,6 +5477,18 @@ const EN: typeof HE = {
     // (change: mission-regenerate). Pressing again drifts further on purpose.
     regenerateTask: 'Swap for a similar mission',
     regenerateNothingLeft: 'There is no other mission that fits this game right now. You can edit this one by hand.',
+    regenerateDone: 'Mission swapped',
+    regenerateUndo: 'Undo',
+    sentenceFillLead: 'Complete the sentence, exactly as players will read it:',
+    generateCode: 'Make up a code',
+    zonePlanTitle: (n: number) => (n === 1 ? 'Your missions are in one area' : `Your missions are spread over ${n} areas`),
+    zonePlanBody: (arrivals: number): string => arrivals > 0 ? 'We will make each stage one area, in walking order, and a far area starts with getting there. No walking back and forth.' : 'We will make each stage one area, in walking order. No walking back and forth.',
+    zonePlanApply: 'Arrange by area',
+    zonePlanDismiss: 'Not now',
+    zonePlanDone: (n: number) => (n === 1 ? 'Game arranged into one area' : `Game arranged into ${n} areas`),
+    zoneStageTitle: (n: number) => `Area ${n}`,
+    zoneArrivalTitle: (n: number) => `Get to area ${n}`,
+    zoneArrivalDescription: 'Walk to the area marked on the map. Its missions open when you arrive.',
     duplicatedTaskTitle: (title: string) => `${title} (copy)`,
     hideTask: 'Take out of the game',
     hideTaskHelp: 'The mission is kept here and joins no run until you bring it back.',

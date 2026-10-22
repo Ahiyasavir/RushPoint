@@ -58,12 +58,16 @@ service cloud.firestore {
         // `sharedLaunch` is SERVER-WRITTEN (change: shared-launch-opens-console): a client may not
         // create a doc with it, and a LOCKED launch copy (a share link that did not allow copying)
         // accepts no client write at all, or the lock would be one direct write away.
-        allow create: if isOwner(uid) && !hasTombstone(request.resource.data)
-                      && !request.resource.data.keys().hasAny(['sharedLaunch']);
-        allow update: if isOwner(uid) && tombstoneUnchanged()
-                      && resource.data.get('sharedLaunch', null) == null
-                      && !request.resource.data.keys().hasAny(['sharedLaunch']);
-        allow delete: if false;
+        // CLIENT WRITES ARE CLOSED (security audit 2026-10-22). They used to be open to
+        // the owner "for responsiveness", but no client has written a game doc since the
+        // Builder moved to createGame/updateGame, and the open door skipped everything
+        // those callables enforce: stage validation, stripUnsafeDisplayChars, the media
+        // origin accept-set, and the server-only fields. The worst of it: `isTemplate:
+        // true` put the writer's game into EVERY creator's new-game menu, because
+        // listGameTemplates is a collectionGroup query across all owners. The tombstone
+        // and sharedLaunch reasoning above still describes WHY those fields are
+        // server-only; this rule now enforces it for every field at once.
+        allow create, update, delete: if false;
 
         // ── RUNS ─────────────────────────────────────────────────────────────
         //    Live instances. Owner reads everything; all writes are CF-only
@@ -319,6 +323,14 @@ service cloud.firestore {
     //    auditLogs record. A rules-level admin check would be a second, weaker copy
     //    of that boundary.
     match /missionBankOverrides/{missionKey} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
+    // ── MISSION STATS (change: composer-v2-learning) ─────────────────────────
+    //    Keep / swap counts per bank mission, in one document. Counts only, so any signed-in
+    //    creator may read them (the composer does); only `recordMissionSignals` writes.
+    match /missionStats/{doc} {
       allow read:  if request.auth != null;
       allow write: if false;
     }

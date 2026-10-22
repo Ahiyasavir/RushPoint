@@ -136,6 +136,10 @@ async function main() {
   await check('owner CANNOT write a run doc (CF-only)', assertFails(setDoc(doc(owner, runPath), { status: 'hacked' })));
   await check('team CANNOT write its own team doc (no score self-edit)', assertFails(setDoc(doc(team, `${runPath}/teams/${TEAM}`), { score: 9999 })));
   await check('owner CANNOT write a team doc', assertFails(setDoc(doc(owner, `${runPath}/teams/${TEAM}`), { score: 9999 })));
+  // composer-v2-learning: keep / swap counts are readable by any signed-in creator, writable by no client.
+  await check('a signed-in client CAN read mission stats', assertSucceeds(getDoc(doc(owner, 'missionStats/all'))));
+  await check('an unauthenticated client CANNOT read mission stats', assertFails(getDoc(doc(anon, 'missionStats/all'))));
+  await check('no client can write mission stats', assertFails(setDoc(doc(owner, 'missionStats/all'), { counts: { x: { kept: 999 } } })));
   await check('client CANNOT write a wallet (credits)', assertFails(setDoc(doc(owner, `wallets/${OWNER}`), { eventCredits: 99999 })));
   await check('client CANNOT write an alert', assertFails(setDoc(doc(team, `${runPath}/alerts/x`), { type: 'sos' })));
   await check('client CANNOT write publicGames (gallery is CF-only)', assertFails(setDoc(doc(owner, `publicGames/${GAME}`), { title: 'x' })));
@@ -175,8 +179,17 @@ async function main() {
     assertFails(setDoc(doc(owner, `users/${OWNER}/games/FORGED-LAUNCH`), { title: 'F', sharedLaunch: { locked: false } })));
   await check('owner CAN still read a locked copy (the Run Console needs it)',
     assertSucceeds(getDoc(doc(owner, `users/${OWNER}/games/LOCKED-COPY`))));
-  await check('owner CAN still write an ordinary (tombstone-free) game doc',
-    assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'G' })));
+  // [security audit 2026-10-22] Game documents are CALLABLE-WRITTEN ONLY. A direct
+  // owner write skipped every check updateGame makes (stage validation, the unsafe-
+  // character strip, the media-origin accept-set) and could set server-only fields:
+  // `isTemplate: true` put any creator's game into EVERY creator's new-game menu,
+  // because listGameTemplates is a collectionGroup query across all owners.
+  await check('owner CANNOT write a game doc directly (updateGame is the only door)',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'G' })));
+  await check('owner CANNOT create a game doc directly (createGame is the only door)',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/NEW-DIRECT`), { title: 'N', ownerUid: OWNER })));
+  await check('owner CANNOT self-promote a game into the template menu (isTemplate)',
+    assertFails(updateDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { isTemplate: true })));
   // [firestore-rules-coverage] Destroying a game is a FIVE-system act — the game
   // subtree, the publicGames/publicTasks gallery index, the accessCodes pointers,
   // Storage photos + game media, and the audit record. Only purgeGameTree does all
@@ -198,9 +211,10 @@ async function main() {
     assertFails(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { deletedAt: deleteField() })));
   await check('owner CANNOT move deletedAt forward (restart the grace period)',
     assertFails(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { deletedAt: '2026-07-20T00:00:00.000Z' })));
-  // …and the guard must NOT become "a trashed game is read-only".
-  await check('owner CAN still edit an ordinary field of a trashed game',
-    assertSucceeds(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { title: 'Trashed (renamed)' })));
+  // A trashed game is edited (and restored) only through the callables now, like
+  // every other game; the denial below is the general rule, not a tombstone special case.
+  await check('owner CANNOT edit a trashed game directly either',
+    assertFails(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { title: 'Trashed (renamed)' })));
   // The delete verb under a run: `allow write: if false` covers it, asserted once
   // as a class so a future verb split there cannot silently open it.
   await check('owner CANNOT delete a team doc (server-only state, delete verb too)',
@@ -356,7 +370,7 @@ async function main() {
     assertFails(setDoc(doc(other, `publicGames/${GAME}`), { title: 'defaced' })));
   await check('authed user CAN read an access code to join', assertSucceeds(getDoc(doc(team, `accessCodes/ABC123`))));
   await check('anon CANNOT read an access code (auth required)', assertFails(getDoc(doc(anon, `accessCodes/ABC123`))));
-  await check('owner CAN write own game template (builder responsiveness)', assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'edited' })));
+  await check('owner CANNOT write own game template directly (updateGame only, audit 2026-10-22)', assertFails(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'edited' })));
 
   console.log('\n── Discovery POIs: coordinates are server-secret ──');
   // Seed a POI with admin privileges (bypasses rules).

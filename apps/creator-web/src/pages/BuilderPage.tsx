@@ -28,7 +28,7 @@ import {
 import type {
   Announcements, DragEndEvent, DragStartEvent, KeyboardCoordinateGetter, ScreenReaderInstructions,
 } from '@dnd-kit/core';
-import { getGame, updateGame, launchRun, exportGameFile, importGameFile, loadPopularTags } from '../services/calls';
+import { getGame, updateGame, launchRun, exportGameFile, importGameFile, loadPopularTags, recordMissionSignals } from '../services/calls';
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
@@ -42,6 +42,7 @@ import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
+import ZonePlanOffer from '../components/ZonePlanOffer';
 import { useT } from '../components/LanguageContext';
 import { useAuth } from '../components/AuthGate';
 // First-open explainer (change: guided-new-game-wizard). Yields to Quick Setup and
@@ -91,12 +92,13 @@ import { buildSavePayload } from '../lib/savePayload';
 // Regenerate one mission from the bank (change: mission-regenerate). The pure
 // decision lives in lib/regenerateMission; the memory of what has already been
 // offered for a mission lives in lib/regenerateHistory.
-import { loadMissionBank, missionBankNow } from '../lib/missionBank';
+import { loadMissionBank, missionBankNow, loadMissionStats, missionStatsNow } from '../lib/missionBank';
 import {
   missionTagProfile, missionRoleAt, regenerateContext, chooseRegeneratedMission,
   applyRegeneratedMission, seedFor,
 } from '../lib/regenerateMission';
 import { readOfferedKeys, recordOfferedKey } from '../lib/regenerateHistory';
+import { readTaste, writeTaste, recordTaste, tasteTagsForTask, recordLaunchTaste, bankKeyForTask } from '../lib/tasteProfile';
 import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib/gamePresentation';
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 // Builder header stage/mission breadcrumb (change: builder-clarity-mission-hierarchy).
@@ -820,6 +822,13 @@ export default function BuilderPage() {
       if (!(await save())) { closePlayTab(); await dialog.alert(b.saveFailed); return; }
       try {
         const { runId, accessCode } = await launchRun({ gameId: game.id, testDrive });
+        // composer-v2-taste: every mission still in a game that really launches is a "yes, this kind".
+        if (!testDrive) {
+          recordLaunchTaste(user?.uid, game.stages, missionBankNow());
+          // composer-v2-learning: every bank mission still in a launched game was KEPT. Fire-and-forget.
+          const kept = game.stages.flatMap((st) => st.tasks).map((t) => bankKeyForTask(t, missionBankNow())).filter((k): k is string => !!k);
+          if (kept.length > 0) void recordMissionSignals({ kept }).catch(() => undefined);
+        }
         // Launch succeeded — now it's safe to burn the one-time first-launch gate.
         if (needFirstLaunchConfirm) markFirstLaunchConfirmed(user?.uid);
         if (testDrive) {
@@ -1674,7 +1683,7 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} onUndo={undo} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
           quickSetupInlineBar={qsVisible && qsStep && qsCardInline ? (
             <QuickSetupBar
               inline
@@ -2655,8 +2664,10 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, quickSetupInlineBar, quickSetupGuided }: {
+function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, quickSetupInlineBar, quickSetupGuided, onUndo: undo }: {
   game: Game; setGame: (g: Game) => void;
+  /** The Builder's history undo, offered by the toast after a card regenerate (composer-v2-phase0). */
+  onUndo: () => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
   // An activated readiness entry (change: builder-first-task-flow). The `nonce`
   // makes re-activating the SAME entry a new request.
@@ -2681,6 +2692,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   quickSetupGuided?: { taskId: string | null; anchor: string | null; onExit: () => void } | null;
 }) {
   const b = useT().builder;
+  // Swap count per card, so a regenerated card plays its spin (change: composer-v2-phase0).
+  const [regenNonce, setRegenNonce] = useState<Record<string, number>>({});
+  // "Not now" on the arrange-by-area offer, for this visit to the Builder (change: composer-v2-zones).
+  const [zoneOfferDismissed, setZoneOfferDismissed] = useState(false);
   // The signed-in creator, for the per-creator regenerate memory
   // (change: mission-regenerate). A browser holds several accounts, and one
   // creator's "already seen" must not narrow another's pool.
@@ -3089,6 +3104,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     const role = missionRoleAt(si, ti, game.stages.length, si < 0 ? 0 : game.stages[si].tasks.length);
 
     void loadMissionBank();
+    void loadMissionStats();
     const offeredKeys = readOfferedKeys(user?.uid, game.id, source.id);
     const picked = chooseRegeneratedMission({
       bank: missionBankNow(),
@@ -3097,6 +3113,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
       drift: offeredKeys.length,
       offeredKeys,
       seed: seedFor(source.id, offeredKeys.length),
+      taste: readTaste(user?.uid),
+      missionStats: missionStatsNow(),
     });
     if (!picked) { void dialog.alert(b.regenerateNothingLeft); return null; }
 
@@ -3111,6 +3129,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     }
 
     recordOfferedKey(user?.uid, game.id, source.id, picked.key);
+    // composer-v2-taste: swapping a mission away says "not this kind".
+    writeTaste(user?.uid, recordTaste(readTaste(user?.uid), tasteTagsForTask(source, missionBankNow()), -1));
+    // composer-v2-learning: a bank mission swapped away teaches the bank. Fire-and-forget.
+    const swappedKey = bankKeyForTask(source, missionBankNow());
+    if (swappedKey) void recordMissionSignals({ swapped: [swappedKey] }).catch(() => undefined);
     return applyRegeneratedMission(source, built);
   }
 
@@ -3132,6 +3155,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     const next = regeneratedTaskFor(stage.tasks[at]);
     if (!next) return;
     updateStage(stage.id, { tasks: stage.tasks.map((t, i) => (i === at ? next : t)) });
+    // composer-v2-phase0: the card spins, and the way back is one press away. Undo is the Builder's
+    // own history, so it restores exactly the mission that was there.
+    setRegenNonce((m) => ({ ...m, [taskId]: (m[taskId] ?? 0) + 1 }));
+    toast.info(b.regenerateDone, { action: { label: b.regenerateUndo, onClick: undo } });
   }
 
   /**
@@ -3302,6 +3329,18 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
         >
           {breadcrumbText}
         </div>
+      )}
+      {/* Areas from the pins (change: composer-v2-zones): one stage per area, in walking order. */}
+      {!quickSetupFocusMode && !zoneOfferDismissed && (
+        <ZonePlanOffer
+          game={game}
+          onDismiss={() => setZoneOfferDismissed(true)}
+          onApply={(plan) => {
+            setGame({ ...game, stages: plan.stages, ...(plan.wizardSteps ? { wizardSteps: plan.wizardSteps } : {}) });
+            if (!plan.stages.some((st) => st.id === activeStageId)) setActiveStageId(plan.stages[0].id);
+            toast.success(b.zonePlanDone(plan.zoneCount), { action: { label: b.regenerateUndo, onClick: undo } });
+          }}
+        />
       )}
       <div className="flex-1 min-h-0">
     <DndContext
@@ -3516,6 +3555,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 onMoveToStage={(taskId, toStageId) => moveTaskToStage(activeStage.id, taskId, toStageId)}
                 onDuplicate={(taskId) => duplicateTask(activeStage.id, taskId)}
                 onRegenerate={(taskId) => regenerateTask(activeStage.id, taskId)}
+                regenNonces={regenNonce}
                 onToggleHidden={(taskId) => toggleTaskHidden(activeStage.id, taskId)}
                 /* Withheld for the last mission of a stage: a stage with none is a
                    readiness blocker, so the only outcome would be a new error. */

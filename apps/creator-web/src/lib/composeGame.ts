@@ -59,6 +59,7 @@ import {
 } from '@rushpoint/shared';
 import {
   ACTIVITY_TAG_IDS,
+  MECHANIC_TAG_IDS,
   AUDIENCE_TAG_IDS,
   SETTING_TAG_IDS,
   isBankTagId,
@@ -78,6 +79,8 @@ import { SPOT_KINDS, type BankSiting, type SpotKind, type TaskBankEntry } from '
 export { SPOT_KINDS, type BankSiting, type SpotKind };
 import { isOccasionId, occasionProfile, type OccasionId } from './occasions';
 import { uuid } from '../taskShorthands';
+import { TASTE_WEIGHT, decodeTaste, tasteAffinity } from './tasteCodec';
+import { qualityBonus, qualityOf, type MissionStats } from './missionQuality';
 import {
   MAX_BLENDED_DESCRIPTION_LEN,
   derivedGameTags,
@@ -202,6 +205,8 @@ export type StageRole = 'opener' | 'middle' | 'finale';
 /** The bank keys this creator was handed recently. Most recent FIRST. */
 export interface RecentPickState {
   recentBankKeys: string[];
+  /** This creator's taste profile, `t1:...` (change: composer-v2-taste). Absent: neutral. */
+  taste?: string;
 }
 
 export interface ComposerResult {
@@ -262,6 +267,22 @@ export interface FitContext {
   usedFamilies: Set<string>;
   /** Bank key → position in the recency memory (0 = most recent). */
   recentIndex: Map<string, number>;
+  /**
+   * Mechanic tag → how many missions already chosen for THIS slot's stage / for the whole game carry
+   * it (change: composer-v2-diversity). Absent (diversity off, or a caller outside the fill loop):
+   * no penalty and no caps, so every other reader of `fitScore` is unchanged.
+   */
+  stageMechanics?: Map<string, number>;
+  gameMechanics?: Map<string, number>;
+  /** The hard caps in MECHANIC_STAGE_CAPS / MECHANIC_GAME_CAPS. The fill loop drops them, never the slot. */
+  mechanicCaps?: boolean;
+  /** The creator's decoded taste profile (change: composer-v2-taste). Absent: neutral. */
+  taste?: number[];
+  /**
+   * A bank mission's current quality, 0-1 (change: composer-v2-quality): its rating updated by
+   * creators' keep / swap counts. Absent (quality off, or a caller outside the fill loop): neutral.
+   */
+  qualityOf?: (key: string) => number;
   /** When set, only missions carrying this tag are eligible (a bookend slot). */
   requiredTag?: BookendTagId;
   /** The highest prep tier this creator accepts. See `prepToleranceOf`. */
@@ -342,6 +363,20 @@ export const TERM_WEIGHTS = {
  */
 export const OCCASION_BONUS = 0.10;
 export const PLACED_PREFERENCE_BONUS = 0.08;
+
+/**
+ * Diversity (change: composer-v2-diversity). The share of a candidate's mechanic tags already in
+ * its stage costs up to DIVERSITY_STAGE_WEIGHT; in the game, up to DIVERSITY_GAME_WEIGHT (saturating
+ * at DIVERSITY_GAME_SATURATION uses of a mechanic). Outside TERM_WEIGHTS like the recency penalty,
+ * and bounded well below a real audience or setting mismatch, so it reorders near-equals and never
+ * hands a creator a mission that does not fit.
+ */
+export const DIVERSITY_STAGE_WEIGHT = 0.12;
+export const DIVERSITY_GAME_WEIGHT = 0.06;
+export const DIVERSITY_GAME_SATURATION = 3;
+/** The mechanics that wear out fastest, capped outright. */
+export const MECHANIC_STAGE_CAPS: Readonly<Record<string, number>> = { strangers: 2 };
+export const MECHANIC_GAME_CAPS: Readonly<Record<string, number>> = { ongoing: 1 };
 
 /** How far below the best a candidate may score and still be sampled. */
 export const TOP_K_MARGIN = 0.15;
@@ -605,6 +640,10 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
     usedKeys: new Set<string>(),
     usedFamilies: new Set<string>(),
     recentIndex,
+    // composer-v2-taste: only a real profile is carried; anything else stays neutral.
+    ...(typeof (recent as RecentPickState | undefined)?.taste === 'string'
+      ? { taste: decodeTaste((recent as RecentPickState).taste) }
+      : {}),
   };
 }
 
@@ -714,7 +753,20 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
     + TERM_WEIGHTS.age * ageFit
     + TERM_WEIGHTS.preferred * preferredOverlap;
 
+  // Diversity: hard caps first (the fill loop retries without them rather than drop a slot).
+  if (ctx.mechanicCaps === true) {
+    for (const [tag, cap] of Object.entries(MECHANIC_STAGE_CAPS)) {
+      if (tags.includes(tag as BankTagId) && (ctx.stageMechanics?.get(tag) ?? 0) >= cap) return -Infinity;
+    }
+    for (const [tag, cap] of Object.entries(MECHANIC_GAME_CAPS)) {
+      if (tags.includes(tag as BankTagId) && (ctx.gameMechanics?.get(tag) ?? 0) >= cap) return -Infinity;
+    }
+  }
+
   return base
+    - diversityPenalty(tags, ctx.stageMechanics, ctx.gameMechanics)
+    + (ctx.taste ? TASTE_WEIGHT * tasteAffinity(ctx.taste, tags) : 0)
+    + (ctx.qualityOf ? qualityBonus(ctx.qualityOf(entry.key)) : 0)
     + occasionBonus(tags, ctx.favouredTags)
     + (ctx.placedPreference === true && tags.includes('locationBased') ? PLACED_PREFERENCE_BONUS : 0)
     - recencyPenalty(entry.key, ctx.recentIndex);
@@ -737,6 +789,35 @@ function occasionBonus(tags: readonly string[], favoured: readonly BankTagId[] |
   if (!Array.isArray(favoured) || favoured.length === 0) return 0;
   const hits = favoured.filter((t) => tags.includes(t)).length;
   return (OCCASION_BONUS * hits) / favoured.length;
+}
+
+/**
+ * A tag array's mechanic tags, computed once per array: `fitScore` runs for every candidate in every
+ * slot of every composition, and filtering against the mechanic list each time is what made a large
+ * composition matrix slow.
+ */
+const MECHANIC_SET: ReadonlySet<string> = new Set(MECHANIC_TAG_IDS);
+const mechanicCache = new WeakMap<readonly string[], string[]>();
+function mechanicsOf(tags: readonly string[]): string[] {
+  let m = mechanicCache.get(tags);
+  if (!m) { m = tags.filter((t) => MECHANIC_SET.has(t)); mechanicCache.set(tags, m); }
+  return m;
+}
+
+/** How much repeating already-chosen mechanics costs. Zero when nothing is tracked. */
+function diversityPenalty(
+  tags: readonly string[],
+  stage: Map<string, number> | undefined,
+  game: Map<string, number> | undefined,
+): number {
+  if (!stage && !game) return 0;
+  const mech = mechanicsOf(tags);
+  if (mech.length === 0) return 0;
+  const inStage = stage ? mech.filter((t) => (stage.get(t) ?? 0) > 0).length / mech.length : 0;
+  const inGame = game
+    ? mech.reduce((a, t) => a + Math.min(1, (game.get(t) ?? 0) / DIVERSITY_GAME_SATURATION), 0) / mech.length
+    : 0;
+  return DIVERSITY_STAGE_WEIGHT * inStage + DIVERSITY_GAME_WEIGHT * inGame;
 }
 
 /**
@@ -1489,6 +1570,9 @@ export function composeGame(
   copy: ComposerDescriptionCopy,
   rng: () => number = Math.random,
   recent: RecentPickState = { recentBankKeys: [] },
+  // composer-v2-diversity: on by default; `false` exists so a test can measure what it buys.
+  // composer-v2-quality: on by default; `missionStats` are creators' keep / swap counts per bank key.
+  opts: { diversity?: boolean; quality?: boolean; missionStats?: Readonly<Record<string, Partial<MissionStats>>> } = {},
 ): ComposerResult | null {
   // ── 1-5. The usable bank, the budget, the blueprint and the per-stage counts
   // All of it lives in `planStages`, which the smart-build preview also calls —
@@ -1545,18 +1629,31 @@ export function composeGame(
   const chosen: (TaskBankEntry | null)[][] = Array.from({ length: stageCount }, (_, s) =>
     Array.from({ length: counts[s] }, () => null));
 
+  // Mechanics already chosen, per stage and for the game (change: composer-v2-diversity).
+  const diversity = opts?.diversity !== false;
+  const stageMechanics = Array.from({ length: stageCount }, () => new Map<string, number>());
+  const gameMechanics = new Map<string, number>();
+
   for (const slot of slots) {
     const slotCtx: FitContext = {
       ...ctx,
       stageTarget: stageTargets[slot.stage],
       ...(slot.requiredTag ? { requiredTag: slot.requiredTag } : {}),
+      ...(diversity ? { stageMechanics: stageMechanics[slot.stage], gameMechanics, mechanicCaps: true } : {}),
+      ...(opts?.quality !== false ? { qualityOf: (key: string) => qualityOf(key, opts?.missionStats) } : {}),
     };
 
-    const candidates: BandCandidate[] = [];
-    for (const e of usable) {
-      const score = fitScore(e, slotCtx);
-      if (score > -Infinity) candidates.push({ key: e.key, score });
-    }
+    const scoreAll = (c: FitContext): BandCandidate[] => {
+      const out: BandCandidate[] = [];
+      for (const e of usable) {
+        const score = fitScore(e, c);
+        if (score > -Infinity) out.push({ key: e.key, score });
+      }
+      return out;
+    };
+    let candidates = scoreAll(slotCtx);
+    // A cap that would empty the slot is lifted for it: a shorter game is worse than a repeat.
+    if (candidates.length === 0 && diversity) candidates = scoreAll({ ...slotCtx, mechanicCaps: false });
 
     const picked = pickFromBand(candidates, rng);
     if (!picked) continue; // pool exhausted — the slot is dropped, never faked
@@ -1566,6 +1663,11 @@ export function composeGame(
     chosen[slot.stage][slot.index] = entry;
     ctx.usedKeys.add(entry.key);
     if (entry.family) ctx.usedFamilies.add(entry.family);
+    for (const t of entry.tags) {
+      if (!MECHANIC_SET.has(t)) continue;
+      stageMechanics[slot.stage].set(t, (stageMechanics[slot.stage].get(t) ?? 0) + 1);
+      gameMechanics.set(t, (gameMechanics.get(t) ?? 0) + 1);
+    }
   }
 
   // ── 8. Build the stages ───────────────────────────────────────────────────

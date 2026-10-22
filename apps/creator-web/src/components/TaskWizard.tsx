@@ -20,7 +20,7 @@ import {
   VIDEO_DURATION_LIMITS, videoDurationProblem,
 } from '@rushpoint/shared';
 import { Button, Input, Label, Textarea } from './ui';
-import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET } from '../lib/interaction';
+import { TAP_CLUSTER, TAP_INLINE, TAP_TARGET, TAP_TEXT } from '../lib/interaction';
 import { dialog } from './dialog';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { uploadTaskMedia, ingestTaskMediaFromUrl } from '../services/firebase';
@@ -43,6 +43,8 @@ import {
   initialRevealState, markTouched, shouldReveal, nextFinishAction, taskRevealBlockers,
 } from '../lib/taskValidationGating';
 import OutcomesEditor from './OutcomesEditor';
+import SentenceFill from './SentenceFill';
+import { hasOpenSlots, extractSlotValues, fillTemplate, generateCode } from '../lib/sentenceForm';
 import { enableOutcomes, disableOutcomes } from '../lib/outcomeEditor';
 import {
   type TaskSample, type SampleOverwriteField, applySample, samplesForType, sampleWouldOverwrite,
@@ -1101,6 +1103,18 @@ function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true 
   const [samplePickerFor, setSamplePickerFor] = useState<TaskType | null>(null);
   const TYPE_META = typeMetaOf(b);
 
+  // Fill-in-the-sentence (change: composer-v2-sentence-setup). The template is the description as it
+  // was WITH its creator brackets, kept per mission so a filled blank stays a blank to edit. When the
+  // text is rewritten by hand and no longer matches it, the form steps aside for the plain text box.
+  const [sentenceTemplate, setSentenceTemplate] = useState<string | null>(
+    () => (hasOpenSlots(task.description) ? task.description ?? null : null));
+  useEffect(() => {
+    setSentenceTemplate(hasOpenSlots(task.description) ? task.description ?? null : null);
+    // Only on a NEW mission: within one mission the template must outlive the brackets it fills.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id]);
+  const sentenceValues = sentenceTemplate ? extractSlotValues(sentenceTemplate, task.description ?? '') : null;
+
   // ── Inspiration Mode (change: builder-first-task-flow) ──
   // One click turns an empty task into a working, completable example of any
   // type, which the creator then edits instead of authoring from nothing.
@@ -1136,9 +1150,14 @@ function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true 
           <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.titleRequiredHint}</p>
         )}
       </div>
-      <div>
+      <div className="flex flex-col gap-2">
         <Label dense>{b.descriptionField}</Label>
-        <Textarea dense data-qs-field="description" value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
+        {sentenceTemplate && sentenceValues && (
+          <SentenceFill template={sentenceTemplate} values={sentenceValues} anchor="description"
+            onChange={(values) => set({ description: fillTemplate(sentenceTemplate, values) })} />
+        )}
+        <Textarea dense {...(sentenceTemplate && sentenceValues ? {} : { 'data-qs-field': 'description' })}
+          value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
       </div>
 
       {/* A picture belongs WITH the mission description, not three clicks away
@@ -1641,11 +1660,19 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
             ) : (
               <div>
                 <Label dense>{b.secretCode}</Label>
-                <Input dense data-qs-field="smart.secretCode" value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
-                  onChange={(e) => {
-                    touch('stationCode');
-                    setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true });
-                  }} />
+                <div className="flex items-center gap-2">
+                  <Input dense data-qs-field="smart.secretCode" value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
+                    onChange={(e) => {
+                      touch('stationCode');
+                      setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true });
+                    }} />
+                  {/* composer-v2-sentence-setup: one press for a code nobody guesses. */}
+                  <button type="button"
+                    onClick={() => { touch('stationCode'); setSmart({ verificationType: 'code_verification', secretCode: generateCode(), hasCode: true }); }}
+                    className={`${TAP_TEXT} shrink-0 px-3 rounded-lg border border-[--rp-border] bg-[--surface-2] text-[13px] text-[--ink-1] hover:border-rp-fire/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}>
+                    {b.generateCode}
+                  </button>
+                </div>
               </div>
             )}
           </div>

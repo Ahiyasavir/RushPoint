@@ -9,13 +9,19 @@
 // aria-live region and auto-dismisses.
 import { useEffect, useState } from 'react';
 import { useT } from './LanguageContext';
-import { TAP_INLINE } from '../lib/interaction';
+import { TAP_INLINE, TAP_TEXT } from '../lib/interaction';
 
 type ToastKind = 'success' | 'error' | 'info';
-interface ToastItem { id: number; kind: ToastKind; message: string }
+/** An optional button inside the toast, e.g. "undo" after a swap (change: composer-v2-phase0). */
+interface ToastAction { label: string; onClick: () => void }
+interface ToastOptions { action?: { label: string; onClick: () => void } }
+interface ToastItem { id: number; kind: ToastKind; message: string; action?: ToastAction }
 
 const MAX_VISIBLE = 3;
 const AUTO_DISMISS_MS = 3200;
+// A toast with an action (an undo) stays longer: the creator first reads what changed, then decides.
+// 3.2 s was gone before the new mission had been read (found in the browser, composer-v2-phase0).
+const ACTION_DISMISS_MS = 8000;
 
 let counter = 0;
 let listener: ((items: ToastItem[]) => void) | null = null;
@@ -23,20 +29,20 @@ let items: ToastItem[] = [];
 
 function emit() { listener?.(items.slice()); }
 
-function push(kind: ToastKind, message: string) {
-  const item: ToastItem = { id: ++counter, kind, message };
+function push(kind: ToastKind, message: string, action?: ToastAction) {
+  const item: ToastItem = { id: ++counter, kind, message, ...(action ? { action } : {}) };
   items = [...items, item].slice(-MAX_VISIBLE);
   emit();
   setTimeout(() => {
     items = items.filter((t) => t.id !== item.id);
     emit();
-  }, AUTO_DISMISS_MS);
+  }, action ? ACTION_DISMISS_MS : AUTO_DISMISS_MS);
 }
 
 export const toast = {
-  success: (message: string) => push('success', message),
-  error:   (message: string) => push('error', message),
-  info:    (message: string) => push('info', message),
+  success: (message: string, opts?: ToastOptions) => push('success', message, opts?.action),
+  error:   (message: string, opts?: ToastOptions) => push('error', message, opts?.action),
+  info:    (message: string, opts?: ToastOptions) => push('info', message, opts?.action),
 };
 
 const ACCENT: Record<ToastKind, string> = {
@@ -74,6 +80,15 @@ export function ToastHost() {
           style={{ borderInlineStartWidth: 3, borderInlineStartColor: ACCENT[t.kind] }}
         >
           <p className="flex-1 text-sm text-[--ink-1] leading-snug" dir="auto">{t.message}</p>
+          {t.action && (
+            <button
+              type="button"
+              onClick={() => { t.action?.onClick(); remove(t.id); }}
+              className={`${TAP_TEXT} shrink-0 px-2 rounded-md text-sm font-semibold text-ink-fire hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}
+            >
+              {t.action.label}
+            </button>
+          )}
           <button
             type="button"
             aria-label={c.dismiss}

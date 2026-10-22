@@ -63,7 +63,7 @@ function SortableTask({ task, stageId, style: outerStyle, measureRef, index, chi
 
 export default function TaskCanvas({
   tasks, activeTaskId, onSelect, stageId, moveTargets, onMoveToStage,
-  onDuplicate, onRegenerate, onToggleHidden, onDelete, groupOf, footer,
+  onDuplicate, onRegenerate, onToggleHidden, onDelete, groupOf, footer, regenNonces,
 }: {
   tasks: Task[];
   activeTaskId?: string;
@@ -76,6 +76,8 @@ export default function TaskCanvas({
   /** The rest of the card's ⋯ menu (change: mission-card-actions). See TaskCard. */
   onDuplicate?: (taskId: string) => void;
   onRegenerate?: (taskId: string) => void;
+  /** Swap count per task id, so a swapped card plays its spin (change: composer-v2-phase0). */
+  regenNonces?: Record<string, number>;
   onToggleHidden?: (taskId: string) => void;
   onDelete?: (taskId: string) => void;
   onMoveToStage?: (taskId: string, toStageId: string) => void;
@@ -120,6 +122,7 @@ export default function TaskCanvas({
       moveTargets={moveTargets}
       onDuplicate={onDuplicate ? () => onDuplicate(t.id) : undefined}
       onRegenerate={onRegenerate ? () => onRegenerate(t.id) : undefined}
+      regenNonce={regenNonces?.[t.id]}
       onToggleHidden={onToggleHidden ? () => onToggleHidden(t.id) : undefined}
       onDelete={onDelete ? () => onDelete(t.id) : undefined}
       onMoveToStage={onMoveToStage ? (toStageId) => onMoveToStage(t.id, toStageId) : undefined}

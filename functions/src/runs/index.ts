@@ -26,6 +26,8 @@ import {
   type RunTeam,
   type RunStageRecord,
   type RunTaskRecord,
+  type TaskStatusOverrides,
+  effectiveTaskStatus,
   type AccessCode,
   type LeaderboardEntry,
   type StageStatus,
@@ -100,6 +102,7 @@ import {
   hasScheduleGate,
   isTimeLimitUp,
   timeLimitRemainingMs,
+  timeLimitClockStart,
   isUnlocked,
   lockedTaskIds,
   unreachableTaskIds,
@@ -196,6 +199,7 @@ import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSumma
 import { sendRunSummaryEmail } from './runSummaryEmail';
 import { validate, parseStored } from '../validation';
 import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
+import { cleanRunEventDetails, runOpenProblem, RUN_NOT_OPEN, registrationOpen, type RunEventDetails, type PrintRecordKey } from '@rushpoint/shared';
 import { isSoloSelfGuidedRun, soloRunReadyToAutoFinalize } from './soloAutoFinalize';
 
 import { requireAuth, assertStaffCan, assertOwnerOrPlatformAdmin, assertNotStaffIdentity } from '../auth';
@@ -326,6 +330,9 @@ export function applyTaskClosure(
   taskId: string,
   launchedAt: string | undefined,
   now: string,
+  // pause-never-strands: the same arithmetic sets a PAUSED mission aside for one team that ran out
+  // of missions because of it. Recorded apart from a closure so nothing reads it as "closed".
+  kind: 'closed' | 'paused' = 'closed',
 ): { changed: boolean; wasHolding: boolean; releaseIds: string[] } {
   const stageIdx = stages.findIndex((s) => (s.tasks ?? []).some((t) => t.taskId === taskId));
   if (stageIdx < 0) return { changed: false, wasHolding: false, releaseIds: [] };
@@ -352,7 +359,8 @@ export function applyTaskClosure(
   const wasHolding = rec.status === 'assigned';
   rec.status = 'skipped';
   rec.skipCause = 'operator';
-  rec.closedByOrganizer = true;
+  if (kind === 'closed') rec.closedByOrganizer = true;
+  else rec.setAsideWhilePaused = true;
   rec.earnedScore = 0;
   rec.completedAt = now;
   stageRec.requiredTaskCount = plan.requiredTaskCount;
@@ -364,7 +372,50 @@ export function applyTaskClosure(
   return { changed: true, wasHolding, releaseIds };
 }
 
+// ─── A pause never strands a team (change: pause-never-strands) ───────────────
+//
+// Race to Zion, 14.10: stage 1 was a chain of required missions, the organizer paused three of them
+// while the stations folded, and every team that still needed one could never finish the stage, so
+// only 2 of 30 reached the vineyard. A pause touches no team when it is made (a team on the mission
+// keeps it; one that still has other work may yet get it back on resume). This is the moment it
+// matters: the team has NOTHING left to be handed in its active stage, nothing in flight, and the
+// stage still holds missions that are paused right now. Each of those is set aside for THIS team
+// exactly like a closure (0 points, what waited for it opens, the team's requirement shrinks by the
+// smallest winnable amount), so the stage completes or the next mission opens. Pure; mutates the
+// `stages` copy the caller owns.
+export function setAsidePausedTasks(
+  stages: RunStageRecord[],
+  game: Game,
+  overrides: TaskStatusOverrides | undefined,
+  launchedAt: string | undefined,
+  now: string,
+): { changed: boolean; releaseIds: string[] } {
+  const idx = stages.findIndex((st) => st.status === 'active');
+  if (idx < 0) return { changed: false, releaseIds: [] };
+  const recs = stages[idx].tasks ?? [];
+  if (recs.some((t) => t.status === 'assigned')) return { changed: false, releaseIds: [] };
+  const paused = recs
+    .filter((t) => t.status === 'unassigned')
+    .map((t) => t.taskId)
+    .filter((id) => {
+      const task = findGameTask(game, id);
+      return !!task && effectiveTaskStatus(task, overrides) === 'paused';
+    });
+  let changed = false;
+  const releaseIds: string[] = [];
+  for (const id of paused) {
+    const out = applyTaskClosure(stages, game, id, launchedAt, now, 'paused');
+    if (out.changed) { changed = true; releaseIds.push(...out.releaseIds); }
+  }
+  return { changed, releaseIds };
+}
+
 /** Every closure already on the run, applied to a team's freshly built stages (a late joiner). */
+/** True when no task record of the team has moved from `unassigned` (change: prepared-run). */
+function teamHasNoProgress(stages: RunStageRecord[] | undefined): boolean {
+  return Array.isArray(stages) && stages.every((s) => (s.tasks ?? []).every((t) => t.status === 'unassigned' && !t.completedAt));
+}
+
 function applyRunClosures(stages: RunStageRecord[], game: Game, run: Pick<Run, 'taskStatusOverrides' | 'launchedAt'>, now: string): RunStageRecord[] {
   const overrides = run.taskStatusOverrides ?? {};
   for (const [taskId, status] of Object.entries(overrides)) {
@@ -445,55 +496,43 @@ export async function closeTaskForAllTeams(
  * that this launch is ALLOWED at all is the caller's job.
  */
 export async function launchRunCore(
-  { ownerUid, gameId, testDrive }: { ownerUid: string; gameId: string; testDrive?: boolean },
-): Promise<{ runId: string; accessCode: string }> {
+  { ownerUid, gameId, testDrive, prepare, event }: {
+    ownerUid: string; gameId: string; testDrive?: boolean;
+    /** Prepare the run ahead of the day (change: prepared-run): a draft, not billed, not a play. */
+    prepare?: boolean;
+    /** Event details for a prepared run, validated by cleanRunEventDetails. */
+    event?: unknown;
+  },
+): Promise<{ runId: string; accessCode: string; status: Run['status'] }> {
   const uid = ownerUid;
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
+  if (prepare && testDrive) {
+    throw new functions.https.HttpsError('invalid-argument', 'A rehearsal is never prepared ahead: it starts straight away');
+  }
+  // Event details are only for a prepared run, and are refused before anything is written.
+  let eventSet: RunEventDetails = {};
+  if (prepare && event !== undefined && event !== null) {
+    const cleaned = cleanRunEventDetails(event);
+    if (!cleaned.ok) throw new functions.https.HttpsError('invalid-argument', `event: ${cleaned.error}`);
+    eventSet = cleaned.set;
+  }
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
   if (game.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your game');
-  // A game in the trash can never go live (change: recoverable-game-deletion).
-  // Paired with deleteGame's refusal to delete a game with an unfinished run,
-  // this is what makes "a tombstoned game never has a live run" an invariant.
-  assertGameNotDeleted(game);
-  if (game.stages.length === 0) {
-    throw new functions.https.HttpsError('failed-precondition', 'Game has no stages — add at least one stage before launching');
-  }
-  // Unwinnable-task guard (defense in depth): updateGame rejects a task with no
-  // usable answer key going forward, but a game saved before that check existed
-  // (or edited by any other path) could still carry one. Catch it at launch —
-  // the last point before real participants start racing against it — rather
-  // than let every attempt fail forever.
-  for (const stage of game.stages) {
-    // Empty-stage guard (nightly hardening): a stage with no tasks becomes active
-    // but has nothing to assign or complete, so it never finishes and the next
-    // stage never unlocks — the team is stuck for the whole run. Reject at launch.
-    if ((stage.tasks?.length ?? 0) === 0) {
-      throw new functions.https.HttpsError('failed-precondition', 'Every stage needs at least one task before launching');
-    }
-    for (const task of stage.tasks ?? []) {
-      const err = taskCompletabilityError(task);
-      if (err) throw new functions.https.HttpsError('failed-precondition', err);
-      // answer-scored-question: re-checked against the preset the run will SCORE with
-      // (a time_only game has no points, so an outcome worth points is refused).
-      const outcomesErr = answerOutcomesProblem(task, game.scoringPreset);
-      if (outcomesErr) {
-        throw new functions.https.HttpsError('failed-precondition', `Task "${task.title || task.id}": points by answer: ${outcomesErr}`);
-      }
-    }
-  }
+  // Validated at prepare time too: a broken game should fail a week early, not on the morning.
+  // openRun validates again, because the game will have been edited since.
+  assertGameLaunchable(game);
 
   const code = await uniqueCode();
   const now = new Date().toISOString();
   const runRef = db.collection(`users/${uid}/games/${gameId}/runs`).doc();
-  const walletRef = db.doc(`wallets/${uid}`);
 
   const accessCodeRef = db.doc(`accessCodes/${code}`);
   // Build the run + access-code docs once a billing decision is known.
   const buildRun = (billingType: Run['billingType'], maxParticipants: number): Run => ({
-    id: runRef.id, gameId, ownerUid: uid, status: 'live', accessCode: code,
+    id: runRef.id, gameId, ownerUid: uid, status: prepare ? 'draft' : 'live', accessCode: code,
     billingType, maxParticipants, participantCount: 0,
     // Only test-drive runs carry the flag — normal runs stay free of the field.
     ...(testDrive ? { isTestDrive: true } : {}),
@@ -502,19 +541,31 @@ export async function launchRunCore(
     // is replayed by every later run, copied by duplicate/export/publish, and
     // rewritten wholesale by the Builder -- the same trap Run.taskStatusOverrides
     // exists to avoid. Only carried when actually on, so an existing run stays
-    // free of the field.
+    // free of the field. (A prepared run copies it again when it is opened.)
     ...(game.autoApproveAllMedia === true ? { autoApproveAllMedia: true } : {}),
     // located-mission-arrival: every located mission of this run opens on arrival.
     arrivalGate: true,
-    launchedAt: now, createdAt: now, updatedAt: now,
+    // A prepared run has no launchedAt until it is opened: every clock that counts from the
+    // launch (scheduled release, expiry, closures) must start on the day, not a week early.
+    ...(prepare ? { preparedAt: now, ...eventSet } : { launchedAt: now }),
+    createdAt: now, updatedAt: now,
   });
   const accessCode: AccessCode = { code, ownerUid: uid, gameId, runId: runRef.id, status: 'unused', createdAt: now };
 
-  // ── Billing + run creation are ATOMIC (row 43): the run + access code are
-  //    written in the SAME transaction that consumes the credit, so a write
-  //    failure can never burn a paid credit without producing a run. The decision
-  //    (pro / free-run / credit / refuse) is the pure resolveLaunchBilling helper.
-  //    Free mode (PAYMENTS_ENABLED === false) touches the wallet not at all. ──
+  if (prepare) {
+    // Not billed: the decision is made by openRun, through the same billing function, so a
+    // cancelled or postponed event never paid. The run carries the free plan's cap until then,
+    // for display only; openRun writes the real one.
+    const placeholder = resolveLaunchBilling(false, {});
+    const billingType = placeholder.ok ? placeholder.billingType : 'free';
+    const maxParticipants = placeholder.ok ? placeholder.maxParticipants : FREE_PARTICIPANTS_PER_FREE_RUN;
+    const batch = db.batch();
+    batch.set(runRef, buildRun(billingType, maxParticipants));
+    batch.set(accessCodeRef, accessCode);
+    await batch.commit();
+    return { runId: runRef.id, accessCode: code, status: 'draft' };
+  }
+
   if (testDrive) {
     // Test-drive (rehearsal) launch (change: test-drive-mode): free, capped at 2,
     // wallet never touched — SAME path in both payment modes. Always a transaction
@@ -552,77 +603,317 @@ export async function launchRunCore(
       t.set(runRef, buildRun(billingType, maxParticipants));
       t.set(accessCodeRef, accessCode);
     });
-  } else if (!PAYMENTS_ENABLED) {
-    const free = resolveLaunchBilling(false, {});
-    const billingType = free.ok ? free.billingType : 'free';
-    const maxParticipants = free.ok ? free.maxParticipants : FREE_PARTICIPANTS_PER_FREE_RUN;
-    const batch = db.batch();
-    batch.set(runRef, buildRun(billingType, maxParticipants));
-    batch.set(accessCodeRef, accessCode);
-    await batch.commit();
   } else {
+    // ── Billing + run creation are ATOMIC (row 43): the run + access code are
+    //    written in the SAME transaction that consumes the credit, so a write
+    //    failure can never burn a paid credit without producing a run. ──
     await db.runTransaction(async (t) => {
-      const wSnap = await t.get(walletRef);
-      const w = (wSnap.exists ? wSnap.data() : {}) as Partial<Wallet>;
-      // row 44: Pro counts only while the subscription is unexpired. An expired
-      // proExpiresAt is treated as a free plan for the billing decision.
-      const proActive = w.plan === 'pro' && !!w.proExpiresAt && new Date(w.proExpiresAt).getTime() > Date.now();
-      const decision = resolveLaunchBilling(true, { ...w, plan: proActive ? 'pro' : 'free' });
-      if (!decision.ok) {
-        throw new functions.https.HttpsError(
-          'resource-exhausted',
-          'No Event Credits left. Buy a credit package or upgrade to Creator Pro to launch this run.',
-        );
-      }
-      if (decision.consume === 'free_run') {
-        t.set(walletRef, {
-          uid, lifetimeFreeRunsUsed: admin.firestore.FieldValue.increment(1), updatedAt: now,
-        }, { merge: true });
-        const txRef = walletRef.collection('transactions').doc();
-        t.set(txRef, {
-          id: txRef.id, type: 'free_run_consumed', runId: runRef.id, gameTitle: game.title,
-          description: `Free run — ${game.title}`, createdAt: now,
-        });
-      } else if (decision.consume === 'credit') {
-        t.set(walletRef, {
-          uid, eventCredits: admin.firestore.FieldValue.increment(-1), updatedAt: now,
-        }, { merge: true });
-        const txRef = walletRef.collection('transactions').doc();
-        t.set(txRef, {
-          id: txRef.id, type: 'charge_event', runId: runRef.id, gameTitle: game.title,
-          creditCost: 1, maxParticipantsPerRun: decision.maxParticipants,
-          description: `1 Event Credit — ${game.title}`, createdAt: now,
-        });
-      }
-      // Same transaction → run + access code commit atomically with the charge.
-      t.set(runRef, buildRun(decision.billingType, decision.maxParticipants));
+      const billing = await consumeLaunchBilling(t, uid, runRef.id, game.title);
+      t.set(runRef, buildRun(billing.billingType, billing.maxParticipants));
       t.set(accessCodeRef, accessCode);
     });
   }
 
-  // Increment game.playCount (best-effort, outside the atomic launch). A test
-  // drive is a rehearsal, not a play, so it is excluded (change: test-drive-mode).
-  if (!testDrive) {
-    db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
-    // …and on the PUBLIC gallery doc, with its ranking score recomputed in the
-    // same transaction (change: gallery-popularity-ranking). Before this, only
-    // duplicateGame bumped the public counter, so the "plays" a creator saw in
-    // the gallery counted copies but not actual launches. No-ops for a private
-    // game (no public doc). Best-effort: a gallery counter must never be able to
-    // fail a run launch.
-    bumpPublicSignals('game', gameId, { uses: 1 }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
-  }
+  // A test drive is a rehearsal, not a play (change: test-drive-mode).
+  if (!testDrive) countPlay(uid, gameId);
 
-  return { runId: runRef.id, accessCode: code };
+  return { runId: runRef.id, accessCode: code, status: 'live' };
+}
+
+/**
+ * Everything that must hold before real participants race against a game. Shared by the
+ * launch, the prepare and openRun (change: prepared-run), so the three can never disagree.
+ */
+function assertGameLaunchable(game: Game): void {
+  // A game in the trash can never go live (change: recoverable-game-deletion).
+  // Paired with deleteGame's refusal to delete a game with an unfinished run,
+  // this is what makes "a tombstoned game never has a live run" an invariant.
+  assertGameNotDeleted(game);
+  if (game.stages.length === 0) {
+    throw new functions.https.HttpsError('failed-precondition', 'Game has no stages — add at least one stage before launching');
+  }
+  // Unwinnable-task guard (defense in depth): updateGame rejects a task with no
+  // usable answer key going forward, but a game saved before that check existed
+  // (or edited by any other path) could still carry one. Catch it at launch —
+  // the last point before real participants start racing against it — rather
+  // than let every attempt fail forever.
+  for (const stage of game.stages) {
+    // Empty-stage guard (nightly hardening): a stage with no tasks becomes active
+    // but has nothing to assign or complete, so it never finishes and the next
+    // stage never unlocks — the team is stuck for the whole run. Reject at launch.
+    if ((stage.tasks?.length ?? 0) === 0) {
+      throw new functions.https.HttpsError('failed-precondition', 'Every stage needs at least one task before launching');
+    }
+    for (const task of stage.tasks ?? []) {
+      const err = taskCompletabilityError(task);
+      if (err) throw new functions.https.HttpsError('failed-precondition', err);
+      // answer-scored-question: re-checked against the preset the run will SCORE with
+      // (a time_only game has no points, so an outcome worth points is refused).
+      const outcomesErr = answerOutcomesProblem(task, game.scoringPreset);
+      if (outcomesErr) {
+        throw new functions.https.HttpsError('failed-precondition', `Task "${task.title || task.id}": points by answer: ${outcomesErr}`);
+      }
+    }
+  }
+}
+
+/**
+ * The billing decision for a run going live, INSIDE the caller's transaction: reads the wallet
+ * (paid mode only), writes the consumption and its ledger entry, returns what the run carries.
+ * The one place a launch is billed, used by the launch and by openRun (change: prepared-run),
+ * so a prepared run cannot be opened by a door that forgot to charge. Free mode
+ * (PAYMENTS_ENABLED === false) touches the wallet not at all.
+ */
+async function consumeLaunchBilling(
+  t: FirebaseFirestore.Transaction, uid: string, runId: string, gameTitle: string,
+): Promise<{ billingType: Run['billingType']; maxParticipants: number }> {
+  if (!PAYMENTS_ENABLED) {
+    const free = resolveLaunchBilling(false, {});
+    return {
+      billingType: free.ok ? free.billingType : 'free',
+      maxParticipants: free.ok ? free.maxParticipants : FREE_PARTICIPANTS_PER_FREE_RUN,
+    };
+  }
+  const walletRef = db.doc(`wallets/${uid}`);
+  const wSnap = await t.get(walletRef);
+  const w = (wSnap.exists ? wSnap.data() : {}) as Partial<Wallet>;
+  // row 44: Pro counts only while the subscription is unexpired. An expired
+  // proExpiresAt is treated as a free plan for the billing decision.
+  const proActive = w.plan === 'pro' && !!w.proExpiresAt && new Date(w.proExpiresAt).getTime() > Date.now();
+  const decision = resolveLaunchBilling(true, { ...w, plan: proActive ? 'pro' : 'free' });
+  if (!decision.ok) {
+    throw new functions.https.HttpsError(
+      'resource-exhausted',
+      'No Event Credits left. Buy a credit package or upgrade to Creator Pro to launch this run.',
+    );
+  }
+  const now = new Date().toISOString();
+  if (decision.consume === 'free_run') {
+    t.set(walletRef, {
+      uid, lifetimeFreeRunsUsed: admin.firestore.FieldValue.increment(1), updatedAt: now,
+    }, { merge: true });
+    const txRef = walletRef.collection('transactions').doc();
+    t.set(txRef, {
+      id: txRef.id, type: 'free_run_consumed', runId, gameTitle,
+      description: `Free run — ${gameTitle}`, createdAt: now,
+    });
+  } else if (decision.consume === 'credit') {
+    t.set(walletRef, {
+      uid, eventCredits: admin.firestore.FieldValue.increment(-1), updatedAt: now,
+    }, { merge: true });
+    const txRef = walletRef.collection('transactions').doc();
+    t.set(txRef, {
+      id: txRef.id, type: 'charge_event', runId, gameTitle,
+      creditCost: 1, maxParticipantsPerRun: decision.maxParticipants,
+      description: `1 Event Credit — ${gameTitle}`, createdAt: now,
+    });
+  }
+  return { billingType: decision.billingType, maxParticipants: decision.maxParticipants };
+}
+
+/** A real run of this game went live: count the play. Best-effort, never fails the launch. */
+function countPlay(uid: string, gameId: string): void {
+  db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
+  // …and on the PUBLIC gallery doc, with its ranking score recomputed in the
+  // same transaction (change: gallery-popularity-ranking). Before this, only
+  // duplicateGame bumped the public counter, so the "plays" a creator saw in
+  // the gallery counted copies but not actual launches. No-ops for a private
+  // game (no public doc). Best-effort: a gallery counter must never be able to
+  // fail a run launch.
+  bumpPublicSignals('game', gameId, { uses: 1 }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
 }
 
 export const launchRun = loggedCallable('launchRun', async (data, context) => {
   const uid = requireAuth(context);
-  const { gameId, testDrive } = data as { gameId: string; testDrive?: boolean };
+  const { gameId, testDrive, prepare, event } = data as { gameId: string; testDrive?: boolean; prepare?: boolean; event?: unknown };
   // The owner IS the caller here. Ownership is re-checked inside the core against
   // the loaded document, so this line is a route, not a trust boundary.
-  return launchRunCore({ ownerUid: uid, gameId, testDrive });
+  return launchRunCore({ ownerUid: uid, gameId, testDrive: testDrive === true, prepare: prepare === true, event });
 });
+
+// ─── A run prepared ahead of the day (change: prepared-run) ──────────────────
+//
+// `launchRun({ prepare: true })` writes a DRAFT: join code, staff codes, prints and console
+// exist, nobody can be started and nothing is scored (DRAFT_REFUSED_CALLABLES). These are the
+// owner's doors for the rest of its life: open it, edit its event details, record a print,
+// cancel it, list the upcoming ones.
+
+/** Load the caller's own run, or refuse. Owner only: none of these doors admits staff. */
+async function loadOwnRun(uid: string, gameId: unknown, runId: unknown): Promise<{ ref: FirebaseFirestore.DocumentReference; run: Run }> {
+  if (typeof gameId !== 'string' || !gameId || typeof runId !== 'string' || !runId) {
+    throw new functions.https.HttpsError('invalid-argument', 'gameId and runId required');
+  }
+  const ref = db.doc(runPath(uid, gameId, runId));
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = snap.data() as Run;
+  if (run.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  return { ref, run };
+}
+
+/**
+ * The ONLY draft → live transition. Re-validates the CURRENT game, bills through the same
+ * function the launch uses, and stamps launchedAt, in one transaction that re-reads the run so
+ * two presses cannot bill twice. A second call on a live run answers `alreadyOpen`.
+ */
+export const openRun = loggedCallable('openRun', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId } = data as { gameId?: unknown; runId?: unknown };
+  const { ref, run } = await loadOwnRun(uid, gameId, runId);
+  if (run.status === 'live') return { ok: true, alreadyOpen: true };
+  if (run.status !== 'draft') {
+    throw new functions.https.HttpsError('failed-precondition', 'Only a prepared run can be opened', { reason: 'run-finished' });
+  }
+  const gameSnap = await db.doc(gamePath(uid, run.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+  assertGameLaunchable(game);
+
+  const opened = await db.runTransaction(async (t) => {
+    const fresh = await t.get(ref);
+    const cur = fresh.data() as Run | undefined;
+    if (cur?.status === 'live') return false;
+    if (cur?.status !== 'draft') {
+      throw new functions.https.HttpsError('failed-precondition', 'Only a prepared run can be opened', { reason: 'run-finished' });
+    }
+    const billing = await consumeLaunchBilling(t, uid, ref.id, game.title);
+    const now = new Date().toISOString();
+    t.update(ref, {
+      status: 'live', launchedAt: now, updatedAt: now,
+      billingType: billing.billingType, maxParticipants: billing.maxParticipants,
+      // Copied on the day, like a launch does (late-joiner-autostart): the template may have
+      // changed since the run was prepared.
+      ...(game.autoApproveAllMedia === true ? { autoApproveAllMedia: true } : {}),
+    });
+    return true;
+  });
+  if (!opened) return { ok: true, alreadyOpen: true };
+  countPlay(uid, run.gameId);
+  await auditBestEffort({ ownerUid: uid, gameId: run.gameId, runId: ref.id, operatorId: uid, actionType: 'run_opened' });
+  return { ok: true, alreadyOpen: false };
+});
+
+/** Edit the planned start, meeting point, note and early-registration switch of an unfinished run. */
+export const updateRunEventDetails = loggedCallable('updateRunEventDetails', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, details } = data as { gameId?: unknown; runId?: unknown; details?: unknown };
+  const cleaned = cleanRunEventDetails(details);
+  if (!cleaned.ok) throw new functions.https.HttpsError('invalid-argument', cleaned.error);
+  const { ref, run } = await loadOwnRun(uid, gameId, runId);
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished', { reason: 'run-finished' });
+  }
+  const patch: Record<string, unknown> = { ...cleaned.set, updatedAt: new Date().toISOString() };
+  for (const key of cleaned.clear) patch[key] = FieldValue.delete();
+  await ref.update(patch);
+  return { ok: true };
+});
+
+const PRINT_RECORD_KEYS: readonly PrintRecordKey[] = ['hostSheet', 'stationQr', 'joinSign'];
+const PRINT_FINGERPRINT_MAX = 64;
+const PRINT_SUMMARY_MAX_BYTES = 20_000;
+
+/**
+ * Record that a document was printed for this run, with the fingerprint of what it showed, so
+ * the console can say "the game changed since you printed". Best-effort from the client: the
+ * browser cannot know the paper came out, only that the print dialog opened.
+ */
+export const markRunPrinted = loggedCallable('markRunPrinted', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, doc, fingerprint, summary } = data as {
+    gameId?: unknown; runId?: unknown; doc?: unknown; fingerprint?: unknown; summary?: unknown;
+  };
+  if (typeof doc !== 'string' || !PRINT_RECORD_KEYS.includes(doc as PrintRecordKey)) {
+    throw new functions.https.HttpsError('invalid-argument', 'doc must be hostSheet, stationQr or joinSign');
+  }
+  if (typeof fingerprint !== 'string' || !fingerprint.trim() || fingerprint.length > PRINT_FINGERPRINT_MAX) {
+    throw new functions.https.HttpsError('invalid-argument', 'fingerprint required');
+  }
+  const summaryOk = summary === undefined || summary === null
+    || (typeof summary === 'object' && !Array.isArray(summary) && JSON.stringify(summary).length <= PRINT_SUMMARY_MAX_BYTES);
+  if (!summaryOk) throw new functions.https.HttpsError('invalid-argument', 'summary must be a small object');
+  const { ref } = await loadOwnRun(uid, gameId, runId);
+  const now = new Date().toISOString();
+  // A real nested object, never a dotted key in .set (the CLAUDE.md footgun); .update with a
+  // dotted path IS nested, and replaces only this one document's record.
+  await ref.update({
+    [`prints.${doc}`]: { printedAt: now, fingerprint, ...(summary && typeof summary === 'object' ? { summary } : {}) },
+    updatedAt: now,
+  });
+  return { ok: true, printedAt: now };
+});
+
+/**
+ * Cancel a prepared run instead of opening it: finished with cancelledAt, its join code revoked
+ * (getJoinInfo/joinRun already refuse a revoked code) and its staff codes closed. Nothing was
+ * billed, so nothing is refunded. A live run is ended with finalizeRun, never here.
+ */
+export const cancelPreparedRun = loggedCallable('cancelPreparedRun', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId } = data as { gameId?: unknown; runId?: unknown };
+  const { ref, run } = await loadOwnRun(uid, gameId, runId);
+  if (run.status !== 'draft') {
+    throw new functions.https.HttpsError('failed-precondition', 'Only a prepared run can be cancelled',
+      { reason: run.status === 'live' ? 'run-live' : 'run-finished' });
+  }
+  const now = new Date().toISOString();
+  const invites = await ref.collection('staffInvites').get();
+  const writes: Array<(b: FirebaseFirestore.WriteBatch) => void> = [
+    (b) => b.update(ref, { status: 'finished', cancelledAt: now, finishedAt: now, updatedAt: now }),
+    (b) => b.set(db.doc(`accessCodes/${run.accessCode}`), { status: 'revoked', revokedAt: now }, { merge: true }),
+    ...invites.docs.map((d) => (b: FirebaseFirestore.WriteBatch) => b.update(d.ref, { disabled: true, updatedAt: now })),
+  ];
+  for (const group of chunk(writes, MAX_BATCH_OPS)) {
+    const b = db.batch();
+    for (const w of group) w(b);
+    await b.commit();
+  }
+  await auditBestEffort({ ownerUid: uid, gameId: run.gameId, runId: ref.id, operatorId: uid, actionType: 'prepared_run_cancelled' });
+  return { ok: true };
+});
+
+/** The owner's upcoming events: every prepared run, soonest first, undated last. */
+export const listPreparedRuns = loggedCallable('listPreparedRuns', async (_data, context) => {
+  const uid = requireAuth(context);
+  const snap = await db.collectionGroup('runs')
+    .where('ownerUid', '==', uid)
+    .where('status', '==', 'draft')
+    .get();
+  const runs = await Promise.all(snap.docs.map(async (d) => {
+    const r = d.data() as Run;
+    const [gameDoc, teams] = await Promise.all([
+      cachedGetDoc<Game>(db, docCachePolicy, gamePath(uid, r.gameId)),
+      d.ref.collection('teams').count().get().catch(() => null),
+    ]);
+    return {
+      runId: d.id, gameId: r.gameId, gameTitle: gameDoc.exists ? gameDoc.data!.title : '',
+      accessCode: r.accessCode, plannedStartAt: r.plannedStartAt ?? null, meetingPoint: r.meetingPoint ?? null,
+      earlyRegistration: r.earlyRegistration !== false, preparedAt: r.preparedAt ?? r.createdAt,
+      registeredTeams: teams ? teams.data().count : null,
+    };
+  }));
+  const at = (iso: string | null) => (iso && Number.isFinite(Date.parse(iso)) ? Date.parse(iso) : Number.POSITIVE_INFINITY);
+  runs.sort((a, b) => at(a.plannedStartAt) - at(b.plannedStartAt) || a.runId.localeCompare(b.runId));
+  return { runs };
+});
+
+/**
+ * Refuse to start or score play on a prepared run (change: prepared-run). Every callable in
+ * DRAFT_REFUSED_CALLABLES calls this (scripts/test-callable-hardening.ts C7). A finished run is
+ * left to each callable's own, older check.
+ */
+export function assertRunOpen(run: { status?: unknown } | null | undefined): void {
+  if (runOpenProblem(run) === 'run-not-open') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has not been opened yet', { reason: RUN_NOT_OPEN });
+  }
+}
+
+/** assertRunOpen for a callable that has not read the run itself. One cached read. */
+export async function assertRunOpenAt(ownerUid: string, gameId: string, runId: string): Promise<void> {
+  if (!ownerUid || !gameId || !runId) return; // the callable's own validation refuses these
+  const snap = await cachedGetDoc<Run>(db, docCachePolicy, runPath(ownerUid, gameId, runId));
+  if (snap.exists) assertRunOpen(snap.data);
+}
 
 
 // ─── getJoinInfo ──────────────────────────────────────────────────────────────
@@ -677,6 +968,13 @@ export const getJoinInfo = loggedCallable('getJoinInfo', async (data, context) =
     branding: game.branding ?? null,
     registrationFields: game.registrationFields,
     runStatus: run?.status ?? 'live',
+    // A prepared run's day and place (change: prepared-run). The organizer's note stays on the
+    // run: it is for staff, not players.
+    ...(run?.status === 'draft' ? {
+      plannedStartAt: run.plannedStartAt ?? null,
+      meetingPoint: run.meetingPoint ?? null,
+      registrationOpen: registrationOpen(run),
+    } : {}),
     // Test-drive flag so play-web can show a persistent "TEST RUN" banner
     // (change: test-drive-mode). Absent on normal runs → false.
     isTestDrive: run?.isTestDrive ?? false,
@@ -707,11 +1005,14 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   // Anti-griefing / DoS: bound the untrusted join payload. displayName + each
   // member name are length-capped; the member list and the free-form
   // registrationData blob are size-capped so a client can't write a huge doc.
-  validate(() => requireString(displayName, 'displayName', MAX_ID_LEN));
+  // Store the CLEANED values requireString returns (security audit 2026-10-22): the raw
+  // strings kept bidi-override / zero-width characters, so a team name could spoof
+  // another team's on the leaderboard, the feed and the staff console.
+  const cleanDisplayName = validate(() => requireString(displayName, 'displayName', MAX_ID_LEN));
   if (!Array.isArray(memberNames) || memberNames.length > 30) {
     throw new functions.https.HttpsError('invalid-argument', 'Too many member names (max 30)');
   }
-  memberNames.forEach((n, i) => validate(() => requireString(n, `memberNames[${i}]`, MAX_ID_LEN)));
+  const cleanMemberNames = memberNames.map((n, i) => validate(() => requireString(n, `memberNames[${i}]`, MAX_ID_LEN)));
   if (registrationData && JSON.stringify(registrationData).length > 4000) {
     throw new functions.https.HttpsError('invalid-argument', 'registrationData too large');
   }
@@ -775,6 +1076,14 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   if (run.status === 'finished') {
     throw new functions.https.HttpsError('failed-precondition', 'This race has already finished.');
   }
+  // A prepared run takes early registrations unless the organizer closed them (change:
+  // prepared-run). The reason and the planned start travel in `details`, so the join screen can
+  // say "registration opens on the day" instead of the generic "this race has finished".
+  if (!registrationOpen(run)) {
+    throw new functions.https.HttpsError('failed-precondition', 'Registration opens on the day', {
+      reason: 'registration-not-open', plannedStartAt: run.plannedStartAt ?? null,
+    });
+  }
 
   const now = new Date().toISOString();
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
@@ -816,16 +1125,18 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     autoStartLateJoiners: game.autoStartLateJoiners,
     requiresGuardianConsent: game.requiresGuardianConsent,
   });
-  const selfStart = (run.isTestDrive === true && !game.requiresGuardianConsent
-    && (game.stages?.length ?? 0) > 0) || lateJoin.autoStart;
+  // Nobody self-starts on a prepared run: play begins when the organizer opens it and starts
+  // the teams (change: prepared-run).
+  const selfStart = run.status !== 'draft' && ((run.isTestDrive === true && !game.requiresGuardianConsent
+    && (game.stages?.length ?? 0) > 0) || lateJoin.autoStart);
   const team: RunTeam = {
     id: teamId,
     runId,
     gameId,
     ownerUid,
-    displayName: displayName.trim(),
+    displayName: cleanDisplayName,
     registrationData,
-    memberNames,
+    memberNames: cleanMemberNames,
     memberCount: game.mode === 'team' ? (memberNames.length || 1) : 1,
     status: selfStart ? 'active' : 'registered',
     // live-task-close-rules: a mission the organizers already closed is closed for a late joiner too.
@@ -850,7 +1161,7 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     // absent value.
     joinedAt: now,
     deviceJoinCode: generateDeviceJoinCode(),
-    devices: [{ uid: teamId, name: displayName.trim(), joinedAt: now }],
+    devices: [{ uid: teamId, name: cleanDisplayName, joinedAt: now }],
     updatedAt: now,
   };
 
@@ -1004,6 +1315,8 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
   if (runDoc.data!.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
+  // A prepared run is opened first (openRun); the console offers both in one confirm.
+  assertRunOpen(runDoc.data);
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
   const game = gameSnap.data() as Game;
@@ -1041,7 +1354,14 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
 
   const batch = db.batch();
   for (const doc of targets) {
-    const stages = (doc.data() as RunTeam).stages.map((s, i) => ({
+    // A team's stages were built when it REGISTERED (joinRun). One that has not played yet
+    // starts on the game as it is NOW (change: prepared-run): a team that registered on Monday
+    // must not play Monday's version on Thursday after the organizer added, removed or reordered
+    // missions. Nothing is lost, because a team with no progress has none; a team with any
+    // progress keeps its stages.
+    const stored = (doc.data() as RunTeam).stages;
+    const base = teamHasNoProgress(stored) ? applyRunClosures(buildInitialStages(game), game, runDoc.data!, now) : stored;
+    const stages = base.map((s, i) => ({
       ...s,
       ...(i === 0 ? { startedAt: now } : {}),
     }));
@@ -1102,6 +1422,12 @@ export const requestGuardianConsent = loggedCallable('requestGuardianConsent', a
   if (!ownerUid || !gameId || !runId) throw new functions.https.HttpsError('invalid-argument', 'run context required');
   // IDOR: a team may only request consent for itself.
   if (teamId && teamId !== uid) throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
+  // ...and only once it IS a team of this run (security audit 2026-10-22). Without this a
+  // stranger could request + grant consent for any run and, via the merge-write below,
+  // create a team document in it: a ghost team that bypassed joinRun's code, cap and
+  // finished-run checks and passed isRunParticipant (announcements, the photo feed).
+  const ownTeam = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${uid}`).get();
+  if (!ownTeam.exists) throw new functions.https.HttpsError('permission-denied', 'Join the run first');
 
   const token = randomBytes(16).toString('hex');
   const now = new Date().toISOString();
@@ -1112,7 +1438,7 @@ export const requestGuardianConsent = loggedCallable('requestGuardianConsent', a
 });
 
 export const grantGuardianConsent = loggedCallable('grantGuardianConsent', async (data, context) => {
-  requireAuth(context); // any authed device (the guardian's), authorized by the token
+  const granterUid = requireAuth(context); // any authed device (the guardian's), authorized by the token
   const { ownerUid, gameId, runId, token, guardianName } = data as {
     ownerUid: string; gameId: string; runId: string; token: string; guardianName?: string;
   };
@@ -1127,12 +1453,17 @@ export const grantGuardianConsent = loggedCallable('grantGuardianConsent', async
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Invalid consent token');
     const rec = snap.data() as { teamId: string; used: boolean };
     if (rec.used) throw new functions.https.HttpsError('failed-precondition', 'Consent token already used');
+    // The team must already exist (update, never a merge-set that would CREATE one), and the
+    // child's own phones may not approve their own consent.
+    const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${rec.teamId}`);
+    const teamSnap = await t.get(teamRef);
+    if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const deviceUids = ((teamSnap.data() as { deviceUids?: unknown }).deviceUids ?? []) as unknown[];
+    if (granterUid === rec.teamId || deviceUids.includes(granterUid)) {
+      throw new functions.https.HttpsError('permission-denied', 'A guardian must approve on their own device');
+    }
     t.update(tokenRef, { used: true, guardianName: name, grantedAt: now });
-    t.set(
-      db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${rec.teamId}`),
-      { guardianConsent: { guardianName: name, grantedAt: now } },
-      { merge: true },
-    );
+    t.update(teamRef, { guardianConsent: { guardianName: name, grantedAt: now } });
     return rec.teamId;
   });
   return { ok: true, teamId };
@@ -1717,6 +2048,7 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
   if ((runSnap.data() as Run).ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
+  assertRunOpen(runSnap.data() as Run);
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
   const game = gameSnap.data() as Game;
@@ -1865,6 +2197,7 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
   }
   // Same rule as every other grading path: a finalized run's board is frozen, so
   // nothing may still move a team's task records.
+  assertRunOpen(run);
   if (run.status === 'finished') {
     throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
   }
@@ -2241,7 +2574,9 @@ export const setTeamHold = loggedCallable('setTeamHold', async (data, context) =
           const moved = resumedStartedAt(r.startedAt, team.heldAt, nowMsResume);
           if (!moved || moved === r.startedAt) return r;
           movedStart = true;
-          return { ...r, startedAt: moved };
+          // composer-v2-phase0: a located mission's limit counts from arrival, so the arrival moves too.
+          const movedArrival = r.arrivedAt ? resumedStartedAt(r.arrivedAt, team.heldAt, nowMsResume) : null;
+          return { ...r, startedAt: moved, ...(movedArrival ? { arrivedAt: movedArrival } : {}) };
         }),
       }));
       tx.update(teamRef, {
@@ -3391,6 +3726,7 @@ export const activateHotZone = loggedCallable('activateHotZone', async (data, co
   if ((runSnap.data() as Run).ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
+  assertRunOpen(runSnap.data() as Run);
 
   const now = new Date();
   const hotZone = {
@@ -3738,6 +4074,8 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   if (run.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
+  // A prepared run is cancelled (cancelPreparedRun), never finalized into an empty result.
+  assertRunOpen(run);
 
   // Delegate the read+buildRankings+write to the shared core. No forcePublish:
   // organizer runs keep honoring manualLeaderboardReveal (the staged reveal path).
@@ -5298,6 +5636,8 @@ function sweepExpiredInFlight(
   game: Game,
   launchedAt: string | undefined,
   nowMs: number,
+  // composer-v2-phase0: the run's `arrivalGate`, so a located mission's clock counts from arrival.
+  arrivalGate?: boolean,
 ): { stages: RunStageRecord[]; expiredTaskId: string; timeUp: boolean; title: string } | null {
   const activeIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeIdx < 0) return null;
@@ -5308,7 +5648,7 @@ function sweepExpiredInFlight(
   // mission-time-limit: this team's own countdown ran out. A submission already waiting for the
   // organizers was sent in time, so it is never swept (time is judged at submission).
   const pendingReview = (team as { taskSubmissions?: Record<string, { status?: string }> }).taskSubmissions?.[assignedRec.taskId]?.status === 'pending';
-  const timeUp = !pendingReview && isTimeLimitUp(gameTask, assignedRec.startedAt, nowMs, 0);
+  const timeUp = !pendingReview && isTimeLimitUp(gameTask, timeLimitClockStart(gameTask, assignedRec, arrivalGate), nowMs, 0);
   if (!timeUp && !isExpired(gameTask, launchedAt, nowMs)) return null;
 
   const now = new Date(nowMs).toISOString();
@@ -5349,6 +5689,8 @@ export async function advanceTeamStateOnPoll(args: {
   team: RunTeam;
   game: Game;
   launchedAt: string | undefined;
+  /** The run's `arrivalGate` (composer-v2-phase0): a located mission's limit counts from arrival. */
+  arrivalGate?: boolean;
   nowMs: number;
   isController: boolean;
   persist: (patch: Record<string, unknown>) => Promise<unknown>;
@@ -5377,7 +5719,7 @@ export async function advanceTeamStateOnPoll(args: {
   const assignedRec = idx >= 0 ? team.stages[idx].tasks.find((t) => t.status === 'assigned') : undefined;
   const gt = assignedRec ? findGameTask(game, assignedRec.taskId) : undefined;
   if (assignedRec && gt && (gt.expiresAfterMinutes || gt.expiresAt || gt.timeLimitMinutes)) {
-    const swept = sweepExpiredInFlight(team, game, launchedAt, nowMs);
+    const swept = sweepExpiredInFlight(team, game, launchedAt, nowMs, args.arrivalGate);
     if (swept) {
       const allDone = swept.stages.every((s) => s.status === 'completed');
       team.stages = swept.stages;
@@ -5462,6 +5804,8 @@ export async function assignNextInActiveStage(
   // other caller (requestNextTask, completeTask's reassign, the poll sweep…)
   // is unaffected.
   preloadedGame?: Game,
+  // pause-never-strands: set once the paused-mission heal below has run, so it runs at most once.
+  pauseHealDone = false,
 ): Promise<{ taskId?: string; reason?: NoAssignmentReason | 'guardian_consent' }> {
   let game: Game;
   if (preloadedGame) {
@@ -5516,7 +5860,7 @@ export async function assignNextInActiveStage(
     if (assignedRec && gt && !team.flashSuspension && team.held !== true && (gt.expiresAfterMinutes || gt.expiresAt || gt.timeLimitMinutes)) {
       const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
       const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
-      const swept = sweepExpiredInFlight(team, game, launchedAt, Date.now());
+      const swept = sweepExpiredInFlight(team, game, launchedAt, Date.now(), (runSnap.data() as Run | undefined)?.arrivalGate === true);
       if (swept) {
         const allDone = swept.stages.every((s) => s.status === 'completed');
         await teamRef.update({
@@ -5677,6 +6021,32 @@ export async function assignNextInActiveStage(
       // the slot doesn't leak, and hand back whatever is actually in flight.
       await releaseTask(result.taskId, ownerUid, gameId, runId);
       return { taskId: claim.taskId };
+    }
+  }
+  // pause-never-strands: nothing could be handed out, and not because a station is full (that team
+  // waits for a slot). If paused missions are what stands between the team and the rest of the
+  // game, set them aside for this team and route again. Costs one run read, only on this path.
+  if (!result.taskId && result.reason !== 'stationsFull' && !pauseHealDone) {
+    const runData = (await db.doc(runPath(ownerUid, gameId, runId)).get()).data() as Run | undefined;
+    const overrides = runData?.taskStatusOverrides;
+    if (overrides && Object.values(overrides).includes('paused')) {
+      let releaseIds: string[] = [];
+      const healed = await withLockRetry(() => db.runTransaction<boolean>(async (tx) => {
+        const cur = await tx.get(teamRef);
+        if (!cur.exists) return false;
+        const curTeam = cur.data() as RunTeam;
+        const stages = (curTeam.stages ?? []).map((st) => ({ ...st, tasks: (st.tasks ?? []).map((t) => ({ ...t })) }));
+        const out = setAsidePausedTasks(stages, game, overrides, runData?.launchedAt, now);
+        if (!out.changed) return false;
+        releaseIds = out.releaseIds;
+        const allDone = stages.every((st) => st.status === 'completed');
+        tx.update(teamRef, { stages, ...(allDone ? { status: 'finished', finishedAt: now } : {}), updatedAt: now });
+        return true;
+      }));
+      if (healed) {
+        for (const id of [...new Set(releaseIds)]) await releaseTask(id, ownerUid, gameId, runId);
+        return assignNextInActiveStage(ownerUid, gameId, runId, teamId, teamLocation, now, game, true);
+      }
     }
   }
   // station-wait-clock: nothing was handed out because every open station is full. The team's
@@ -6329,22 +6699,28 @@ async function evaluateTeamOutOfBounds(
 }
 
 /** The held mission's remaining time for this team, or null (no held mission, no limit). */
-function activeTaskTimeLeftMs(team: RunTeam, game: Game, nowMs: number): number | null {
+function activeTaskTimeLeftMs(team: RunTeam, game: Game, nowMs: number, arrivalGate?: boolean): number | null {
   const stage = (team.stages ?? []).find((st) => st.status === 'active');
   const rec = stage?.tasks?.find((r) => r.status === 'assigned');
   if (!rec) return null;
   // A held team's countdown stands still (teamClockNowMs); resume moves startedAt forward by the
   // hold, so the value carries on from where it stopped instead of jumping back up.
-  return timeLimitRemainingMs(findGameTask(game, rec.taskId), rec.startedAt, teamClockNowMs(team, nowMs));
+  const task = findGameTask(game, rec.taskId); // located: counts from arrival (composer-v2-phase0)
+  return timeLimitRemainingMs(task, timeLimitClockStart(task, rec, arrivalGate), teamClockNowMs(team, nowMs));
 }
 
 // mission-time-limit: this team's own countdown for the mission. Judged at SUBMISSION (a photo
 // sent in time and reviewed later still counts, because review goes straight to
 // completeTaskForTeam), with TIME_LIMIT_GRACE_MS for an answer in flight at the buzzer.
-export function assertWithinTimeLimit(team: RunTeam, task: Pick<Task, 'id' | 'timeLimitMinutes'>): void {
+export function assertWithinTimeLimit(
+  team: RunTeam,
+  task: Pick<Task, 'id' | 'timeLimitMinutes'> & Partial<Pick<Task, 'coordinates' | 'triggerMode' | 'locationless' | 'hideLocation'>>,
+): void {
   if (!task.timeLimitMinutes) return;
   const rec = (team.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === task.id);
-  if (rec && isTimeLimitUp(task, rec.startedAt, Date.now())) {
+  // composer-v2-phase0: no run here, so the gate is inferred from the arrival latch (see
+  // timeLimitClockStart): exact for every mission that can reach a submission.
+  if (rec && isTimeLimitUp(task, timeLimitClockStart(task, rec, undefined), Date.now())) {
     throw new functions.https.HttpsError('failed-precondition', 'Time is up for this mission', { code: 'timeLimit' });
   }
 }
@@ -6980,6 +7356,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     team,
     game,
     launchedAt: run.launchedAt,
+    arrivalGate: run.arrivalGate === true,
     nowMs: Date.now(),
     isController: resolveDeviceRole(team, uid) === 'controller',
     persist: (patch) => db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update(patch),
@@ -7230,6 +7607,9 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     contacts: contactsFor(run.contacts, 'players'),
     // Why the team is held back from starting, or null when it is not.
     holdReason,
+    // A prepared run's day and place for the waiting screen (change: prepared-run). Only while
+    // it is prepared, and never the organizer's note.
+    ...(run.status === 'draft' ? { event: { plannedStartAt: run.plannedStartAt ?? null, meetingPoint: run.meetingPoint ?? null } } : {}),
     stageNarratives,
     completedTaskPins,
     run: {
@@ -7285,7 +7665,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     activeStageTasks,
     // mission-time-limit: how long this team has left on the mission it holds, on the SERVER's
     // clock, as a DURATION (the phone counts it down from when it received it). null = no limit.
-    activeTaskTimeLeftMs: activeTaskTimeLeftMs(team, game, Date.now()),
+    activeTaskTimeLeftMs: activeTaskTimeLeftMs(team, game, Date.now(), run.arrivalGate === true),
     // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
     // genuinely release/unlock-gated (routing cannot hand them out yet). The play
     // UI uses this — NOT the presence of omitted content — to decide "all

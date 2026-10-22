@@ -71,7 +71,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite, resolveStaffRun } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamMayAdvance, closeTaskForAllTeams, assertWithinTimeLimit } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamMayAdvance, closeTaskForAllTeams, assertWithinTimeLimit, assertRunOpenAt } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { flashClaimVerdict, resumedStartedAt, type FlashMissionDoc } from '@rushpoint/shared';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
@@ -141,7 +141,10 @@ export {
   requestGuardianConsent, grantGuardianConsent,
   activateHotZone, deactivateHotZone,
   getRunDiscoveryPois, claimDiscoveryPoi,
+  openRun, updateRunEventDetails, markRunPrinted, cancelPreparedRun, listPreparedRuns,
 } from './runs/index';
+// openRun · updateRunEventDetails · markRunPrinted · cancelPreparedRun · listPreparedRuns: a run
+// prepared ahead of the day (change: prepared-run).
 // onRunFinalized is a Firestore TRIGGER (not a callable) — fires the run's
 // post-finalize consolidation (player-profile folds, benchmark aggregate,
 // summary email) with the platform's own execution/retry guarantee, off
@@ -1339,7 +1342,9 @@ function resumeFromFlash(team: RunTeam, flashId: string, nowMs: number): Partial
     tasks: st.tasks.map((r) => {
       if (!s.taskId || r.taskId !== s.taskId || r.status !== 'assigned') return r;
       const moved = resumedStartedAt(r.startedAt, s.at, nowMs);
-      return moved ? { ...r, startedAt: moved } : r;
+      // composer-v2-phase0: a located mission's limit counts from arrival, so the arrival moves too.
+      const movedArrival = r.arrivedAt ? resumedStartedAt(r.arrivedAt, s.at, nowMs) : null;
+      return moved ? { ...r, startedAt: moved, ...(movedArrival ? { arrivedAt: movedArrival } : {}) } : r;
     }),
   }));
   return { stages, flashSuspension: admin.firestore.FieldValue.delete() as never };
@@ -1576,6 +1581,8 @@ export const pushFlashMission = loggedCallable('pushFlashMission', async (data, 
     bonusPoints: number;
     ttlSeconds: number;
   };
+  // Nothing is scored on a prepared run (change: prepared-run).
+  await assertRunOpenAt(ownerUid, gameId, runId);
 
   // Bound the broadcast text (shown to every participant).
   const cleanTitle = validate(() => requireString(title, 'title', MAX_MESSAGE_LEN));
@@ -2070,10 +2077,12 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   let scheduleGate: { releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; expiresAt?: string } | undefined;
   // mission-time-limit: the per team countdown, from the same snapshot.
   let timeLimitMinutes: number | undefined;
+  // composer-v2-phase0: the pin fields decide whether the limit counts from arrival.
+  let limitPlace: { coordinates?: unknown; triggerMode?: unknown; locationless?: boolean; hideLocation?: boolean } = {};
   if (gameSnap.exists) {
     const game = gameSnap.data() as {
       photoFeedEnabled?: boolean;
-      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; expiresAt?: string; timeLimitMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind; videoMinSeconds?: number; videoMaxSeconds?: number } }[] }[];
+      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; coordinates?: unknown; triggerMode?: unknown; locationless?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; expiresAt?: string; timeLimitMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind; videoMinSeconds?: number; videoMaxSeconds?: number } }[] }[];
     };
     feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
@@ -2089,6 +2098,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
           : 'photo';
         scheduleGate = { releaseAt: task.releaseAt, releaseAfterMinutes: task.releaseAfterMinutes, expiresAfterMinutes: task.expiresAfterMinutes, expiresAt: task.expiresAt };
         timeLimitMinutes = task.timeLimitMinutes;
+        limitPlace = { coordinates: task.coordinates, triggerMode: task.triggerMode, locationless: task.locationless, hideLocation: task.hideLocation };
         break;
       }
     }
@@ -2156,7 +2166,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // carried it). Placed here so the existing stage-active / idempotency / slot
   // guards are untouched; loads the run once, only when the task is actually gated.
   // mission-time-limit: judged at SUBMISSION, so a photo sent in time still counts when reviewed later.
-  assertWithinTimeLimit(team, { id: taskId, timeLimitMinutes });
+  assertWithinTimeLimit(team, { id: taskId, timeLimitMinutes, ...limitPlace } as Parameters<typeof assertWithinTimeLimit>[1]);
   if (scheduleGate && hasScheduleGate(scheduleGate)) {
     const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
     const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
@@ -2585,6 +2595,8 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
     delta: number;
     reason?: string;
   };
+  // Nothing is scored on a prepared run (change: prepared-run).
+  await assertRunOpenAt(ownerUid, gameId, runId);
 
   // `typeof NaN === 'number'` and `typeof Infinity === 'number'`, so a bare type
   // check lets a non-finite delta through → it would write a non-finite
@@ -2697,14 +2709,13 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
 // finishes and scores it (D2). The response reports how many teams that is.
 export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, context) => {
   await assertStaffCan(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId, 'tasks');
-  const { ownerUid, gameId, runId, taskId, status, reason, force } = data as {
+  const { ownerUid, gameId, runId, taskId, status, reason } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     taskId: string;
     status: StationStatus;
     reason?: string;
-    force?: boolean;
   };
 
   const ids = validate(() => ({
@@ -2763,21 +2774,10 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     throw new functions.https.HttpsError('failed-precondition', `Cannot change this task: ${plan.reason}`);
   }
 
-  // The organizer learns about a dead-ended stage HERE, not through stuck teams.
-  // Same rule and the same quantity the Builder reports as `stageUnwinnable`.
-  if (plan.stageUnwinnable && force !== true) {
-    throw new functions.https.HttpsError(
-      'failed-precondition',
-      'Pausing this task would leave the stage with fewer available tasks than it requires',
-      {
-        code: 'stageUnwinnable',
-        availableCount: plan.availableAfter,
-        requiredCount: plan.requiredCount,
-        stageTitle: stage.title ?? '',
-        taskTitle: task.title ?? '',
-      },
-    );
-  }
+  // A pause is never refused, even one the stage cannot spare (change: pause-never-strands). On
+  // 14.10 such pauses were refused, then forced, and the forced pause stranded 16 teams in stage 1.
+  // Routing now owns that case: a team that runs out of missions because of a pause moves on past
+  // it (`setAsidePausedTasks`, runs/index.ts), so `stageUnwinnable` is only reported, never a wall.
 
   // Whole-map write inside a transaction. Deliberately NOT a dotted path: task ids
   // are opaque strings and this repo has been bitten by dotted-key writes twice.
@@ -2808,7 +2808,9 @@ export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, 
     reason: cleanReason,
     taskId: ids.taskId,
     taskTitle: task.title ?? '',
-    forced: plan.stageUnwinnable === true,
+    // Kept in the record shape for old readers; a pause can no longer be forced (pause-never-strands).
+    forced: false,
+    stageUnwinnable: plan.stageUnwinnable === true,
   });
 
   return {

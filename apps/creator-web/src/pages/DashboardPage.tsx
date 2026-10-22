@@ -8,17 +8,18 @@ import {
 } from '@rushpoint/shared';
 import {
   createGame, updateGame, listGames, launchRun, deleteGame, publishGame,
-  createGameFromTemplate, importGameFile, type TemplateGroupEntry,
+  createGameFromTemplate, importGameFile, recordMissionSignals, type TemplateGroupEntry,
 } from '../services/calls';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
 import { TAP_TARGET } from '../lib/interaction';
 import { composeGame, previewShape, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
 import SmartBuildReveal, { type RevealStage } from '../components/SmartBuildReveal';
 import { readRecentPicks, recordRecentPicks } from '../lib/recentBankPicks';
+import { readTaste, recordLaunchTaste, bankKeyForTask } from '../lib/tasteProfile';
 // The bank the composer draws from is `taskBank.ts` MERGED with the admin's
 // edits and deletions (change: admin-editable-mission-bank). loadMissionBank()
 // fails open to the authored bank, so composing never depends on that read.
-import { loadMissionBank } from '../lib/missionBank';
+import { loadMissionBank, missionBankNow, loadMissionStats } from '../lib/missionBank';
 import NewGameWizard, { type WizardSubmission, type WizardTemplate } from '../components/NewGameWizard';
 import { Badge, Button, Card, EmptyState, Input, Label, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
@@ -529,12 +530,16 @@ export default function DashboardPage() {
       // reveal would report planned slots against a different pool than the one
       // the game was actually built from.
       const bank = await loadMissionBank();
+      // composer-v2-learning: creators' keep / swap counts update each mission's quality. Fails open.
+      const missionStats = await loadMissionStats();
       const result = composeGame(
         bank,
         plan.composerAnswers,
         composerCopy,
         seededRng(plan.composerSeed),
-        readRecentPicks(user?.uid),
+        // composer-v2-taste: what this creator keeps and swaps away nudges the picks.
+        { ...readRecentPicks(user?.uid), taste: readTaste(user?.uid) },
+        { missionStats },
       );
 
       // `null` means the mission bank could not make a game at all. Hand the
@@ -722,6 +727,13 @@ export default function DashboardPage() {
     setLaunching(true);
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
+      // composer-v2-taste: every mission still in a game that really launches is a "yes, this kind".
+      if (!opts?.testDrive && Array.isArray(g.stages)) {
+        recordLaunchTaste(user?.uid, g.stages, missionBankNow());
+        // composer-v2-learning: every bank mission still in a launched game was KEPT. Fire-and-forget.
+        const kept = g.stages.flatMap((st) => st.tasks).map((t) => bankKeyForTask(t, missionBankNow())).filter((k): k is string => !!k);
+        if (kept.length > 0) void recordMissionSignals({ kept }).catch(() => undefined);
+      }
       if (needFirstLaunchConfirm) markFirstLaunchConfirmed(user?.uid);
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {

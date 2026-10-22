@@ -8,6 +8,7 @@
 //   npx tsx scripts/test-task-time-limit.ts
 import {
   timeLimitRemainingMs, isTimeLimitUp, timeLimitProblem, TIME_LIMIT_GRACE_MS, TIME_LIMIT_MAX_MINUTES,
+  timeLimitClockStart,
 } from '../packages/shared/src/taskTimeLimit';
 import { isExpired, expiryInstantMs, hasScheduleGate, validateAvailabilityWindow } from '../packages/shared/src/schedule';
 
@@ -56,6 +57,34 @@ check('a window that closes before it opens is refused',
   typeof validateAvailabilityWindow({ releaseAt: at, expiresAt: start }) === 'string'
   && validateAvailabilityWindow({ releaseAt: start, expiresAt: at }) === null);
 check('an unparsable absolute close is refused at save time', typeof validateAvailabilityWindow({ expiresAt: 'soon' }) === 'string');
+
+// ── The clock starts on arrival for a located mission (change: composer-v2-phase0) ───────
+// A mission sealed until arrival counted its limit from the moment it was GIVEN, so the walk to
+// the pin ate the clock. Now it counts from `arrivedAt`, and before arrival there is no countdown.
+const pin = { lat: 31.77, lng: 35.21 };
+const located = { timeLimitMinutes: 3, coordinates: pin, triggerMode: 'radius' };
+const arrived = '2026-09-27T10:04:00.000Z';
+check('gated + arrived: counts from the arrival',
+  timeLimitClockStart(located, { startedAt: start, arrivedAt: arrived }, true) === arrived);
+check('gated + not arrived: no clock yet',
+  timeLimitClockStart(located, { startedAt: start }, true) === null);
+check('not arrived means no countdown and never up',
+  timeLimitRemainingMs(located, timeLimitClockStart(located, { startedAt: start }, true), t0 + 60 * 60_000) === null
+  && !isTimeLimitUp(located, timeLimitClockStart(located, { startedAt: start }, true), t0 + 60 * 60_000));
+check('a run without the gate keeps the old clock',
+  timeLimitClockStart(located, { startedAt: start, arrivedAt: arrived }, false) === start);
+check('a locationless mission keeps the old clock',
+  timeLimitClockStart({ timeLimitMinutes: 3, locationless: true }, { startedAt: start, arrivedAt: arrived }, true) === start
+  && timeLimitClockStart({ timeLimitMinutes: 3 }, { startedAt: start }, true) === start);
+check('a hidden mission keeps the old clock (finding it IS the mission)',
+  timeLimitClockStart({ ...located, hideLocation: true }, { startedAt: start, arrivedAt: arrived }, true) === start);
+check('gate unknown: inferred from the arrival latch',
+  timeLimitClockStart(located, { startedAt: start, arrivedAt: arrived }, undefined) === arrived
+  && timeLimitClockStart(located, { startedAt: start }, undefined) === start);
+check('the full limit is there on arrival',
+  timeLimitRemainingMs(located, timeLimitClockStart(located, { startedAt: start, arrivedAt: arrived }, true), Date.parse(arrived)) === 3 * 60_000);
+check('garbage never throws',
+  [null, undefined, {}, 'x'].every((v) => { try { timeLimitClockStart(v as never, v as never, true); return true; } catch { return false; } }));
 
 console.log(`\n${failures === 0 ? 'ALL TIME-LIMIT TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

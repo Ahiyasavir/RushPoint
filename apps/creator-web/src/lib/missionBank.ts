@@ -20,7 +20,8 @@
 // working. An admin's edit not being visible for one session is a cosmetic
 // problem; the new-game flow dead-ending is not. Same reasoning as
 // `stuckGuards.ts`: a blocking client-side dependency must fail open.
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { parseMissionStats, type MissionStats } from './missionQuality';
 import { db } from '../services/firebase';
 import { TASK_BANK, type TaskBankEntry } from '../taskBank';
 import { applyBankOverrides, type MissionBankOverride } from './missionBankOverlay';
@@ -80,4 +81,33 @@ export async function loadMissionBank(): Promise<TaskBankEntry[]> {
  */
 export function missionBankNow(): TaskBankEntry[] {
   return memo?.entries ?? TASK_BANK;
+}
+
+// ── Creators' keep / swap counts (change: composer-v2-learning) ───────────────
+// One document for the whole bank, memoised like the bank itself. Fails open: no stats means every
+// mission is judged by its rating alone, which is exactly the composer's behaviour before learning.
+let statsMemo: { stats: Record<string, MissionStats>; ts: number } | null = null;
+let statsInFlight: Promise<Record<string, MissionStats>> | null = null;
+
+export async function loadMissionStats(): Promise<Record<string, MissionStats>> {
+  if (statsMemo && Date.now() - statsMemo.ts < FRESH_MS) return statsMemo.stats;
+  if (statsInFlight) return statsInFlight;
+  statsInFlight = (async () => {
+    let stats: Record<string, MissionStats> = {};
+    try {
+      const snap = await getDoc(doc(db, 'missionStats', 'all'));
+      stats = parseMissionStats(snap.exists() ? snap.data() : null);
+    } catch (e) {
+      console.warn('[missionBank] stats read failed; using ratings alone', e);
+    }
+    statsMemo = { stats, ts: Date.now() };
+    statsInFlight = null;
+    return stats;
+  })();
+  return statsInFlight;
+}
+
+/** The counts as of the last load, or none. For a synchronous press that must not wait. */
+export function missionStatsNow(): Record<string, MissionStats> {
+  return statsMemo?.stats ?? {};
 }

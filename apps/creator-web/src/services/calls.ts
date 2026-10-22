@@ -1,6 +1,6 @@
 // Typed wrappers around every creator-facing Cloud Function callable.
 import { callable, publicCallable } from './api';
-import type { WaivableKind } from '@rushpoint/shared';
+import type { WaivableKind, RunEventDetails, PrintRecordKey } from '@rushpoint/shared';
 import type {
   Game,
   StaffCapability,
@@ -109,7 +109,28 @@ export const restoreGame      = callable<{ gameId: string }, { ok: boolean; alre
 export const purgeGameNow     = callable<{ gameId: string }, { ok: boolean }>('purgeGameNow');
 
 // ── Runs ──
-export const launchRun     = callable<{ gameId: string; testDrive?: boolean }, { runId: string; accessCode: string }>('launchRun');
+export const launchRun     = callable<
+  { gameId: string; testDrive?: boolean; prepare?: boolean; event?: RunEventDetails },
+  { runId: string; accessCode: string; status?: 'draft' | 'live' }
+>('launchRun');
+// A run prepared ahead of the day (change: prepared-run).
+export const openRun = callable<{ gameId: string; runId: string }, { ok: true; alreadyOpen: boolean }>('openRun');
+/** `null` or '' for a key CLEARS it; an absent key is untouched. */
+export const updateRunEventDetails = callable<
+  { gameId: string; runId: string; details: { [K in keyof RunEventDetails]?: RunEventDetails[K] | null } },
+  { ok: true }
+>('updateRunEventDetails');
+export const markRunPrinted = callable<
+  { gameId: string; runId: string; doc: PrintRecordKey; fingerprint: string; summary?: unknown },
+  { ok: true; printedAt: string }
+>('markRunPrinted');
+export const cancelPreparedRun = callable<{ gameId: string; runId: string }, { ok: true }>('cancelPreparedRun');
+export interface PreparedRunSummary {
+  runId: string; gameId: string; gameTitle: string; accessCode: string;
+  plannedStartAt: string | null; meetingPoint: string | null; earlyRegistration: boolean;
+  preparedAt: string; registeredTeams: number | null;
+}
+export const listPreparedRuns = callable<Record<string, never>, { runs: PreparedRunSummary[] }>('listPreparedRuns');
 // `heldForConsent` counts teams the server refused to start because the game
 // requires guardian consent and none is recorded (change: expose-enforced-settings).
 // Optional so an older backend simply reports nothing rather than breaking.
@@ -338,6 +359,13 @@ export const searchTaskLibrary = callable<{ query?: string; tags?: string[]; lim
 export const incrementTaskCopyCount = callable<{ publicTaskId: string }, { ok: boolean; applied?: boolean }>('incrementTaskCopyCount');
 // Desired-END-STATE setter, not a toggle: sending `liked: true` twice is a no-op,
 // so a retry or a double tap can never double-count (change: gallery-popularity-ranking).
+// What creators teach the mission bank (change: composer-v2-learning): bank keys KEPT in a launched
+// game and SWAPPED away by regenerate. Fire-and-forget at every call site.
+export const recordMissionSignals = callable<
+  { kept?: string[]; swapped?: string[] },
+  { recorded: number }
+>('recordMissionSignals');
+
 export const setPublicLike     = callable<
   { kind: 'game' | 'task'; itemId: string; liked: boolean },
   { liked: boolean; likeCount: number; popularity: number }
@@ -424,8 +452,8 @@ export const hideFeedItem          = callable<{ ownerUid: string; gameId: string
 // Live task availability (change: live-task-pause): take one task out of play for
 // THIS run, or put it back. Run scoped — the game template is never touched. A team
 // already holding the task keeps it (`teamsHolding` says how many that is). The
-// server refuses a change that would leave the owning stage unwinnable unless
-// `force` is set, answering with details.code === 'stageUnwinnable'.
+// server refuses a PAUSE that would leave the owning stage unwinnable, answering with
+// details.code === 'stageUnwinnable'. It cannot be forced (change: pause-never-strands).
 // quick-dial-and-actions: tonight's phone numbers for a run (owner only).
 export const setRunContacts = callable<
   { ownerUid: string; gameId: string; runId: string; contacts: { label: string; phone: string; visibleTo: ('players' | 'staff')[] }[] },
@@ -433,7 +461,7 @@ export const setRunContacts = callable<
 >('setRunContacts');
 
 export const setRunTaskStatus      = callable<
-  { ownerUid: string; gameId: string; runId: string; taskId: string; status: StationStatus; reason?: string; force?: boolean },
+  { ownerUid: string; gameId: string; runId: string; taskId: string; status: StationStatus; reason?: string },
   {
     ok: boolean; taskId: string; status: StationStatus; previousStatus: StationStatus;
     noop: boolean; teamsHolding: number; availableCount: number; requiredCount: number;

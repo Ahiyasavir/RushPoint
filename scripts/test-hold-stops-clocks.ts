@@ -34,7 +34,7 @@ ok('race clock: no start ⇒ 0', raceElapsedMs({}, T0) === 0);
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 const runs = read('functions/src/runs/index.ts');
-const fn = runs.slice(runs.indexOf('function activeTaskTimeLeftMs('), runs.indexOf('function activeTaskTimeLeftMs(') + 600);
+const fn = runs.slice(runs.indexOf('function activeTaskTimeLeftMs('), runs.indexOf('function activeTaskTimeLeftMs(') + 900);
 ok('server: the countdown is computed at the team clock, not at now', /teamClockNowMs\(team, nowMs\)/.test(fn));
 const runner = read('apps/play-web/src/components/TaskRunner.tsx');
 ok('phone: the mission countdown is told the team is held', /<TimeLimitCountdown[^>]*paused=\{/.test(runner.replace(/\n\s*/g, ' ')));

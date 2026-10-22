@@ -38,6 +38,8 @@ import {
   type BankTagId,
 } from '../bankTags';
 import { seededRng, pickFromBand } from './composeGame';
+import { TASTE_WEIGHT, tasteAffinity } from './tasteCodec';
+import { qualityBonus, qualityOf, type MissionStats } from './missionQuality';
 import type { OccasionId } from './occasions';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -411,6 +413,11 @@ export interface RegenerateRequest {
   /** Bank keys already offered for this mission. */
   offeredKeys: readonly string[];
   seed: number;
+  /** This creator's taste profile, `t1:...` (change: composer-v2-taste). Absent: neutral. */
+  taste?: string;
+  /** composer-v2-quality: prefer stronger missions (default on); creators' keep / swap counts. */
+  quality?: boolean;
+  missionStats?: Readonly<Record<string, Partial<MissionStats>>>;
 }
 
 /**
@@ -468,7 +475,14 @@ export function chooseRegeneratedMission(req: RegenerateRequest | null | undefin
   );
   const pool = fresh.length > 0 ? fresh : eligible;
 
-  const scored = pool.map((e) => ({ key: e.key, score: similarityScore(e, profile, drift), entry: e }));
+  const taste = typeof req!.taste === 'string' ? req!.taste : undefined;
+  const scored = pool.map((e) => ({
+    key: e.key,
+    score: similarityScore(e, profile, drift)
+      + (taste ? TASTE_WEIGHT * tasteAffinity(taste, tagsOf(e.tags)) : 0)
+      + (req!.quality !== false ? qualityBonus(qualityOf(e.key, req!.missionStats)) : 0),
+    entry: e,
+  }));
   const picked = pickFromBand(scored, seededRng(num(req!.seed) ?? 0));
   return picked ? picked.entry : null;
 }

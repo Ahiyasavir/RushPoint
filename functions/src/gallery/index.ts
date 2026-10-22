@@ -4,6 +4,7 @@
 // gallery-popularity-ranking).
 
 import * as functions from 'firebase-functions';
+import { FieldValue } from 'firebase-admin/firestore';
 import { loggedCallable } from '../obs/log';
 import { enforceRateLimit } from '../rateLimitStore';
 import { db } from '../firebase';
@@ -27,6 +28,7 @@ import {
 } from '@rushpoint/shared';
 import { RECOMMENDED_TAGS, normalizeTags } from '@rushpoint/shared';
 import { bumpPublicSignals, publicItemPath, scoreFor } from './popularityStore';
+import { MISSION_STATS_DOC, parseMissionSignals, statsIncrements } from './missionSignals';
 import {
   readStoredTagCounts,
   tallyTags,
@@ -383,6 +385,8 @@ export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data
 
 export const incrementTaskCopyCount = loggedCallable('incrementTaskCopyCount', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  // Feeds the gallery ranking, so it is bounded like setPublicLike (security audit 2026-10-22).
+  await enforceRateLimit(context.auth.uid, 'incrementTaskCopyCount');
   const { publicTaskId } = data as { publicTaskId: string };
   if (!publicTaskId) throw new functions.https.HttpsError('invalid-argument', 'publicTaskId required');
 
@@ -518,4 +522,20 @@ export const getPopularTags = loggedCallable('getPopularTags', async (data, cont
   }
 
   return { tags };
+});
+
+// ── What creators teach the mission bank (change: composer-v2-learning) ─────
+// A bank mission still in a game that launched was KEPT; one regenerated away was SWAPPED. The counts
+// update each mission's quality in the composer (creator-web lib/missionQuality.ts). Signed-in callers
+// only, like every creator callable (a creator account is not told apart by sign-in method anywhere in
+// the platform). Residual gap, the same one RATE_LIMITS documents: anonymous uids are free to mint, so
+// a script could skew counts; the rating prior (10 observations) and the per-uid budget blunt it, and
+// App Check is the real fix. Counts only, nothing personal (gallery/missionSignals).
+export const recordMissionSignals = loggedCallable('recordMissionSignals', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  await enforceRateLimit(context.auth.uid, 'recordMissionSignals');
+  const signals = parseMissionSignals(data);
+  if (!signals) return { recorded: 0 };
+  await db.doc(MISSION_STATS_DOC).set(statsIncrements(signals, (n) => FieldValue.increment(n)), { merge: true });
+  return { recorded: signals.kept.length + signals.swapped.length };
 });

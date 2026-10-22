@@ -3,7 +3,7 @@
 // creator can read a whole stage's structure (type, difficulty, time, points,
 // location mode, and a computed 1-line interaction preview) without opening a
 // panel. Pure presentation — all logic comes from lib/taskCardPreview.
-import type { HTMLAttributes } from 'react';
+import { useEffect, useRef, type HTMLAttributes } from 'react';
 import type { Task, TaskType } from '@rushpoint/shared';
 import { normalizeTriggerMode } from '@rushpoint/shared';
 import { isTaskHidden } from '@rushpoint/shared';
@@ -13,6 +13,7 @@ import { GROUP_STYLES } from '../lib/groupStyles';
 import { useT } from './LanguageContext';
 import { BuilderIcon, TRIGGER_ICON_NAME } from './builderIcons';
 import { Icon } from './Icon';
+import { TAP_CLUSTER } from '../lib/interaction';
 
 // The exclusive-group palette now lives in a pure, React-free lib so it can be
 // unit-tested directly. Re-exported here so existing importers (BuilderPage,
@@ -41,7 +42,7 @@ export interface MoveTarget { id: string; label: string }
 
 export default function TaskCard({
   task, active, onClick, dragging, moveTargets, onMoveToStage,
-  onDuplicate, onRegenerate, onToggleHidden, onDelete, group, handleProps,
+  onDuplicate, onRegenerate, onToggleHidden, onDelete, group, handleProps, regenNonce,
 }: {
   task: Task;
   active?: boolean;
@@ -65,6 +66,11 @@ export default function TaskCard({
    * actions rather than with the destructive ones.
    */
   onRegenerate?: () => void;
+  /**
+   * Bumped by the Builder each time this card's mission is swapped (change: composer-v2-phase0),
+   * so the card plays its spin once per swap. Absent or 0: no spin.
+   */
+  regenNonce?: number;
   /** Bench this mission, or bring it back. See shared/hiddenTask. */
   onToggleHidden?: () => void;
   onDelete?: () => void;
@@ -76,6 +82,17 @@ export default function TaskCard({
   handleProps?: HTMLAttributes<HTMLElement> & { ref?: (el: HTMLElement | null) => void };
 }) {
   const b = useT().builder;
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Replay the spin on every swap WITHOUT remounting the card: a remount would drop keyboard focus
+  // from the button that was just pressed. Removing the class, forcing a reflow and adding it back
+  // restarts a CSS animation; `prefers-reduced-motion` turns the animation itself off in index.css.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || !regenNonce) return;
+    el.classList.remove('rp-regen-spin');
+    void el.offsetWidth;
+    el.classList.add('rp-regen-spin');
+  }, [regenNonce]);
   const hidden = isTaskHidden(task);
   const style = group ? GROUP_STYLES[group.index % GROUP_STYLES.length] : null;
   const color = TYPE_FAMILY_COLOR[task.type];
@@ -99,6 +116,7 @@ export default function TaskCard({
   // Enter/Space are wired manually to preserve button semantics.
   return (
     <div
+      ref={rootRef}
       role="button"
       tabIndex={0}
       // Without an explicit name the card's accessible name is computed from its
@@ -184,6 +202,16 @@ export default function TaskCard({
             button — a `<span onClick>` wrapper here would be a clickable
             non-interactive element, which the creator a11y scan counts and is right
             to. */}
+        {/* Regenerate, one visible press (change: composer-v2-phase0). It used to live only in the
+            menu below, where nobody found it. Always fully visible, unlike the menu, because it is
+            the action this card most wants pressed. The menu keeps its row for keyboard users. */}
+        {onRegenerate && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onRegenerate(); }}
+            aria-label={b.regenerateTask} title={b.regenerateTask}
+            className={`${TAP_CLUSTER} shrink-0 rounded border border-[--rp-border] bg-[--surface-2] text-[--ink-2] hover:text-ink-fire hover:border-rp-fire/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60`}>
+            <Icon name="dice" className="w-4 h-4" />
+          </button>
+        )}
         {(onDuplicate || onRegenerate || onToggleHidden || onDelete || (onMoveToStage && moveTargets && moveTargets.length > 0)) && (
           <span className="shrink-0 opacity-60 transition-opacity group-hover/card:opacity-100 focus-within:opacity-100">
             <OverflowMenu

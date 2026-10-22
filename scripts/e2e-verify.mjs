@@ -7399,6 +7399,172 @@ async function main() {
     check('a link that carries the run address still signs in', !!linked?.customToken);
   });
 
+  // ═══ prepared-run: a run prepared ahead of the day (Ahiya 2026-10-08) ═══════════
+  // Codes, staff and prints exist before the day; nobody is started or scored until the
+  // organizer opens it; a team that registered early starts on the CURRENT game.
+  await scenario('prepared run (prepare → staff · early join · refusals → open → start on the current game · cancel)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const task = (id, title) => ({ id, title, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 });
+    const { gameId: pg } = await creator.call('createGame', { title: 'Prepared Ahead', mode: 'individual' });
+    await creator.call('updateGame', { gameId: pg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'pr-0', order: 0, isFinal: true, title: 'Only stage', tasks: [task('pr-a', 'First')] }] });
+    const gameRef = adminSdk.firestore().doc(`users/${OWNER}/games/${pg}`);
+    const playsBefore = (await gameRef.get()).data()?.playCount ?? 0;
+
+    // ── prepare + testDrive together is refused ──
+    let both = '';
+    try { await creator.call('launchRun', { gameId: pg, prepare: true, testDrive: true }); } catch (e) { both = e.code; }
+    check('prepare and testDrive together are refused', both === 'functions/invalid-argument', both);
+
+    // ── prepare ──
+    const PLANNED = '2026-10-15T07:00:00.000Z';
+    const prep = await creator.call('launchRun', { gameId: pg, prepare: true,
+      event: { plannedStartAt: PLANNED, meetingPoint: 'Sacher Park', eventNote: 'Bring water' } });
+    const pr = prep?.runId;
+    check('prepare returns a run and a join code', !!pr && typeof prep?.accessCode === 'string', JSON.stringify(prep));
+    const runRef = adminSdk.firestore().doc(`users/${OWNER}/games/${pg}/runs/${pr}`);
+    let runDoc = (await runRef.get()).data();
+    check('a prepared run is a draft', runDoc?.status === 'draft', runDoc?.status);
+    check('a prepared run has no launchedAt yet', runDoc?.launchedAt === undefined, runDoc?.launchedAt);
+    check('a prepared run carries preparedAt', typeof runDoc?.preparedAt === 'string');
+    check('the event details are stored on the run',
+      runDoc?.plannedStartAt === PLANNED && runDoc?.meetingPoint === 'Sacher Park' && runDoc?.eventNote === 'Bring water', JSON.stringify(runDoc));
+    check('preparing is not a play', ((await gameRef.get()).data()?.playCount ?? 0) === playsBefore);
+    const live = await creator.call('listLiveRuns', {});
+    check('a draft is not a live run', !(live?.runs ?? []).some((r) => r.runId === pr), JSON.stringify(live?.runs?.map((r) => r.runId)));
+    const upcoming = await creator.call('listPreparedRuns', {});
+    const up = (upcoming?.runs ?? []).find((r) => r.runId === pr);
+    check('listPreparedRuns lists it with its date and code',
+      up?.gameId === pg && up?.plannedStartAt === PLANNED && up?.accessCode === prep.accessCode && up?.gameTitle === 'Prepared Ahead', JSON.stringify(up));
+
+    // ── staff before the day ──
+    const { pin: staffCode } = await creator.call('inviteStaff', { ownerUid: OWNER, gameId: pg, runId: pr, name: 'Gate' });
+    const marshal = makeParty('prepMarshal');
+    await signInAnonymously(marshal.auth);
+    const signed = await marshal.call('staffSignIn', { pin: staffCode, name: 'Noa' });
+    check('a marshal signs in to a prepared run', !!signed?.customToken && signed?.runId === pr);
+
+    // ── a player looks and registers early ──
+    const early = makeParty('prepEarly');
+    const earlyCred = await signInAnonymously(early.auth);
+    const info = await early.call('getJoinInfo', { code: prep.accessCode });
+    check('getJoinInfo says the run is prepared', info?.runStatus === 'draft', info?.runStatus);
+    check('getJoinInfo carries the planned start and meeting point',
+      info?.plannedStartAt === PLANNED && info?.meetingPoint === 'Sacher Park', JSON.stringify(info));
+    check('getJoinInfo never carries the organizer note', info?.eventNote === undefined && !JSON.stringify(info).includes('Bring water'));
+    const joined = await early.call('joinRun', { code: prep.accessCode, displayName: 'Early Birds' });
+    check('a team registers early', joined?.teamId === earlyCred.user.uid);
+    const teamRef = runRef.collection('teams').doc(earlyCred.user.uid);
+    let team = (await teamRef.get()).data();
+    check('an early team waits, not started', team?.launched === false && team?.status === 'registered', JSON.stringify({ l: team?.launched, s: team?.status }));
+    const st = await early.call('getMyTeamState', { code: prep.accessCode });
+    check('getMyTeamState carries the planned start while prepared',
+      st?.event?.plannedStartAt === PLANNED && st?.event?.meetingPoint === 'Sacher Park' && st?.run?.status === 'draft', JSON.stringify({ e: st?.event, s: st?.run?.status }));
+    check('getMyTeamState never carries the organizer note', !JSON.stringify(st).includes('Bring water'));
+
+    // ── the organizer keeps editing: a mission added after the team registered ──
+    await creator.call('updateGame', { gameId: pg,
+      stages: [{ id: 'pr-0', order: 0, isFinal: true, title: 'Only stage', tasks: [task('pr-a', 'First'), task('pr-b', 'Added later')] }] });
+
+    // ── nothing starts or scores on a draft ──
+    const S = { ownerUid: OWNER, gameId: pg, runId: pr };
+    const refusals = [
+      ['startTeams', { gameId: pg, runId: pr }],
+      ['finalizeRun', { gameId: pg, runId: pr }],
+      ['pushFlashMission', { ...S, title: 'Bonus', description: 'x', bonusPoints: 5, ttlSeconds: 600 }],
+      ['activateHotZone', { gameId: pg, runId: pr, center: { lat: 31.77, lng: 35.21 }, radiusMeters: 200, multiplier: 2, durationMinutes: 10 }],
+      ['skipStage', { gameId: pg, runId: pr, teamId: earlyCred.user.uid }],
+      ['skipTaskForTeam', { ...S, teamId: earlyCred.user.uid }],
+      ['adjustTeamScore', { ...S, teamId: earlyCred.user.uid, delta: 10, reason: 'probe' }],
+    ];
+    for (const [fn, payload] of refusals) {
+      let code = ''; let reason = '';
+      try { await creator.call(fn, payload); } catch (e) { code = e.code; reason = e.details?.reason ?? ''; }
+      check(`${fn} refuses a prepared run (run-not-open)`, code === 'functions/failed-precondition' && reason === 'run-not-open', `${code} ${reason}`);
+    }
+    team = (await teamRef.get()).data();
+    check('the early team is still not started after the refusals', team?.launched === false && (team?.score ?? 0) === 0);
+    const ann = await creator.call('pushAnnouncement', { ...S, title: 'See you', message: 'Thursday at 10' });
+    check('an announcement works on a prepared run', !!ann?.announcementId, JSON.stringify(ann));
+
+    // ── event details ──
+    await creator.call('updateRunEventDetails', { gameId: pg, runId: pr, details: { meetingPoint: 'North gate', eventNote: null } });
+    runDoc = (await runRef.get()).data();
+    check('updateRunEventDetails sets and clears', runDoc?.meetingPoint === 'North gate' && runDoc?.eventNote === undefined, JSON.stringify(runDoc));
+    let badDate = '';
+    try { await creator.call('updateRunEventDetails', { gameId: pg, runId: pr, details: { plannedStartAt: 'next thursday' } }); } catch (e) { badDate = e.code; }
+    check('an unreadable date is refused', badDate === 'functions/invalid-argument', badDate);
+    let strangerEdit = '';
+    try { await early.call('updateRunEventDetails', { gameId: pg, runId: pr, details: { meetingPoint: 'x' } }); } catch (e) { strangerEdit = e.code; }
+    check('only the owner edits the event details', strangerEdit === 'functions/permission-denied' || strangerEdit === 'functions/not-found', strangerEdit);
+
+    // ── early registration closed ──
+    await creator.call('updateRunEventDetails', { gameId: pg, runId: pr, details: { earlyRegistration: false } });
+    const late = makeParty('prepLate');
+    await signInAnonymously(late.auth);
+    let closed = ''; let closedReason = '';
+    try { await late.call('joinRun', { code: prep.accessCode, displayName: 'Too Soon' }); } catch (e) { closed = e.code; closedReason = e.details?.reason ?? ''; }
+    check('registration closed until the day is refused with its reason',
+      closed === 'functions/failed-precondition' && closedReason === 'registration-not-open', `${closed} ${closedReason}`);
+    const rejoin = await early.call('joinRun', { code: prep.accessCode, displayName: 'Early Birds' });
+    check('a team already registered is still recognised', rejoin?.alreadyJoined === true);
+    await creator.call('updateRunEventDetails', { gameId: pg, runId: pr, details: { earlyRegistration: true } });
+
+    // ── prints ──
+    await creator.call('markRunPrinted', { gameId: pg, runId: pr, doc: 'hostSheet', fingerprint: 'fp-1', summary: { v: 1, doc: 'host', title: 'Prepared Ahead', hashes: {} } });
+    runDoc = (await runRef.get()).data();
+    check('markRunPrinted records the fingerprint and time',
+      runDoc?.prints?.hostSheet?.fingerprint === 'fp-1' && typeof runDoc?.prints?.hostSheet?.printedAt === 'string', JSON.stringify(runDoc?.prints));
+    let badDoc = '';
+    try { await creator.call('markRunPrinted', { gameId: pg, runId: pr, doc: 'poster', fingerprint: 'x' }); } catch (e) { badDoc = e.code; }
+    check('an unknown print document is refused', badDoc === 'functions/invalid-argument', badDoc);
+
+    // ── open ──
+    const opened = await creator.call('openRun', { gameId: pg, runId: pr });
+    check('openRun opens it', opened?.ok === true && opened?.alreadyOpen !== true, JSON.stringify(opened));
+    runDoc = (await runRef.get()).data();
+    check('an opened run is live with launchedAt', runDoc?.status === 'live' && typeof runDoc?.launchedAt === 'string');
+    check('opening counts one play', ((await gameRef.get()).data()?.playCount ?? 0) === playsBefore + 1);
+    const again = await creator.call('openRun', { gameId: pg, runId: pr });
+    check('a second open is idempotent', again?.alreadyOpen === true);
+    check('a second open does not count another play', ((await gameRef.get()).data()?.playCount ?? 0) === playsBefore + 1);
+    check('the opened run is now a live run', ((await creator.call('listLiveRuns', {}))?.runs ?? []).some((r) => r.runId === pr));
+    check('and no longer upcoming', !((await creator.call('listPreparedRuns', {}))?.runs ?? []).some((r) => r.runId === pr));
+
+    // ── start: the early team plays TODAY's game ──
+    const started = await creator.call('startTeams', { gameId: pg, runId: pr });
+    check('startTeams starts the early team', started?.launched === 1, JSON.stringify(started));
+    team = (await teamRef.get()).data();
+    const taskIds = (team?.stages ?? []).flatMap((s) => (s.tasks ?? []).map((t) => t.taskId));
+    check('the early team got the mission added after it registered', taskIds.includes('pr-b'), JSON.stringify(taskIds));
+
+    // ── cancel ──
+    const prep2 = await creator.call('launchRun', { gameId: pg, prepare: true });
+    const pr2 = prep2.runId;
+    await creator.call('inviteStaff', { ownerUid: OWNER, gameId: pg, runId: pr2, name: 'Gate' });
+    let cancelLive = '';
+    try { await creator.call('cancelPreparedRun', { gameId: pg, runId: pr }); } catch (e) { cancelLive = e.code; }
+    check('a live run cannot be cancelled as a draft', cancelLive === 'functions/failed-precondition', cancelLive);
+    const cancelled = await creator.call('cancelPreparedRun', { gameId: pg, runId: pr2 });
+    check('cancelPreparedRun acks', cancelled?.ok === true);
+    const run2 = (await adminSdk.firestore().doc(`users/${OWNER}/games/${pg}/runs/${pr2}`).get()).data();
+    check('a cancelled draft is finished with cancelledAt', run2?.status === 'finished' && typeof run2?.cancelledAt === 'string', JSON.stringify(run2));
+    const code2 = (await adminSdk.firestore().doc(`accessCodes/${prep2.accessCode}`).get()).data();
+    check('its join code is revoked', code2?.status === 'revoked', code2?.status);
+    const invites2 = await adminSdk.firestore().collection(`users/${OWNER}/games/${pg}/runs/${pr2}/staffInvites`).get();
+    check('its staff codes are closed', invites2.size > 0 && invites2.docs.every((d) => d.data().disabled === true));
+    let openCancelled = '';
+    try { await creator.call('openRun', { gameId: pg, runId: pr2 }); } catch (e) { openCancelled = e.code; }
+    check('a cancelled draft cannot be opened', openCancelled === 'functions/failed-precondition', openCancelled);
+    check('cancelling is not a play', ((await gameRef.get()).data()?.playCount ?? 0) === playsBefore + 1);
+
+    // ── strangers ──
+    let strangerOpen = '';
+    try { await early.call('openRun', { gameId: pg, runId: pr2 }); } catch (e) { strangerOpen = e.code; }
+    check('a stranger cannot open a run', strangerOpen === 'functions/permission-denied' || strangerOpen === 'functions/not-found', strangerOpen);
+  });
+
   // ═══ WO-5: bad-coordinate inputs return clean errors, not 500 ════════════════
   // Client {lat,lng} flowed into haversineKm; only null/undefined defaulted to
   // (0,0). Out-of-range/NaN/string coords reached haversineKm → LocationError →
@@ -11325,61 +11491,75 @@ async function main() {
     check('holder: the paused station released its slot (counter back to 0 — no leak)',
       (hCounts[held] ?? 0) === 0, JSON.stringify(hCounts));
 
-    // ── C. The unwinnable-stage guard ────────────────────────────────────────
-    // requiredTaskCount 2 of 2: pausing EITHER task leaves the stage unable to
-    // yield what it requires. The organizer must learn that here, not through
-    // teams that silently dead-end in the field.
-    const { gameId: ug } = await creator.call('createGame', { title: 'Unwinnable Pause Game', mode: 'individual' });
+    // ── C. A pause never strands a team (change: pause-never-strands) ─────────
+    // The 14.10 race: stage 1 was a chain of required missions, the organizer paused missions in it,
+    // and every team that still needed one could never finish the stage, so only 2 of 30 reached the
+    // vineyard (stage 3). Here: head → mid → end, all required, then a final stage. Pausing `mid` is
+    // ACCEPTED. A team that already holds `mid` keeps it and finishes it; a team that runs out of
+    // missions because of the pause moves on past it (set aside for that team only, 0 points), and
+    // still reaches the next stage.
+    const { gameId: ug } = await creator.call('createGame', { title: 'Pause Never Strands Game', mode: 'individual' });
+    const ut = (id, after) => ({ id, title: `Mission ${id}`, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+      ...(after ? { unlockAfterTaskIds: after } : {}) });
     await creator.call('updateGame', {
       gameId: ug, scoringPreset: 'time_only',
-      stages: [{ id: 'uw-s', order: 0, title: 'Both required', isFinal: true, requiredTaskCount: 2, tasks: [
-        { id: 'uw-a', title: 'Left', type: 'self_report', triggerMode: 'locationless', locationless: true,
-          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
-        { id: 'uw-b', title: 'Right', type: 'self_report', triggerMode: 'locationless', locationless: true,
-          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
-      ] }],
+      stages: [
+        { id: 'uw-s1', order: 0, title: 'Chain', tasks: [ut('uw-head'), ut('uw-mid', ['uw-head']), ut('uw-end', ['uw-head', 'uw-mid'])] },
+        { id: 'uw-s2', order: 1, title: 'Vineyard', isFinal: true, tasks: [ut('uw-vine')] },
+      ],
     });
-    const { runId: ur } = await creator.call('launchRun', { gameId: ug });
+    const { runId: ur, accessCode: uc } = await creator.call('launchRun', { gameId: ug });
     const U = { ownerUid: OWNER, gameId: ug, runId: ur };
-    const uRunPath = `users/${OWNER}/games/${ug}/runs/${ur}`;
+    const uTeamPath = (uid) => `users/${OWNER}/games/${ug}/runs/${ur}/teams/${uid}`;
+    const uRec = (team, id) => (team?.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === id);
+    const uHolder = makeParty('pauseStrandHolder');
+    const uHolderUid = (await signInAnonymously(uHolder.auth)).user.uid;
+    await uHolder.call('joinRun', { code: uc, displayName: 'Holds Mid' });
+    const uLate = makeParty('pauseStrandLate');
+    const uLateUid = (await signInAnonymously(uLate.auth)).user.uid;
+    await uLate.call('joinRun', { code: uc, displayName: 'Still On Head' });
+    await creator.call('startTeams', { gameId: ug, runId: ur });
+    const activeOf = async (p) => (await p.call('getMyTeamState', { code: uc }))?.team?.activeTaskId;
+    const advance = async (p) => {
+      const cur = await activeOf(p);
+      if (cur) await p.call('completeTask', { ...U, taskId: cur });
+      if (!(await activeOf(p))) await p.call('requestNextTask', { code: uc, lat: 0, lng: 0 });
+      return activeOf(p);
+    };
+    check('pause precondition: the uHolder is on mid, the other team is still on head',
+      (await advance(uHolder)) === 'uw-mid' && (await activeOf(uLate)) === 'uw-head');
 
-    // This run has never had an override written, so `null` here is the full
-    // before-image — the comparison below is the literal "UNCHANGED" contract.
-    const uBefore = JSON.stringify((await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? null);
-    const uwErr = await expectError('unwinnable: pausing a task the stage cannot spare is refused',
-      creator.call('setRunTaskStatus', { ...U, taskId: 'uw-a', status: 'paused' }),
-      { codeIn: ['functions/failed-precondition'] });
-    check('unwinnable: the refusal is machine-readable (details.code === stageUnwinnable)',
-      uwErr?.details?.code === 'stageUnwinnable', JSON.stringify(uwErr?.details));
-    check('unwinnable: the refusal carries the counts the operator needs to decide',
-      uwErr?.details?.availableCount === 1 && uwErr?.details?.requiredCount === 2,
-      JSON.stringify(uwErr?.details));
-    const uAfter = JSON.stringify((await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? null);
-    check('unwinnable: the refused call left run.taskStatusOverrides UNCHANGED (nothing written)',
-      uAfter === uBefore, `${uBefore} → ${uAfter}`);
+    const uPaused = await creator.call('setRunTaskStatus', { ...U, taskId: 'uw-mid', status: 'paused', reason: 'station folding' });
+    check('pause: pausing a mission the stage cannot spare is ACCEPTED (no refusal, no force)',
+      uPaused?.ok === true && uPaused?.status === 'paused', JSON.stringify(uPaused));
 
-    // …and the operator can still override the guard deliberately.
-    const uForced = await creator.call('setRunTaskStatus', {
-      ...U, taskId: 'uw-a', status: 'paused', force: true, reason: 'street closed by police',
-    });
-    check('unwinnable: force applies the change and STILL reports the dead end it created',
-      uForced?.ok === true && uForced?.status === 'paused' && uForced?.stageUnwinnable === true
-      && uForced?.availableCount === 1 && uForced?.requiredCount === 2,
-      JSON.stringify(uForced));
-    const uOverrides = (await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? {};
-    check('unwinnable: the forced override is persisted on the run document',
-      uOverrides['uw-a'] === 'paused', JSON.stringify(uOverrides));
+    const lateNext = await advance(uLate);
+    check('pause: a team that runs out of missions because of the pause is NOT stuck: it moves past mid to end',
+      lateNext === 'uw-end', String(lateNext));
+    const lateTeam = (await creator.getDocAt(uTeamPath(uLateUid))).data ?? {};
+    const midRec = uRec(lateTeam, 'uw-mid');
+    check('pause: for that team mid is set aside, skipped with 0 points, and marked as set aside for a pause',
+      midRec?.status === 'skipped' && (midRec?.earnedScore ?? 0) === 0 && midRec?.setAsideWhilePaused === true && midRec?.closedByOrganizer !== true,
+      JSON.stringify(midRec));
+    check('pause: that team reaches the next stage (the vineyard)',
+      (await advance(uLate)) === 'uw-vine', JSON.stringify((await creator.getDocAt(uTeamPath(uLateUid))).data?.stages?.map((st) => st.status)));
+
+    const holderTeamBefore = (await creator.getDocAt(uTeamPath(uHolderUid))).data ?? {};
+    check('pause: the uHolder kept mid (a pause never takes a mission from a team on it)',
+      holderTeamBefore.activeTaskId === 'uw-mid' && uRec(holderTeamBefore, 'uw-mid')?.status === 'assigned', JSON.stringify(uRec(holderTeamBefore, 'uw-mid')));
+    check('pause: the uHolder finishes mid, plays end, and reaches the vineyard too',
+      (await advance(uHolder)) === 'uw-end' && (await advance(uHolder)) === 'uw-vine');
+    check('pause: the uHolder scored mid (it was completed, not set aside)',
+      uRec((await creator.getDocAt(uTeamPath(uHolderUid))).data, 'uw-mid')?.status === 'completed');
 
     // ── The durable trail: taking a task out of play changes what every team in
     //    the run can score, so it is audited like adjustTeamScore.
     const pauseLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
     const statusEntries = (pauseLogs?.logs ?? []).filter((l) => l.actionType === 'task_status_changed');
-    const forcedEntry = statusEntries.find((l) => l.runId === ur && l.taskId === 'uw-a');
-    check('audit: the FORCED change is recorded, and recorded as forced',
-      forcedEntry?.forced === true && forcedEntry?.previousValue === 'active' && forcedEntry?.newValue === 'paused',
-      JSON.stringify(forcedEntry));
+    const pauseEntry = statusEntries.find((l) => l.runId === ur && l.taskId === 'uw-mid' && l.newValue === 'paused');
     check('audit: the operator\'s reason rides along on the record',
-      forcedEntry?.reason === 'street closed by police', JSON.stringify(forcedEntry?.reason));
+      pauseEntry?.reason === 'station folding', JSON.stringify(pauseEntry));
     const plainEntry = statusEntries.find((l) => l.runId === lr && l.taskId === 'lp-near' && l.newValue === 'paused');
     check('audit: an ordinary pause is recorded as NOT forced (the flag distinguishes them)',
       plainEntry?.forced === false, JSON.stringify(plainEntry));
@@ -11477,12 +11657,35 @@ async function main() {
       { id: 'pc-s', order: 0, title: 'Chain', isFinal: true, requiredTaskCount: 2, tasks: [t('pc-a'), t('pc-b', ['pc-a']), t('pc-c')] },
     ] });
     const { runId: pr } = await creator.call('launchRun', { gameId: pg });
-    const pausedErr = await expectError('pause: pausing a prerequisite its stage cannot spare is refused',
-      creator.call('setRunTaskStatus', { ownerUid: OWNER, gameId: pg, runId: pr, taskId: 'pc-a', status: 'paused' }),
-      { codeIn: ['functions/failed-precondition'] });
-    check('pause: the refusal counts the locked dependent as unavailable (1 of 2)',
-      pausedErr?.details?.availableCount === 1 && pausedErr?.details?.requiredCount === 2, JSON.stringify(pausedErr?.details));
+    // pause-never-strands: the pause is applied (routing sets it aside for a team that runs dry), and
+    // the stage check still REPORTS it, counting the locked dependent as unavailable.
+    const paused = await creator.call('setRunTaskStatus', { ownerUid: OWNER, gameId: pg, runId: pr, taskId: 'pc-a', status: 'paused' });
+    check('pause: a prerequisite its stage cannot spare is paused, and reported as unwinnable',
+      paused?.ok === true && paused?.status === 'paused' && paused?.stageUnwinnable === true, JSON.stringify(paused));
+    check('pause: the report counts the locked dependent as unavailable (1 of 2)',
+      paused?.availableCount === 1 && paused?.requiredCount === 2 && JSON.stringify(paused?.dependentsLocked) === JSON.stringify(['pc-b']),
+      JSON.stringify(paused));
   }); // scenario: closing a mission mid-run
+
+  // ═══ What creators teach the mission bank (change: composer-v2-learning) ════════
+  // A bank mission kept in a launched game, or swapped away, moves its count in ONE document the
+  // composer reads. Creators only; garbage keys never become field paths.
+  await scenario('mission signals (keep / swap counts for the composer)', async () => {
+    const before = (await creator.getDocAt('missionStats/all')).data?.counts ?? {};
+    const k = (key, f) => Number(before?.[key]?.[f] ?? 0);
+    const r = await creator.call('recordMissionSignals', { kept: ['four-things', 'four-things', 'agent-in-crowd'], swapped: ['elevator-race', 'has.dot', '__proto__'] });
+    check('mission signals: only real keys are recorded, once each', r?.recorded === 3, JSON.stringify(r));
+    const after = (await creator.getDocAt('missionStats/all')).data?.counts ?? {};
+    check('mission signals: kept counts move by one', Number(after?.['four-things']?.kept) === k('four-things', 'kept') + 1
+      && Number(after?.['agent-in-crowd']?.kept) === k('agent-in-crowd', 'kept') + 1, JSON.stringify(after?.['four-things']));
+    check('mission signals: swapped counts move by one', Number(after?.['elevator-race']?.swapped) === k('elevator-race', 'swapped') + 1);
+    check('mission signals: no dotted or prototype field was written', !('has.dot' in after) && !Object.prototype.hasOwnProperty.call(after, '__proto__'));
+    const empty = await creator.call('recordMissionSignals', { kept: [] });
+    check('mission signals: nothing valid records nothing', empty?.recorded === 0);
+    const sig = makeParty('missionSignalsNobody'); // deliberately NOT signed in
+    await expectError('mission signals: an unauthenticated caller cannot teach the bank',
+      sig.call('recordMissionSignals', { kept: ['four-things'] }), { codeIn: ['functions/unauthenticated'] });
+  });
 
   // ═══ Mission time limits (change: mission-time-limit) ═══════════════════════
   //
@@ -11589,6 +11792,37 @@ async function main() {
       (await ap.call('getMyTeamState', { code: ac }))?.team?.activeTaskId === 'ac-open');
     await expectError('absolute close: completing it by hand is refused',
       ap.call('completeTask', { ...A, taskId: 'ac-closed' }), { codeIn: ['functions/failed-precondition'] });
+
+    // E. A located mission counts from ARRIVAL (change: composer-v2-phase0). The walk to the pin
+    // used to eat the clock: a team was given the mission, walked, and found it already closed.
+    const PIN = { lat: 31.7767, lng: 35.2345 };
+    const { gameId: lg } = await creator.call('createGame', { title: 'Time From Arrival Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: lg, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'la-s1', order: 0, title: 'Walk', isFinal: true, tasks: [
+        { id: 'la-quiz', title: 'Mission la-quiz', type: 'quiz', choices: ['yes', 'no'], answers: ['yes'], timeLimitMinutes: LIMIT,
+          coordinates: PIN, triggerMode: 'radius', geofenceRadiusMeters: 40, difficulty: 1, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9 },
+      ] },
+    ] });
+    const { runId: lr, accessCode: lc } = await creator.call('launchRun', { gameId: lg });
+    const L = { ownerUid: OWNER, gameId: lg, runId: lr };
+    const lp = makeParty('timeFromArrival');
+    const lUid = (await signInAnonymously(lp.auth)).user.uid;
+    await lp.call('joinRun', { code: lc, displayName: 'Still Walking' });
+    await creator.call('startTeams', { gameId: lg, runId: lr });
+    const la0 = await lp.call('getMyTeamState', { code: lc });
+    check('time from arrival: no countdown while the team walks', la0?.team?.activeTaskId === 'la-quiz' && la0?.activeTaskTimeLeftMs === null,
+      JSON.stringify({ active: la0?.team?.activeTaskId, left: la0?.activeTaskTimeLeftMs }));
+    await sleep(8600);
+    await lp.call('getMyTeamState', { code: lc }); // the poll sweep must leave it alone
+    const laTeam = (await creator.getDocAt(`users/${OWNER}/games/${lg}/runs/${lr}/teams/${lUid}`)).data ?? {};
+    const laRec = (laTeam.stages ?? []).flatMap((st) => st.tasks ?? []).find((r) => r.taskId === 'la-quiz');
+    check('time from arrival: a long walk does not close the mission', laRec?.status === 'assigned', JSON.stringify(laRec));
+    await creator.call('markTeamArrived', { ...L, teamId: lUid, taskId: 'la-quiz', reason: 'e2e' });
+    const la1 = await lp.call('getMyTeamState', { code: lc });
+    check('time from arrival: the countdown starts on arrival with the full limit',
+      typeof la1?.activeTaskTimeLeftMs === 'number' && la1.activeTaskTimeLeftMs > 0 && la1.activeTaskTimeLeftMs <= 3000, JSON.stringify(la1?.activeTaskTimeLeftMs));
+    const laAns = await lp.call('submitTaskAnswer', { ...L, taskId: 'la-quiz', answer: 'yes' });
+    check('time from arrival: answering right after arriving scores', laAns?.correct === true, JSON.stringify(laAns));
 
     // D. A HOLD freezes the countdown (Ahiya, 2026-10-06: "השעון לא עוצר כשאני עוצר קבוצה... זה
     // פשוט מוסיף לי זמן כשאני ממשיך"). The server already moved the mission's start forward on
