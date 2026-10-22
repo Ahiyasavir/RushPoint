@@ -118,6 +118,9 @@ export function createRateLimiter(
         throw new functions.https.HttpsError(
           'resource-exhausted',
           'Too many requests — slow down a moment. / יותר מדי בקשות — האט/י לרגע.',
+          // Marked, because the same code also means "this race / team is full": without the mark a
+          // phone that failed ten times in a minute told its organizer to open more spots (21.10).
+          { reason: 'rateLimited', retryAfterMs: decision.retryAfterMs },
         );
       }
     },

@@ -49,6 +49,19 @@ ok(announcementVisibleTo({ teamId: 'team-B' }, 'team-A') === false, 'other team 
   ok(he.includes('+30'), `HE positive delta still shows +30 (got "${he}")`);
 }
 
+// D27 (race 14.10): a marshal picked the preset "creativity bonus" and the players read
+// "+20 · reasonCreativity", in both languages. A preset reason id is a KEY, never copy: it is shown
+// by its label in the notice's language. Free text stays exactly as the marshal typed it.
+{
+  const he = formatScoreNotice(20, 'reasonCreativity', 'he');
+  const en = formatScoreNotice(20, 'reasonCreativity', 'en');
+  ok(he === '+20 · בונוס יצירתיות', `D27: a preset reason is its Hebrew label (got "${he}")`);
+  ok(en === '+20 · Creativity bonus', `D27: and its English label (got "${en}")`);
+  ok(!/reason[A-Z]/.test(formatScoreNotice(-10, 'reasonLate', 'he')), 'D27: no raw reason key reaches a player (penalty)');
+  ok(formatScoreNotice(110, 'אלופים', 'he') === '+110 · אלופים', 'D27: free text is untouched');
+  ok(formatScoreNotice(5, 'reasonOther', 'he') === '+5', 'D27: "other" with no text says nothing rather than the key');
+}
+
 // Overnight 2026-09-29, played at 375x667: every operator route left a "הצוות שלח אתכם אל: X" notice,
 // and old ones stayed after the team moved on (three stacked, two naming a mission no longer current),
 // pushing the mission's own button out of the sheet. A route notice is shown only while X is current.

@@ -146,6 +146,8 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   setTeamHold: { max: 30, windowMs: MIN },
   // team-lifecycle-controls: owner-only and audited; a removal is a rare, deliberate act.
   setTeamRemoved: { max: 30, windowMs: MIN },
+  // D70: renaming a team is an organizer action at the speed of a person typing.
+  renameTeam: { max: 30, windowMs: MIN },
   // located-mission-arrival: a marshal letting teams in at a door with no GPS.
   markTeamArrived: { max: 60, windowMs: MIN },
   // flash-missions-v2

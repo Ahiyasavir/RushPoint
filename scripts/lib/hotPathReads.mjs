@@ -64,6 +64,18 @@ export const CACHED_DOC_READS = [
     why: 'every participant callable resolves its team here — ~23,000 reads per run at 120 '
        + 'teams, one per state poll, location ping, arrival, answer and completion',
   },
+  {
+    // An attached (non-founding) phone's uid is not the team id, so its team document is not
+    // at teamPath(uid). It used to be found with an uncached `deviceUids array-contains` query
+    // on EVERY call: every 60s poll and every team-document change, on every extra phone.
+    // At 35 teams x 6 phones that one query was the largest per-phone read in the product.
+    // The reverse index `runDeviceMember/{uid}` is written in the same transaction as the
+    // attach, so it is addressable by the uid and can be cached like any other document.
+    fn: 'resolveCallerTeam',
+    require: /cachedGetDoc[^;]*runDeviceMember/,
+    why: 'an attached phone must find its team through the cached device-membership index, not '
+       + 'an uncached array-contains query on every poll (change: race-multi-phone-capacity)',
+  },
 ];
 
 /** Body extraction shared with the transaction guard's idiom. */
@@ -126,8 +138,11 @@ export function findUncachedHotReads(readFile, file = 'functions/src/runs/index.
       problems.push({ fn: site.fn, problem: `declared function not found in ${file} — renamed or removed?` });
       continue;
     }
-    if (site.forbid.test(body)) {
+    if (site.forbid && site.forbid.test(body)) {
       problems.push({ fn: site.fn, problem: `reads its document uncached — ${site.why}` });
+    }
+    if (site.require && !site.require.test(body)) {
+      problems.push({ fn: site.fn, problem: `does not use its cached lookup — ${site.why}` });
     }
   }
   for (const site of CACHED_COLLECTION_READS) {

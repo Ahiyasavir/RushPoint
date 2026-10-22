@@ -8,8 +8,9 @@ import {
 } from '@rushpoint/shared';
 import {
   createGame, updateGame, listGames, launchRun, deleteGame, publishGame,
-  createGameFromTemplate, importGameFile, recordMissionSignals, type TemplateGroupEntry,
+  createGameFromTemplate, importGameFile, listLiveRuns, recordMissionSignals, type TemplateGroupEntry,
 } from '../services/calls';
+import { decideLaunchOverLiveRun, formatLaunchWhen } from '../lib/liveRunGuard';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
 import { TAP_TARGET } from '../lib/interaction';
 import { composeGame, previewShape, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
@@ -720,6 +721,18 @@ export default function DashboardPage() {
     if (needFirstLaunchConfirm) {
       const ok = await dialog.confirm(t.builder.firstLaunchConfirmBody, t.builder.firstLaunchConfirmCta);
       if (!ok) return;
+    }
+    // D06 (race 14.10): a game that is already running is opened, not launched again.
+    if (!opts?.testDrive) {
+      const choice = await decideLaunchOverLiveRun({
+        gameId: g.id,
+        fetchLiveRuns: async () => (await listLiveRuns({})).runs,
+        confirm: (m, cta, danger) => dialog.confirm(m, cta, danger, { title: t.builder.liveRunExistsTitle }),
+        copy: { existsBody: t.builder.liveRunExistsBody, openCta: t.builder.liveRunOpenCta, anotherBody: t.builder.liveRunAnotherBody, anotherCta: t.builder.liveRunAnotherCta },
+        formatWhen: (iso) => formatLaunchWhen(iso, lang),
+      });
+      if (choice.kind === 'open') { nav(`/run/${choice.run.gameId}/${choice.run.runId}`); return; }
+      if (choice.kind === 'cancel') return;
     }
     // Show the liftoff overlay for the launch wait, always cleared in `finally` so
     // an error can never leave it stuck open (change: creator-launch-liftoff). On

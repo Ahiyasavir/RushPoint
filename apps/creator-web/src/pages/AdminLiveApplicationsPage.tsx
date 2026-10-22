@@ -145,7 +145,9 @@ export default function AdminLiveApplicationsPage() {
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     {/* dir="auto" because a team name may be Hebrew or Latin. */}
-                    <span className="font-semibold text-lg" dir="auto">{app.teamName}</span>
+                    {/* The short form (rushpoint-live-short-form) asks for no team name, so the
+                        phone stands in for it rather than leaving the heading blank. */}
+                    <span className="font-semibold text-lg" dir="auto">{app.teamName || app.phone}</span>
                     <Badge color="cyan">{tl.membersLabel(app.teamSize)}</Badge>
                     {app.sectors.map((sector) => (
                       <Badge key={sector} color="zinc">{tl.sectorLabel(sector)}</Badge>
@@ -160,30 +162,38 @@ export default function AdminLiveApplicationsPage() {
                   {/* The short answers, as a definition list: two of these are one word
                       long and giving each its own paragraph would bury the pitch. */}
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-                    <div>
-                      <dt className="opacity-60">{tl.colLocation}</dt>
-                      <dd dir="auto" className="break-words">{app.location}</dd>
-                    </div>
+                    {app.location && (
+                      <div>
+                        <dt className="opacity-60">{tl.colLocation}</dt>
+                        <dd dir="auto" className="break-words">{app.location}</dd>
+                      </div>
+                    )}
                     <div>
                       <dt className="opacity-60">{tl.colAges}</dt>
                       <dd dir="auto" className="break-words">{app.ageRange}</dd>
                     </div>
-                    <div>
-                      <dt className="opacity-60">{tl.colCamera}</dt>
-                      <dd>{tl.cameraLabel(app.cameraComfort)}</dd>
-                    </div>
+                    {app.cameraComfort > 0 && (
+                      <div>
+                        <dt className="opacity-60">{tl.colCamera}</dt>
+                        <dd>{tl.cameraLabel(app.cameraComfort)}</dd>
+                      </div>
+                    )}
                   </dl>
 
                   {/* whitespace-pre-wrap keeps the applicant's own line breaks without
                       interpreting anything they wrote. */}
-                  <div className="space-y-1">
-                    <p className="text-xs opacity-60">{tl.colMet}</p>
-                    <p className="text-sm whitespace-pre-wrap break-words" dir="auto">{app.howTheyMet}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs opacity-60">{tl.colMotivation}</p>
-                    <p className="text-sm whitespace-pre-wrap break-words" dir="auto">{app.motivation}</p>
-                  </div>
+                  {app.howTheyMet && (
+                    <div className="space-y-1">
+                      <p className="text-xs opacity-60">{tl.colMet}</p>
+                      <p className="text-sm whitespace-pre-wrap break-words" dir="auto">{app.howTheyMet}</p>
+                    </div>
+                  )}
+                  {app.motivation && (
+                    <div className="space-y-1">
+                      <p className="text-xs opacity-60">{tl.colMotivation}</p>
+                      <p className="text-sm whitespace-pre-wrap break-words" dir="auto">{app.motivation}</p>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-3">
                     {/* dir="ltr" because a phone number reads left to right inside an

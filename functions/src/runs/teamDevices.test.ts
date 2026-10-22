@@ -6,6 +6,7 @@ import {
   generateDeviceJoinCode,
   canAttachDevice,
   canAddRunDevice,
+  planDeviceReplacement,
   DEVICE_JOIN_CODE_ALPHABET,
   DEVICE_JOIN_CODE_LENGTH,
   MAX_TEAM_DEVICES,
@@ -199,8 +200,15 @@ describe('canAddRunDevice (global per-run phone ceiling)', () => {
   // writes of 20,000, and the VPS sat at load 0.14 with 2.8 GB free through a 100 team
   // rehearsal. Note that DEVICES, not teams, is what the read budget scales with, because every
   // extra phone polls team state on its own.
-  test('MAX_RUN_DEVICES is 150', () => {
-    expect(MAX_RUN_DEVICES).toBe(150);
+  //
+  // 150 -> 250 on 2026-10-10 (change: race-multi-phone-capacity). A 35-team school race with 3-6
+  // phones per team is 105-210 phones; at 150 the LATE teams could not even register, because
+  // `joinRun` checks this same ceiling before it creates a team. Raised together with the two
+  // read cuts that make an extra phone cheap: its team lookup is cached, and the cache outlives
+  // the participant poll.
+  // 250 -> 500 the same day after the move to Blaze (see runCapacity.ts).
+  test('MAX_RUN_DEVICES is 500', () => {
+    expect(MAX_RUN_DEVICES).toBe(500);
   });
 
   test('admits a phone while the run is below the ceiling', () => {
@@ -231,5 +239,104 @@ describe('FIRESTORE_PATHS.runDeviceMember (device-membership reverse index)', ()
   test('exposes the collection path for the same run', () => {
     expect(FIRESTORE_PATHS.runDeviceMembersCol('owner1', 'game1', 'run1'))
       .toBe('users/owner1/games/game1/runs/run1/deviceMembers');
+  });
+});
+
+// change: rejoin-replaces-lost-phone. A phone that lost its sign-in rejoins as a NEW identity and
+// names the one it lost. Reproduced 18.10: without this, a full team refused it, every loss used up a
+// slot, and a rejoined sender came back as a viewer with the sending role left on a dead identity.
+describe('planDeviceReplacement', () => {
+  const NOW = '2026-10-18T10:00:00.000Z';
+  const full = () => baseTeam({
+    memberCount: 1,
+    deviceUids: ['uid-founder', 'uid-b', 'uid-c'],
+    controllerUid: 'uid-founder',
+    devices: [
+      { uid: 'uid-founder', name: 'Founder', joinedAt: 't0' },
+      { uid: 'uid-b', name: 'Noa', joinedAt: 't1' },
+      { uid: 'uid-c', name: 'Phone', joinedAt: 't2' },
+    ],
+  });
+
+  test('swaps the lost identity in place on a team at its phone limit', () => {
+    const team = full();
+    expect(canAttachDevice(team, 'uid-new')).toEqual({ ok: false, reason: 'full' });
+    const plan = planDeviceReplacement(team, 'uid-new', 'uid-b', NOW);
+    expect(plan).toEqual({
+      kind: 'replace',
+      deviceUids: ['uid-founder', 'uid-new', 'uid-c'],
+      devices: [
+        { uid: 'uid-founder', name: 'Founder', joinedAt: 't0' },
+        { uid: 'uid-new', name: 'Noa', joinedAt: NOW },
+        { uid: 'uid-c', name: 'Phone', joinedAt: 't2' },
+      ],
+      controllerUid: 'uid-founder',
+    });
+  });
+
+  test('the sending role moves with the identity that held it', () => {
+    const team = { ...full(), controllerUid: 'uid-c' };
+    const plan = planDeviceReplacement(team, 'uid-new', 'uid-c', NOW);
+    expect(plan.kind).toBe('replace');
+    if (plan.kind === 'replace') expect(plan.controllerUid).toBe('uid-new');
+  });
+
+  test("the founder's identity can be replaced: device and sender roles move, the team id does not", () => {
+    const plan = planDeviceReplacement(full(), 'uid-new', 'uid-founder', NOW);
+    expect(plan.kind).toBe('replace');
+    if (plan.kind !== 'replace') return;
+    expect(plan.deviceUids).toEqual(['uid-new', 'uid-b', 'uid-c']);
+    expect(plan.controllerUid).toBe('uid-new');
+    expect(plan.devices[0]).toEqual({ uid: 'uid-new', name: 'Founder', joinedAt: NOW });
+  });
+
+  test('a legacy doc (no device fields) replaces its founding uid', () => {
+    const legacy = baseTeam({ displayName: 'Old', updatedAt: 't0' });
+    const plan = planDeviceReplacement(legacy, 'uid-new', 'uid-founder', NOW);
+    expect(plan).toEqual({
+      kind: 'replace',
+      deviceUids: ['uid-new'],
+      devices: [{ uid: 'uid-new', name: 'Old', joinedAt: NOW }],
+      controllerUid: 'uid-new',
+    });
+  });
+
+  test('a uid listed in deviceUids but missing from devices still gets a devices entry', () => {
+    const team = { ...full(), devices: [{ uid: 'uid-founder', name: 'Founder', joinedAt: 't0' }] };
+    const plan = planDeviceReplacement(team, 'uid-new', 'uid-c', NOW);
+    expect(plan.kind).toBe('replace');
+    if (plan.kind === 'replace') {
+      expect(plan.devices.map((d) => d.uid)).toEqual(['uid-founder', 'uid-new']);
+    }
+  });
+
+  test('anything doubtful falls back to an ordinary attach', () => {
+    const team = full();
+    for (const replaces of [undefined, null, '', 'uid-unknown', 'uid-new', 42, {}, ['uid-b']]) {
+      expect(planDeviceReplacement(team, 'uid-new', replaces as unknown, NOW)).toEqual({ kind: 'attach' });
+    }
+  });
+
+  test('a caller already on the team is a duplicate, never a swap of someone else', () => {
+    expect(planDeviceReplacement(full(), 'uid-c', 'uid-b', NOW)).toEqual({ kind: 'duplicate' });
+  });
+
+  test('a finished team is refused, as for an ordinary attach', () => {
+    const team = { ...full(), status: 'finished' as RunTeam['status'] };
+    expect(planDeviceReplacement(team, 'uid-new', 'uid-b', NOW)).toEqual({ kind: 'refused', reason: 'finished' });
+  });
+
+  test('three losses in a row never grow the team', () => {
+    let team = baseTeam({ memberCount: 3, deviceUids: ['uid-founder', 'uid-p0'], controllerUid: 'uid-founder' });
+    let current = 'uid-p0';
+    for (let i = 1; i <= 3; i++) {
+      const next = `uid-p${i}`;
+      const plan = planDeviceReplacement(team, next, current, NOW);
+      expect(plan.kind).toBe('replace');
+      if (plan.kind !== 'replace') return;
+      team = { ...team, deviceUids: plan.deviceUids, devices: plan.devices, controllerUid: plan.controllerUid };
+      current = next;
+    }
+    expect(team.deviceUids).toEqual(['uid-founder', 'uid-p3']);
   });
 });

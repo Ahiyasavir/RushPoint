@@ -28,7 +28,9 @@ import {
 import type {
   Announcements, DragEndEvent, DragStartEvent, KeyboardCoordinateGetter, ScreenReaderInstructions,
 } from '@dnd-kit/core';
-import { getGame, updateGame, launchRun, exportGameFile, importGameFile, loadPopularTags, recordMissionSignals } from '../services/calls';
+import { getGame, updateGame, launchRun, listLiveRuns, exportGameFile, importGameFile, loadPopularTags, recordMissionSignals } from '../services/calls';
+import { decideLaunchOverLiveRun, formatLaunchWhen } from '../lib/liveRunGuard';
+import { useLanguage } from '../components/LanguageContext';
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
@@ -332,6 +334,7 @@ export default function BuilderPage() {
   const t = useT();
   const b = t.builder;
   const q = t.quickSetup;
+  const { lang } = useLanguage();
   const TAB_LABEL: Record<BuilderTab, string> = {
     build: b.tabBuild, preview: b.tabPreview, analytics: b.tabAnalytics, settings: b.tabSettings,
   };
@@ -802,6 +805,21 @@ export default function BuilderPage() {
     // NOT `noopener`: with that feature the browser returns null by design, and
     // we need the handle to point the tab at the run once the code exists. The
     // opener link is severed immediately after navigating instead.
+    // D06/D09 (race 14.10): every press of "הפעל ריצה" on the race morning made a new, empty live run
+    // and jumped to it, while the teams joined the run launched two days earlier. A game that is
+    // already running is OPENED. Only the real launch asks; a test run never does, and so never
+    // needs this await before its popup opens below.
+    if (!testDrive) {
+      const choice = await decideLaunchOverLiveRun({
+        gameId: game.id,
+        fetchLiveRuns: async () => (await listLiveRuns({})).runs,
+        confirm: (m, cta, danger) => dialog.confirm(m, cta, danger, { title: b.liveRunExistsTitle }),
+        copy: { existsBody: b.liveRunExistsBody, openCta: b.liveRunOpenCta, anotherBody: b.liveRunAnotherBody, anotherCta: b.liveRunAnotherCta },
+        formatWhen: (iso) => formatLaunchWhen(iso, lang),
+      });
+      if (choice.kind === 'open') { nav(`/run/${choice.run.gameId}/${choice.run.runId}`); return; }
+      if (choice.kind === 'cancel') return;
+    }
     const playTab = testDrive ? window.open('about:blank', '_blank') : null;
     // True once the tab has been sent somewhere real. Every path that ends
     // WITHOUT handing off closes it, so a failed save can't strand the creator on

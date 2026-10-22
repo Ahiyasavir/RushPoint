@@ -1,4 +1,5 @@
 import { Fragment, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { normalizeJoinCodeInput } from '../lib/joinCode';
 import { useWideLayout } from '../lib/useWideLayout';
 import { STAFF_PHONE_ORDER, staffDesktopLayout, staffDeskCounts, teamWaitsForStation, type StaffSection } from '../lib/staffLayout';
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
@@ -267,7 +268,8 @@ function StaffSignIn({
           <Input
             value={pin}
             dir="ltr"
-            onChange={(e) => { setPin(e.target.value.toUpperCase()); if (missing === 'pin') setMissing(null); }}
+            // A marshal's keyboard may be in Hebrew; read each letter as its key (21.10, joinCode.ts).
+            onChange={(e) => { setPin(normalizeJoinCodeInput(e.target.value)); if (missing === 'pin') setMissing(null); }}
             placeholder={t.staff.pin}
             autoCapitalize="characters"
             autoCorrect="off"

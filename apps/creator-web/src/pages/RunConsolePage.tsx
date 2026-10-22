@@ -10,7 +10,7 @@ import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   updateGame,
-  skipStage, skipTaskForTeam, returnTeamTo, adjustTeamScore, setTeamHold, setTeamRemoved, forceAssignTask, markTeamArrived,
+  skipStage, skipTaskForTeam, returnTeamTo, adjustTeamScore, setTeamHold, setTeamRemoved, renameTeam, forceAssignTask, markTeamArrived,
   deactivateFlashMission, reviewFlashMission, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
@@ -1526,6 +1526,17 @@ export default function RunConsolePage() {
       toast.success(rc.letInDone({ team: team.displayName }));
     } catch { await dialog.alert(rc.teamActionFailed); }
   }
+  // D70 (race 14.10): a team under an offensive name asked to change it and there was no way.
+  async function renameOneTeam(team: RunTeamRow) {
+    const next = await dialog.prompt(rc.renameTeamPrompt({ team: team.displayName }), team.displayName, rc.confirmCta.renameTeam);
+    const name = next?.trim();
+    if (!name || name === team.displayName) return;
+    try {
+      const res = await renameTeam({ ...ctx, teamId: team.id, displayName: name });
+      await loadTeams();
+      toast.success(rc.renameTeamDone({ team: res.displayName }));
+    } catch { await dialog.alert(rc.teamActionFailed); }
+  }
   async function restoreOneTeam(team: RunTeamRow) {
     try {
       await setTeamRemoved({ ...ctx, teamId: team.id, removed: false });
@@ -1935,6 +1946,12 @@ export default function RunConsolePage() {
                             run: () => void restoreOneTeam(team),
                             disabled: false,
                           },
+                          renameTeam: {
+                            label: rc.renameTeam,
+                            aria: rc.renameTeamAria({ team: team.displayName }),
+                            run: () => void renameOneTeam(team),
+                            disabled: false,
+                          },
                           routeTeam: {
                             label: rc.routeTeam,
                             aria: rc.routeTeamAria({ team: team.displayName }),
@@ -1942,7 +1959,7 @@ export default function RunConsolePage() {
                             disabled: false,
                           },
                         }[id as 'clearTeamOutOfBounds' | 'skipTask' | 'skipStage' | 'sendBack' | 'adjustTeamScore'
-                          | 'startTeam' | 'holdTeam' | 'resumeTeam' | 'removeTeam' | 'restoreTeam' | 'routeTeam'];
+                          | 'startTeam' | 'holdTeam' | 'resumeTeam' | 'removeTeam' | 'restoreTeam' | 'routeTeam' | 'renameTeam'];
                         return (
                           <Button
                             key={id}
@@ -2496,6 +2513,7 @@ export default function RunConsolePage() {
                 removeTeam: { label: rc.removeTeam, run: () => void removeOneTeam(row) },
                 routeTeam: { label: rc.routeTeam, run: () => setRouteFor(row) },
                 restoreTeam: { label: rc.restoreTeam, run: () => void restoreOneTeam(row) },
+                renameTeam: { label: rc.renameTeam, run: () => void renameOneTeam(row) },
                 // D4: the row's ⋯ is gone, so everything it offered must be here.
                 skipStage: { label: rc.skipStage, run: () => void skipTeamStage(row) },
                 clearTeamOutOfBounds: { label: rc.letBackIn, run: () => void letBackInAction.run(row) },

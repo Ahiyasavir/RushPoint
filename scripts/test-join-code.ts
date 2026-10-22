@@ -207,4 +207,51 @@ check('a plain failed-precondition is still a finished run',
 }
 
 console.log(`\n${failures === 0 ? 'ALL JOIN-CODE TESTS PASSED' : failures + ' FAILED'}`);
+// ── Join refusals that used to lie (race 14.10 follow-up, 21.10) ─────────────
+// A phone that failed ten times in a minute hit the join rate limit, and `resource-exhausted` read as
+// "the race is full, your host can open more spots": a false message that sent the organizer after a
+// problem that did not exist. The server marks its rate-limit refusal; the phone says "wait a moment".
+console.log('\n── honest refusals ──');
+check('a rate-limited join is "slow down", never "the race is full"',
+  joinErrorKey({ code: 'functions/resource-exhausted', details: { reason: 'rateLimited', retryAfterMs: 20000 } }) === 'slowDown');
+check('a real capacity refusal is still "full"',
+  joinErrorKey({ code: 'functions/resource-exhausted', details: { cap: 500, used: 500 } }) === 'full');
+check('the team phone limit is still "full"', joinErrorKey({ code: 'functions/resource-exhausted' }) === 'full');
+// Anonymous sign-in itself failing reaches the screen as a Firebase AUTH code, not a functions code.
+check('auth/network-request-failed is a connection problem, not a generic failure',
+  joinErrorKey({ code: 'auth/network-request-failed' }) === 'connection');
+check('auth/too-many-requests (the per-network sign-up limit) has its own advice',
+  joinErrorKey({ code: 'auth/too-many-requests' }) === 'networkBusy');
+check('auth/internal-error is a connection problem', joinErrorKey({ code: 'auth/internal-error' }) === 'connection');
+{
+  const i18nNow = readFileSync(join(process.cwd(), 'apps/play-web/src/i18n.ts'), 'utf8');
+  check('slowDown copy exists in both languages', (i18nNow.match(/\bslowDown: '/g) ?? []).length === 2);
+  check('networkBusy copy exists in both languages', (i18nNow.match(/\bnetworkBusy: '/g) ?? []).length === 2);
+  const screenNow = readFileSync(join(process.cwd(), 'apps/play-web/src/screens/JoinScreen.tsx'), 'utf8');
+  check('the join screen shows both', /case 'slowDown'/.test(screenNow) && /case 'networkBusy'/.test(screenNow));
+}
+// ── A code typed on a Hebrew keyboard (21.10) ────────────────────────────────
+// An iPhone cannot be forced onto an English keyboard. A child whose keyboard is in Hebrew types
+// "EH3L25" as "קי3ך25"; the field used to DROP every Hebrew letter as it was typed (the key seemed
+// dead) and the code that remained was wrong. Each Hebrew letter is the key it sits on.
+console.log('\n── Hebrew keyboard ──');
+check('קי3ך25 (E H 3 L 2 5 on a Hebrew keyboard) is EH3L25', normalizeJoinCodeInput('קי3ך25') === 'EH3L25', normalizeJoinCodeInput('קי3ך25'));
+// In chunks: a code is capped at MAX_JOIN_CODE_LEN (12) characters.
+check('every letter key maps (A to L)', normalizeJoinCodeInput('שנבגקכעיןחלך') === 'ABCDEFGHIJKL', normalizeJoinCodeInput('שנבגקכעיןחלך'));
+check('every letter key maps (M to X)', normalizeJoinCodeInput("צמםפ/רדאוה'ס") === 'MNOPQRSTUVWX', normalizeJoinCodeInput("צמםפ/רדאוה'ס"));
+check('every letter key maps (Y, Z)', normalizeJoinCodeInput('טז') === 'YZ', normalizeJoinCodeInput('טז'));
+check('a Latin code is unchanged', normalizeJoinCodeInput('eh3l25') === 'EH3L25');
+check('a mix of both layouts reads as one code', normalizeJoinCodeInput('EH3ך25') === 'EH3L25');
+check('a pasted Hebrew sentence with the code keeps only the code', normalizeJoinCodeInput('הקוד שלכם: EH3L25') === 'EH3L25',
+  normalizeJoinCodeInput('הקוד שלכם: EH3L25'));
+check('a pasted link still yields its code parameter', normalizeJoinCodeInput('https://player.rush-point.com/?code=EH3L25') === 'EH3L25');
+check('Hebrew prose around a code is not turned into letters of the code',
+  normalizeJoinCodeInput('https://player.rush-point.com/?code=EH3L25 הקוד שלכם') === 'EH3L25');
+{
+  const screenNow = readFileSync(join(process.cwd(), 'apps/play-web/src/screens/JoinScreen.tsx'), 'utf8');
+  check('the team (phones) code field maps the Hebrew keyboard too',
+    /onChange=\{\(e\) => setTeamCode\(normalizeJoinCodeInput\(e\.target\.value\)/.test(screenNow));
+}
+
+console.log(`\n${failures === 0 ? 'ALL JOIN-CODE TESTS PASSED (with honest refusals)' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -91,6 +91,8 @@ const HE = {
     // change: self-healing-entry. The phone lost its sign-in and automatic recovery failed. Not a
     // reception problem: the one action that works is a reload.
     signInLost: 'הטלפון התנתק מהמשחק. טענו את הדף מחדש ונסו שוב.',
+    slowDown: 'היו הרבה ניסיונות ברצף. חכו חצי דקה ונסו שוב.',
+    networkBusy: 'יותר מדי טלפונים נרשמו מהרשת הזו בשעה האחרונה. כבו את האינטרנט האלחוטי, עברו לגלישה סלולרית ונסו שוב, או פנו למארגן.',
     reloadCta: 'טעינה מחדש',
     // In-app legal links (Google Play requirement — the policy governing the
     // photo feed must be reachable by the people posting to it).
@@ -935,6 +937,12 @@ const HE = {
     menu: 'תפריט',
     menuClose: 'סגירת התפריט',
     leaveOnThisPhone: 'יציאה מהמשחק בטלפון הזה',
+    // change: return-to-game. At the 14.10 race people left the game to search Google and could not
+    // find their way back. The menu opens a search in a NEW tab, and the waiting screen says how to
+    // get back (a rescan of the same code resumes exactly where the team was).
+    webSearch: 'חיפוש באינטרנט',
+    returnTipTitle: 'יצאתם מהמשחק?',
+    returnTipBody: 'סרקו שוב את הברקוד ותחזרו לאותו מקום.',
     sosAria: 'שליחת קריאת מצוקה למארגנים',
     callContact: ({ label }: { label: string }) => `להתקשר אל ${label}`,
     headlineFirst: 'אנחנו #1!',
@@ -1237,6 +1245,8 @@ const EN: typeof HE = {
     gameFull: 'This race is full. Tell your host, they can open more spots.',
     connectionError: 'Connection problem. Check your connection and try again.',
     signInLost: 'This phone was signed out of the game. Reload the page and try again.',
+    slowDown: 'Lots of tries in a row. Wait half a minute and try again.',
+    networkBusy: 'Too many phones signed up from this network in the last hour. Turn off WiFi, use mobile data and try again, or ask your host.',
     reloadCta: 'Reload',
     // In-app legal links (Google Play requirement — the policy governing the
     // photo feed must be reachable by the people posting to it).
@@ -2037,6 +2047,9 @@ const EN: typeof HE = {
     menu: 'Menu',
     menuClose: 'Close the menu',
     leaveOnThisPhone: 'Leave the game on this phone',
+    webSearch: 'Search the web',
+    returnTipTitle: 'Left the game?',
+    returnTipBody: 'Scan the code again and you are back where you were.',
     sosAria: 'Send an SOS alert to the organizers',
     callContact: ({ label }: { label: string }) => `Call ${label}`,
     headlineFirst: "WE'RE #1!",

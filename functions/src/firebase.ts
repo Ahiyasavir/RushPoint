@@ -21,12 +21,18 @@ rawDb.settings({ ignoreUndefinedProperties: true });
  *
  * The TTL is a SAFETY NET, not the coherence mechanism — coherence comes from write
  * invalidation. It only bounds how long an entry could survive if a write ever reached
- * Firestore without passing through the interceptor. 30s is far longer than the 5s Run
- * Console poll and the 12s participant poll, so it costs almost no hit rate.
+ * Firestore without passing through the interceptor.
+ *
+ * It must OUTLIVE the participant's fallback poll (60s, PlayScreen.tsx). It was 30s, set when
+ * that poll was 12s; once the poll moved to 60s every quiet poll found its team document
+ * expired and re-read it, on every phone (change: race-multi-phone-capacity, pinned by
+ * scripts/test-race-capacity.ts). 120s keeps one quiet team at ~0.5 reads a minute however many
+ * phones it has. The cost: a write that bypasses the API (Firebase console, an operator script
+ * on the VPS) can take up to two minutes to appear.
  */
 export const docCachePolicy = createDocCachePolicy({
   maxEntries: 20_000,
-  ttlMs: 30_000,
+  ttlMs: 120_000,
   // OPT-IN, and off by default. Serving reads from memory is only correct where ONE process
   // is the sole writer. That is true of the VPS API container (functions/server.js, a single
   // Express process) and is set there via RUSHPOINT_DOC_CACHE=1 in docker-compose.api.yml.

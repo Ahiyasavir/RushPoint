@@ -1,6 +1,6 @@
 import * as functions from 'firebase-functions';
 import { randomInt } from 'node:crypto';
-import type { RunTeam } from '@rushpoint/shared';
+import type { RunTeam, TeamDevice } from '@rushpoint/shared';
 // The per-team device allowance and the attendance arithmetic (change:
 // every-member-plays). Pure and shared, so the backend guard and both apps read one
 // definition of "how many phones may this team have".
@@ -97,4 +97,49 @@ export function canAttachDevice(team: RunTeam, uid: string): AttachDecision {
   // teams, it does not create new ones, so the run's read budget is unchanged.
   if (uids.length >= teamDeviceAllowance(team)) return { ok: false, reason: 'full' };
   return { ok: true };
+}
+
+// ─── Rejoin replaces the lost phone (change: rejoin-replaces-lost-phone) ─────
+// A phone that lost its sign-in (self-healing-entry) rejoins as a NEW anonymous identity and names
+// the one it held (`replacesUid`, saved on the phone at join time). Appending it left the dead
+// identity on the team forever: a full team refused the rejoin, every loss used up a slot, and a
+// rejoined sender came back as a viewer with the sending role on an identity nobody holds (all three
+// reproduced 18.10). When the named identity IS attached to this team, the new one takes its place:
+// same position, same device name, and the sending role if the old one had it. Net zero devices, so
+// neither the per-team allowance nor the run counter applies.
+//
+// Trust: the device code already grants attach + claimController (full team control), and a member
+// uid is needed on top, so a replacement gives nothing the code did not. Anything doubtful falls back
+// to the ordinary attach with every existing guard. Pure and total.
+
+export type DeviceReplacementPlan =
+  | { kind: 'replace'; deviceUids: string[]; devices: TeamDevice[]; controllerUid: string }
+  | { kind: 'attach' }
+  | { kind: 'duplicate' }
+  | { kind: 'refused'; reason: 'finished' };
+
+export function planDeviceReplacement(
+  team: RunTeam,
+  callerUid: string,
+  replacesUid: unknown,
+  nowIso: string,
+): DeviceReplacementPlan {
+  if (team.status === 'finished') return { kind: 'refused', reason: 'finished' };
+  const uids = attachedDeviceUids(team);
+  if (uids.includes(callerUid)) return { kind: 'duplicate' };
+  if (typeof replacesUid !== 'string' || !replacesUid || replacesUid === callerUid) return { kind: 'attach' };
+  if (!uids.includes(replacesUid)) return { kind: 'attach' };
+
+  const known: TeamDevice[] = team.devices ?? [{ uid: team.id, name: team.displayName, joinedAt: team.updatedAt }];
+  const old = known.find((d) => d.uid === replacesUid);
+  const devices = old
+    ? known.map((d) => (d.uid === replacesUid ? { ...d, uid: callerUid, joinedAt: nowIso } : d))
+    : [...known, { uid: callerUid, name: 'Phone', joinedAt: nowIso }];
+  const controller = controllerUidOf(team);
+  return {
+    kind: 'replace',
+    deviceUids: uids.map((u) => (u === replacesUid ? callerUid : u)),
+    devices,
+    controllerUid: controller === replacesUid ? callerUid : controller,
+  };
 }

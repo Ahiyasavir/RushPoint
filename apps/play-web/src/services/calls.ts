@@ -369,8 +369,10 @@ export const sendTeamChatMessage = callable<
 // Attach this phone to an existing team via the run access code + the team's
 // device join code (shown on the phones already attached).
 export const joinTeamAsDevice = callable<
-  { code: string; teamCode: string; memberName?: string },
-  { ownerUid: string; gameId: string; runId: string; teamId: string; role: 'controller' | 'viewer' | null; alreadyAttached: boolean }
+  // replacesUid (change: rejoin-replaces-lost-phone): the identity this phone held before it lost its
+  // sign-in. The server swaps it for the new one instead of adding a phone.
+  { code: string; teamCode: string; memberName?: string; replacesUid?: string },
+  { ownerUid: string; gameId: string; runId: string; teamId: string; role: 'controller' | 'viewer' | null; alreadyAttached: boolean; replaced?: boolean }
 >('joinTeamAsDevice');
 
 // ── Everyone does their part (change: every-member-plays) ──

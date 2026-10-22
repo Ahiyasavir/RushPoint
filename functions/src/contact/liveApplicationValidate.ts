@@ -85,6 +85,7 @@ export interface LiveApplicationFields {
   readonly howTheyMet: string;
   readonly ageRange: string;
   readonly motivation: string;
+  /** 1 to 5, or 0 when the team was not asked (the short form). */
   readonly cameraComfort: number;
   readonly phone: string;
   /** Digits only, `972…` form — for dialling and for spotting a duplicate application. */
@@ -129,6 +130,28 @@ function requiredInteger(value: unknown, field: string, min: number, max: number
 }
 
 /**
+ * An OPTIONAL string (change: rushpoint-live-short-form, 15.10). The form now asks only for the
+ * team size, the ages and a phone number; every other answer may be absent and is stored as ''.
+ * A value that IS sent is still held to its type and its bound: optional means "may be absent",
+ * never "may be anything". Absent, null and '' are the same thing for the transport reason above.
+ */
+function optionalText(value: unknown, field: string, max: number): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value !== 'string') throw new ApplicationRejected(field, `${field} must be text`);
+  const trimmed = value.trim();
+  if (trimmed.length > max) {
+    throw new ApplicationRejected(field, `${field} must be at most ${max} characters`);
+  }
+  return trimmed;
+}
+
+/** An OPTIONAL whole number in a range; absent is 0, which no scale here uses. */
+function optionalInteger(value: unknown, field: string, min: number, max: number): number {
+  if (value === null || value === undefined || value === '') return 0;
+  return requiredInteger(value, field, min, max);
+}
+
+/**
  * Israeli mobile numbers, normalized to `972…` so two spellings of one number are one
  * number. Deliberately permissive about SPACING and punctuation — people write their
  * own phone number a dozen ways and none of them is wrong — and strict only about the
@@ -144,8 +167,11 @@ export function normalizePhone(raw: string): string {
   throw new ApplicationRejected('phone', 'phone must be an Israeli mobile number');
 }
 
-/** At least one sector, each from the allowlist, each counted once. */
-function requiredSectors(value: unknown): TeamSector[] {
+/**
+ * The sectors, each from the allowlist, each counted once. OPTIONAL since the short form
+ * (rushpoint-live-short-form): none at all is an empty list, but an unknown value is still refused.
+ */
+function optionalSectors(value: unknown): TeamSector[] {
   const list = Array.isArray(value) ? value : [value];
   const seen: TeamSector[] = [];
   for (const entry of list) {
@@ -156,7 +182,6 @@ function requiredSectors(value: unknown): TeamSector[] {
     const sector = entry as TeamSector;
     if (!seen.includes(sector)) seen.push(sector);
   }
-  if (seen.length === 0) throw new ApplicationRejected('sectors', 'sectors is required');
   return seen;
 }
 
@@ -224,21 +249,24 @@ export function validateLiveApplication(payload: Record<string, unknown>): {
   /** Null when the team applied without one. See parsePhotoDataUrl. */
   photo: LiveApplicationPhoto | null;
 } {
-  const teamName = requiredText(payload.teamName, 'teamName', LIVE_APPLICATION_LIMITS.teamName);
+  // The three answers the short form asks for (rushpoint-live-short-form, 15.10: nine questions
+  // were putting teams off applying). Everything else is optional and validated only if sent.
   const teamSize = requiredInteger(payload.teamSize, 'teamSize', TEAM_SIZE_MIN, TEAM_SIZE_MAX);
-  const sectors = requiredSectors(payload.sectors);
-  const location = requiredText(payload.location, 'location', LIVE_APPLICATION_LIMITS.location);
-  const howTheyMet = requiredText(payload.howTheyMet, 'howTheyMet', LIVE_APPLICATION_LIMITS.howTheyMet);
   const ageRange = requiredText(payload.ageRange, 'ageRange', LIVE_APPLICATION_LIMITS.ageRange);
-  const motivation = requiredText(payload.motivation, 'motivation', LIVE_APPLICATION_LIMITS.motivation);
-  const cameraComfort = requiredInteger(
+  const phone = requiredText(payload.phone, 'phone', LIVE_APPLICATION_LIMITS.phone);
+  const phoneNormalized = normalizePhone(phone);
+
+  const teamName = optionalText(payload.teamName, 'teamName', LIVE_APPLICATION_LIMITS.teamName);
+  const sectors = optionalSectors(payload.sectors);
+  const location = optionalText(payload.location, 'location', LIVE_APPLICATION_LIMITS.location);
+  const howTheyMet = optionalText(payload.howTheyMet, 'howTheyMet', LIVE_APPLICATION_LIMITS.howTheyMet);
+  const motivation = optionalText(payload.motivation, 'motivation', LIVE_APPLICATION_LIMITS.motivation);
+  const cameraComfort = optionalInteger(
     payload.cameraComfort,
     'cameraComfort',
     CAMERA_COMFORT_MIN,
     CAMERA_COMFORT_MAX,
   );
-  const phone = requiredText(payload.phone, 'phone', LIVE_APPLICATION_LIMITS.phone);
-  const phoneNormalized = normalizePhone(phone);
   const language = optionalLanguage(payload.language);
 
   const photo = parsePhotoDataUrl(payload.photo);

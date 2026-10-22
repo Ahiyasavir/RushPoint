@@ -37,7 +37,21 @@ export function buildDeployTestGame(date, notes = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`date must be YYYY-MM-DD, got "${date}"`);
   const stages = [
     {
-      id: 'dt-s1', order: 0, title: 'ניקוד ותשובות', isFinal: false,
+      // One station, room for one team: the second team waits, and its clock stops (2026-10-11).
+      id: 'dt-s0', order: 0, title: 'תחנה לקבוצה אחת', isFinal: false,
+      tasks: [
+        anywhere({
+          id: 'dt-station-wait', title: 'תחנה שיש בה מקום לקבוצה אחת', type: 'self_report', maxConcurrentTeams: 1,
+          // Not `locationless`: a mission played from anywhere has no station cap. The trigger mode
+          // still lets it be finished without walking.
+          locationless: false,
+          description: say('התחילו שתי קבוצות יחד. הקבוצה שקיבלה את המשימה מחכה חצי דקה ורק אז מסמנת שסיימה.',
+            'הקבוצה השנייה רואה "כל התחנות תפוסות כרגע" והשעון שלה נעצר. בקונסולה קופצת הודעה עם שם הקבוצה, ועל השורה שלה כתוב "מחכים לתחנה פנויה, השעון שלהם עצור". כשהראשונה מסיימת, השנייה מקבלת את המשימה לבד תוך כמה שניות.'),
+        }),
+      ],
+    },
+    {
+      id: 'dt-s1', order: 1, title: 'ניקוד ותשובות', isFinal: false,
       tasks: [
         anywhere({
           id: 'dt-quiz-outcomes', title: 'ניקוד לפי תשובה', type: 'quiz',
@@ -80,7 +94,7 @@ export function buildDeployTestGame(date, notes = {}) {
       ],
     },
     {
-      id: 'dt-s2', order: 1, title: 'צילום ווידאו', isFinal: false,
+      id: 'dt-s2', order: 2, title: 'צילום ווידאו', isFinal: false,
       tasks: [
         anywhere({
           id: 'dt-photo-auto', title: 'צילום עם אישור אוטומטי', type: 'photo',
@@ -103,7 +117,28 @@ export function buildDeployTestGame(date, notes = {}) {
       ],
     },
     {
-      id: 'dt-s3', order: 2, title: 'שטח ובטיחות', isFinal: true,
+      // The 14.10 vineyard (2026-10-21): a chain of required missions, and a pause in the middle of
+      // it. A pause used to strand every team that still needed the paused mission.
+      id: 'dt-s-chain', order: 3, title: 'שרשרת והשהיה', isFinal: false,
+      tasks: [
+        anywhere({
+          id: 'dt-chain-head', title: 'זינוק של השרשרת', type: 'self_report',
+          description: say('צריך שתי קבוצות. קבוצה א מסיימת את המשימה הזו ועוברת ל"משימה שמשהים". רק אז המארגן משהה בקונסולה את "משימה שמשהים" (השהיה, לא סגירה). אחרי זה קבוצה ב מסיימת את המשימה הזו.',
+            'בקונסולה אין "להשהות בכל זאת", ומופיעה הודעה שקבוצה שתישאר בלי משימות תדלג על המשימה ותמשיך. קבוצה ב לא נתקעת: היא מקבלת ישר את "סוף השרשרת" וממשיכה משם לשלב הבא. קבוצה א ממשיכה את "משימה שמשהים" ומקבלת עליה נקודות.'),
+        }),
+        anywhere({
+          id: 'dt-chain-mid', title: 'משימה שמשהים', type: 'self_report', unlockAfterTaskIds: ['dt-chain-head'],
+          description: say('זו המשימה שהמארגן משהה. קבוצה שכבר עליה מסיימת אותה כרגיל.',
+            'הקבוצה שהחזיקה בה ברגע ההשהיה מסיימת ומקבלת נקודות. קבוצה שעוד לא הגיעה אליה מדלגת עליה ולא נתקעת.'),
+        }),
+        anywhere({
+          id: 'dt-chain-end', title: 'סוף השרשרת', type: 'self_report', unlockAfterTaskIds: ['dt-chain-head', 'dt-chain-mid'],
+          description: say('מסיימים כרגיל.', 'אחרי המשימה הזו השלב נגמר והקבוצה ממשיכה לשלב הבא, גם אם דילגה על "משימה שמשהים".'),
+        }),
+      ],
+    },
+    {
+      id: 'dt-s3', order: 4, title: 'שטח ובטיחות', isFinal: true,
       tasks: [
         {
           id: LOCATED_TASK_ID, title: 'הליכה לנקודה', type: 'field', triggerMode: 'radius',

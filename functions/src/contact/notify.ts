@@ -84,7 +84,9 @@ export interface LiveApplicationNotification {
 
 export async function sendLiveApplicationNotification(entry: LiveApplicationNotification): Promise<void> {
   try {
-    const subject = `RushPoint Live application: ${entry.teamName} (${entry.teamSize})`;
+    // The short form (rushpoint-live-short-form) asks only for the size, the ages and a phone, so a
+    // team may have no name: the phone identifies it instead, and empty answers are left out.
+    const subject = `RushPoint Live application: ${entry.teamName || entry.phone} (${entry.teamSize})`;
     const rows: Array<[string, string]> = [
       ['Team', entry.teamName],
       ['Size', String(entry.teamSize)],
@@ -92,10 +94,10 @@ export async function sendLiveApplicationNotification(entry: LiveApplicationNoti
       ['Lives in', entry.location],
       ['How they met', entry.howTheyMet],
       ['Ages', entry.ageRange],
-      ['On camera', `${entry.cameraComfort}/5`],
+      ['On camera', entry.cameraComfort > 0 ? `${entry.cameraComfort}/5` : ''],
       ['Phone', entry.phone],
       ['Why them', entry.motivation],
-    ];
+    ].filter(([, value]) => value !== '') as Array<[string, string]>;
 
     const text = rows.map(([label, value]) => `${label}: ${value}`).join('\n');
     const html = [

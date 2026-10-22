@@ -1036,6 +1036,11 @@ export interface LiveRunSummary {
   participantCount: number;
   launchedAt: string | null;
   unackedAlerts: number;
+  /** The run document's last write. The server refreshes it during play (every leaderboard
+   *  refresh), so it says whether anyone is PLAYING, which `launchedAt` alone cannot (D07). */
+  updatedAt?: string | null;
+  /** A test run (D06): never offered as "the run already live" when launching for real. */
+  isTestDrive?: boolean;
 }
 
 // A timed, geofenced score multiplier an organizer activates on a run

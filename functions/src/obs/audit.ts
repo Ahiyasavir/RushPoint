@@ -102,6 +102,8 @@ export const AUDIT_TEAM_RESUMED       = 'team_resumed';
 // team-lifecycle-controls: the organizer took a team out of the game, or brought it back.
 export const AUDIT_TEAM_REMOVED       = 'team_removed';
 export const AUDIT_TEAM_RESTORED      = 'team_restored';
+// D70 (race 14.10): the organizer renamed a team (an offensive name, a typo).
+export const AUDIT_TEAM_RENAMED       = 'team_renamed';
 // route-team-to-mission: routed with a per-blocker waiver; queued for after the current mission;
 // a queued route dropped because what blocked it changed.
 export const AUDIT_TASK_ROUTED        = 'task_routed';

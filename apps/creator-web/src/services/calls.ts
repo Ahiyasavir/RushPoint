@@ -200,6 +200,11 @@ export const setTeamRemoved = callable<
   { ownerUid?: string; gameId: string; runId: string; teamId: string; removed: boolean; reason?: string },
   { ok: boolean; removed: boolean; changed: boolean }
 >('setTeamRemoved');
+// D70 (race 14.10): the organizer renames ONE team of a live run. Owner only, audited.
+export const renameTeam = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; displayName: string },
+  { ok: boolean; displayName: string }
+>('renameTeam');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
 export const refreshLeaderboard = callable<
   { ownerUid: string; gameId: string; runId: string; publish?: boolean; frozen?: boolean },
@@ -262,6 +267,8 @@ export interface MyRunRow {
   leaderboardPublished: boolean;
   topTeamName: string | null;
   topScore: number | null;
+  /** The run document's last write (D07): written during play. */
+  updatedAt?: string | null;
 }
 export const listMyRuns = callable<
   { gameId?: string; limit?: number },
@@ -452,8 +459,8 @@ export const hideFeedItem          = callable<{ ownerUid: string; gameId: string
 // Live task availability (change: live-task-pause): take one task out of play for
 // THIS run, or put it back. Run scoped — the game template is never touched. A team
 // already holding the task keeps it (`teamsHolding` says how many that is). The
-// server refuses a PAUSE that would leave the owning stage unwinnable, answering with
-// details.code === 'stageUnwinnable'. It cannot be forced (change: pause-never-strands).
+// server never refuses a pause (change: pause-never-strands); `stageUnwinnable`
+// in the result says a team that runs out of missions will move past it.
 // quick-dial-and-actions: tonight's phone numbers for a run (owner only).
 export const setRunContacts = callable<
   { ownerUid: string; gameId: string; runId: string; contacts: { label: string; phone: string; visibleTo: ('players' | 'staff')[] }[] },

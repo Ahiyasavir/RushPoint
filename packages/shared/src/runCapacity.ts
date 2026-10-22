@@ -26,7 +26,18 @@
 // keeping the projection under 0.8x. Raising it further without re-running the measurement
 // (npm run measure:location, scripts/fs-ops-report.mjs) is how a run walks into
 // RESOURCE_EXHAUSTED mid game.
-export const MAX_RUN_DEVICES = 150;
+//
+// RAISED 150 -> 250 (change: race-multi-phone-capacity, 2026-10-10) for a 35-team school race
+// with 3-6 phones a team (105-210 phones). At 150 the LATE teams could not even register:
+// `joinRun` checks this ceiling before it creates a team. Raised together with the two cuts that
+// make an extra phone cheap (its team lookup is cached; the cache outlives the 60s poll), and
+// sized so a 6-phone team still fits at 35 teams with headroom.
+//
+// RAISED 250 -> 500 the same day, once the project moved to the Blaze plan: the ceiling had been
+// protecting the free 50k-read day, and a measured 420-phone load test on the VPS showed 250 was
+// the only thing turning teams away (63 of 70 teams joined). 35 teams x the 8-phone per-team
+// allowance is 280, so 250 could still refuse the last teams of this race.
+export const MAX_RUN_DEVICES = 500;
 
 export type RunDeviceDecision = { ok: true } | { ok: false; reason: 'run-full' };
 
