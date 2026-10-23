@@ -127,7 +127,9 @@ async function round(i, teamCode) {
     await sleep(WIPE_SETTLE_MS);
     const buttons = await d.findElements(By.css('button'));
     let clicked = false;
-    for (const b of buttons) { if (ATTACH_CTA.test(await b.getText().catch(() => ''))) { await b.click(); clicked = true; break; } }
+    // Not WebElement.click(): on iOS safaridriver it lands as a long press that selects the label's
+    // text (seen on the first run) and React never gets the click.
+    for (const b of buttons) { if (ATTACH_CTA.test(await b.getText().catch(() => ''))) { await d.executeScript('arguments[0].click()', b); clicked = true; break; } }
     if (!clicked) throw new Error('could not tap the attach button');
 
     const end = Date.now() + 40000;
