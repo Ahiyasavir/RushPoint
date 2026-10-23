@@ -55,6 +55,9 @@ function stripIds(value: unknown): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (k === 'id') continue;
+      // A station's code is minted fresh per build on purpose (23.10: one fixed '2468' was the
+      // code of every station in every game); section 3b below pins that it IS fresh.
+      if (k === 'secretCode') continue;
       out[k] = stripIds(v);
     }
     return out;
@@ -129,6 +132,18 @@ console.log('\n── 3. build() mints fresh ids every call ──────�
   }
   eq('two builds of the same entry share no id, at any depth', notFresh, []);
   eq('two builds of the same entry are otherwise identical', notStable, []);
+}
+
+console.log('\n── 3b. every station mints its own code ────────────────────');
+{
+  // Three builds, so a chance repeat of two codes (about 1 in 5000) can never fail the gate.
+  const stations = TASK_BANK.map((e) => ({ key: e.key, a: e.build(), b: e.build(), c: e.build() }))
+    .filter((x) => x.a.type === 'smart_station' && typeof x.a.smart?.secretCode === 'string');
+  ok(`the bank has code stations to check (${stations.length})`, stations.length >= 4);
+  const fixed = stations.filter((x) => x.a.smart?.secretCode === x.b.smart?.secretCode && x.b.smart?.secretCode === x.c.smart?.secretCode).map((x) => x.key);
+  eq('a station mints a new code each build (never one fixed code)', fixed, []);
+  const weak = stations.filter((x) => !/^\d{4}$/.test(x.a.smart?.secretCode ?? '') || new Set(x.a.smart?.secretCode).size < 3).map((x) => x.key);
+  eq('every minted code is four digits, at least three different', weak, []);
 }
 
 console.log('\n── 4. declared difficulty matches the built mission ────────');

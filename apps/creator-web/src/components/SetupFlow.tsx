@@ -427,6 +427,8 @@ function ItemBeat({
   const rtl = useLanguage().lang === 'he';
   const task = screen.scope === 'task' ? taskIn(game, screen.stageId, screen.taskId) : null;
   const ask = askFor(item, sf, task);
+  // An ordering quiz is finished by sorting, not by answering (found in the 23.10 checks).
+  const doneKey = task?.type === 'quiz' && (task.orderItems?.length ?? 0) > 0 ? 'order' : screen.taskType;
   const fills = FILLS.has(item.fieldPath);
   const field = (
     <FieldInput game={game} screen={screen} item={item} task={task} onTaskChange={onTaskChange}
@@ -460,9 +462,9 @@ function ItemBeat({
                 <p className="mt-0.5 text-[16px] sm:text-lg leading-snug sm:leading-relaxed text-[--ink-1] whitespace-pre-line" dir="auto">{blanked(screen.playerText)}</p>
               </div>
             )}
-            {screen.taskType && (sf.howDone[screen.taskType] ?? '') !== '' && (
+            {doneKey && (sf.howDone[doneKey] ?? '') !== '' && (
               <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-rp-fire/10 px-3 py-1.5 text-[14px] sm:text-[15px] font-semibold text-ink-fire">
-                <Icon name="flag" className="w-4 h-4 shrink-0" />{sf.howDone[screen.taskType]}
+                <Icon name="flag" className="w-4 h-4 shrink-0" />{sf.howDone[doneKey]}
               </p>
             )}
             {task?.hideLocation === true && (

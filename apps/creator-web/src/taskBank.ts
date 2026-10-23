@@ -2457,6 +2457,7 @@ import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import type { OccasionId } from './lib/occasions';
 import { uuid } from './taskShorthands';
+import { generateCode } from './lib/sentenceForm';
 
 /**
  * One Quick Setup step a mission asks its creator for.
@@ -2683,10 +2684,12 @@ const ATTACH_PHOTO: TaskBankSetup = {
  * `TaskBankEntry.exclusiveStation`), not a decoration a busier event can afford
  * to raise.
  */
+// A fresh code per built mission (found 23.10): a fixed '2468' in every station of every game was
+// one guessable code for the whole platform, shown to the creator as "already set".
 const codeStation = (over: Partial<Task> & Pick<Task, 'title'>): Task =>
   sited({
     type: 'smart_station',
-    smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+    smart: { enabled: true, verificationType: 'code_verification', secretCode: generateCode() },
     maxConcurrentTeams: 1,
     ...over,
   });
@@ -3214,7 +3217,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 6,
       estimatedMinutes: 9,
       pointValue: 150,
-      smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+      smart: { enabled: true, verificationType: 'code_verification', secretCode: generateCode() },
       hideLocation: true,
       locationClue: '',
       hint: 'רמז: הוראות קצרות (ימינה, שמאלה, קרוב) עובדות יותר טוב ממשפטים ארוכים.\n\nHint: short directions (left, right, closer) work better than long sentences.',
@@ -3872,7 +3875,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 3,
       estimatedMinutes: 6,
       pointValue: 100,
-      smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+      smart: { enabled: true, verificationType: 'code_verification', secretCode: generateCode() },
       hideLocation: true,
       locationClue: '',
       // A written code is read, never taken — every team finds the same sign.
@@ -6755,7 +6758,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 6,
       estimatedMinutes: 6,
       pointValue: 150,
-      smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+      smart: { enabled: true, verificationType: 'code_verification', secretCode: generateCode() },
       hint: 'רמז: המעטפה לא אומרת איפה הקוד, היא מראה.',
       hintPenalty: 20,
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
