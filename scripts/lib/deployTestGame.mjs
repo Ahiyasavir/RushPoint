@@ -138,7 +138,27 @@ export function buildDeployTestGame(date, notes = {}) {
       ],
     },
     {
-      id: 'dt-s3', order: 4, title: 'שטח ובטיחות', isFinal: true,
+      // composer-variety (2026-10-23): a stage with more missions than a team plays. Routing hands
+      // each team its own subset, which is what the composer now builds in every middle stage.
+      id: 'dt-s-choice', order: 4, title: 'מסלול משלכם', isFinal: false, requiredTaskCount: 2,
+      tasks: [
+        anywhere({
+          id: 'dt-choice-a', title: 'מסלול משלכם: א', type: 'self_report',
+          description: say('צריך שתי קבוצות. בשלב הזה שלוש משימות, וכל קבוצה עושה רק שתיים מהן. כל קבוצה מסיימת את מה שהיא מקבלת, וכותבים לעצמכם אילו משימות קיבלתם.',
+            'כל קבוצה מקבלת שתי משימות מתוך שלוש ועוברת לשלב הבא אחרי השנייה. שתי הקבוצות לא חייבות לקבל את אותן משימות. המשימה שקבוצה לא קיבלה לא מחכה לה ולא תוקעת אותה.'),
+        }),
+        anywhere({
+          id: 'dt-choice-b', title: 'מסלול משלכם: ב', type: 'self_report',
+          description: say('מסיימים כרגיל.', 'אחרי שתי משימות מהשלב הזה הקבוצה ממשיכה לשלב הבא.'),
+        }),
+        anywhere({
+          id: 'dt-choice-c', title: 'מסלול משלכם: ג', type: 'self_report',
+          description: say('מסיימים כרגיל.', 'אחרי שתי משימות מהשלב הזה הקבוצה ממשיכה לשלב הבא.'),
+        }),
+      ],
+    },
+    {
+      id: 'dt-s3', order: 5, title: 'שטח ובטיחות', isFinal: true,
       tasks: [
         {
           id: LOCATED_TASK_ID, title: 'הליכה לנקודה', type: 'field', triggerMode: 'radius',
