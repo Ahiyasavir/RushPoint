@@ -28,7 +28,7 @@ export interface RouteStage {
   }[];
 }
 
-export default function RoutePreviewMap({ stages, className = '' }: { stages: RouteStage[]; className?: string }) {
+export default function RoutePreviewMap({ stages, className = '', fill = false }: { stages: RouteStage[]; className?: string; fill?: boolean }) {
   const mapUi = useT().mapUi;
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
@@ -116,7 +116,7 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: Ro
   }, [JSON.stringify(stops)]);
 
   return (
-    <div className="relative">
+    <div className={fill ? 'relative h-full' : 'relative'}>
       <div ref={ref} className={`rounded-xl overflow-hidden border border-glass-border ${className}`} />
       <MapModeToggle mode={mode} onChange={setMode} />
       {stops.length === 0 && (

@@ -521,3 +521,66 @@ html.dark .glass-card {
 @media (prefers-reduced-motion: reduce) {
   .rp-regen-spin { animation: none; }
 }
+
+/* The setup walk's preparation card (change: setup-flow-full-screen): one soft ring that breathes out
+   once as the card arrives, so the instruction is noticed without anything blinking at the creator. */
+@keyframes rp-prep-glow {
+  0% { box-shadow: 0 0 0 0 rgba(255, 179, 0, 0.45); }
+  100% { box-shadow: 0 0 0 14px rgba(255, 179, 0, 0); }
+}
+.rp-prep-glow { animation: rp-prep-glow 0.9s ease-out 0.1s 1 both; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-prep-glow { animation: none; }
+}
+
+/* The setup walk's canvas (change: setup-flow-full-screen). Ahiya, 23.10: "the white background bores
+   me". A warm wash with the brand's contour lines, so the walk feels like a map being drawn, and two
+   slow lights that drift. Content stays on solid cards, so nothing here costs legibility. */
+.rp-setup-bg {
+  background-color: #FFF8F2;
+  background-image:
+    radial-gradient(55% 45% at 100% 0%, rgba(255, 87, 34, 0.13), transparent 70%),
+    radial-gradient(50% 45% at 0% 100%, rgba(255, 179, 0, 0.16), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='560' viewBox='0 0 560 560' fill='none' stroke='%23FF5722' stroke-opacity='0.10' stroke-width='1.2'%3E%3Cpath d='M280 110c74 0 146 42 156 114s-42 156-124 166-176-30-186-114 80-166 154-166z'/%3E%3Cpath d='M280 154c54 0 106 32 113 84s-31 112-91 120-127-22-135-82 59-122 113-122z'/%3E%3Cpath d='M282 198c34 0 65 21 69 54s-19 69-56 73-79-14-83-52 37-75 70-75z'/%3E%3Cpath d='M283 238c14 0 27 9 29 23s-8 29-24 31-33-6-35-22 16-32 30-32z'/%3E%3Cpath d='M-40 468c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 506c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 544c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 36c82 22 152 10 212-20s142-42 222-10 152 22 212 0'/%3E%3Cpath d='M-40 70c82 22 152 10 212-20s142-42 222-10 152 22 212 0'/%3E%3C/svg%3E");
+  background-size: auto, auto, 560px 560px;
+}
+html.dark .rp-setup-bg {
+  background-color: #0B0A12;
+  background-image:
+    radial-gradient(55% 45% at 100% 0%, rgba(255, 87, 34, 0.20), transparent 70%),
+    radial-gradient(50% 45% at 0% 100%, rgba(255, 179, 0, 0.12), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='560' viewBox='0 0 560 560' fill='none' stroke='%23FF5722' stroke-opacity='0.14' stroke-width='1.2'%3E%3Cpath d='M280 110c74 0 146 42 156 114s-42 156-124 166-176-30-186-114 80-166 154-166z'/%3E%3Cpath d='M280 154c54 0 106 32 113 84s-31 112-91 120-127-22-135-82 59-122 113-122z'/%3E%3Cpath d='M282 198c34 0 65 21 69 54s-19 69-56 73-79-14-83-52 37-75 70-75z'/%3E%3Cpath d='M-40 468c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 506c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 36c82 22 152 10 212-20s142-42 222-10 152 22 212 0'/%3E%3C/svg%3E");
+  background-size: auto, auto, 560px 560px;
+}
+.rp-setup-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  pointer-events: none;
+}
+.rp-setup-orb-1 {
+  width: 420px; height: 420px; top: -120px; inset-inline-start: -120px;
+  background: radial-gradient(circle, rgba(255, 87, 34, 0.22), transparent 65%);
+  animation: rp-orb-drift-1 18s ease-in-out infinite alternate;
+}
+.rp-setup-orb-2 {
+  width: 360px; height: 360px; bottom: -110px; inset-inline-end: -90px;
+  background: radial-gradient(circle, rgba(255, 179, 0, 0.24), transparent 65%);
+  animation: rp-orb-drift-2 22s ease-in-out infinite alternate;
+}
+@keyframes rp-orb-drift-1 { to { transform: translate(90px, 70px) scale(1.1); } }
+@keyframes rp-orb-drift-2 { to { transform: translate(-80px, -60px) scale(1.15); } }
+@media (prefers-reduced-motion: reduce) {
+  .rp-setup-orb { animation: none; }
+}
+
+/* The setup walk's Next, once the screen's field is filled: it glows twice to say "you can go on". */
+@keyframes rp-cta-ready {
+  0% { box-shadow: 0 0 0 0 rgba(255, 87, 34, 0.55); }
+  70% { box-shadow: 0 0 0 12px rgba(255, 87, 34, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 87, 34, 0); }
+}
+.rp-cta-ready { animation: rp-cta-ready 1.1s ease-out 2; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-cta-ready { animation: none; }
+}

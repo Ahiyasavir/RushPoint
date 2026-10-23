@@ -22,7 +22,7 @@
 //
 // Dependency-free (no React, no Firebase, no `window`) so the whole flow is
 // assertable without a DOM — scripts/test-quick-setup-flow.ts.
-import type { Game } from '@rushpoint/shared';
+import type { Game, Task } from '@rushpoint/shared';
 import {
   type TemplateWizardStep,
   type WizardTarget,
@@ -31,6 +31,7 @@ import {
   resolveWizardTarget,
 } from '@rushpoint/shared';
 import { fieldIgnoredByPreset, type SettingsRowKey } from './missionSettingsRows';
+import { hasOpenSlots } from './sentenceForm';
 
 /** Just enough of a game to drive the flow, so tests and callers stay light. */
 type QuickSetupGame = Pick<Game, 'stages'> & Partial<Pick<Game, 'title' | 'description' | 'instructions' | 'wizardSteps' | 'scoringPreset'>>;
@@ -166,6 +167,61 @@ function syntheticLocationSteps(
     }
   }
   return out;
+}
+
+/** The field that holds what a team must enter to complete this mission, if the creator supplies it. */
+export function completionFieldOf(task: Task | null | undefined): string | null {
+  if (!task) return null;
+  if (Array.isArray(task.answerOutcomes) && task.answerOutcomes.length > 0) return null;
+  if (task.type === 'smart_station' && task.smart?.verificationType !== 'photo_upload') return 'smart.secretCode';
+  // An ordering quiz is answered by its order; a survey has no right answer to supply.
+  if (task.type === 'quiz') return Array.isArray(task.orderItems) && task.orderItems.length > 0 ? 'orderItems' : 'answers';
+  if (task.type === 'numeric') return 'numericAnswer';
+  return null;
+}
+
+/** The mission texts the walk completes as a sentence when they carry blanks. */
+export const SENTENCE_FIELDS = ['title', 'description', 'hint', 'locationClue'] as const;
+
+/** The id a synthesized "what do the teams enter" step gets. */
+export function syntheticCompletionStepId(stageId: string, taskId: string): string {
+  return `qs-synthetic-completion:${stageId}:${taskId}`;
+}
+
+/**
+ * The steps the full-screen setup walk shows (change: setup-flow-full-screen). Quick Setup's own list
+ * plus two things it leaves out:
+ *
+ * - It runs for EVERY game, not only one carrying template notes: a composed game has none, and the
+ *   walk is how it gets placed at all.
+ * - A card for what the teams must ENTER to complete each mission (the station's code, the quiz's
+ *   answer, the number), even when the bank already filled it. Ahiya, 22.10: the creator has to see
+ *   the code to put it at the spot, and a code nobody was shown is a mission nobody can finish.
+ */
+export function setupFlowSteps(game: QuickSetupGame | null | undefined): TemplateWizardStep[] {
+  if (!game) return [];
+  const authored = (Array.isArray(game.wizardSteps) ? game.wizardSteps : []).filter((s) => {
+    const target = resolveWizardTarget(game, s);
+    return !(target && target.scope === 'task' && fieldIgnoredByPreset(target.fieldPath, game.scoringPreset));
+  });
+  const has = new Set(authored.map((s) => `${s.stageId ?? ''}|${s.taskId ?? ''}|${s.targetFieldPath ?? ''}`));
+  const completion: TemplateWizardStep[] = [];
+  for (const stage of game.stages ?? []) {
+    for (const task of stage?.tasks ?? []) {
+      if (!stage?.id || !task?.id) continue;
+      const field = completionFieldOf(task);
+      if (field && !has.has(`${stage.id}|${task.id}|${field}`)) {
+        completion.push({ id: syntheticCompletionStepId(stage.id, task.id), stageId: stage.id, taskId: task.id, targetFieldPath: field, instructionPrompt: '', isRequired: true });
+      }
+      // A text with blanks left for the creator ("[הוראות ליוצר: ...]") is a sentence to complete,
+      // whether or not the bank wrote a note about it (Ahiya, 22.10).
+      for (const text of SENTENCE_FIELDS) {
+        if (!hasOpenSlots((task as unknown as Record<string, unknown>)[text]) || has.has(`${stage.id}|${task.id}|${text}`)) continue;
+        completion.push({ id: `qs-synthetic-sentence:${stage.id}:${task.id}:${text}`, stageId: stage.id, taskId: task.id, targetFieldPath: text, instructionPrompt: '', isRequired: true });
+      }
+    }
+  }
+  return orderQuickSetupSteps(game, [...authored, ...syntheticLocationSteps(game, authored), ...completion]);
 }
 
 /** The ids of the steps whose target field is still unconfigured. */
@@ -474,6 +530,18 @@ export const JUST_CREATED_NAV_STATE = { rpJustCreated: true } as const;
  * page's state shape), and every unreadable value must mean "an ordinary open"
  * — the behaviour this app had before the stamp existed.
  */
+/**
+ * The composer's hop into the Builder also asks for the full-screen setup walk (change:
+ * setup-flow-full-screen): Ahiya, 22.10, "after building, Quick Setup opens by itself, without even
+ * showing the ordinary builder". Same router-state carrier as JUST_CREATED_NAV_STATE, same one
+ * navigation lifetime (the Builder replaces the state once read).
+ */
+export const OPEN_SETUP_NAV_STATE = { ...JUST_CREATED_NAV_STATE, rpOpenSetup: true } as const;
+
+export function wantsSetupFlow(state: unknown): boolean {
+  return !!state && typeof state === 'object' && (state as { rpOpenSetup?: unknown }).rpOpenSetup === true;
+}
+
 export function isJustCreatedNavState(state: unknown): boolean {
   if (typeof state !== 'object' || state === null) return false;
   return (state as { rpJustCreated?: unknown }).rpJustCreated === true;

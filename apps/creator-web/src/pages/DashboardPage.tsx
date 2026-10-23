@@ -13,8 +13,7 @@ import {
 import { decideLaunchOverLiveRun, formatLaunchWhen } from '../lib/liveRunGuard';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
 import { TAP_TARGET } from '../lib/interaction';
-import { composeGame, previewShape, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
-import SmartBuildReveal, { type RevealStage } from '../components/SmartBuildReveal';
+import { composeGame, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
 import { readRecentPicks, recordRecentPicks } from '../lib/recentBankPicks';
 import { readTaste, recordLaunchTaste, bankKeyForTask } from '../lib/tasteProfile';
 // The bank the composer draws from is `taskBank.ts` MERGED with the admin's
@@ -29,14 +28,14 @@ import { OverflowMenu } from '../components/OverflowMenu';
 // The stamp that tells the Builder this mount is the landing from the new-game
 // wizard, so it does not stack a second guided flow on top (change:
 // creator-mobile-mechanics).
-import { JUST_CREATED_NAV_STATE } from '../lib/quickSetup';
+import { JUST_CREATED_NAV_STATE, OPEN_SETUP_NAV_STATE } from '../lib/quickSetup';
 import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import ShareLinkDialog from '../components/ShareLinkDialog';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
-import { firstLaunchBlocker, splitTestDriveReadiness, computeGameReadiness, groupReadinessIssues, type ReadinessIssue } from '../lib/gameReadiness';
+import { firstLaunchBlocker, splitTestDriveReadiness, type ReadinessIssue } from '../lib/gameReadiness';
 import { describeCallFailure } from '../lib/callFeedback';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
@@ -224,13 +223,6 @@ export default function DashboardPage() {
   // (change: failed-load-is-not-an-empty-account). See the render below.
   const [loadFailed, setLoadFailed] = useState(false);
   const [picking, setPicking] = useState(false);
-  // The composed game waiting to be revealed (change: smart-build-delight).
-  // Non-null only between "the game was created" and "the creator continued", so
-  // it is never a source of truth for anything — the game is already on the
-  // server by the time this is set.
-  const [reveal, setReveal] = useState<
-    { gameId: string; title: string; stages: RevealStage[]; left: string[] } | null
-  >(null);
   // The template the creator selected but has not confirmed yet — the moment the
   // play mode and scoring style are DISCLOSED instead of silently assigned.
   const [chosen, setChosen] = useState<PickerChoice | null>(null);
@@ -476,6 +468,8 @@ export default function DashboardPage() {
     placeMissionPrompt: () => d.wizard.placeMissionPrompt,
     // The station's spot kind, appended to the prompt (change: composer-siting-by-station).
     placeSpotHint: (spot) => d.wizard.placeSpotHint[spot] ?? '',
+    // The clue of the one hidden mission a placed game gets (change: composer-variety).
+    hiddenCluePrompt: () => d.wizard.hiddenCluePrompt,
   };
 
   /**
@@ -526,10 +520,6 @@ export default function DashboardPage() {
       // from this exact seed. Composing under a different stream would hand them a
       // different shape from the one they watched being built — the specific lie
       // this change exists to make impossible (change: smart-build-delight).
-      // ONE bank for this whole composition: the compose call below and the
-      // `previewShape` further down must be handed the SAME entries, or the
-      // reveal would report planned slots against a different pool than the one
-      // the game was actually built from.
       const bank = await loadMissionBank();
       // composer-v2-learning: creators' keep / swap counts update each mission's quality. Fails open.
       const missionStats = await loadMissionStats();
@@ -590,34 +580,11 @@ export default function DashboardPage() {
           const say = namedPlaces ? d.wizard.shortWithPlaces : d.wizard.shortNoPlaces;
           await dialog.alert(say({ asked: askedMinutes, got: estimatedMinutes }));
         }
-        // The reveal, not a navigation (change: smart-build-delight). The game
-        // already exists at this point, so nothing here is load-bearing — the
-        // creator can continue at any moment, and closing the tab loses nothing.
-        //
-        // The PLANNED slot counts are recomputed from the same answers and the
-        // same seed the panel used, which is exactly the agreement
-        // scripts/test-preview-shape.ts pins: it returns the shape the creator
-        // watched accumulate, so the reveal can show which planned slots the
-        // composer could not fill instead of quietly shipping a shorter stage.
-        const planned = previewShape(
-          bank,
-          plan.composerAnswers,
-          plan.composerSeed,
-          readRecentPicks(user?.uid),
-        );
+        // Straight into the setup walk (change: setup-flow-full-screen). Its first screen is the
+        // "your game is ready" moment AND the plan, so a separate reveal before it was the same
+        // thing said twice.
         setPicking(false);
-        setReveal({
-          gameId,
-          title: plan.title,
-          stages: result.stages.map((s, i) => ({
-            missions: (s.tasks ?? []).map((task) => task.title ?? ''),
-            plannedSlots: planned.stages[i]?.slots ?? (s.tasks ?? []).length,
-          })),
-          // Honest about what is left (change: quick-setup-reachable): the same
-          // readiness the Builder will show, grouped into one line per kind.
-          left: groupReadinessIssues(computeGameReadiness({ stages: result.stages } as never))
-            .map((g) => d.wizard.revealLeft[g.code](g.count)),
-        });
+        nav(`/build/${gameId}`, { state: OPEN_SETUP_NAV_STATE });
       } catch (e) {
         // Same rule as every other path here: the wizard already closed, so a
         // silent failure would leave the creator on an unchanged dashboard with
@@ -1217,39 +1184,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── The smart build's reveal (change: smart-build-delight) ────────────
-          Deliberately NOT dismissible by backdrop click or Escape: every other
-          modal here can be cancelled because cancelling means "do not do the
-          thing", but the game already exists. A stray click that dropped the
-          creator back on the dashboard would look exactly like the build having
-          failed. The one way out is the button, and it is live immediately. */}
-      {reveal && createPortal(
-        <div role="dialog" aria-modal="true" aria-label={d.wizard.revealTitle} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up">
-            <SmartBuildReveal
-              gameTitle={reveal.title}
-              stages={reveal.stages}
-              leftBeforeLaunch={reveal.left}
-              onContinue={() => {
-                const { gameId } = reveal;
-                setReveal(null);
-                nav(`/build/${gameId}`, { state: JUST_CREATED_NAV_STATE });
-              }}
-              labels={{
-                title: d.wizard.revealTitle,
-                subtitle: d.wizard.revealSub,
-                stage: (n) => d.wizard.shapeStage(n),
-                missions: (n) => d.wizard.revealMissions(n),
-                continue: d.wizard.revealContinue,
-                leftTitle: d.wizard.revealLeftTitle,
-                aria: d.wizard.revealAria,
-              }}
-            />
-          </div>
-        </div>,
-        document.body,
-      )}
 
       {/* ── Template picker modal ─────────────────────────────────────────── */}
       {picking && createPortal(

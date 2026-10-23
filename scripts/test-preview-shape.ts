@@ -111,7 +111,8 @@ console.log('\n── 1. the watched shape IS the composed shape ─────
               }
               for (let i = 0; i < shape.stages.length; i++) {
                 const planned = shape.stages[i].slots;
-                const actual = built.stages[i].tasks.length;
+                // What ONE team plays: the stage's choice missions (composer-variety) are on top of the plan.
+                const actual = built.stages[i].tasks.filter((t) => !built.extraTaskIds.includes(t.id)).length;
                 if (planned < actual) {
                   mismatch ||= `${cell}: stage ${i} planned ${planned} but built ${actual} — the plan must never under-count`;
                 }
@@ -200,8 +201,9 @@ console.log('\n── 5. the plan is a plan, never an under-count ────�
       const built = composeGame(TASK_BANK, answers, COPY, seededRng(seed), NO_RECENT);
       if (!built || !shape.possible) continue;
       const planned = shape.stages.reduce((n, s) => n + s.slots, 0);
-      if (planned < built.usedBankKeys.length) {
-        under ||= `${occasion}/s${seed}: planned ${planned}, built ${built.usedBankKeys.length}`;
+      const perTeam = built.usedBankKeys.length - built.extraTaskIds.length;
+      if (planned < perTeam) {
+        under ||= `${occasion}/s${seed}: planned ${planned}, built ${perTeam}`;
       }
     }
   }

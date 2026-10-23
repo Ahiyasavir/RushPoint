@@ -78,6 +78,7 @@ import {
 import { SPOT_KINDS, type BankSiting, type SpotKind, type TaskBankEntry } from '../taskBank';
 export { SPOT_KINDS, type BankSiting, type SpotKind };
 import { isOccasionId, occasionProfile, type OccasionId } from './occasions';
+import { scaleMissionTime } from './missionTime';
 import { uuid } from '../taskShorthands';
 import { TASTE_WEIGHT, decodeTaste, tasteAffinity } from './tasteCodec';
 import { qualityBonus, qualityOf, type MissionStats } from './missionQuality';
@@ -197,6 +198,12 @@ export interface ComposerDescriptionCopy extends NewGameDescriptionCopy {
    * absent or empty leaves the prompt as it was.
    */
   placeSpotHint?(spot: SpotKind): string;
+  /**
+   * The Quick Setup prompt for the clue of the game's hidden mission (change: composer-variety).
+   * Optional: absent or empty means the composer hides nothing, because a hidden mission with no
+   * way to ask for its clue would send teams looking for a spot nobody described.
+   */
+  hiddenCluePrompt?(): string;
 }
 
 /** Where a stage sits in the arc. Drives which name list it draws from. */
@@ -211,6 +218,11 @@ export interface RecentPickState {
 
 export interface ComposerResult {
   stages: Stage[];
+  /**
+   * The missions a middle stage holds BEYOND what a team must do (change: composer-variety), in
+   * the order they were added. `usedBankKeys.length - extraTaskIds.length` is what one team plays.
+   */
+  extraTaskIds: string[];
   description: string;
   tags: string[];
   wizardSteps: TemplateWizardStep[];
@@ -1564,6 +1576,20 @@ export function previewShape(
   };
 }
 
+/** A stage never grows past this many missions: more is setup work, not variety. */
+const MAX_STAGE_TASKS = 6;
+
+/**
+ * How many missions a middle stage holds beyond what a team must do (change: composer-variety).
+ * One team gains nothing from a choice it never sees, so small groups get none; from two teams up
+ * one extra spreads them out, and from about six teams two extras keep queues short.
+ */
+export function choiceExtras(people: unknown): number {
+  const n = typeof people === 'number' && Number.isFinite(people) ? Math.floor(people) : 0;
+  if (n < 6) return 0;
+  return n >= 24 ? 2 : 1;
+}
+
 export function composeGame(
   bank: readonly TaskBankEntry[],
   answers: ComposerAnswers,
@@ -1634,7 +1660,7 @@ export function composeGame(
   const stageMechanics = Array.from({ length: stageCount }, () => new Map<string, number>());
   const gameMechanics = new Map<string, number>();
 
-  for (const slot of slots) {
+  const fillSlot = (slot: Slot): TaskBankEntry | null => {
     const slotCtx: FitContext = {
       ...ctx,
       stageTarget: stageTargets[slot.stage],
@@ -1656,11 +1682,10 @@ export function composeGame(
     if (candidates.length === 0 && diversity) candidates = scoreAll({ ...slotCtx, mechanicCaps: false });
 
     const picked = pickFromBand(candidates, rng);
-    if (!picked) continue; // pool exhausted — the slot is dropped, never faked
+    if (!picked) return null; // pool exhausted — the slot is dropped, never faked
 
     const entry = usable.find((e) => e.key === picked.key);
-    if (!entry) continue;
-    chosen[slot.stage][slot.index] = entry;
+    if (!entry) return null;
     ctx.usedKeys.add(entry.key);
     if (entry.family) ctx.usedFamilies.add(entry.family);
     for (const t of entry.tags) {
@@ -1668,6 +1693,11 @@ export function composeGame(
       stageMechanics[slot.stage].set(t, (stageMechanics[slot.stage].get(t) ?? 0) + 1);
       gameMechanics.set(t, (gameMechanics.get(t) ?? 0) + 1);
     }
+    return entry;
+  };
+  for (const slot of slots) {
+    const entry = fillSlot(slot);
+    if (entry) chosen[slot.stage][slot.index] = entry;
   }
 
   // ── 8. Build the stages ───────────────────────────────────────────────────
@@ -1676,23 +1706,23 @@ export function composeGame(
   const wizardSteps: TemplateWizardStep[] = [];
   let slotCounter = 0;
 
-  for (let s = 0; s < stageCount; s++) {
-    const tasks: Task[] = [];
-    const stageId = uuid();
+  // Each stage's entries, for the honest time total (a team plays only `requiredTaskCount` of them).
+  const stageEntries = new Map<string, TaskBankEntry[]>();
+  const sitedTaskIds = new Set<string>();
+  const keyOfTask = new Map<string, string>();
+  const extraTaskIds: string[] = [];
 
-    // A pin for every mission a place can help (change: composer-pins-follow-prep):
-    // choosing a location level on the prep scale IS choosing to place locations,
-    // so the composer does not second-guess it with one station per stage.
-    for (const entry of chosen[s]) {
-      if (!entry) continue;
+  const emit = (entry: TaskBankEntry, stageId: string, tasks: Task[]): boolean => {
       let task: Task;
       try {
         task = entry.build();
       } catch {
         // A broken mission is skipped, never allowed to take the game down.
-        continue;
+        return false;
       }
-      if (!task || typeof task !== 'object' || typeof task.id !== 'string') continue;
+      if (!task || typeof task !== 'object' || typeof task.id !== 'string') return false;
+      // The countdown follows the difficulty asked for (change: composer-time-by-difficulty).
+      task = scaleMissionTime(task, preference);
 
       // A play-from-anywhere mission in a game that HAS places gets pinned: the
       // creator picks the spot, and Quick Setup below asks them for it. Without
@@ -1709,6 +1739,9 @@ export function composeGame(
 
       tasks.push(task);
       usedEntries.push(entry);
+      stageEntries.set(stageId, [...(stageEntries.get(stageId) ?? []), entry]);
+      if (siteIt) sitedTaskIds.add(task.id);
+      keyOfTask.set(task.id, entry.key);
 
       // Quick Setup, bound to the id just minted — no positional resolution step
       // that could ever go stale.
@@ -1736,6 +1769,17 @@ export function composeGame(
         });
       }
       slotCounter++;
+      return true;
+  };
+
+  for (let s = 0; s < stageCount; s++) {
+    const tasks: Task[] = [];
+    const stageId = uuid();
+    // A pin for every mission a place can help (change: composer-pins-follow-prep):
+    // choosing a location level on the prep scale IS choosing to place locations,
+    // so the composer does not second-guess it with one station per stage.
+    for (const entry of chosen[s]) {
+      if (entry) emit(entry, stageId, tasks);
     }
 
     // A stage with nothing in it is dropped rather than emitted empty — that is
@@ -1775,13 +1819,68 @@ export function composeGame(
   // names at all (see nameStages).
   nameStages(stages, copy, rng, isOccasionId(a.occasion) ? a.occasion : undefined);
 
+  // ── 11. Variety (change: composer-variety) ───────────────────────────────
+  // Ahiya, 23.10: "more missions in a stage, so not every team does the same missions". A middle
+  // stage gets missions beyond what a team must do; routing then sends each team the subset that
+  // suits it and skips the rest, so teams spread out, queue less, and compare different stories at
+  // the end. The opener and the finale stay shared: everyone starts and ends together. Its draws
+  // come after every existing one, so seeds made before this change keep their first ten steps.
+  const extras = choiceExtras(people);
+  if (extras > 0 && stages.length >= 3) {
+    for (let si = 1; si < stages.length - 1; si++) {
+      const stage = stages[si];
+      const stageSlot = counts.findIndex((_, k) => k === si);
+      for (let k = 0; k < extras && stage.tasks.length < MAX_STAGE_TASKS; k++) {
+        const entry = fillSlot({ stage: stageSlot >= 0 ? stageSlot : Math.min(si, stageCount - 1), index: stage.tasks.length });
+        if (!entry || !emit(entry, stage.id, stage.tasks)) break;
+        extraTaskIds.push(stage.tasks[stage.tasks.length - 1].id);
+      }
+    }
+  }
+
+  // One hidden mission in a placed game: no pin on the players' map, only a search area and the
+  // creator's clue, and the spot reveals itself when a team gets there. Only a mission the composer
+  // pinned itself (it fits any spot, so any clue works), only in the middle of the game, and only
+  // when the creator accepts authoring work, because the clue is theirs to write.
+  const cluePrompt = oneParagraph(copyCall(copy?.hiddenCluePrompt));
+  // A game that already holds a hidden mission from the bank keeps it as its one surprise.
+  const alreadyHidden = stages.some((st) => st.tasks.some((t) => t.hideLocation === true));
+  if (placedGame && cluePrompt !== '' && ctx.prepTolerance >= 1 && stages.length >= 3 && !alreadyHidden) {
+    // The middle stages, nearest the centre of the game first.
+    const centre = (stages.length - 1) / 2;
+    const middles = stages.slice(1, -1).sort((x, y) => Math.abs(x.order - centre) - Math.abs(y.order - centre));
+    let mid: Stage | undefined;
+    let target: Task | undefined;
+    for (const st of middles) {
+      target = st.tasks.find((t) => sitedTaskIds.has(t.id) && !extraTaskIds.includes(t.id));
+      if (target) { mid = st; break; }
+    }
+    if (mid && target) {
+      target.hideLocation = true;
+      wizardSteps.push({
+        id: `qs-hidden-${target.id}-locationClue`,
+        stageId: mid.id,
+        taskId: target.id,
+        targetFieldPath: 'locationClue',
+        instructionPrompt: cluePrompt,
+        isRequired: true,
+      });
+    }
+  }
+
   const activities = namedActivities(usedEntries);
 
   // The honest total: what the chosen missions actually cost, walking included.
   // `planDurationFit` cannot see transit — it only knows interaction time — so
   // reporting its figure told a creator a sited two-hour game was a thirty-minute
   // one. Its verdict still drives the trim above; this is the number we publish.
-  const realMinutes = usedEntries.reduce((sum, e) => sum + missionCostMinutes(e, walk), 0);
+  const realMinutes = stages.reduce((sum, st) => {
+    const entries = stageEntries.get(st.id) ?? [];
+    if (entries.length === 0) return sum;
+    const all = entries.reduce((m, e) => m + missionCostMinutes(e, walk), 0);
+    const share = Math.min(1, (st.requiredTaskCount ?? entries.length) / entries.length);
+    return sum + all * share;
+  }, 0);
 
   const descriptionAnswers = {
     people,
@@ -1797,7 +1896,9 @@ export function composeGame(
     scoringPreset: COMPOSED_SCORING_PRESET,
     mode: COMPOSED_MODE,
     estimatedMinutes: realMinutes > 0 ? Math.round(realMinutes) : Math.max(1, plan.estimatedMinutes),
-    usedBankKeys: usedEntries.map((e) => e.key),
+    // Reading order (stage by stage), extras included where they sit.
+    usedBankKeys: stages.flatMap((st) => st.tasks.map((t) => keyOfTask.get(t.id) ?? '')).filter((k) => k !== ''),
+    extraTaskIds,
     blueprintKey: blueprint.key,
     ...(minutes !== null && minutes > 0 && realMinutes < minutes * SHORTFALL_RATIO
       ? {

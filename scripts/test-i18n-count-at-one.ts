@@ -35,6 +35,7 @@ const ALLOWED: Record<string, string> = {
   'creator.he.adminUsers.truncatedNotice': 'shown only when the list is cut at its page size, never 1',
   'creator.he.runHistory.truncated': 'shown only when the list is cut at its page size, never 1',
   'creator.he.builder.dndCancelled': 'the argument is a mission title, not a count',
+  'creator.he.setupFlow.stageDone': 'the argument is the stage NUMBER ("stage 1 is ready"), not a count',
   'creator.he.builder.dndDropped': 'the argument is a mission title, not a count',
   'creator.he.builder.noConfigNote': 'the argument is a task type label, not a count',
   'creator.he.settings.addPasswordDesc': 'the argument is an e-mail address',

@@ -67,8 +67,14 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toSt
 
 export default function TaskWizard({
   task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings, revealAll,
-  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors, onRegenerate, scoringPreset,
+  focusTab, focusGroup, focusNonce, guided, guidedAnchor, onExitGuided, gameAnchors, onRegenerate, scoringPreset, bare,
 }: {
+  /**
+   * Guided, inside the full-screen setup flow (change: setup-flow-full-screen): the flow already says
+   * which mission this is and owns the way out, so the editor drops its own context strip and shows
+   * only the one control it was pointed at.
+   */
+  bare?: boolean;
   /** The game's scoring preset: decides which scoring control step 3 shows (change: mission-editor-value-rows). */
   scoringPreset?: unknown;
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
@@ -359,7 +365,7 @@ export default function TaskWizard({
           quick-setup-one-card) — so the mission was being named twice, an inch
           apart. The card is the one that says it, because that is the message the
           creator is meant to read. */}
-      {view.showContextStrip && (
+      {view.showContextStrip && !bare && (
         <div role="group" aria-label={b.guidedGroupAria} className="shrink-0 mb-2.5 pb-1.5 flex items-center gap-2 border-b border-[--rp-border]">
           <span className="inline-flex items-center gap-1.5 min-w-0 rounded-full bg-[--surface-2] border border-[--rp-border] ps-2 pe-2.5 py-1 text-[13px] text-[--ink-2]">
             <span className="text-[--ink-3] shrink-0">{b.guidedTypeLabel}</span>

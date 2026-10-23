@@ -27,6 +27,7 @@
 //      `start` or `finish` pool is REFUSED: the composer cannot build a game
 //      without a bookend at each end, and this read is the last place that can
 //      stop one bad row turning "compose one for me" into a permanent dead end.
+import { asCreatorBlanks } from './sentenceForm';
 import type { TaskBankEntry } from '../taskBank';
 import { isBankTagId, withDifficultyBand, type BankTagId } from '../bankTags';
 
@@ -167,11 +168,12 @@ export function normalizeBankOverride(raw: unknown): MissionBankOverride | null 
 
   if (raw.deleted === true) { out.deleted = true; hasField = true; }
 
+  // A plain bracket in the admin's wording is a blank for the creator (asCreatorBlanks).
   const title = text(raw.title);
-  if (title !== undefined) { out.title = title; hasField = true; }
+  if (title !== undefined) { out.title = asCreatorBlanks(title); hasField = true; }
 
   const description = text(raw.description);
-  if (description !== undefined) { out.description = description; hasField = true; }
+  if (description !== undefined) { out.description = asCreatorBlanks(description); hasField = true; }
 
   const tags = tagsOf(raw.tags);
   if (tags !== undefined) { out.tags = tags; hasField = true; }

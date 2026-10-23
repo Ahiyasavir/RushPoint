@@ -116,6 +116,8 @@ import {
 // one with CSS) keeps a single menu instance, so the two copies cannot drift.
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { Icon, type IconName } from '../components/Icon';
+import SetupFlow from '../components/SetupFlow';
+import { wantsSetupFlow, setupFlowSteps } from '../lib/quickSetup';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -314,6 +316,52 @@ function markGamePreviewed(gameId: string) {
   } catch { /* storage unavailable — the step simply stays unticked */ }
 }
 
+/** The mission swap, outside any component so the setup walk and the stage canvas share it. */
+function regenerateMissionIn(game: Game, source: Task | undefined, uid: string | undefined, onNothingLeft: () => void): Task | null {
+  if (!source) return null;
+
+  // The SLOT's role, not the task's: whatever mission ends up first has to be
+  // one a group can walk up to and begin with, and the bank tags its openers
+  // and finales for exactly that reason. Found in the browser — the first real
+  // press replaced this game's opening mission with a mid-game one.
+  const si = game.stages.findIndex((st) => st.tasks.some((t) => t.id === source.id));
+  const ti = si < 0 ? -1 : game.stages[si].tasks.findIndex((t) => t.id === source.id);
+  const role = missionRoleAt(si, ti, game.stages.length, si < 0 ? 0 : game.stages[si].tasks.length);
+
+  void loadMissionBank();
+  void loadMissionStats();
+  const offeredKeys = readOfferedKeys(uid, game.id, source.id);
+  const picked = chooseRegeneratedMission({
+    bank: missionBankNow(),
+    profile: missionTagProfile(source, role),
+    context: regenerateContext(game, source),
+    drift: offeredKeys.length,
+    offeredKeys,
+    seed: seedFor(source.id, offeredKeys.length),
+    taste: readTaste(uid),
+    missionStats: missionStatsNow(),
+  });
+  if (!picked) { onNothingLeft(); return null; }
+
+  let built: Task;
+  try {
+    built = picked.build();
+  } catch {
+    // A bank entry that cannot build is a content defect, not a reason to take
+    // the Builder down with it.
+    onNothingLeft();
+    return null;
+  }
+
+  recordOfferedKey(uid, game.id, source.id, picked.key);
+  // composer-v2-taste: swapping a mission away says "not this kind".
+  writeTaste(uid, recordTaste(readTaste(uid), tasteTagsForTask(source, missionBankNow()), -1));
+  // composer-v2-learning: a bank mission swapped away teaches the bank. Fire-and-forget.
+  const swappedKey = bankKeyForTask(source, missionBankNow());
+  if (swappedKey) void recordMissionSignals({ swapped: [swappedKey] }).catch(() => undefined);
+  return applyRegeneratedMission(source, built);
+}
+
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
@@ -323,6 +371,10 @@ export default function BuilderPage() {
   // navigation that opened this page, and the Quick Setup effect below must give
   // the same answer whether it runs on mount or after a later re-render.
   const justCreated = useRef(isJustCreatedNavState(location.state));
+  // The composer asks for the setup walk itself (change: setup-flow-full-screen): Ahiya wanted it to
+  // open by itself, before the ordinary builder is ever shown. Read in the same breath as the stamp
+  // above, because that stamp is consumed (replaced) right after.
+  const openSetupOnArrival = useRef(wantsSetupFlow(location.state));
   // Consume the stamp once read (change: quick-setup-reachable). Router state lives
   // in history.state, which SURVIVES a reload, so leaving it in place deferred the
   // invitation on every refresh too. The ref above keeps this mount's answer.
@@ -912,11 +964,24 @@ export default function BuilderPage() {
   );
   const [cleanupDismissed, setCleanupDismissed] = useState(false);
   const qsSteps = useMemo(() => quickSetupSteps(game), [game]);
+  const setupSteps = useMemo(() => setupFlowSteps(game), [game]);
   const qsOutstanding = useMemo(() => outstandingQuickSetupIds(game), [game]);
   const qsCtx = useMemo(() => ({ steps: qsSteps, outstanding: qsOutstanding }), [qsSteps, qsOutstanding]);
   // Mutually exclusive by status: the bar shows on `running`, the context card on
   // `intro`, so the two can never be on screen together.
   const qsStep = currentQuickSetupStep(qsState, qsSteps);
+  // The full-screen setup walk (change: setup-flow-full-screen) is how Quick Setup is done now: every
+  // entry that used to start the step card (the invitation, the menu, the launch refusal) opens it,
+  // and the composer opens it on arrival. `resume` decides where it starts (lib/setupFlow firstBeat).
+  const [setupFlow, setSetupFlow] = useState<{ resume: boolean } | null>(null);
+  const setupOpen = setupFlow !== null || qsState.status === 'running';
+  useEffect(() => {
+    if (!game || !openSetupOnArrival.current) return;
+    openSetupOnArrival.current = false;
+    // Always, even with nothing to fill: the plan and the route at the end are the point of arriving
+    // from the composer (Ahiya: "the game is ready, then it shows him the plan"), not only the fields.
+    setSetupFlow({ resume: false });
+  }, [game]);
   // WHICH mission the flow is on, for the guided mission editor (change:
   // quick-setup-guided-editor). Resolved from the step itself so it is right the
   // moment the flow is on screen, before the navigation effect has written
@@ -952,7 +1017,7 @@ export default function BuilderPage() {
   //    declares ONLY its own eligibility; `GuidanceProvider` decides which single
   //    one may be on screen, using the order in lib/builderGuidance.ts. Declared
   //    here, above the early returns, because these are hooks (React #300).
-  const qsWantsScreen = qsState.status === 'welcome' || Boolean(qsStep) || qsCelebrating;
+  const qsWantsScreen = setupOpen || qsState.status === 'welcome' || Boolean(qsStep) || qsCelebrating;
   const qsVisible = useGuidanceSlot('quick-setup', qsWantsScreen);
   const nudgeVisible = useGuidanceSlot(
     'ready-nudge',
@@ -1089,6 +1154,12 @@ export default function BuilderPage() {
   const dispatchQs = useCallback((action: QuickSetupAction) => {
     setQsState((prev) => quickSetupReducer(prev, action, qsCtx));
   }, [qsCtx]);
+  // Leaving the walk is leaving Quick Setup: recorded as `closed` like the card's ✕ always was, so the
+  // invitation is not offered again on this game and the menu still resumes it.
+  const closeSetupFlow = useCallback(() => {
+    setSetupFlow(null);
+    setQsState((prev) => (prev.status === 'running' || prev.status === 'welcome' ? quickSetupReducer(prev, { type: 'close' }, qsCtx) : prev));
+  }, [qsCtx]);
 
   /**
    * What the flow needs to SAY about a step: which copy slot to speak from, and —
@@ -1184,6 +1255,35 @@ export default function BuilderPage() {
       {/* The one-time invitation. Offered on a freshly cloned template rather than
           waiting to be discovered — and it moves nothing on the canvas until the
           creator accepts, so declining costs exactly one click. */}
+      {setupOpen && game && (
+        <SetupFlow
+          game={game}
+          steps={setupSteps}
+          resume={setupFlow?.resume !== false}
+          onRegenerate={(stageId, taskId) => {
+            const src = game.stages.find((st) => st.id === stageId)?.tasks.find((x) => x.id === taskId);
+            const next = regenerateMissionIn(game, src, user?.uid, () => { void dialog.alert(t.builder.regenerateNothingLeft); });
+            if (!next) return false;
+            setGame({
+              ...game,
+              stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === taskId ? next : x) }),
+            });
+            return true;
+          }}
+          onTaskChange={(stageId, task) => setGame({
+            ...game,
+            stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === task.id ? task : x) }),
+          })}
+          onGameChange={setGame}
+          gameAnchors={(game.stages ?? []).flatMap((st) => st.tasks ?? []).map((x) => x.coordinates).filter(isPlacedCoord)}
+          onDone={closeSetupFlow}
+          onLaunch={() => { closeSetupFlow(); void saveAndLaunch(false); }}
+          onEditMyself={(stageId, taskId) => {
+            closeSetupFlow();
+            if (stageId && taskId) goToQuickSetupStep({ id: 'edit-myself', stageId, taskId, targetFieldPath: 'title', instructionPrompt: '', isRequired: false });
+          }}
+        />
+      )}
       {qsVisible && qsState.status === 'welcome' && (
         <QuickSetupWelcome
           remaining={qsOutstanding.length}
@@ -1195,7 +1295,7 @@ export default function BuilderPage() {
           `qsCardInline`), so exactly ONE instruction is ever on screen — which is
           what let `reserveTop` and the 62dvh/88dvh height branch be deleted rather
           than re-tuned (change: builder-mission-editor-route, design D5). */}
-      {qsVisible && qsStep && !qsCardInline && (
+      {qsVisible && qsStep && !qsCardInline && !setupOpen && (
         <QuickSetupBar
           step={qsStep}
           index={quickSetupProgress(qsState, qsSteps).step - 1}
@@ -1702,7 +1802,7 @@ export default function BuilderPage() {
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
         {activeTab === 'build' && <StepStages game={game} setGame={setGame} onUndo={undo} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
-          quickSetupInlineBar={qsVisible && qsStep && qsCardInline ? (
+          quickSetupInlineBar={qsVisible && qsStep && qsCardInline && !setupOpen ? (
             <QuickSetupBar
               inline
               /* Guided is the layout that puts this card in its own column from
@@ -3111,48 +3211,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
    *     admin's edit is picked up by the next press.
    */
   function regeneratedTaskFor(source: Task | undefined): Task | null {
-    if (!source) return null;
-
-    // The SLOT's role, not the task's: whatever mission ends up first has to be
-    // one a group can walk up to and begin with, and the bank tags its openers
-    // and finales for exactly that reason. Found in the browser — the first real
-    // press replaced this game's opening mission with a mid-game one.
-    const si = game.stages.findIndex((st) => st.tasks.some((t) => t.id === source.id));
-    const ti = si < 0 ? -1 : game.stages[si].tasks.findIndex((t) => t.id === source.id);
-    const role = missionRoleAt(si, ti, game.stages.length, si < 0 ? 0 : game.stages[si].tasks.length);
-
-    void loadMissionBank();
-    void loadMissionStats();
-    const offeredKeys = readOfferedKeys(user?.uid, game.id, source.id);
-    const picked = chooseRegeneratedMission({
-      bank: missionBankNow(),
-      profile: missionTagProfile(source, role),
-      context: regenerateContext(game, source),
-      drift: offeredKeys.length,
-      offeredKeys,
-      seed: seedFor(source.id, offeredKeys.length),
-      taste: readTaste(user?.uid),
-      missionStats: missionStatsNow(),
-    });
-    if (!picked) { void dialog.alert(b.regenerateNothingLeft); return null; }
-
-    let built: Task;
-    try {
-      built = picked.build();
-    } catch {
-      // A bank entry that cannot build is a content defect, not a reason to take
-      // the Builder down with it.
-      void dialog.alert(b.regenerateNothingLeft);
-      return null;
-    }
-
-    recordOfferedKey(user?.uid, game.id, source.id, picked.key);
-    // composer-v2-taste: swapping a mission away says "not this kind".
-    writeTaste(user?.uid, recordTaste(readTaste(user?.uid), tasteTagsForTask(source, missionBankNow()), -1));
-    // composer-v2-learning: a bank mission swapped away teaches the bank. Fire-and-forget.
-    const swappedKey = bankKeyForTask(source, missionBankNow());
-    if (swappedKey) void recordMissionSignals({ swapped: [swappedKey] }).catch(() => undefined);
-    return applyRegeneratedMission(source, built);
+    return regenerateMissionIn(game, source, user?.uid, () => { void dialog.alert(b.regenerateNothingLeft); });
   }
 
   /**

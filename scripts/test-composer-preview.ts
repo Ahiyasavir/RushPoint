@@ -84,8 +84,10 @@ console.log('\n── 1. the preview matches the game that gets built ───�
               mismatch ||= `${audience}/${setting}/${difficultyPreference}/${minutes}m/s${seed}: preview said impossible, build succeeded`;
               continue;
             }
-            if (built.usedBankKeys.length !== preview.missionCount) {
-              mismatch ||= `${audience}/${setting}/${difficultyPreference}/${minutes}m/s${seed}: previewed ${preview.missionCount}, built ${built.usedBankKeys.length}`;
+            // The preview counts what ONE team plays; choice missions (composer-variety) come on top.
+            const perTeam = built.usedBankKeys.length - built.extraTaskIds.length;
+            if (perTeam !== preview.missionCount) {
+              mismatch ||= `${audience}/${setting}/${difficultyPreference}/${minutes}m/s${seed}: previewed ${preview.missionCount}, built ${perTeam}`;
             }
           }
         }

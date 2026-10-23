@@ -2806,6 +2806,9 @@ export const TASK_BANK: TaskBankEntry[] = [
       description: 'תלכו למקום שבתמונה.',
       type: 'geofence',
       estimatedMinutes: 8,
+      // The puzzle IS finding the place: a visible pin would solve it (23.10 audit).
+      hideLocation: true,
+      locationClue: 'המקום שבתמונה שמצורפת למשימה',
       // A public spot, not a shared object — any number of teams can arrive.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
@@ -2818,17 +2821,21 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'mixed', 'hard', 'neighborhood', 'cityCenter', 'park', 'navigation', 'puzzle'],
     difficulty: 8,
     transitMinutes: 8,
+    // The emoji line lives in the CLUE: a hidden mission shows its team only the clue until they
+    // arrive, and a visible pin would solve the riddle for them (23.10 audit).
     setup: [
       PLACE_IT,
       {
-        field: 'description',
+        field: 'locationClue',
         required: true,
         prompt: 'תכתבו את שורת האימוג׳ים שמרמזת על המקום, כל אימוג׳י מילה אחת.\n\nWrite the emoji line that hints at the spot, one emoji per word.',
       },
     ],
     build: () => sited({
       title: 'חידת אימוג׳ים',
-      description: 'תלכו למקום שהאימוג׳ים האלה מתארים: [הוראות ליוצר: תכתבו כאן את שורת האימוג׳ים, אימוג׳י אחד לכל מילה].',
+      description: 'תלכו למקום שהאימוג׳ים ברמז מתארים.',
+      hideLocation: true,
+      locationClue: '[הוראות ליוצר: תכתבו כאן את שורת האימוג׳ים, אימוג׳י אחד לכל מילה]',
       type: 'geofence',
       difficulty: 8,
       estimatedMinutes: 5,
@@ -2886,6 +2893,9 @@ export const TASK_BANK: TaskBankEntry[] = [
       title: 'מאיפה צולמה התמונה',
       description: 'תגיעו לנקודה המדויקת שממנה צולמה התמונה.',
       type: 'geofence',
+      // The puzzle IS finding the spot: a visible pin would solve it (23.10 audit).
+      hideLocation: true,
+      locationClue: 'הנקודה שממנה צולמה התמונה שמצורפת למשימה',
       difficulty: 7,
       estimatedMinutes: 7,
       pointValue: 160,
@@ -2902,7 +2912,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     // Needs a crowd, so the team walks to where people actually are.
     transitMinutes: 5,
-    setup: [PLACE_IT],
+    // A sheet and a pen are not something every team carries (L30), so the creator hands them out.
+    setup: [PLACE_IT, {
+      field: 'description',
+      required: true,
+      prompt: 'לפני המשחק תכינו לכל קבוצה דף ועט. בלי זה אין על מה לאסוף חתימות.\n\nBefore the game, give every team a sheet of paper and a pen. Without them there is nothing to collect signatures on.',
+    }],
     build: () => sited({
       title: 'העצומה האבסורדית',
       description: 'תכתבו על דף: "מפסיקים את האבסורד: חותמים עכשיו על העצומה לביטול חובת הרישיון לרכיבה על חמורים ומחזירים את ההיגיון לרחובות!" תספרו לאנשים ברחוב שזה חלק ממשחק, תאספו 15 חתימות, ותצלמו את הדף.',
@@ -2968,7 +2983,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'שיווק שמפו',
-      description: 'תמכרו את השמפו שבקופסה לאדם זר בלפחות 10 שקלים, ותצטלמו איתו.',
+      description: 'תמכרו את השמפו שבקופסה לאדם זר בלפחות 10 שקלים. סרטון קצר שבו הוא מחזיק את השמפו ואומר כמה שילם.',
       type: 'photo',
       // Re-priced 2 → 9 (rule 75). Harvested at 2 from the source template and
       // never checked: this is find a willing stranger, pitch, agree a price,
@@ -3191,7 +3206,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'המפתח החבוי',
-      description: 'תמצאו את המפתח שפותח את [הוראות ליוצר: מה בדיוק נעול], ותכתבו כאן את הקוד שבפנים. אחר כך תחזירו את המפתח בדיוק למקום.',
+      description: 'מוחבא כאן מפתח שפותח [הוראות ליוצר: מה בדיוק נעול]. מצאו אותו, והכניסו את הקוד שמצאתם. בסיום תחזירו את המפתח בדיוק למקום.',
       // A code entry since 2026-10-22: the founder's own edit on the admin page asks
       // the team to type "the code you found" inside the box, while the mission still
       // asked for a photo, so production showed one instruction and checked another.
@@ -3374,11 +3389,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'description',
       required: true,
-      prompt: 'תקבעו מה החפץ שכל קבוצה מקבלת בהתחלה, וכמה זמן יש להם. תכינו אותו מראש לכל קבוצה.\n\nDecide what object each team starts with, and how long they get. Prepare one per team in advance.',
+      prompt: 'לפני המשחק תכינו לכל קבוצה חפץ קטן אחד, אותו חפץ לכולם (למשל עיפרון או פקק), ותחלקו אותו בהתחלה.\n\nBefore the game, prepare one small object per team, the same object for everyone (a pencil or a bottle cap), and hand it out at the start.',
     }],
     build: () => anywhere({
       title: 'סחר חליפין',
-      description: 'הציעו את החפץ שבידכם לאנשים ברחוב, וקבלו כל הצעת חילופין, לא משנה מה. תמשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
+      description: 'קיבלתם חפץ קטן. הציעו אותו לאנשים ברחוב, וקבלו כל הצעת חילופין, לא משנה מה. תמשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
       type: 'photo',
       difficulty: 8,
       estimatedMinutes: 15,
@@ -3446,7 +3461,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => codeStation({
       title: 'מנת השף',
-      description: 'לכו ל[הוראות ליוצר: הדוכן או המקום] ובקשו מיץ גזר עם לימון. תקבלו איתו קוד, הקלידו אותו כאן.',
+      description: 'לכו ל[הוראות ליוצר: להכניס את המקום] ובקשו מיץ גזר עם לימון. תקבלו איתו קוד, הקלידו אותו כאן.',
       difficulty: 3,
       estimatedMinutes: 6,
       pointValue: 110,
@@ -3606,17 +3621,17 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'תתארו נקודת התחלה ברורה וקבועה (למשל "משער בית הספר"), כדי שהצוות ידע בדיוק מאיפה לספור עד הסיכה.\n\nDescribe a clear, fixed starting point (for example "from the school gate"), so the team knows exactly where to count from.',
+        prompt: 'תכתבו נקודת התחלה ונקודת סיום ברורות וקבועות (למשל "משער בית הספר" ו"הספסל הראשון בגינה"), כדי שהצוות ידע בדיוק מאיפה עד איפה לספור.\n\nWrite a clear, fixed start point and end point (for example "the school gate" and "the first bench in the garden"), so the team knows exactly where to count from and to.',
       },
       {
         field: 'numericAnswer',
         required: true,
-        prompt: 'לפני המשחק: תלכו בעצמכם מנקודת ההתחלה עד כאן ותספרו את הצעדים. תכתבו את המספר האמיתי.\n\nBefore the game: walk it yourself from the starting point to here and count the steps. Enter the real number.',
+        prompt: 'לפני המשחק: תלכו בעצמכם מנקודת ההתחלה עד נקודת הסיום ותספרו את הצעדים. תכתבו את המספר האמיתי.\n\nBefore the game: walk it yourself from the start point to the end point and count the steps. Enter the real number.',
       },
     ],
     build: () => sited({
       title: 'הליכה',
-      description: 'כמה צעדים לוקח לכם להגיע מ[הוראות ליוצר: נקודה ראשונה] ל[הוראות ליוצר: נקודה שנייה]?',
+      description: 'כמה צעדים לוקח לכם להגיע מ[הוראות ליוצר: נקודה ראשונה] ל[הוראות ליוצר: נקודה שנייה]',
       type: 'numeric',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -3717,23 +3732,25 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'cityCenter', 'neighborhood', 'park', 'corporate', 'adults', 'youth', 'hard', 'navigation', 'puzzle'],
     difficulty: 7,
     transitMinutes: 10,
+    // The riddle lives in the CLUE: until arrival a hidden mission shows its team only the clue, so a
+    // riddle in the description was a mission with nothing to solve (23.10 audit).
     setup: [
       PLACE_IT,
       {
-        field: 'description',
+        field: 'locationClue',
         required: true,
         prompt: 'תחליפו את הסוגריים ברמז למקום, בלי השם שלו, למשל "שבו נשבעים לשמור על העיר". תבדקו שאפשר לפענח אותו מנקודת הפתיחה.\n\nReplace the brackets with a clue to the place, without its name. Make sure it can be worked out from the starting point.',
       },
     ],
     build: () => sited({
       title: 'ניווט לפי רמז',
-      description: 'תנווטו למקום ש[הוראות ליוצר: הרמז, בלי שם המקום].',
+      description: 'תנווטו למקום שהרמז מתאר.',
       type: 'geofence',
       difficulty: 7,
       estimatedMinutes: 6,
       pointValue: 160,
       hideLocation: true,
-      locationClue: '',
+      locationClue: 'תנווטו למקום ש[הוראות ליוצר: הרמז, בלי שם המקום].',
       hint: 'תקראו את הרמז שוב בקול. לרוב התשובה כבר שם.',
       hintPenalty: 25,
       // A public spot, not a shared object — any number of teams can arrive.
@@ -4484,13 +4501,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'תלמידים לרגע',
-      description: 'המציאו עכשיו לחיצת יד משלכם עם אדם זר של לפחות 4 תנועות.',
+      description: 'תמציאו לחיצת יד משלכם של לפחות 4 תנועות, ותלמדו אותה אדם זר. סרטון שבו הוא עושה אותה איתכם מההתחלה ועד הסוף.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 10,
       pointValue: 170,
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
-      hint: 'רמז: שלוש תנועות פשוטות נלמדות בשלושים שניות. אם הזר מתבלבל, המצאתם משהו מסובך מדי. תפשטו ותנסו שוב.',
+      hint: 'רמז: ארבע תנועות פשוטות נלמדות בחצי דקה. אם הזר מתבלבל, המצאתם משהו מסובך מדי. תפשטו ותנסו שוב.',
       hintPenalty: 20,
     }),
   },
@@ -4595,7 +4612,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'תתארו לי בלי להגיד',
-      description: 'אחד מכם עומד עם הגב לחדר ולא מציץ. השאר בוחרים חפץ אחד ומתארים אותו במילים בלבד: בלי להגיד מה זה, בלי להצביע, ובלי להשתמש במילה שקשורה למה שעושים איתו. הוא מנחש בקול. כשהוא צודק, הוא מסתובב, ואתם מצלמים אותו מחזיק את החפץ.',
+      description: 'אחד מכם עומד עם הגב לחדר ולא מציץ. השאר בוחרים חפץ אחד ומתארים אותו במילים בלבד: בלי להגיד מה זה, בלי להצביע, ובלי להשתמש במילה שקשורה למה שעושים איתו. סרטון אחד, מהמילה הראשונה ועד שהוא מנחש נכון ומסתובב עם החפץ ביד.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 8,
@@ -5089,6 +5106,12 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'reverse-shoplifting',
     sourceTemplateKey: 'mission-studio',
+    // Optional prep: a team can always find something to leave, but notes or chalk make it certain.
+    setup: [{
+      field: 'description',
+      required: false,
+      prompt: 'לפני המשחק כדאי לתת לכל קבוצה כמה פתקים ועט, או גיר. ככה לכל קבוצה יש מה להשאיר.\n\nBefore the game, it helps to give every team a few notes and a pen, or some chalk, so every team has something to leave.',
+    }],
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'park', 'neighborhood', 'cityCenter', 'school', 'beach', 'kindness'],
     difficulty: 3,
     // SF0's "reverse shoplifting". The first draft included a coin on a machine;
@@ -5122,7 +5145,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'numericAnswer',
         required: true,
-        prompt: 'תכתבו את הקוד המלא, ארבע הספרות לפי הסדר.\n\nEnter the full code, the four digits in order.',
+        prompt: 'תכתבו את הקוד המלא, ארבע הספרות לפי הסדר. הספרה הראשונה לא 0, כי מספר שמתחיל ב 0 מאבד אותה.\n\nEnter the full code, the four digits in order. The first digit must not be 0: a number starting with 0 loses it.',
       },
     ],
     build: () => sited({
@@ -6137,7 +6160,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'תחביאו קופסה סגורה עם חפץ ראשון ליד ציון דרך בנקודה, ותחליפו את הסוגריים בשמו. אל תמחקו את שאר ההוראות.\n\nHide a closed box with a first object by a landmark at the pin, and replace the brackets with it. Do not delete the rest.',
+        prompt: 'לפני המשחק תחביאו קופסה סגורה עם חפץ ראשון בתוכה, ליד משהו בולט בנקודה, כדי שגם לקבוצה הראשונה יהיה מה להחליף.\n\nBefore the game, hide a closed box with a first object inside, by something easy to spot at the pin, so the first team has something to swap too.',
       },
     ],
     build: () => sited({
@@ -6645,7 +6668,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'answers',
         required: true,
-        prompt: 'תשימו בקופסה בנקודה חמישה חפצים שהאות הראשונה שלהם יוצרת מילה, למשל פקק, ענב, מטבע = פעם. תכתבו כאן את המילה.\n\nPut five objects in a box at the pin whose first letters spell a word. Enter the word here.',
+        prompt: 'תשימו בקופסה בנקודה חמישה חפצים שהאות הראשונה שלהם יוצרת מילה, למשל מטבע, ספוג, גזר, רימון, תפוח = מסגרת. תכתבו כאן את המילה.\n\nPut five objects in a box at the pin whose first letters spell a five letter word. Enter the word here.',
       },
     ],
     build: () => sited({
@@ -6800,7 +6823,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'five-cities',
     family: 'farthest',
     sourceTemplateKey: 'mission-studio',
-    tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'historic', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'hunt'],
+    // Strangers sign, so the team needs a pen: not every team carries one (L30). That is real prep.
+    setup: [{
+      field: 'description',
+      required: true,
+      prompt: 'לפני המשחק תנו לכל קבוצה עט ופתק. לא לכל אחד יש קבלה בכיס, ובלי עט אין חתימות.\n\nBefore the game, give every team a pen and a slip of paper. Not everyone has a receipt on them, and without a pen there are no signatures.',
+    }],
+    tags: ['action', 'teamwork', 'needsSetup', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'historic', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'hunt'],
     difficulty: 5,
     build: () => anywhere({
       title: 'חמש ערים',

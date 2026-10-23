@@ -40,6 +40,26 @@ export function parseSentence(template: unknown): SentencePart[] {
   return parts;
 }
 
+/**
+ * A bare bracket written by an admin ("[נקודה ראשונה]", "[להכניס את המקום]") turned into a creator
+ * blank ("[הוראות ליוצר: נקודה ראשונה]").
+ *
+ * The admin mission page stores the founder's own wording, and he writes a blank the natural way,
+ * as a plain bracket. Only the marked form is a blank to the setup walk and to Quick Setup's "done
+ * yet?" check, so a plain bracket was never asked for and reached players verbatim (found 23.10 in
+ * how-many-steps, vendor-secret-code). No bank text uses a bracket meant for players, so every
+ * unmarked bracket is the creator's. Pure and total; a marked bracket is left exactly as it is.
+ */
+export function asCreatorBlanks(text: string): string {
+  if (typeof text !== 'string' || !text.includes('[')) return text;
+  return text.replace(/\[([^\]\n]*)\]/g, (whole, inner: string) => {
+    if (new RegExp(SLOT.source, 'i').test(whole)) return whole;
+    const words = inner.trim();
+    if (words === '') return whole;
+    return /[\u0590-\u05FF]/.test(words) ? `[הוראות ליוצר: ${words}]` : `[creator: ${words}]`;
+  });
+}
+
 export function hasOpenSlots(text: unknown): boolean {
   return parseSentence(text).some((p) => p.kind === 'slot');
 }
