@@ -1,0 +1,53 @@
+# The iPhone join check from the deploy checklist, in REAL Mobile Safari on an iOS Simulator
+# (scripts/ios-sim/ios-sim-joins.mjs). Runs against PRODUCTION, on demand only.
+#   gh workflow run ios-sim-joins.yml --ref ios-sim-join-check -f run_code=AT4GB7
+name: iPhone joins (iOS Simulator)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_code: { description: 'Access code of a LIVE test run', required: true }
+      rounds: { description: 'Joins to make', required: false, default: '10' }
+  push:
+    branches: [ios-sim-join-check]
+    paths: ['scripts/ios-sim/**', '.github/workflows/ios-sim-joins.yml']
+
+jobs:
+  joins:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      RUN_CODE: ${{ inputs.run_code || 'AT4GB7' }}
+      ROUNDS: ${{ inputs.rounds || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: scripts/ios-sim }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Boot an iPhone simulator
+        run: |
+          xcodebuild -version
+          UDID=$(xcrun simctl list devices available -j | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0)).devices;
+            const ios = Object.entries(d).filter(([rt]) => /iOS/.test(rt)).sort(([a], [b]) => b.localeCompare(a, undefined, { numeric: true }));
+            for (const [rt, list] of ios) { const p = list.find((x) => /^iPhone \d+$/.test(x.name)) || list.find((x) => /^iPhone/.test(x.name)); if (p) { console.error(rt, p.name); console.log(p.udid); break; } }')
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Start safaridriver
+        run: |
+          sudo safaridriver --enable
+          safaridriver -p 4444 > safaridriver.log 2>&1 &
+          sleep 3
+      - name: Ten joins in Mobile Safari
+        working-directory: scripts/ios-sim
+        run: |
+          npm install --no-save --no-audit --no-fund selenium-webdriver@4.27.0
+          node ios-sim-joins.mjs
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sim-joins
+          path: |
+            scripts/ios-sim/ios-sim-out
+            safaridriver.log
