@@ -1533,6 +1533,10 @@ export async function completeTaskForTeam(
     // function of the stored team document.
     awardOverride?: number;
     outcomeId?: string;
+    // A STAFF decision may complete a mission the team no longer holds (an organizer approving a
+    // photo after routing the team elsewhere). Every participant door leaves this unset, so the
+    // holding rule below is the default and a new door cannot forget it.
+    allowUnheld?: boolean;
   },
 ): Promise<{ completed: boolean; heldSlot: boolean }> {
   // Returns { completed, heldSlot }. `completed` is TRUE only when this call
@@ -1652,6 +1656,12 @@ export async function completeTaskForTeam(
     // other team's reservation and silently defeat the station cap. Mirrors the
     // checkOutTask in-flight test.
     const heldSlot = team.activeTaskId === taskId || taskRec.status === 'assigned';
+    // Holding the mission (deploy check 2026-10-23, see assertTeamHoldsTask): re-checked here, on the
+    // record read inside this transaction, so a mission released between a door's early check and
+    // this commit cannot be scored. Placed after the terminal no-op so a replay stays a no-op.
+    if (!heldSlot && !extras?.allowUnheld) {
+      throw new functions.https.HttpsError('failed-precondition', NOT_HELD_MSG, { reason: 'not-held' });
+    }
 
     // Stage-lock enforcement: a completion may only land in the team's ACTIVE
     // stage. A task in a locked (future / scheduled-gated) or already-completed
@@ -5024,7 +5034,9 @@ export const revealTaskAnswer = loggedCallable('revealTaskAnswer', async (data, 
       // what the creator is waiting for, and must not fail over a review stamp.
       const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
       const teamSnap = await teamRef.get();
-      const submissions = (teamSnap.data() as { taskSubmissions?: Record<string, RawSubmission> } | undefined)?.taskSubmissions;
+      // Approving completes the mission, so it must be the one the team is on.
+      if (teamSnap.exists) assertTeamHoldsTask(teamSnap.data() as RunTeam, taskId);
+      const submissions =(teamSnap.data() as { taskSubmissions?: Record<string, RawSubmission> } | undefined)?.taskSubmissions;
       if (submissions?.[taskId]) {
         await teamRef.set(
           { taskSubmissions: { [taskId]: { status: 'approved', reviewedAt: now } } },
@@ -6235,6 +6247,9 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
 
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   assertTeamMayAdvance(team); // staff-console-field-ops — no check-in while held
+  // Same order as every other door: the stage first (its refusal names the reason), then holding.
+  assertStageActiveForTask(team, taskId);
+  assertTeamHoldsTask(team, taskId);
   const now = new Date().toISOString();
   const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
   // Set by the proximity gate below when the grace window let a coarse fix through
@@ -6810,6 +6825,34 @@ function routedHereByOperator(team: RunTeam, taskId: string): boolean {
   return false;
 }
 
+// Holding the mission (deploy check 2026-10-23): a team may only act on the mission it was HANDED.
+// Every assignment path (routing's claim, forceAssignTask, applyRoute, returnTeamTo) sets the record
+// to 'assigned' and the team's activeTaskId together, so a record still 'unassigned' that is not the
+// activeTaskId was never given to this team. Production proved the hole: a team that routing had just
+// answered `stationsFull` completed a capped station ANOTHER team held and scored 100, defeating the
+// cap and the routing at once. There is no mode in which a player picks their own mission, so the
+// rule is total. A TERMINAL record (completed / skipped) passes on purpose: completeTaskForTeam folds
+// it to the idempotent no-op a duplicate submission has always received. Called BEFORE any grading,
+// so an unheld mission is not an answer oracle and records no attempt, step or submission;
+// completeTaskForTeam re-checks the same thing inside its transaction.
+const NOT_HELD_MSG = 'This mission is not the one your team is on';
+
+export function teamHoldsTask(team: Pick<RunTeam, 'stages' | 'activeTaskId'>, taskId: string): boolean {
+  if (team.activeTaskId === taskId) return true;
+  for (const s of team.stages ?? []) {
+    const rec = (s.tasks ?? []).find((t) => t.taskId === taskId);
+    if (rec) return rec.status !== 'unassigned';
+  }
+  // No record: completeTaskForTeam already treats an unknown task as a no-op.
+  return true;
+}
+
+export function assertTeamHoldsTask(team: Pick<RunTeam, 'stages' | 'activeTaskId'>, taskId: string): void {
+  if (!teamHoldsTask(team, taskId)) {
+    throw new functions.https.HttpsError('failed-precondition', NOT_HELD_MSG, { reason: 'not-held' });
+  }
+}
+
 // WO-2 oracle guard: reject a submission whose stage the team has NOT YET reached
 // (a locked / future / scheduled-gated stage) — that is the only oracle a probe
 // could exploit (a wrong vs a correct answer on a locked stage now throw the
@@ -6963,6 +7006,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // computation (and before the attempt-limit read, so a probe consumes no slot).
   // A wrong and a correct answer on a locked stage now throw the identical error.
   assertStageActiveForTask(team, taskId);
+  assertTeamHoldsTask(team, taskId);
 
   // Optional presence gate (change: quiz-location-verification): when the creator
   // opted this task into requirePresence AND it has real coordinates, the submitted
@@ -7361,6 +7405,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   // stage throws the identical error regardless of step-answer correctness,
   // before any step-progress read/write.
   assertStageActiveForTask(team, taskId);
+  assertTeamHoldsTask(team, taskId);
   // Task expiry (change: task-expiry): a closed task takes no more steps.
   await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task, team);
 
