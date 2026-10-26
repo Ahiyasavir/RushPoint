@@ -71,7 +71,7 @@ async function recordStationCodeAttempt(
 
 
 import { createRunStaffInvite, resolveStaffRun } from './runs/staffInvite';
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamMayAdvance, closeTaskForAllTeams, assertWithinTimeLimit, assertRunOpenAt } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamHoldsTask, assertTeamMayAdvance, closeTaskForAllTeams, assertWithinTimeLimit, assertRunOpenAt } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { flashClaimVerdict, resumedStartedAt, type FlashMissionDoc } from '@rushpoint/shared';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
@@ -1868,6 +1868,8 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   // wrong code and a correct code on a locked stage now throw the identical
   // "stage not active" error instead of 'Incorrect code' vs a stage error.
   assertStageActiveForTask(team, taskId);
+  // Only the station the team was handed (deploy check 2026-10-23), also before the comparison.
+  assertTeamHoldsTask(team, taskId);
 
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -2164,6 +2166,9 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   //  2. if the task is already completed, or its submission is already approved,
   //     return an idempotent no-op WITHOUT writing.
   assertStageActiveForTask(team, taskId);
+  //  3. only the mission the team was handed (deploy check 2026-10-23): no submission row, pending
+  //     or approved, for a mission another team holds or routing never gave this one.
+  assertTeamHoldsTask(team, taskId);
   // wave-h #3: an EXPIRED / not-yet-RELEASED photo task is refused, same gate as
   // completeTask/verifyStationCode (the shared completeTaskForTeam choke point never
   // carried it). Placed here so the existing stage-active / idempotency / slot
@@ -2484,8 +2489,10 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   // not active - the submission stays pending and the reviewer sees the error, instead of a record
   // that says approved over a mission that never completed. Pinned by
   // scripts/test-review-approval-order.ts.
+  // allowUnheld: the photo was sent while the team held the mission (submitStationPhoto refuses it
+  // otherwise); a reviewer approving it after the team was routed elsewhere is an organizer decision.
   const completed = approved
-    ? (await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now)).completed
+    ? (await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now, { allowUnheld: true })).completed
     : false;
 
   // merge:true deep-merges this into the existing submission, preserving

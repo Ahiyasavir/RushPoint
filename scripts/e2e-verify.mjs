@@ -177,6 +177,17 @@ async function expectError(label, promise, opts = {}) {
   }
 }
 
+// Completion requires holding the mission (deploy check 2026-10-23): every participant door refuses
+// a mission the team was never handed. A scenario that wants to act on a SPECIFIC mission hands it
+// to the team first, the way an organizer would (forceAssignTask), instead of relying on routing's
+// pick. A no-op when the team already holds it or the record is terminal.
+async function handTo(owner, { ownerUid, gameId, runId }, teamId, taskId, extra = {}) {
+  const t = (await owner.getDocAt(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`)).data ?? {};
+  const rec = (t.stages ?? []).flatMap((s) => s.tasks ?? []).find((r) => r.taskId === taskId);
+  if (t.activeTaskId === taskId || !rec || rec.status !== 'unassigned') return;
+  await owner.call('forceAssignTask', { ownerUid, gameId, runId, teamId, taskId, ...extra });
+}
+
 // DEV AID ONLY (change: spark-tier-location-load): `--only=<substring>` runs just the
 // scenarios whose name matches, so a red-green loop on one scenario does not cost a full
 // suite run. The gate NEVER passes it, and an active filter is announced loudly on both
@@ -1110,6 +1121,12 @@ async function main() {
   }
   check('submitStationPhoto still rejects ANOTHER team folder on an emulator URL', emuOtherTeamRejected);
 
+  // Completion requires holding the mission (deploy check 2026-10-23). Routing handed this team the
+  // AUDIO task (the sanitizer check below reads it), so read that payload now, then hand the team the
+  // photo task every submission below is about, as an organizer would.
+  const stateBeforePhoto = await player.call('getMyTeamState', { code: accessCode });
+  await handTo(creator, { ownerUid: creatorCred.user.uid, gameId, runId }, playerCred.user.uid, PHOTO_TASK_ID);
+
   // [attached-phone-uploads] An ATTACHED phone that holds control must be able to send media.
   // The client used to upload into the TEAM folder (runs/{run}/teams/{teamId}/…), which every
   // server gate refuses for a device whose uid is not the team id. These assertions pin the
@@ -1212,9 +1229,9 @@ async function main() {
   // client renders the recorder instead of the photo picker.
   // play-task-gating (wave D): only the ASSIGNED task is shipped, and the audio
   // task is the one routing assigns in this stage (it is locationless), so this
-  // reads the task the team actually holds. Its located sibling (the photo task,
-  // submitted directly below) is correctly absent from the payload.
-  const audioTaskSan = (state?.activeStageTasks ?? []).find((t) => t.id === AUDIO_TASK_ID);
+  // reads the payload captured while the team held it, before the photo task was
+  // handed over above.
+  const audioTaskSan = (stateBeforePhoto?.activeStageTasks ?? []).find((t) => t.id === AUDIO_TASK_ID);
   check('sanitized audio task exposes smart.captureKind === "audio"',
     audioTaskSan?.smart?.captureKind === 'audio', JSON.stringify(audioTaskSan?.smart ?? {}));
 
@@ -1445,6 +1462,8 @@ async function main() {
     JSON.stringify(feedItemsAfterVideo.map((f) => f?.taskId)));
 
   // ── 9. Complete the final plain task ────────────────────────────────────────
+  // A review routes nobody on; the phone asks for the next mission (requestNextTask).
+  await player.call('requestNextTask', { ownerUid: creatorCred.user.uid, gameId, runId });
   const completeRes = await player.call('completeTask', {
     taskId: PLAIN_TASK_ID, code: accessCode, lat: 31.8, lng: 35.17,
   });
@@ -2273,6 +2292,7 @@ async function main() {
   const pbT = makeParty('pbTester'); await signInAnonymously(pbT.auth);
   await pbT.call('joinRun', { code: cPBT, displayName: 'Desk tester' });
   await creator.call('startTeams', { gameId: gPB, runId: rPBT });
+  await handTo(creator, { ownerUid: creatorCred.user.uid, gameId: gPB, runId: rPBT }, pbT.auth.currentUser.uid, 'pb-field');
   const farCheckIn = await pbT.call('completeTask', { taskId: 'pb-field', code: cPBT, ...FAR });
   check('test run ACCEPTS a far-away completeTask (desk rehearsal)', farCheckIn?.ok === true, JSON.stringify(farCheckIn));
   const farArrival = await pbT.call('reportArrival', { taskId: 'pb-hidden', code: cPBT, ...FAR });
@@ -2283,6 +2303,7 @@ async function main() {
   const pbN = makeParty('pbReal'); await signInAnonymously(pbN.auth);
   await pbN.call('joinRun', { code: cPBN, displayName: 'Real player' });
   await creator.call('startTeams', { gameId: gPB, runId: rPBN });
+  await handTo(creator, { ownerUid: creatorCred.user.uid, gameId: gPB, runId: rPBN }, pbN.auth.currentUser.uid, 'pb-field');
   await expectError('real run REJECTS the same far-away completeTask (SPOOF holds)',
     pbN.call('completeTask', { taskId: 'pb-field', code: cPBN, ...FAR }),
     { codeIn: ['functions/failed-precondition'], match: /too far/i });
@@ -2542,6 +2563,93 @@ async function main() {
 
   }); // scenario: completeTask type gate
 
+  await scenario('completion requires holding the mission (every participant door)', async () => {
+    // Production probe 2026-10-23: a team whose requestNextTask had just answered
+    // `stationsFull` called completeTask on a capped station ANOTHER team held and the
+    // server stored it `completed` with 100 points, bypassing both the station cap and
+    // routing. Every participant door must refuse a mission the team was never handed
+    // (record not `assigned`, not its activeTaskId), change nothing, and still let the
+    // holder finish it.
+    const OWNER = creatorCred.user.uid;
+    // Located (a locationless mission is uncapped) but `instant`, so no GPS and no arrival seal:
+    // the only thing standing between the intruder and the points is whether it holds the mission.
+    const loc = { coordinates: { lat: 31.78, lng: 35.21 }, triggerMode: 'instant', difficulty: 2, estimatedMinutes: 3, pointValue: 100, maxConcurrentTeams: 1 };
+    const { gameId: hg } = await creator.call('createGame', { title: 'Held Mission Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: hg,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'hm-s1', order: 0, title: 'Capped', tasks: [
+          { ...loc, id: 'hm-check', title: 'Check in', type: 'self_report' },
+          { ...loc, id: 'hm-quiz', title: 'Quiz', type: 'quiz', answers: ['yes'] },
+          { ...loc, id: 'hm-seq', title: 'Sequence', type: 'sequence', steps: [{ id: 'hm-st1', prompt: 'Say it', answer: 'go' }] },
+          { ...loc, id: 'hm-code', title: 'Code', type: 'smart_station',
+            smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'ZION', codeInputLabel: 'Code' } },
+          { ...loc, id: 'hm-photo', title: 'Photo', type: 'photo',
+            smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true } },
+        ] },
+        { id: 'hm-s2', order: 1, title: 'Finish', isFinal: true, tasks: [
+          { ...loc, id: 'hm-end', title: 'Wrap up', type: 'self_report', maxConcurrentTeams: 9 },
+        ] },
+      ],
+    });
+    const { runId: hr, accessCode: hc } = await creator.call('launchRun', { gameId: hg });
+    // Six teams, five stations capped at one: exactly one team is left holding nothing.
+    const teams = [];
+    for (let i = 0; i < 6; i++) {
+      const p = makeParty(`heldPlayer${i}`);
+      const uid = (await signInAnonymously(p.auth)).user.uid;
+      await p.call('joinRun', { code: hc, displayName: `Held ${i}` });
+      teams.push({ p, uid });
+    }
+    await creator.call('startTeams', { gameId: hg, runId: hr });
+    const HC = { ownerUid: OWNER, gameId: hg, runId: hr };
+    const teamDoc = async (uid) => (await creator.getDocAt(`users/${OWNER}/games/${hg}/runs/${hr}/teams/${uid}`)).data ?? {};
+    for (const t of teams) {
+      await t.p.call('requestNextTask', HC);
+      t.doc = await teamDoc(t.uid);
+    }
+    const intruders = teams.filter((t) => !t.doc.activeTaskId);
+    const holders = new Map(teams.filter((t) => t.doc.activeTaskId).map((t) => [t.doc.activeTaskId, t]));
+    check('held-mission: five stations held by five teams, one team holds nothing',
+      intruders.length === 1 && holders.size === 5, JSON.stringify(teams.map((t) => t.doc.activeTaskId ?? null)));
+    const intruder = intruders[0];
+    if (!intruder) return;
+    const recOf = (doc, taskId) => (doc.stages ?? []).flatMap((s) => s.tasks).find((r) => r.taskId === taskId);
+    const photoUrl = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${hr}/teams/${intruder.uid}/hm-photo.jpg`)}?alt=media`;
+    const doors = [
+      ['completeTask', 'hm-check', () => intruder.p.call('completeTask', { ...HC, taskId: 'hm-check' })],
+      ['submitTaskAnswer', 'hm-quiz', () => intruder.p.call('submitTaskAnswer', { ...HC, taskId: 'hm-quiz', answer: 'yes' })],
+      ['submitSequenceStep', 'hm-seq', () => intruder.p.call('submitSequenceStep', { ...HC, taskId: 'hm-seq', stepIndex: 0, answer: 'go' })],
+      ['verifyStationCode', 'hm-code', () => intruder.p.call('verifyStationCode', { ...HC, teamId: intruder.uid, taskId: 'hm-code', code: 'ZION' })],
+      ['submitStationPhoto', 'hm-photo', () => intruder.p.call('submitStationPhoto', { ...HC, teamId: intruder.uid, taskId: 'hm-photo', photoUrl, contentType: 'image/jpeg' })],
+    ];
+    for (const [door, taskId, call] of doors) {
+      await expectError(`held-mission: ${door} refuses a mission the team does not hold`, call(),
+        { codeIn: ['functions/failed-precondition'], match: /not the one your team is on/i });
+    }
+    const after = await teamDoc(intruder.uid);
+    check('held-mission: the intruder scored nothing', (after.score ?? 0) === 0, String(after.score));
+    check('held-mission: every refused mission is still unassigned on the intruder',
+      doors.every(([, id]) => recOf(after, id)?.status === 'unassigned'),
+      JSON.stringify(doors.map(([, id]) => recOf(after, id)?.status)));
+    check('held-mission: no submission, step or attempt was recorded for the intruder',
+      !after.taskSubmissions?.['hm-photo'] && !after.taskStepProgress?.['hm-seq'] && !after.taskAttempts?.['hm-quiz'],
+      JSON.stringify({ subs: after.taskSubmissions, steps: after.taskStepProgress, attempts: after.taskAttempts }));
+    const run = (await creator.getDocAt(`users/${OWNER}/games/${hg}/runs/${hr}`)).data ?? {};
+    check('held-mission: every station still counts exactly its one holder',
+      doors.every(([, id]) => run.taskCounts?.[id] === 1), JSON.stringify(run.taskCounts));
+    // Positive control: the holder of the check-in still finishes it.
+    const holder = holders.get('hm-check');
+    const done = holder ? await holder.p.call('completeTask', { ...HC, taskId: 'hm-check' }) : null;
+    const holderDoc = holder ? await teamDoc(holder.uid) : {};
+    check('held-mission: the holder still completes its own mission',
+      done?.ok === true && !done?.already && recOf(holderDoc, 'hm-check')?.status === 'completed', JSON.stringify(done));
+    const holderQ = holders.get('hm-quiz');
+    const q = holderQ ? await holderQ.p.call('submitTaskAnswer', { ...HC, taskId: 'hm-quiz', answer: 'yes' }) : null;
+    check('held-mission: the holder still answers its own quiz', q?.correct === true, JSON.stringify(q));
+  }); // scenario: completion requires holding the mission
+
   await scenario('quiz ordering (seeded shuffle + orderedAnswer)', async () => {
 
   // ── Ordering quiz (change: quiz-ordering) ────────────────────────────────────
@@ -2767,6 +2875,7 @@ async function main() {
   await expectError('unlisted choice ⇒ invalid-argument',
     svC.call('submitTaskAnswer', { ...CTX, taskId: 'sv-choice', answer: 'Tacos' }),
     { codeIn: ['functions/invalid-argument'] });
+  await handTo(creator, CTX, svC.auth.currentUser.uid, 'sv-text');
   await expectError('empty response ⇒ invalid-argument',
     svC.call('submitTaskAnswer', { ...CTX, taskId: 'sv-text', answer: '   ' }),
     { codeIn: ['functions/invalid-argument'] });
@@ -2941,6 +3050,7 @@ async function main() {
     // 2) Staff-review approve path → a second item (game-doc read on the staff path).
     const fTeamPath = `users/${OWNER}/games/${fg}/runs/${fr}/teams/${fUid}`;
     const fRunPath = `users/${OWNER}/games/${fg}/runs/${fr}`;
+    await handTo(creator, FCTX, fUid, 'fp-rev'); // the next mission, as the phone would request it
     await fp.call('submitStationPhoto', { ...FCTX, teamId: fUid, taskId: 'fp-rev', photoUrl: feedPhotoUrl('b.jpg') });
 
     // 2a) REVIEW QUEUE SOURCE (wave-e task 13): a photo awaiting review lands as
@@ -3209,6 +3319,7 @@ async function main() {
     // moderation guard only blocks an already-approved/completed task, so a
     // rejection must leave the task retryable — otherwise one bad photo would
     // permanently dead-end the team).
+    await handTo(creator, RQCTX, rqUid, 'rq-rej');
     await rqP.call('submitStationPhoto', { ...RQCTX, teamId: rqUid, taskId: 'rq-rej', photoUrl: rqUrl('r1.jpg') });
     const scoreBeforeReject = (await creator.getDocAt(rqTeamPath)).data?.score ?? 0;
     const rejected = await creator.call('reviewStationSubmission', {
@@ -3281,6 +3392,7 @@ async function main() {
     const rqTok = await rqStaff.call('staffSignIn', { ownerUid: OWNER, gameId: rqGame, runId: rqRun, pin: rqPin });
     await signInWithCustomToken(rqStaff.auth, rqTok.customToken);
 
+    await handTo(creator, RQCTX, rqUid, 'rq-dual');
     await rqP.call('submitStationPhoto', { ...RQCTX, teamId: rqUid, taskId: 'rq-dual', photoUrl: rqUrl('d.jpg') });
     const scoreBeforeDual = (await creator.getDocAt(rqTeamPath)).data?.score ?? 0;
     const dual = await Promise.allSettled([
@@ -3390,6 +3502,7 @@ async function main() {
     // Arrive at the hidden spot so it is revealed + completable, then submit it.
     const arr = await ap.call('reportArrival', { ...ACTX, taskId: 'ha-hidden', lat: 31.78, lng: 35.21 });
     check('hidden-feed(auto): arrival at the hidden spot latches', arr?.arrived === true, JSON.stringify(arr));
+    await handTo(creator, ACTX, apUid, 'ha-hidden');
     const autoHidden = await ap.call('submitStationPhoto', { ...ACTX, teamId: apUid, taskId: 'ha-hidden', photoUrl: feedPhotoUrl(ar, apUid, 'h.jpg') });
     check('hidden-feed(auto): hidden photo still auto-approves (completion unaffected)', autoHidden?.autoApproved === true, JSON.stringify(autoHidden));
 
@@ -3437,6 +3550,7 @@ async function main() {
       !feedAfterHidden.some((d) => d.taskTitle === HIDDEN_TITLE), JSON.stringify(feedAfterHidden.map((d) => d.taskTitle)));
 
     // Normal staff-reviewed task (stage 2, now active): submit + approve → feeds.
+    await handTo(creator, RCTX, rpUid, 'hr-normal');
     await rp.call('submitStationPhoto', { ...RCTX, teamId: rpUid, taskId: 'hr-normal', photoUrl: feedPhotoUrl(rr, rpUid, 'n.jpg') });
     const revNormal = await creator.call('reviewStationSubmission', { ...RCTX, teamId: rpUid, taskId: 'hr-normal', approved: true });
     check('hidden-feed(review): staff approves the normal photo', revNormal?.approved === true, JSON.stringify(revNormal));
@@ -3514,6 +3628,7 @@ async function main() {
 
     // 2) staff-reviewed video → feeds with mediaKind:'video'.
     // An out-of-range length is DROPPED, never a refusal: it is a display hint.
+    await handTo(creator, VCTX, vUid, 'vf-rev'); // each stage's mission, as the phone requests it
     await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-rev', photoUrl: feedPhotoUrl(vr, vUid, 'rev.webm'), contentType: 'video/webm',
       posterUrl: feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), mediaDurationSec: 9999 });
     const revSub = (await creator.getDocAt(`users/${OWNER}/games/${vg}/runs/${vr}/teams/${vUid}`)).data?.taskSubmissions?.['vf-rev'];
@@ -3527,6 +3642,7 @@ async function main() {
     check('video-poster: the staff-approved feed item carries the poster', revItem?.posterUrl === feedPhotoUrl(vr, vUid, 'rev.poster.jpg'), JSON.stringify(revItem));
 
     // 3) hidden-location video → still excluded, exactly like a hidden photo.
+    await handTo(creator, VCTX, vUid, 'vf-hidden');
     const vArr = await vp.call('reportArrival', { ...VCTX, taskId: 'vf-hidden', lat: 31.78, lng: 35.21 });
     check('video-feed: arrival at the hidden spot latches', vArr?.arrived === true, JSON.stringify(vArr));
     // A null poster from an older client is ABSENT, never a refusal (the undefined-to-null transport
@@ -3540,6 +3656,7 @@ async function main() {
 
     // 4) audio stays excluded — the allowlist gained a value, it did not become
     //    accept-everything.
+    await handTo(creator, VCTX, vUid, 'vf-audio');
     await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-audio', photoUrl: feedPhotoUrl(vr, vUid, 'chant.webm'), contentType: 'audio/webm' });
     const revAudio = await creator.call('reviewStationSubmission', { ...VCTX, teamId: vUid, taskId: 'vf-audio', approved: true });
     check('video-feed: staff approves the audio submission', revAudio?.approved === true, JSON.stringify(revAudio));
@@ -3569,7 +3686,8 @@ async function main() {
     await lp.call('joinRun', { code: lc, displayName: 'Clip Length' });
     await creator.call('startTeams', { gameId: lg, runId: lr });
     const LC = { ownerUid: OWNER, gameId: lg, runId: lr, teamId: lUid };
-    const send = (taskId, mediaDurationSec) => lp.call('submitStationPhoto', { ...LC, taskId, photoUrl: url(lr, lUid, `${taskId}.webm`), contentType: 'video/webm', ...(mediaDurationSec === undefined ? {} : { mediaDurationSec }) });
+    // Each clip is sent for the mission the team holds at that moment (the holding rule).
+    const send = async (taskId, mediaDurationSec) => (await handTo(creator, LC, lUid, taskId), lp.call('submitStationPhoto', { ...LC, taskId, photoUrl: url(lr, lUid, `${taskId}.webm`), contentType: 'video/webm', ...(mediaDurationSec === undefined ? {} : { mediaDurationSec }) }));
     const short = await send('cl-short', 4);
     check('clip-length: a clip under the minimum is NOT auto-approved', short?.autoApproved === false && short?.lengthHold === 'short', JSON.stringify(short));
     const none = await send('cl-none', undefined);
@@ -3620,6 +3738,7 @@ async function main() {
     check('deferred: the phone is told whether the run approves every media mission', st0?.run?.autoApproveAllMedia === false, JSON.stringify(st0?.run));
 
     // 1) An auto-approved photo: approved and routed on with no file yet, no feed item yet.
+    await handTo(creator, DC, dUid, 'dm-photo');
     const p = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-photo', mediaDeferred: true, contentType: 'image/jpeg' });
     check('deferred: an auto-approved photo is approved with no file', p?.autoApproved === true && p?.deferred === true, JSON.stringify(p));
     let team = (await creator.getDocAt(teamPath)).data ?? {};
@@ -3662,6 +3781,7 @@ async function main() {
       && (await creator.getDocAt(teamPath)).data?.taskSubmissions?.['dm-photo']?.photoUrl === url(dr, dUid, 'p.jpg'), JSON.stringify(again));
 
     // 3) A clip inside the range: deferred, and the poster + length ride along.
+    await handTo(creator, DC, dUid, 'dm-video');
     const v = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-video', mediaDeferred: true, contentType: 'video/webm', mediaDurationSec: 12 });
     check('deferred: a clip inside the length range is approved with no file', v?.autoApproved === true && v?.deferred === true, JSON.stringify(v));
     await dp.call('attachSubmissionMedia', { ...DC, taskId: 'dm-video', photoUrl: url(dr, dUid, 'v.webm'), contentType: 'video/webm', posterUrl: url(dr, dUid, 'v.jpg') });
@@ -3672,7 +3792,9 @@ async function main() {
       && vItem?.posterUrl === url(dr, dUid, 'v.jpg') && vItem?.mediaKind === 'video', JSON.stringify({ vSub, vItem }));
 
     // 4) Not approved automatically ⇒ nothing is written and the phone uploads first.
+    await handTo(creator, DC, dUid, 'dm-long');
     const long = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-long', mediaDeferred: true, contentType: 'video/webm', mediaDurationSec: 60 });
+    await handTo(creator, DC, dUid, 'dm-review');
     const review = await dp.call('submitStationPhoto', { ...DC, teamId: dUid, taskId: 'dm-review', mediaDeferred: true, contentType: 'image/jpeg' });
     team = (await creator.getDocAt(teamPath)).data ?? {};
     check('deferred: a clip outside the range is not deferred, and says why', long?.deferred === false && long?.submitted === false && long?.lengthHold === 'long', JSON.stringify(long));
@@ -3746,6 +3868,7 @@ async function main() {
 
   // geofence: far rejected, near accepted (server validates GPS)
   let geoFar = false;
+  await handTo(creator, C4, player4.auth.currentUser.uid, 'gf1'); // three missions share this stage
   try { await player4.call('completeTask', { ...C4, taskId: 'gf1', lat: 32.5, lng: 35.9 }); }
   catch (e) { geoFar = /too far/i.test(e.message); }
   check('geofence: too-far check-in rejected', geoFar);
@@ -3761,6 +3884,7 @@ async function main() {
   // ARRIVAL_RADIUS_FLOOR_M, so `exact` means "at this spot" rather than a promise the
   // hardware cannot keep. The gate is still a gate: past the floor it still refuses.
   let exFar = false;
+  await handTo(creator, C4, player4.auth.currentUser.uid, 'ex1'); // three missions share this stage
   try { await player4.call('completeTask', { ...C4, taskId: 'ex1', lat: 31.7806, lng: 35.21 }); }
   catch (e) { exFar = /too far/i.test(e.message); }
   check('exact: a check-in well beyond the floor is still rejected', exFar);
@@ -3770,6 +3894,7 @@ async function main() {
     exFloor?.ok === true, JSON.stringify(exFloor));
 
   // instant (triggerMode): completes with no GPS at all.
+  await handTo(creator, C4, player4.auth.currentUser.uid, 'in1'); // three missions share this stage
   const inst = await player4.call('completeTask', { ...C4, taskId: 'in1' });
   check('instant: completes with no coordinates', inst?.ok === true);
 
@@ -3785,6 +3910,7 @@ async function main() {
   check('sequence: hasAnswer marks the tap-to-confirm step',
     seqTask?.steps?.map((s) => s.hasAnswer).join(',') === 'true,false,true',
     JSON.stringify(seqTask?.steps));
+  await handTo(creator, C4, player4.auth.currentUser.uid, 'sq1');
   const seq0 = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 0, answer: 'open' });
   check('sequence: step 1 (answer) accepted', seq0?.stepCorrect === true && seq0?.stepsDone === 1);
   const seq1 = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 1 });
@@ -3904,7 +4030,8 @@ async function main() {
     // completeTask on the not-yet-released task is refused.
     let blocked = false;
     try { await pS.call('completeTask', { ...CS, taskId: 'locked-1' }); }
-    catch (e) { blocked = /not available yet/i.test(e.message); }
+    // The holding rule (deploy check 2026-10-23) may refuse it first: it was never handed out.
+    catch (e) { blocked = /not available yet|not the one your team is on/i.test(e.message); }
     check('scheduled: future-release task cannot be completed', blocked);
 
     // Routing assigns the OPEN task, not the gated one.
@@ -4034,7 +4161,7 @@ async function main() {
     // Anti-cheat: a hand-crafted completion of the locked task is refused.
     await expectError('unlock: direct completeTask on a locked task is refused',
       pU.call('completeTask', { ...CU, taskId: 'u-b' }),
-      { match: /locked|prerequisite/i });
+      { match: /locked|prerequisite|not the one your team is on/i });
 
     // Routing hands out A (never the locked B).
     const asg = await pU.call('requestNextTask', { ...CU, lat: 0, lng: 0 });
@@ -5082,13 +5209,13 @@ async function main() {
       others.every((id) => !wireV.includes(`Quiz ${{ 'v-1': 'one', 'v-2': 'two', 'v-3': 'three' }[id]}`)),
       'a non-assigned task title is readable on the wire');
 
-    // Hiding is a PAYLOAD concern only: the server still authorizes normally, so
-    // a hand-crafted answer to a non-assigned task is graded on its merits, not
-    // silently accepted because "the client couldn't have known".
+    // Hiding is a PAYLOAD concern only, and it is not the authorization: the server
+    // refuses a hand-crafted answer to a non-assigned task on its own (deploy check
+    // 2026-10-23), before grading it, so it is not an answer oracle either.
     const victim = others[0];
-    const wrong = await pV.call('submitTaskAnswer', { ...CV, taskId: victim, answer: 'not-the-answer' });
-    check('visibility: server still grades a hand-crafted non-assigned answer (no omission-as-authz)',
-      wrong?.correct === false, JSON.stringify(wrong));
+    await expectError('visibility: server refuses a hand-crafted answer to a non-assigned task',
+      pV.call('submitTaskAnswer', { ...CV, taskId: victim, answer: 'not-the-answer' }),
+      { codeIn: ['functions/failed-precondition'], match: /not the one your team is on/i });
 
     // History still renders: after completing the assigned task it stays in the
     // payload (the player has seen it) — progress/recap must not go blank.
@@ -5375,8 +5502,15 @@ async function main() {
     const pHCred = await signInAnonymously(pH.auth);
     const hUid = pHCred.user.uid;
     await pH.call('joinRun', { code: cH, displayName: 'Gatekeeper' });
+    // A second team holds the photo station, so the expiry gate below is judged on a mission the
+    // team really holds (the holding rule refuses an unheld one first, deploy check 2026-10-23).
+    const pH2 = makeParty('stationGates2');
+    const hUid2 = (await signInAnonymously(pH2.auth)).user.uid;
+    await pH2.call('joinRun', { code: cH, displayName: 'Gatekeeper Two' });
     await creator.call('startTeams', { gameId: gH, runId: rH });
     const CH = { ownerUid: OWNER, gameId: gH, runId: rH };
+    await handTo(creator, CH, hUid, 'ws-lock');
+    await handTo(creator, CH, hUid2, 'wp-exp');
 
     // ── attempt-limit lockout (wave-h #1) ──────────────────────────────────────
     // Two wrong codes exhaust attemptLimit:2; the 3rd attempt is refused with
@@ -5399,6 +5533,7 @@ async function main() {
     // ws-exp has an expiry gate but is still OPEN here: a wrong code must reach the
     // normal 'Incorrect code' path, proving the release/expiry gate does not block a
     // live station.
+    await handTo(creator, CH, hUid, 'ws-exp');
     await expectError('station expiry: an OPEN gated station still grades codes',
       pH.call('verifyStationCode', { ...CH, teamId: hUid, taskId: 'ws-exp', code: 'NOPE' }),
       { match: /incorrect code/i });
@@ -5417,9 +5552,9 @@ async function main() {
     // ── submitStationPhoto expiry gate (wave-h #3) ─────────────────────────────
     // An expired photo task refuses a submit (a valid, IDOR-scoped Storage URL, so
     // the refusal comes from the expiry gate, not requireStorageUrl).
-    const hPhotoUrl = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rH}/teams/${hUid}/late.jpg`)}?alt=media`;
+    const hPhotoUrl = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rH}/teams/${hUid2}/late.jpg`)}?alt=media`;
     await expectError('station expiry: submitStationPhoto refuses a submit after expiry',
-      pH.call('submitStationPhoto', { ...CH, teamId: hUid, taskId: 'wp-exp', photoUrl: hPhotoUrl }),
+      pH2.call('submitStationPhoto', { ...CH, teamId: hUid2, taskId: 'wp-exp', photoUrl: hPhotoUrl }),
       { match: /expired/i });
   }); // scenario: smart_station gates
 
@@ -6587,6 +6722,9 @@ async function main() {
     const stampedExcludedMs = (team, taskId) => (team?.stages ?? [])
       .flatMap((s) => s.tasks ?? []).find((t) => t.taskId === taskId)?.excludedMs;
 
+    // Each team on the alternative it is about to play (the holding rule: routing's pick is a coin flip).
+    await handTo(creator, { ownerUid: OWNER, gameId: pg, runId: pr }, hareId, 'pc-fast');
+    await handTo(creator, { ownerUid: OWNER, gameId: pg, runId: pr }, tortoiseId, 'pc-slow');
     // Hare first, on the UNPAUSED alternative: short wall clock, nothing excluded.
     await hare.call('completeTask', { taskId: 'pc-fast', code: pcCode });
     // Tortoise deliberates, then completes the PAUSED alternative.
@@ -7122,7 +7260,11 @@ async function main() {
     check('cap: both slots reserved before the attack', (counts['st-a'] ?? 0) === 1 && (counts['st-b'] ?? 0) === 1, JSON.stringify(counts));
 
     // ATTACK: the st-b holder hand-crafts a completeTask on st-a, which it never checked out.
-    await attacker.call('completeTask', { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21, taskId: 'st-a' });
+    // Since the 2026-10-23 deploy check it is refused outright (it used to score while merely
+    // leaving the slot alone); the slot assertions below still hold either way.
+    await expectError('cap: completing a station another team holds is refused',
+      attacker.call('completeTask', { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21, taskId: 'st-a' }),
+      { codeIn: ['functions/failed-precondition'], match: /not the one your team is on/i });
 
     counts = (await creator.getDocAt(runPath)).data?.taskCounts ?? {};
     check("cap: attacker cannot drain the holder's slot (taskCounts st-a still 1)",
@@ -10101,6 +10243,7 @@ async function main() {
       (await creator.getColAt(`users/${OWNER}/games/${qg}/runs/${qr}/feedItems`)).length;
 
     // ── 1. Two teams pending on the SAME task; the NEWER one is reviewed first ──
+    for (const t of [early, late, straggler]) await handTo(creator, QCTX, t.uid, 'rq-photo');
     await early.party.call('submitStationPhoto', { ...QCTX, teamId: early.uid, taskId: 'rq-photo', photoUrl: qPhotoUrl(early.uid, 'early.jpg') });
     // A real gap between the two submissions: the queue sorts on `submittedAt`, so
     // identical stamps would make "the older one" meaningless.
@@ -10145,6 +10288,8 @@ async function main() {
     // route — which auto-skips the still-pending photo task. The reviewer arrives
     // late and must be able to clear the row.
     await straggler.party.call('submitStationPhoto', { ...QCTX, teamId: straggler.uid, taskId: 'rq-photo', photoUrl: qPhotoUrl(straggler.uid, 'straggler.jpg') });
+    // An organizer moves the waiting team onto the alternative (it holds only one mission at a time).
+    await handTo(creator, QCTX, straggler.uid, 'rq-alt');
     await straggler.party.call('completeTask', { taskId: 'rq-alt', code: qc });
     const stragglerDoc = (await creator.getDocAt(qTeamPath(straggler.uid))).data;
     check('queue: the straggler really did finish before the review',
