@@ -1497,7 +1497,7 @@ export default function TaskRunner({ session, state, stage, onChanged, role = 's
           too small/low-contrast. Bigger title + higher-contrast body (play-web's
           reversed zinc scale ⇒ zinc-300 is darker on the light theme). */}
       <h2 dir="auto" className="text-2xl font-bold mb-2">{task.title}</h2>
-      {task.description && <p dir="auto" className="text-zinc-300 text-base leading-relaxed mb-3">{task.description}</p>}
+      {task.description && <p dir="auto" className="whitespace-pre-line text-zinc-300 text-base leading-relaxed mb-3">{task.description}</p>}
       {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
       {task.smart?.longInstructions && <p dir="auto" className="text-zinc-300 text-base mb-3">{task.smart.longInstructions}</p>}
 
@@ -2844,9 +2844,22 @@ function PhotoEntry({ busy, working, onSubmit, restored, onCaptured, selfie = fa
       // ONE capture button (issue 20, Ahiya 2026-10-06): a second "use the phone's camera" link
       // read as two buttons doing the same thing. The phone's camera is the automatic fallback
       // when the in-app one cannot open (onFallback -> nativeOnly), so nobody loses it.
-      <Button variant={file && !retakeFirst ? 'ghost' : 'primary'} disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
-        {file ? t.task.retakePhoto : t.task.takePhoto}
-      </Button>
+      //
+      // The "no gallery" note lives in THIS branch only: the in-app viewfinder has no file
+      // picker at all, so the sentence is true by construction. The native fallback above is
+      // a `capture` file input, which some browsers/webviews answer with a chooser that
+      // includes the gallery, so the note is not shown there.
+      <>
+        {!file && (
+          <p className="flex items-center gap-2 text-sm font-medium text-zinc-200" data-testid="photo-in-app-only">
+            <Icon name="camera" className="w-4 h-4 shrink-0 text-ink-fire" />
+            {t.task.photoInAppOnly}
+          </p>
+        )}
+        <Button variant={file && !retakeFirst ? 'ghost' : 'primary'} disabled={busy} onClick={() => setViewfinder(true)} data-testid="photo-take">
+          {file ? t.task.retakePhoto : t.task.takePhoto}
+        </Button>
+      </>
     )
   );
   return (
@@ -3912,6 +3925,13 @@ function VideoEntry({ smart, runId, busy, working, onSubmit, onCaptured, onStrea
         {minSeconds > 0
           ? t.task.videoRangeHint({ min: minSeconds, max: maxSeconds })
           : t.task.videoMaxHint({ sec: maxSeconds })}
+      </p>
+      {/* The in-app recorder only (the `unsupported` native-picker view above has neither a
+          gallery guarantee nor a pause control): it has no file picker, and its viewfinder
+          shows a pause / continue button for the whole take (holdTake / resumeTake). */}
+      <p className="flex items-center gap-2 text-sm font-medium text-zinc-200" data-testid="video-in-app-only">
+        <Icon name="video" className="w-4 h-4 shrink-0 text-ink-fire" />
+        {t.task.videoInAppOnly}
       </p>
       <Button disabled={busy || opening} onClick={() => void openCamera()}>{t.task.startRecording}</Button>
     </div>

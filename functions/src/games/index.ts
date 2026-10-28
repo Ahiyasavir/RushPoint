@@ -45,6 +45,7 @@ import {
   // What a PUBLIC task may say about where it is (change: task-library-map-view).
   publicTaskLocation,
   stripUnsafeDisplayChars,
+  stripUnsafeProseChars,
   // THE one definition of a tag list (change: game-task-tags). The client parses
   // with the same function, so what the creator sees and what we store cannot
   // diverge — and a client that skips it (or is hostile) still cannot store an
@@ -221,7 +222,7 @@ function sanitizeStagesText(stages: Stage[] | undefined, gameTags?: string[]): S
     tasks: (stage.tasks ?? []).map((task) => ({
       ...task,
       title: clean(task.title) ?? task.title,
-      ...(task.description !== undefined ? { description: clean(task.description) } : {}),
+      ...(task.description !== undefined ? { description: stripUnsafeProseChars(task.description) } : {}),
       // Task tags (change: game-task-tags) — bounded here rather than trusted, and
       // done inside this pass on purpose: it rebuilds a NEW stages array, and this
       // repo's hard rule is never to dotted-update an element of a stored array.
@@ -339,7 +340,7 @@ export const createGame = loggedCallable('createGame', async (data, context) => 
     // (wave-j J6) so a title/description can't impersonate another name in the
     // creator, play, or staff console — mirrors requireString on the callables.
     title: stripUnsafeDisplayChars(title).trim(),
-    description: description ? stripUnsafeDisplayChars(description).trim() : description,
+    description: description ? stripUnsafeProseChars(description).trim() : description,
     mode,
     stages: [],
     scoringPreset: DEFAULT_SCORING_PRESET,
@@ -448,7 +449,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
 
   const updates: Partial<Game> & { updatedAt: string } = { updatedAt: new Date().toISOString() };
   if (title !== undefined)              updates.title = stripUnsafeDisplayChars(title).trim();
-  if (description !== undefined)        updates.description = description ? stripUnsafeDisplayChars(description).trim() : description;
+  if (description !== undefined)        updates.description = description ? stripUnsafeProseChars(description).trim() : description;
   if (mode !== undefined)               updates.mode = mode;
   if (stages !== undefined) {
     // Save-time validation. Unlockable tasks (change: unlockable-tasks): the
@@ -1535,7 +1536,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     const setOrClear = (key: string, value: unknown) => {
       updates[key] = value === undefined ? del : value;
     };
-    setOrClear('description', parsed.description ? stripUnsafeDisplayChars(parsed.description).trim() : undefined);
+    setOrClear('description', parsed.description ? stripUnsafeProseChars(parsed.description).trim() : undefined);
     setOrClear('scoringOptions', parsed.scoringOptions);
     setOrClear('branding', parsed.branding);
     setOrClear('coverImage', parsed.coverImage);

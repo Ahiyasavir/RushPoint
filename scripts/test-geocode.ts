@@ -27,6 +27,7 @@ import {
   nominatimDelayMs,
   NOMINATIM_MIN_INTERVAL_MS,
   __resetNominatimRateGate,
+  cameraForResult,
 } from '../apps/creator-web/src/lib/geocode';
 
 // ─── This suite must NEVER touch the network ─────────────────────────────────
@@ -240,6 +241,20 @@ async function run(): Promise<void> {
     // A map must not depend on a third-party CDN being reachable.
     check(`${lib} serves the plugin from our own bundle`, src.includes('?url') && !src.includes('unpkg.com'));
     check(`${lib} loads it lazily`, /setRTLTextPlugin\(rtlPluginUrl, true\)/.test(src));
+  }
+
+  // 2026-10-27: a chosen hit is framed by its own extent (city as a city, house as a street).
+  {
+    const city = parseNominatim([{ display_name: 'ירושלים, ישראל', lat: '31.77', lon: '35.21', boundingbox: ['31.70', '31.88', '35.10', '35.30'] }])[0];
+    check('Nominatim boundingbox is read as [w,s,e,n]', JSON.stringify(city?.bbox) === JSON.stringify([35.1, 31.7, 35.3, 31.88]), JSON.stringify(city?.bbox));
+    const cc = cameraForResult(city!);
+    check('a city is framed by its bounds, clamped between 11 and 17', cc.kind === 'bounds' && cc.minZoom === 11 && cc.maxZoom === 17);
+    const mt = parseMapTiler({ features: [{ place_name: 'רחוב יפו 1, ירושלים', center: [35.22, 31.78], bbox: [35.219, 31.779, 35.221, 31.781] }] })[0];
+    check('MapTiler bbox is kept as given', mt?.bbox?.[0] === 35.219);
+    const bare = cameraForResult({ label: 'x', detail: '', lat: 31.7, lng: 35.2 });
+    check('a hit with no extent gets a neighbourhood zoom (16)', bare.kind === 'center' && bare.zoom === 16);
+    const bogus = cameraForResult({ label: 'x', detail: '', lat: 31.7, lng: 35.2, bbox: [30, 29, 40, 35] });
+    check('a country-sized or inverted extent falls back to a centred view', bogus.kind === 'center');
   }
 
   console.log(`\n${failures === 0 ? 'ALL GEOCODE TESTS PASSED' : failures + ' FAILED'}`);

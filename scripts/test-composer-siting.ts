@@ -140,7 +140,9 @@ const base = { audience: 'youth', setting: 'outdoor', minutes: 90, people: 24, d
 const notPlaced = previewPrepCost(TASK_BANK, { ...base, locationMissions: false, prepEffort: 1 } as ComposerAnswers, 7);
 ok('no pins when nothing is placed', notPlaced.pins === 0 && notPlaced.minutes === 0, notPlaced);
 const placed = previewPrepCost(TASK_BANK, { ...base, locationMissions: true, prepEffort: 2 } as ComposerAnswers, 7);
-ok('a placed plan asks for pins', placed.pins >= 3, placed);
+// Was `>= 3` until 27.10, when the play-anywhere missions stopped asking for pins
+// (test-bank-location-fit.ts); the claim here is only that a placed plan asks for some.
+ok('a placed plan asks for pins', placed.pins >= 1, placed);
 ok('…and about a minute and a half each', placed.minutes === Math.ceil(placed.pins * 1.5), placed);
 ok('fromAnywhere is never placed', previewPrepCost(TASK_BANK, { ...base, setting: 'fromAnywhere', locationMissions: true } as ComposerAnswers, 7).pins === 0);
 let threw = false;

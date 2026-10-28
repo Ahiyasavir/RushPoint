@@ -261,6 +261,10 @@ const HE = {
     videoAlreadyUp: 'הסרטון כבר עלה בזמן הצילום. אפשר לשלוח.',
     choicePoints: ({ n }: { n: number }) => `${n} נק׳`,
     inAppCameraUnavailable: 'המצלמה באפליקציה לא נפתחה בטלפון הזה, אז נצלם במצלמה של הטלפון.',
+    // Shown above the capture button ONLY where the app itself is the camera (the in-app
+    // viewfinder / recorder), because only there is a gallery pick really impossible.
+    photoInAppOnly: 'מצלמים כאן באפליקציה. אי אפשר להעלות תמונה מהגלריה.',
+    videoInAppOnly: 'מצלמים כאן באפליקציה, לא מהגלריה. אפשר לעצור באמצע ולהמשיך.',
     shutter: 'צילום',
     videoTooShortForAuto: ({ sec }: { sec: number }) => `הסרטון לא מגיע ל ${sec} שניות, אז הוא לא יאושר אוטומטית: הוא יישלח למארגנים לבדיקה. אפשר לצלם שוב.`,
     videoTooLongForAuto: ({ sec }: { sec: number }) => `הסרטון עובר את ${sec} השניות, אז הוא לא יאושר אוטומטית: הוא יישלח למארגנים לבדיקה. אפשר לצלם שוב.`,
@@ -1401,6 +1405,8 @@ const EN: typeof HE = {
     videoAlreadyUp: 'The clip already went up while you filmed. Ready to send.',
     choicePoints: ({ n }: { n: number }) => `${n} pts`,
     inAppCameraUnavailable: 'The camera inside the app would not open on this phone, so the phone\'s own camera takes the picture.',
+    photoInAppOnly: 'Shoot it here in the app. Uploading from the gallery is not possible.',
+    videoInAppOnly: 'Film it here in the app, not from the gallery. You can pause midway and carry on.',
     shutter: 'Take the picture',
     videoTooShortForAuto: ({ sec }: { sec: number }) => `The clip is under ${sec} seconds, so it will not be approved automatically: the organizers will review it. You can film it again.`,
     videoTooLongForAuto: ({ sec }: { sec: number }) => `The clip is over ${sec} seconds, so it will not be approved automatically: the organizers will review it. You can film it again.`,

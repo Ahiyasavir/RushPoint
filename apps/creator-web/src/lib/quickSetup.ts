@@ -29,6 +29,9 @@ import {
   orderQuickSetupSteps,
   isWizardStepConfigured,
   resolveWizardTarget,
+  readWizardFieldValue,
+  isSampleStep,
+  confirmSampleStep,
 } from '@rushpoint/shared';
 import { fieldIgnoredByPreset, type SettingsRowKey } from './missionSettingsRows';
 import { hasOpenSlots } from './sentenceForm';
@@ -198,6 +201,8 @@ export function syntheticCompletionStepId(stageId: string, taskId: string): stri
  *   answer, the number), even when the bank already filled it. Ahiya, 22.10: the creator has to see
  *   the code to put it at the spot, and a code nobody was shown is a mission nobody can finish.
  */
+const SENTENCE_STEP_PREFIX = 'qs-synthetic-sentence:';
+
 export function setupFlowSteps(game: QuickSetupGame | null | undefined): TemplateWizardStep[] {
   if (!game) return [];
   const authored = (Array.isArray(game.wizardSteps) ? game.wizardSteps : []).filter((s) => {
@@ -217,7 +222,7 @@ export function setupFlowSteps(game: QuickSetupGame | null | undefined): Templat
       // whether or not the bank wrote a note about it (Ahiya, 22.10).
       for (const text of SENTENCE_FIELDS) {
         if (!hasOpenSlots((task as unknown as Record<string, unknown>)[text]) || has.has(`${stage.id}|${task.id}|${text}`)) continue;
-        completion.push({ id: `qs-synthetic-sentence:${stage.id}:${task.id}:${text}`, stageId: stage.id, taskId: task.id, targetFieldPath: text, instructionPrompt: '', isRequired: true });
+        completion.push({ id: `${SENTENCE_STEP_PREFIX}${stage.id}:${task.id}:${text}`, stageId: stage.id, taskId: task.id, targetFieldPath: text, instructionPrompt: '', isRequired: true });
       }
     }
   }
@@ -244,7 +249,87 @@ export function quickSetupRemainingCount(game: QuickSetupGame | null | undefined
  */
 export function quickSetupLaunchBlockers(game: QuickSetupGame | null | undefined): TemplateWizardStep[] {
   if (!game) return [];
-  return quickSetupSteps(game).filter((s) => s.isRequired && !isWizardStepConfigured(game, s));
+  const steps = quickSetupSteps(game).filter((s) => s.isRequired && !isWizardStepConfigured(game, s));
+  // A blank left for the creator ("[הוראות ליוצר: ...]") would reach the players verbatim, so it
+  // blocks a launch too, whether or not any authored step points at it (bug hunt 27.10). The walk's
+  // sentence steps exist exactly while such a blank is open.
+  const seen = new Set(steps.map((s) => `${s.taskId ?? ''}|${s.targetFieldPath ?? ''}`));
+  for (const s of setupFlowSteps(game)) {
+    if (!s.id.startsWith(SENTENCE_STEP_PREFIX) || seen.has(`${s.taskId ?? ''}|${s.targetFieldPath ?? ''}`)) continue;
+    steps.push(s);
+  }
+  return steps;
+}
+
+/**
+ * The walk's list must not shrink under the creator's fingers (bug hunt 27.10): a sentence step
+ * exists only while its text has an open blank, so the first letter typed into the LAST blank used
+ * to delete the very screen being typed on and jump the walk forward. Every sentence step seen once
+ * stays (as long as its mission still exists); a filled one simply reads as configured.
+ */
+export function keepSeenSentenceSteps(
+  game: QuickSetupGame | null | undefined,
+  next: readonly TemplateWizardStep[],
+  seen: readonly TemplateWizardStep[],
+): TemplateWizardStep[] {
+  if (!game) return [...next];
+  const ids = new Set(next.map((s) => s.id));
+  const taskIds = new Set((game.stages ?? []).flatMap((st) => (st?.tasks ?? []).map((t) => t?.id)));
+  const kept = seen.filter((s) => s.id.startsWith(SENTENCE_STEP_PREFIX) && !ids.has(s.id) && taskIds.has(s.taskId));
+  return kept.length === 0 ? [...next] : orderQuickSetupSteps(game, [...next, ...kept]);
+}
+
+/**
+ * Where a creator who left the walk stands, for the dashboard's "shall we continue?" card (research
+ * 27.10: an interrupted task is remembered, and a resume one press away brings people back). Counted
+ * over the REQUIRED steps, with the build counted as done, exactly like the walk's own %. Null when
+ * nothing required is open.
+ */
+export function setupResume(game: QuickSetupGame | null | undefined): { pct: number; left: number } | null {
+  if (!game) return null;
+  const steps = setupFlowSteps(game).filter((s) => s.isRequired);
+  if (steps.length === 0) return null;
+  const done = steps.filter((s) => isWizardStepConfigured(game, s)).length;
+  const left = steps.length - done;
+  return left === 0 ? null : { pct: Math.round((100 * (1 + done)) / (1 + steps.length)), left };
+}
+
+/** The one game the dashboard offers to resume: the most recently touched with setup still open. */
+export function gameToResume<G extends QuickSetupGame & { id?: string; updatedAt?: string; createdAt?: string }>(
+  games: readonly G[] | null | undefined, nowMs: number, maxAgeDays = 21,
+): { game: G; pct: number; left: number } | null {
+  const fresh = (games ?? []).filter((g) => {
+    const t = Date.parse(g.updatedAt ?? g.createdAt ?? '');
+    return Number.isFinite(t) && nowMs - t < maxAgeDays * 86_400_000;
+  }).sort((a, b) => Date.parse(b.updatedAt ?? b.createdAt ?? '') - Date.parse(a.updatedAt ?? a.createdAt ?? ''));
+  for (const g of fresh.slice(0, 5)) {
+    const r = setupResume(g);
+    if (r) return { game: g, ...r };
+  }
+  return null;
+}
+
+/** A game with every authored step on one mission dropped: what a SWAPPED mission must shed. */
+export function withoutStepsForTask<G extends QuickSetupGame>(game: G, taskId: string): G {
+  const steps = Array.isArray(game.wizardSteps) ? game.wizardSteps : [];
+  return steps.some((s) => s.taskId === taskId) ? { ...game, wizardSteps: steps.filter((s) => s.taskId !== taskId) } : game;
+}
+
+/**
+ * `next` with the sample mark dropped from every step whose field the edit changed (28.10): the
+ * creator wrote their own value over a bank sample. Judged against `prev`, so it does not matter
+ * which screen made the edit. Returns `next` itself when nothing changed.
+ */
+export function confirmEditedSamples<G extends QuickSetupGame>(prev: QuickSetupGame | null | undefined, next: G): G {
+  if (!prev || !Array.isArray(next.wizardSteps)) return next;
+  let out = next;
+  for (const step of next.wizardSteps) {
+    if (!isSampleStep(step)) continue;
+    const before = JSON.stringify(readWizardFieldValue(prev, step) ?? null);
+    const after = JSON.stringify(readWizardFieldValue(next, step) ?? null);
+    if (before !== after) out = confirmSampleStep(out, step.id);
+  }
+  return out;
 }
 
 /** The one blocker a caller with no modal should name. `null` ⇔ the launch may proceed. */

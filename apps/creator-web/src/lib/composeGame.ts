@@ -55,6 +55,7 @@ import {
   effectiveExpectedDurationMinutes,
   normalizeTags,
   planDurationFit,
+  SAMPLE_STEP_PREFIX,
   type PersonalizationStage,
 } from '@rushpoint/shared';
 import {
@@ -1760,7 +1761,7 @@ export function composeGame(
       for (const setup of entry.setup ?? []) {
         if (!setup || typeof setup.field !== 'string' || setup.field === '') continue;
         wizardSteps.push({
-          id: `qs-${slotCounter}-${setup.field}`,
+          id: `${setup.sample ? SAMPLE_STEP_PREFIX : ''}qs-${slotCounter}-${setup.field}`,
           stageId,
           taskId: task.id,
           targetFieldPath: setup.field,

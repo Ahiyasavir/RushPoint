@@ -233,6 +233,10 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
     capabilities?: unknown;
   };
 
+  // The address is checked BEFORE the owner gate: an admin passes that gate whatever ownerUid
+  // says, so a call that left it out used to write an invite under users/undefined/… and return a
+  // code no staff console could sign in with (live check 2026-10-26).
+  validate(() => { requireString(ownerUid, 'ownerUid'); requireString(gameId, 'gameId'); requireString(runId, 'runId'); });
   // No emulator bypass — anyone who can mint a PIN owns the run's staff surface.
   if (uid !== ownerUid && !context.auth?.token.admin) {
     throw new functions.https.HttpsError('permission-denied', 'Only the game owner can invite staff');
@@ -250,6 +254,9 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
 
   // One writer for the invite document, shared with launchSharedRun — see
   // runs/staffInvite.ts. WHO may mint one is decided above; this only writes it.
+  if (!(await db.doc(FIRESTORE_PATHS.run(ownerUid, gameId, runId)).get()).exists) {
+    throw new functions.https.HttpsError('not-found', 'Run not found');
+  }
   const result = await createRunStaffInvite({ ownerUid, gameId, runId, name: cleanName, capabilities: caps });
   return { ...result, capabilities: caps };
 });

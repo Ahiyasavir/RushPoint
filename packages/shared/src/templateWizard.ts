@@ -216,6 +216,28 @@ function entryIsFilled(entry: unknown): boolean {
  * An unresolvable step reads as configured: it is inert, and inert work must not
  * show up as something the creator still owes (FAIL OPEN).
  */
+/**
+ * A step whose field still holds a SAMPLE, not the creator's own value (Ahiya, 28.10). Some answers
+ * only the creator can know (how many benches are here, what they wrapped), but a quiz or numeric
+ * mission with no answer cannot be saved, so the composer ships a sample and marks the step by this
+ * id prefix. The mark lives in the step id because the id is stored and copied as is, so no new
+ * field reaches the server. It reads as unconfigured whatever the value, until the creator writes
+ * their own answer and `confirmSampleStep` drops the mark.
+ */
+export const SAMPLE_STEP_PREFIX = 'sample:';
+
+export function isSampleStep(step: Pick<TemplateWizardStep, 'id'> | undefined | null): boolean {
+  return typeof step?.id === 'string' && step.id.startsWith(SAMPLE_STEP_PREFIX);
+}
+
+/** The game with that step's sample mark dropped: the creator has given their own value. */
+export function confirmSampleStep<G extends { wizardSteps?: TemplateWizardStep[] }>(game: G, stepId: string): G {
+  if (!stepId.startsWith(SAMPLE_STEP_PREFIX) || !Array.isArray(game.wizardSteps)) return game;
+  const plain = stepId.slice(SAMPLE_STEP_PREFIX.length);
+  if (!game.wizardSteps.some((s) => s.id === stepId)) return game;
+  return { ...game, wizardSteps: game.wizardSteps.map((s) => (s.id === stepId ? { ...s, id: plain } : s)) };
+}
+
 export function isWizardStepConfigured(
   game: PointableGame | undefined | null,
   step: TemplateWizardStep | undefined | null,
@@ -232,6 +254,8 @@ export function isWizardStepConfigured(
     return !isNullIsland(task.coordinates);
   }
 
+  // A sample the bank put there so the mission saves is not the creator's answer (28.10).
+  if (isSampleStep(step)) return false;
   const value = readWizardFieldValue(game, step);
   if (value === undefined || value === null) return false;
   // A boolean has no "unset" state, so a step on one is guidance, never a blocker.
@@ -460,7 +484,23 @@ export function remapWizardStepIds(
  * A bracketed note addressed to the creator: `[הערת מפעיל - למחוק]`,
  * `[הוראות למפעיל - למחוק]`, `[operator note - delete]`.
  */
-const BRACKET_NOTE = /\[[^\]\n]*(?:מפעיל|ליוצר|operator|organi[sz]er)[^\]\n]*\]\s*[:：-]?\s*/;
+/**
+ * A BLANK left for the creator inside text players read: `[הוראות ליוצר: …]`, `[הוראות למארגן: …]`,
+ * `[creator: …]`, `[organizer: …]`. Group 1 is everything inside the brackets.
+ *
+ * The ONE definition: the setup walk's fill-in-the-sentence form (creator-web `lib/sentenceForm.ts`)
+ * reads it to draw the boxes, and `BRACKET_NOTE` below is built to match everything it matches, so a
+ * blank the walk asks for can never read as already configured here. They used to be two regexes and
+ * disagreed: `[creator: …]` (what an English admin bracket becomes) and `[הוראות למארגן: …]` were boxes
+ * in the walk and "done" to the launch check (bug hunt 27.10). Pinned by
+ * scripts/test-walk-every-bank-mission.ts.
+ */
+export const CREATOR_BLANK = /\[((?:הוראות|הערה)\s+(?:ליוצר|למארגן|למפעיל)[^\]\n]*|(?:creator|organi[sz]er)\s*:[^\]\n]*)\]/gi;
+
+const BRACKET_NOTE = new RegExp(
+  `(?:${CREATOR_BLANK.source}|\\[[^\\]\\n]*(?:מפעיל|ליוצר|operator|organi[sz]er)[^\\]\\n]*\\])\\s*[:：-]?\\s*`,
+  'i',
+);
 /** The same instruction written without brackets, as `הוראות ליוצר: …`. */
 const BARE_NOTE = /(?:^|\n)[ \t]*(?:הוראות ליוצר|הערה ליוצר|note to creator)\s*[:：-]\s*/;
 /**

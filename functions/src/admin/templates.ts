@@ -22,6 +22,7 @@ import {
   FIRESTORE_PATHS,
   isGameDeleted,
   stripUnsafeDisplayChars,
+  stripUnsafeProseChars,
   templateGroupSiblingMatches,
   remapWizardStepIds,
   pruneWizardSteps,
@@ -499,7 +500,7 @@ export const createGameFromTemplate = loggedCallable('createGameFromTemplate', a
     ? defaultModeForGroupSize(groupSize, template.mode)
     : template.mode;
   const personalizedDescription = typeof description === 'string' && description.trim()
-    ? stripUnsafeDisplayChars(description).trim()
+    ? stripUnsafeProseChars(description).trim()
     : template.description;
 
   const now = new Date().toISOString();

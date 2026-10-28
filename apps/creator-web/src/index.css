@@ -536,11 +536,13 @@ html.dark .glass-card {
 /* The setup walk's canvas (change: setup-flow-full-screen). Ahiya, 23.10: "the white background bores
    me". A warm wash with the brand's contour lines, so the walk feels like a map being drawn, and two
    slow lights that drift. Content stays on solid cards, so nothing here costs legibility. */
+/* 28.10: was #FFF8F2 behind pure-white cards, one white glare from edge to edge on a phone ("why does
+   the screen look so blinding?"). A warm sand tone lets the cards stand out and rests the eye. */
 .rp-setup-bg {
-  background-color: #FFF8F2;
+  background-color: #F3E7DA;
   background-image:
-    radial-gradient(55% 45% at 100% 0%, rgba(255, 87, 34, 0.13), transparent 70%),
-    radial-gradient(50% 45% at 0% 100%, rgba(255, 179, 0, 0.16), transparent 70%),
+    radial-gradient(55% 45% at 100% 0%, rgba(255, 87, 34, 0.10), transparent 70%),
+    radial-gradient(50% 45% at 0% 100%, rgba(255, 179, 0, 0.12), transparent 70%),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='560' viewBox='0 0 560 560' fill='none' stroke='%23FF5722' stroke-opacity='0.10' stroke-width='1.2'%3E%3Cpath d='M280 110c74 0 146 42 156 114s-42 156-124 166-176-30-186-114 80-166 154-166z'/%3E%3Cpath d='M280 154c54 0 106 32 113 84s-31 112-91 120-127-22-135-82 59-122 113-122z'/%3E%3Cpath d='M282 198c34 0 65 21 69 54s-19 69-56 73-79-14-83-52 37-75 70-75z'/%3E%3Cpath d='M283 238c14 0 27 9 29 23s-8 29-24 31-33-6-35-22 16-32 30-32z'/%3E%3Cpath d='M-40 468c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 506c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 544c92-30 172-10 242 20s162 52 262 10 142-30 162-20'/%3E%3Cpath d='M-40 36c82 22 152 10 212-20s142-42 222-10 152 22 212 0'/%3E%3Cpath d='M-40 70c82 22 152 10 212-20s142-42 222-10 152 22 212 0'/%3E%3C/svg%3E");
   background-size: auto, auto, 560px 560px;
 }
@@ -584,3 +586,13 @@ html.dark .rp-setup-bg {
 @media (prefers-reduced-motion: reduce) {
   .rp-cta-ready { animation: none; }
 }
+
+/* LocationPicker `fill`: the search box floats over the map, so MapLibre's top corner controls
+   (zoom, attribution, the topo/satellite switch) start below it. */
+.rp-map-search-over .maplibregl-ctrl-top-left,
+.rp-map-search-over .maplibregl-ctrl-top-right { margin-top: 4.25rem; }
+
+/* The setup walk's "swipe up to continue" hint (28.10): a small nudge upward, still under reduced motion. */
+@keyframes rp-swipe-nudge { 0%, 70%, 100% { transform: translateY(0); } 35% { transform: translateY(-4px); } }
+.rp-swipe-hint { animation: rp-swipe-nudge 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .rp-swipe-hint { animation: none; } }

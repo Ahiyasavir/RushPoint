@@ -1249,6 +1249,13 @@ async function main() {
     ownerUid: creatorCred.user.uid, gameId, runId, name: 'E2E Marshal', permissions: ['review_photos'],
   });
   check('inviteStaff returns a PIN', !!pin, pin);
+  // Live check 2026-10-26: an ADMIN passes the owner gate whatever ownerUid says, so a call that
+  // left ownerUid out wrote an invite under users/undefined/… and handed back a 6-digit code that
+  // no staff console could ever sign in with. The address must name a run that exists.
+  await expectError('inviteStaff without ownerUid is refused, even for an admin',
+    platformAdmin.call('inviteStaff', { gameId, runId, name: 'No owner' }), { codeIn: ['functions/invalid-argument'] });
+  await expectError('inviteStaff for a run that does not exist is refused',
+    creator.call('inviteStaff', { ownerUid: creatorCred.user.uid, gameId, runId: 'no-such-run', name: 'Ghost' }), { codeIn: ['functions/not-found'] });
 
   // [anti-cheat row 40] a different caller that fails the PIN 5× is locked out of
   // this run — even a subsequent attempt with the CORRECT pin is refused. The

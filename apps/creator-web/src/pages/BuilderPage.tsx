@@ -117,7 +117,7 @@ import {
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { Icon, type IconName } from '../components/Icon';
 import SetupFlow from '../components/SetupFlow';
-import { wantsSetupFlow, setupFlowSteps } from '../lib/quickSetup';
+import { wantsSetupFlow, setupFlowSteps, keepSeenSentenceSteps, withoutStepsForTask, confirmEditedSamples } from '../lib/quickSetup';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -396,7 +396,9 @@ export default function BuilderPage() {
   // persists them just like any other change.
   const history = useHistory<Game | null>(null);
   const game = history.state;
-  const setGame = history.set as (g: Game) => void;
+  // Every edit passes through `confirmEditedSamples`: a creator who writes their own answer over a
+  // bank sample, in the setup walk or the mission editor alike, owns that field from then on (28.10).
+  const setGame = (g: Game) => (history.set as (g: Game) => void)(confirmEditedSamples(history.state, g));
   const { undo, redo, canUndo, canRedo } = history;
   const [tab, setTab] = useState<BuilderTab>('build');
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
@@ -964,7 +966,12 @@ export default function BuilderPage() {
   );
   const [cleanupDismissed, setCleanupDismissed] = useState(false);
   const qsSteps = useMemo(() => quickSetupSteps(game), [game]);
-  const setupSteps = useMemo(() => setupFlowSteps(game), [game]);
+  const seenSetupSteps = useRef<TemplateWizardStep[]>([]);
+  const setupSteps = useMemo(() => {
+    const steps = keepSeenSentenceSteps(game, setupFlowSteps(game), seenSetupSteps.current);
+    seenSetupSteps.current = steps;
+    return steps;
+  }, [game]);
   const qsOutstanding = useMemo(() => outstandingQuickSetupIds(game), [game]);
   const qsCtx = useMemo(() => ({ steps: qsSteps, outstanding: qsOutstanding }), [qsSteps, qsOutstanding]);
   // Mutually exclusive by status: the bar shows on `running`, the context card on
@@ -1264,10 +1271,13 @@ export default function BuilderPage() {
             const src = game.stages.find((st) => st.id === stageId)?.tasks.find((x) => x.id === taskId);
             const next = regenerateMissionIn(game, src, user?.uid, () => { void dialog.alert(t.builder.regenerateNothingLeft); });
             if (!next) return false;
-            setGame({
+            // The swapped-in mission keeps the slot's id, so the old mission's authored steps (a
+            // photo, a hidden spot's clue) would otherwise be asked of it and block the launch.
+            seenSetupSteps.current = seenSetupSteps.current.filter((s) => s.taskId !== taskId);
+            setGame(withoutStepsForTask({
               ...game,
               stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === taskId ? next : x) }),
-            });
+            }, taskId));
             return true;
           }}
           onTaskChange={(stageId, task) => setGame({
@@ -3231,7 +3241,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     if (!stage || at < 0) return;
     const next = regeneratedTaskFor(stage.tasks[at]);
     if (!next) return;
-    updateStage(stage.id, { tasks: stage.tasks.map((t, i) => (i === at ? next : t)) });
+    // Like the setup walk's swap: the slot keeps its id, so the old mission's authored steps go.
+    setGame(withoutStepsForTask({
+      ...game,
+      stages: game.stages.map((st) => (st.id === stage.id ? { ...st, tasks: st.tasks.map((t, i) => (i === at ? next : t)) } : st)),
+    }, taskId));
     // composer-v2-phase0: the card spins, and the way back is one press away. Undo is the Builder's
     // own history, so it restores exactly the mission that was there.
     setRegenNonce((m) => ({ ...m, [taskId]: (m[taskId] ?? 0) + 1 }));

@@ -49,6 +49,8 @@ function eq(label: string, actual: unknown, expected: unknown): void {
  * sequence mission would compare unequal and the "otherwise identical" assertion
  * would fail for the wrong reason.
  */
+const FRESH_CODE_ENTRIES = new Set(['four-places', 'balloon-message', 'color-code-trail']);
+
 function stripIds(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripIds);
   if (value && typeof value === 'object') {
@@ -128,7 +130,9 @@ console.log('\n── 3. build() mints fresh ids every call ──────�
     if (shared.length > 0 || idsA.length === 0) notFresh.push(e.key);
 
     // …and everything else must be identical, or `build()` is not a pure factory.
-    if (JSON.stringify(stripIds(a)) !== JSON.stringify(stripIds(b))) notStable.push(e.key);
+    // These mint their code fresh per build, like a station's secretCode (28.10, freshDigits).
+    const freshCode = (t: unknown) => (FRESH_CODE_ENTRIES.has(e.key) ? { ...(t as object), numericAnswer: undefined, answers: undefined } : t);
+    if (JSON.stringify(stripIds(freshCode(a))) !== JSON.stringify(stripIds(freshCode(b)))) notStable.push(e.key);
   }
   eq('two builds of the same entry share no id, at any depth', notFresh, []);
   eq('two builds of the same entry are otherwise identical', notStable, []);

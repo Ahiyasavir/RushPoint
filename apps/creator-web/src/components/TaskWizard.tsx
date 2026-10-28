@@ -817,7 +817,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen, gameAnchors, guid
           280px and the step scrolls in the rare case that does not fit. Everything
           else on this step was already cut to earn this space. */}
       {choice === 'specific' ? (
-        <div className="flex-1 min-h-[280px] flex flex-col relative">
+        <div className="flex-1 min-h-[max(320px,min(52dvh,440px))] flex flex-col relative">
           {/* Handed to the MAP rather than positioned here (change:
               builder-ux-round-2). This wrapper spans LocationPicker's search row AND
               the coordinates field below the tiles, so anchoring to it put the

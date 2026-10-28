@@ -133,6 +133,17 @@ export function stripUnsafeDisplayChars(value: string): string {
   return value.replace(UNSAFE_DISPLAY_CHARS, '');
 }
 
+/**
+ * The same strip for PROSE (a description), which keeps its line breaks (28.10). The control-char
+ * range above includes LF, so every description saved through updateGame lost its lines: a
+ * mission written as one row per place, or a creator's own paragraphs typed in the editor, came
+ * back as one run-on line ("…במקום אחר.הראשונה:"). A line break cannot reorder or hide text, so it
+ * is not what the strip is for. A CRLF is kept as a single LF.
+ */
+export function stripUnsafeProseChars(value: string): string {
+  return value.replace(/\r\n?/g, '\n').split('\n').map(stripUnsafeDisplayChars).join('\n');
+}
+
 // ─── Structural winnability guard (wave-j J2/J3/J4) ───────────────────────────
 // The single SOURCE of the "a broken game can't be saved or published" rule,
 // mirroring launchRun's launch-time defense (functions/src/runs/index.ts) so a

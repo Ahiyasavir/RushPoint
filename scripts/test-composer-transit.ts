@@ -25,6 +25,7 @@ import {
   composeGame,
   seededRng,
   missionCostMinutes,
+  siteableInPlacedGame,
   averageMissionCost,
   targetTaskCount,
   MINUTES_PER_TASK,
@@ -191,7 +192,9 @@ console.log('a longer answer still buys a longer game');
 // So: `missionCostMinutes` takes MINUTES, not a flag, and the caller decides.
 console.log('the walk is a number the caller supplies, not a flag');
 {
-  const placeless = TASK_BANK.find((e) => !e.tags.includes('locationBased'))!;
+  // A play-anywhere mission the composer may pin: one that never gets a pin has no walk to add
+  // (test-bank-location-fit.ts), so the walk is only ever added to a pinnable one.
+  const placeless = TASK_BANK.find((e) => !e.tags.includes('locationBased') && siteableInPlacedGame(e))!;
   const sitedEntry = TASK_BANK.find((e) => e.tags.includes('locationBased'))!;
 
   const noWalk = missionCostMinutes(placeless, 0);

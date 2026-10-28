@@ -3081,7 +3081,7 @@ function HotZonePanel({ ctx, hotZone, gameAnchors }: { ctx: { ownerUid: string; 
       ) : (
         <div className="space-y-2">
           <Label>{t.runConsole.hotZoneCenter}</Label>
-          <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" anchors={gameAnchors} />
+          <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-[min(48dvh,360px)] min-h-[260px]" anchors={gameAnchors} />
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div><Label>{t.runConsole.hotZoneRadius}</Label><Input type="number" value={radius} onChange={(e) => setRadius(Math.max(1, Number(e.target.value)))} /></div>
             <div><Label>{t.runConsole.hotZoneMultiplier}</Label><Input type="number" value={mult} min={2} max={5} onChange={(e) => setMult(Math.min(5, Math.max(2, Number(e.target.value))))} /></div>
@@ -3306,7 +3306,7 @@ function ZonesConsole({ ownerUid, gameId, runId, gameAnchors }: { ownerUid: stri
         <Button variant={runActionVariant('createZone')} disabled={busy || !title.trim()} onClick={create}>{rc.zonesAdd}</Button>
       </div>
       <div className="mb-3">
-        <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" anchors={gameAnchors} />
+        <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-[min(48dvh,360px)] min-h-[260px]" anchors={gameAnchors} />
       </div>
       {zones.length === 0 ? (
         <PanelEmpty panel="zones" />

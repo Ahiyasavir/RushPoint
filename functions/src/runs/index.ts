@@ -2911,6 +2911,8 @@ async function applyRoute(a: {
         inFlight.status = 'unassigned';
         delete inFlight.startedAt;
         delete inFlight.routedByOperator;
+        // Its arrival belongs to this hold; handed back later, the team proves it again.
+        delete inFlight.arrivedAt; delete inFlight.arrivalUnverified;
         displacedTaskId = inFlight.taskId;
       }
       rec.status = 'assigned';
@@ -3185,6 +3187,7 @@ export const forceAssignTask = loggedCallable('forceAssignTask', async (data, co
       if (inFlight) {
         inFlight.status = 'unassigned';
         delete inFlight.startedAt;
+        delete inFlight.arrivedAt; delete inFlight.arrivalUnverified;
         displacedTaskId = inFlight.taskId;
       }
 

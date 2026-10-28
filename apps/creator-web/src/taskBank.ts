@@ -2473,6 +2473,13 @@ export interface TaskBankSetup {
   prompt: string;
   /** Blocks the launch while the field is unconfigured. Default false. */
   required?: boolean;
+  /**
+   * The value `build()` puts in this field is only a SAMPLE (Ahiya, 28.10): an answer only the
+   * creator can know (a count, a height, what they wrapped). It is there so the mission saves (a quiz
+   * with no answer is refused), but it is not the answer, so the walk shows an empty box and the
+   * launch stays blocked until the creator types their own (`SAMPLE_STEP_PREFIX`).
+   */
+  sample?: true;
 }
 
 export interface TaskBankEntry {
@@ -2598,6 +2605,23 @@ export type SpotKind = typeof SPOT_KINDS[number];
 export const OPEN_SPACE_CAPACITY = 100;
 
 /**
+ * The radius a play-anywhere mission gets if a creator pins it (Ahiya, 27.10): a pyramid on
+ * open grass or a scene at a bench does not happen at one exact spot, so its pin is a loose
+ * meeting area, never the 40 m check-in a station gets. Inert while the mission stays
+ * locationless; it applies the moment the composer or the Builder gives it a pin.
+ * Pinned by scripts/test-bank-location-fit.ts.
+ */
+export const LOOSE_PIN_RADIUS_M = 300;
+
+/**
+ * The arrival radius of a mission that IS tied to a place but happens over an AREA of it (Ahiya,
+ * 28.10): signs along a street, things hidden around a spot, a square where an agent walks, counts
+ * within 40 m. Its pin marks the area, not a doorstep, so the 40 m station check-in refused teams
+ * already standing in the middle of the mission. Pinned by scripts/test-bank-location-fit.ts.
+ */
+export const AREA_PIN_RADIUS_M = 150;
+
+/**
  * Everything every harvested mission shares. Keeps each entry to what differs.
  *
  * `maxConcurrentTeams: 1` is the SAFE floor, not a considered answer for any
@@ -2686,6 +2710,18 @@ const ATTACH_PHOTO: TaskBankSetup = {
  */
 // A fresh code per built mission (found 23.10): a fixed '2468' in every station of every game was
 // one guessable code for the whole platform, shown to the creator as "already set".
+/**
+ * A code of `n` digits the creator plants (balloons, coloured objects), fresh per built mission.
+ *
+ * The other half of the same rule (Ahiya, 28.10): an answer the walk ASKS the creator for never
+ * passes for done while it is a sample. A count, a height, the word their signs spell, what they
+ * wrapped: those keep a sample so the mission saves, and their setup step says `sample: true`,
+ * because a sample ("6", "כדור") read as already done and was offered as "keep it", which launches
+ * a game nobody can solve. A code the creator merely has to copy is fine to hand them, so it is
+ * fresh instead. scripts/test-bank-no-sample-answers.ts pins both.
+ */
+const freshDigits = (n: number): string => Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join('');
+
 const codeStation = (over: Partial<Task> & Pick<Task, 'title'>): Task =>
   sited({
     type: 'smart_station',
@@ -2734,6 +2770,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'youth-winning-rap',
+    siting: 'never',
     sourceTemplateKey: 'youth-missions',
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium', 'performance', 'music', 'humor', 'againstClock'],
     difficulty: 5,
@@ -2756,6 +2793,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'performance', 'humor'],
     difficulty: 5,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'המילוט הגדול',
       description: 'אתם בסצנת שיא של סרט פעולה: הרגע חילצתם חבר ואתם בורחים. תיצרו תמונה קפואה (Freeze Frame) של רגע הבריחה. לכל אחד מכם תפקיד אחר בסצנה, וכולם קופאים באותו רגע בדיוק.',
       type: 'photo',
@@ -2780,6 +2818,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium', 'park', 'beach', 'forest', 'school', 'physical', 'building'],
     difficulty: 5,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'פירמידה אנושית',
       description: 'תבנו פירמידה אנושית: שכבה רחבה למטה, וכל שכבה שמעליה צרה ממנה. תצלמו אותה ברגע שהיא עומדת יציב בלי שאף אחד מחזיק אותה.',
       type: 'photo',
@@ -2856,6 +2895,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'park', 'performance', 'humor'],
     difficulty: 5,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'כתבת חדשות דחופה',
       description: 'אחד מכם כתב טלוויזיה שמדווח בשידור חי על אירוע מוזר שקרה כאן. השאר משחקים ניצבים, עוברי אורח או גיבורי האירוע. סרטון של 40 שניות, עם פתיחה וסיום. הכתב חייב לומר איפה הוא עומד ומה קרה כאן. אם תצליחו לשכנע עובר אורח אמיתי להתראיין, זה מה שיהפוך את הסרטון לאמיתי.',
       type: 'photo',
@@ -2910,18 +2950,19 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'youth-absurd-petition',
+    // Needs people, not a spot: signatures can be collected on any busy street, so no pin
+    // (Ahiya, 27.10: a mission whose action is not at a specific spot is playable from anywhere).
+    siting: 'never',
     sourceTemplateKey: 'youth-missions',
-    tags: ['action', 'camera', 'teamwork', 'creative', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'medium', 'cityCenter', 'mall', 'neighborhood', 'beach', 'strangers', 'humor', 'dare', 'crowded'],
+    tags: ['action', 'camera', 'teamwork', 'creative', 'needsSetup', 'fromAnywhere', 'outdoor', 'youth', 'medium', 'cityCenter', 'mall', 'neighborhood', 'beach', 'strangers', 'humor', 'dare', 'crowded'],
     difficulty: 5,
-    // Needs a crowd, so the team walks to where people actually are.
-    transitMinutes: 5,
     // A sheet and a pen are not something every team carries (L30), so the creator hands them out.
-    setup: [PLACE_IT, {
+    setup: [{
       field: 'description',
       required: true,
       prompt: 'לפני המשחק תכינו לכל קבוצה דף ועט. בלי זה אין על מה לאסוף חתימות.\n\nBefore the game, give every team a sheet of paper and a pen. Without them there is nothing to collect signatures on.',
     }],
-    build: () => sited({
+    build: () => anywhere({
       title: 'העצומה האבסורדית',
       description: 'תכתבו על דף: "מפסיקים את האבסורד: חותמים עכשיו על העצומה לביטול חובת הרישיון לרכיבה על חמורים ומחזירים את ההיגיון לרחובות!" תספרו לאנשים ברחוב שזה חלק ממשחק, תאספו 15 חתימות, ותצלמו את הדף.',
       type: 'photo',
@@ -2934,6 +2975,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'youth-israeli-pride',
+    siting: 'never',
     sourceTemplateKey: 'youth-missions',
     // The placeless finale, for the same reason the pyramid is the placeless
     // opener. Building something together and photographing it is a real closing
@@ -2974,6 +3016,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // which is the flavour the youth set is thinnest on.
   {
     key: 'challenge-shampoo-pitch',
+    siting: 'never',
     sourceTemplateKey: 'challenge-missions',
     // needsSetup, and it is the real thing: somebody has to hand each team a box
     // with a bottle of shampoo in it before the game starts.
@@ -3008,6 +3051,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'challenge-beatles-crossing',
+    siting: 'never',
     sourceTemplateKey: 'challenge-missions',
     // Same mission as `statue-remake` in different clothes: recreate a famous
     // image with your bodies. One game, one of them.
@@ -3066,6 +3110,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['start', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth', 'medium', 'indoor', 'outdoor', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'adults', 'crowded', 'historic', 'physical'],
     difficulty: 4,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'כולם באוויר',
       description: 'תמונה אחת שבה כל חברי הקבוצה באוויר בו זמנית.',
       type: 'photo',
@@ -3082,6 +3127,7 @@ export const TASK_BANK: TaskBankEntry[] = [
         tags: ['finish', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'easy', 'humor', 'performance'],
     difficulty: 2,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'טקס הניצחון',
       // Rule 55, restored. The operator's curation pass cut this to 60% of its
       // length and, in doing so, cut the only thing in it that was about the
@@ -3111,6 +3157,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['camera', 'action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'park', 'beach', 'mixed', 'youth', 'kids', 'corporate', 'medium', 'building', 'nature', 'record'],
     difficulty: 5,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'רוג׳ום',
       description: 'תבנו רוג׳ום ביחד: כל אחד מכם מוסיף לפחות אבן אחת, מהגדולה לקטנה, עד שהוא עומד לבד. ככה מסמנים שביל ביער. תצלמו אותו, ובסוף תפזרו את האבנים בחזרה כדי לא לבלבל מי שיעבור כאן אחריכם.',
       type: 'photo',
@@ -3127,6 +3174,7 @@ export const TASK_BANK: TaskBankEntry[] = [
         tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'youth', 'kids', 'corporate', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'school', 'indoor', 'outdoor', 'physical'],
     difficulty: 4,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'האות האנושית',
       description: 'תשכבו על הרצפה ותיצרו בגופכם את האות הראשונה של שם הקבוצה. אחד מכם מצלם מלמעלה, עם היד מושטת גבוה ככל שאפשר, כדי שרואים את כל האות.',
       type: 'photo',
@@ -3230,6 +3278,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'ad-for-nothing',
+    siting: 'never',
     family: 'genre-parody',
     sourceTemplateKey: 'authored',
         tags: ['creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'performance', 'humor'],
@@ -3261,12 +3310,14 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'numericAnswer',
+        sample: true,
         required: true,
         prompt: 'תכתבו את המספר הנכון. אם קשה לספור בדיוק, תרחיבו בהגדרות המשימה כמה קרובה התשובה צריכה להיות.\n\nEnter the correct number. If an exact count is hard, widen the tolerance in the mission settings.',
       },
     ],
     build: () => sited({
       title: 'הספירה המדויקת',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'תספרו כמה ספסלים יש עד 40 מטר מהנקודה הזאת. תתחלקו לשניים, כל חצי סופר בנפרד, ותגישו רק כששני הצדדים הגיעו לאותו מספר.',
       type: 'numeric',
       difficulty: 5,
@@ -3300,12 +3351,14 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תכתבו את המילה שיוצאת. תבדקו אותה בשטח לפני המשחק, שלטים מתחלפים.\n\nEnter the word it spells. Check it on the ground before the game, signs get replaced.',
       },
     ],
     build: () => sited({
       title: 'צופן השלטים',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'לאורך הרחוב הזה יש שלטים. תיקחו את האות הראשונה מכל אחד מהם, לפי הסדר, ותרכיבו מילה אחת. היא התשובה.',
       type: 'quiz',
       difficulty: 7,
@@ -3334,6 +3387,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'מה לא שייך לכאן',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'מישהו החביא כאן חפץ אחד שלא אמור להיות במקום הזה. תמצאו אותו ותצטלמו איתו במקום שבו מצאתם, בלי להזיז אותו.',
       type: 'photo',
       difficulty: 5,
@@ -3349,8 +3403,8 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Strangers: the missions people remember a week later ──────────────────
   {
     key: 'thirty-second-interview',
+    siting: 'never',
     family: 'stranger-question',
-    spot: 'bench',
     sourceTemplateKey: 'authored',
     tags: ['action', 'camera', 'creative', 'noPrep', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'beach', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded', 'educational', 'indoor', 'outdoor', 'school', 'office', 'park', 'strangers'],
     difficulty: 6,
@@ -3386,6 +3440,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // a fuzzy negotiation into a clear, luck-driven chain with an unambiguous
     // finish line.
     key: 'trade-up',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['action', 'teamwork', 'creative', 'needsSetup', 'fromAnywhere', 'cityCenter', 'mall', 'neighborhood', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'crowded', 'camera', 'kids', 'strangers', 'dare'],
     difficulty: 8,
@@ -3474,6 +3529,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Indoor, and the office in particular, which had nothing at all ────────
   {
     key: 'one-colour-five-things',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
     tags: ['camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'mall', 'office', 'school', 'neighborhood', 'mixed', 'kids', 'corporate', 'easy', 'forest', 'park', 'cityCenter', 'hunt'],
@@ -3490,6 +3546,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'office-olympics',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'corporate', 'adults', 'mixed', 'medium', 'camera', 'humor', 'physical'],
     difficulty: 5,
@@ -3521,6 +3578,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'oldest-thing-here',
+    siting: 'never',
     family: 'oldest-find',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'neighborhood', 'cityCenter', 'corporate', 'adults', 'mixed', 'medium', 'historic', 'creative', 'youth', 'hunt', 'observation', 'history'],
@@ -3541,6 +3599,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'rainbow-hunt',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'color-hunt',
     tags: ['camera', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'forest', 'beach', 'neighborhood', 'kids', 'mixed', 'easy', 'hunt'],
@@ -3564,6 +3623,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // checkable claim, then test it against a second, unrelated witness. That
     // is a real skill (interviewing, judging a source) rather than a photo op.
     key: 'local-legend',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     // Same act as humans-of-the-city: ask a stranger one question, film the answer.
     family: 'stranger-question',
@@ -3628,12 +3688,14 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'numericAnswer',
+        sample: true,
         required: true,
         prompt: 'לפני המשחק: תלכו בעצמכם מנקודת ההתחלה עד נקודת הסיום ותספרו את הצעדים. תכתבו את המספר האמיתי.\n\nBefore the game: walk it yourself from the start point to the end point and count the steps. Enter the real number.',
       },
     ],
     build: () => sited({
       title: 'הליכה',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'כמה צעדים לוקח לכם להגיע מ[הוראות ליוצר: נקודה ראשונה] ל[הוראות ליוצר: נקודה שנייה]',
       type: 'numeric',
       difficulty: 3,
@@ -3677,6 +3739,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'park', 'forest', 'beach', 'neighborhood', 'school', 'mixed', 'kids', 'medium', 'humor'],
     difficulty: 5,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'כולם ואף אחד',
       description: 'תצלמו תמונה שאפשר לספור בה את כל הקבוצה, אבל אי אפשר לזהות אף אחד מכם: בלי פנים ובלי שום סימן מזהה.',
       type: 'photo',
@@ -3702,6 +3765,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'numericAnswer',
+        sample: true,
         required: true,
         prompt: 'תבררו מראש את הגובה האמיתי במטרים ותכתבו אותו. אם אין מספר מדויק, תספרו קומות ותכפילו בשלוש.\n\nFind out the real height in metres in advance and enter it. If there is no exact figure, count the floors and multiply by three.',
       },
@@ -3762,6 +3826,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'price-target',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     // Was `numeric` ("write how close you got"): a team could type the target
     // itself and nothing could tell (lessons L1). The price tags in one photo
@@ -3906,6 +3971,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       prompt: 'המשימה צריכה דף נייר לכל קבוצה, תחלקו אותו מראש בהרשמה או בעמדת פתיחה. אפשר גם לערוך את המשימה כך שהיעד יהיה להטיס את המטוס מנקודה אחת לשנייה שתבחרו, במקום ספירת צעדים.\n\nThis mission needs one sheet of paper per team, hand it out at registration or a start station. You can also edit it so the goal is flying the plane from one point to another you choose, instead of counting steps.',
     }],
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'מבחן הטיסה',
       description: 'תקפלו מטוס נייר שעף לפחות 10 צעדים גדולים מנקודת הזריקה. תצלמו בסרטון אחד את הזריקה ואת ספירת הצעדים.',
       type: 'photo',
@@ -3928,6 +3994,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 3,
     minAge: 6,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'מרוץ המלצרים',
       description: 'כל אחד מכם הולך 20 צעדים עם בקבוק עומד על כף היד הפתוחה, והיד השנייה בכיס. נפל? מתחילים מאפס. סרטון אחד.',
       type: 'photo',
@@ -3960,11 +4027,13 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'choices',
+        sample: true,
         required: true,
         prompt: 'תרשמו את שמות כל החפצים שהופיעו בתמונה, אחד לכל אפשרות.\n\nList the name of every object that appeared in the photo, one per option.',
       },
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תכתבו את שם החפץ שהחלטתם לשנות. חייב להתאים בדיוק לאחת האפשרויות שכתבתם.\n\nEnter the name of the object you changed. Must exactly match one of the options above.',
       },
@@ -4004,6 +4073,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     setup: [{
       field: 'orderItems',
+      sample: true,
       required: true,
       prompt: 'תרשמו 4 עד 5 דברים שהחוגג/ת אוהב/ת (צבע, מאכל, סרט, חיה, משחק), מהכי אהוב עד הכי פחות אהוב, לפי מה שאתם באמת יודעים עליו/ה.\n\nList 4 to 5 things the celebrant loves (a color, food, movie, animal, game), ranked from most to least loved, based on what you actually know about them.',
     }],
@@ -4023,6 +4093,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   // ── Ambient knowledge needs no Quick Setup field at all — rule 28 ──────────
   {
     key: 'backwards-name',
+    siting: 'never',
     // "החוגג/ת" — there is no celebrant at a team offsite. See TaskBankEntry.occasions.
     occasions: ['birthday', 'mitzvah'],
     sourceTemplateKey: 'authored',
@@ -4096,6 +4167,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       'neighborhood', 'home', 'kids', 'mixed', 'easy', 'calm'],
     difficulty: 2,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'שורה לפי גובה',
       // The no-talking rule is the whole mission (rule 4): ordering a line by
       // height is trivial out loud and genuinely funny in hand signals.
@@ -4114,12 +4186,15 @@ export const TASK_BANK: TaskBankEntry[] = [
   // a spoiler of the answer.
   {
     key: 'anagram-easy',
+    // A riddle needs no place, but a walking race may make it a station: then the pin is a loose area.
+    spot: 'anyCorner',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
     // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'office', 'school', 'indoor', 'puzzle', 'calm'],
     difficulty: 3,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'חידת האותיות הקצרה',
       description: 'תסדרו מחדש את האותיות האלה למילה אחת: ן ו ר ת פ. אסור לחפש בגוגל.',
       type: 'quiz',
@@ -4133,12 +4208,15 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'anagram-medium',
+    // A riddle needs no place, but a walking race may make it a station: then the pin is a loose area.
+    spot: 'anyCorner',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
     // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'office', 'school', 'indoor', 'puzzle', 'calm'],
     difficulty: 5,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'חידת האותיות',
       description: 'תסדרו מחדש את האותיות האלה למילה אחת: ת י ג ת ל. אסור לחפש בגוגל.',
       type: 'quiz',
@@ -4152,12 +4230,15 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'anagram-hard',
+    // A riddle needs no place, but a walking race may make it a station: then the pin is a loose area.
+    spot: 'anyCorner',
     family: 'anagram-riddle',
     sourceTemplateKey: 'authored',
     // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'hard', 'office', 'school', 'indoor', 'puzzle', 'calm'],
     difficulty: 7,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'חידת האותיות הארוכה',
       description: 'תסדרו מחדש את האותיות האלה למילה אחת: ק ה ת ר ה פ. אסור לחפש בגוגל.',
       type: 'quiz',
@@ -4183,17 +4264,19 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'תחליפו את הסוגריים בתיאור מדויק של שלוש הבדיקות שבחרתם (למשל: חלונות בקיר X, שתי הספרות האחרונות בשלט Y, עצים שרואים מכאן). אל תמחקו את שאר ההוראות.\n\nReplace the brackets with an exact description of the three observations you chose (e.g. windows on wall X, the last two digits on sign Y, trees in view). Don\'t delete the rest of the instructions.',
+        prompt: 'לכל ספרה, תכתבו בדיוק מה סופרים או קוראים בשבילה, למשל: חלונות בקיר הכתום, שתי הספרות האחרונות בשלט של המכולת, עצים שרואים מכאן.\n\nFor each digit, write exactly what is counted or read for it, e.g. windows on the orange wall, the last two digits on the grocery sign, trees in view.',
       },
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תבחרו 3 בדיקות באתר ותעשו אותן בעצמכם: ספרה 1 = חלונות בקיר שבחרתם. ספרה 2 = שתי הספרות האחרונות בשלט שבחרתם. ספרה 3 = עצים או ספסלים שרואים מכאן. תחברו לקוד, למשל 483, ותכתבו כאן.\n\nChoose 3 real observations on site and survey them yourself: digit 1 = windows on a wall you choose. Digit 2 = the last two digits on a sign you choose. Digit 3 = trees or benches in view. Combine into a code, e.g. 483, and enter it here.',
       },
     ],
     build: () => sited({
       title: 'מנעול המספרים',
-      description: 'תרכיבו קוד בן שלוש ספרות: [הוראות ליוצר: מה לספור או לקרוא לכל ספרה, לפי הסדר].',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
+      description: 'תרכיבו קוד בן שלוש ספרות.\nהספרה הראשונה: [הוראות ליוצר: מה סופרים או קוראים בשבילה]\nהספרה השנייה: [הוראות ליוצר: מה סופרים או קוראים בשבילה]\nהספרה השלישית: [הוראות ליוצר: מה סופרים או קוראים בשבילה]',
       type: 'quiz',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -4207,16 +4290,20 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'mystery-gift',
+    // A riddle needs no place, but a walking race may make it a station: then the pin is a loose area.
+    spot: 'anyCorner',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'puzzle', 'calm'],
     difficulty: 3,
     minAge: 6,
     setup: [{
       field: 'answers',
+      sample: true,
       required: true,
       prompt: 'תעטפו חפץ קטן ולא שביר בעטיפה אטומה. תכתבו כאן בדיוק מה זה, במילה אחת או שתיים.\n\nWrap a small, unbreakable object in opaque wrapping. Write here exactly what it is, in one or two words.',
     }],
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'מתנת התעלומה',
       description: 'מה יש בחבילה העטופה? מותר למשש, להרים ולנער בעדינות, אבל לא לפתוח. יש לכם ניחוש אחד.',
       type: 'quiz',
@@ -4232,6 +4319,8 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Rule 19: every balloon of the ONE chosen color carries the same code, so
     // there is never a "which one is correct" ambiguity for the team.
     key: 'balloon-message',
+    // A riddle needs no place, but a walking race may make it a station: then the pin is a loose area.
+    spot: 'anyCorner',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'medium', 'hunt'],
     difficulty: 4,
@@ -4248,13 +4337,14 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
     ],
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'הודעת הבלון',
       description: 'בין כל הבלונים, תמצאו בלון בצבע [הוראות ליוצר: תכתבו כאן את הצבע שבחרתם]. בפנים יש פתק עם קוד, תכתבו אותו כאן ותאספו את השאריות.',
       type: 'quiz',
       difficulty: 4,
       estimatedMinutes: 5,
       pointValue: 100,
-      answers: ['1234'],
+      answers: [freshDigits(4)],
       hint: 'רמז: הבלון שלכם תמיד יהיה בצבע שנכתב למעלה. לא צריך לבדוק בלונים בצבעים אחרים.',
       hintPenalty: 15,
     }),
@@ -4283,12 +4373,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'שביל הצבעים הסודי',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'כאן מוסתרים ארבעה חפצים צבעוניים, ועל כל אחד ספרה. תמצאו את כולם ותחברו את הספרות לקוד אחד, תמיד לפי הסדר: אדום, כחול, צהוב, ירוק.',
       type: 'quiz',
       difficulty: 5,
       estimatedMinutes: 10,
       pointValue: 130,
-      answers: ['3719'],
+      answers: [freshDigits(4)],
       hint: 'רמז: שכחתם את הסדר? הצבעים תמיד: אדום, כחול, צהוב, ירוק.',
       hintPenalty: 20,
       hideLocation: true,
@@ -4315,12 +4406,15 @@ export const TASK_BANK: TaskBankEntry[] = [
     // played (rule 31): every home, office and school bathroom holds one. The
     // youngest-friendly entry of the three, and the only one carrying `home`.
     key: 'household-riddle-comb',
+    // A riddle needs no place, but a walking race may make it a station: then the pin is a loose area.
+    spot: 'anyCorner',
     sourceTemplateKey: 'authored',
     // Sofa puzzle: in a park or a street the field adds nothing (gate G8), so home and indoors only.
         tags: ['thinking', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy', 'office', 'school', 'indoor', 'puzzle', 'hunt'],
     difficulty: 2,
     minAge: 6,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'החידה שיושבת בבית',
       description: 'יש לי שיניים אבל אני לא נושך, ויש לי גב אבל אף אחד לא שוכב עליי. אני שטוח, אני נכנס לתיק, ואני עובר לכם בשיער בכל בוקר. מי אני? אסור לחפש בגוגל, מותר לחפש בבית. תכתבו את התשובה במילה אחת.',
       type: 'quiz',
@@ -4383,6 +4477,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['finish', 'action', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'park', 'beach', 'school', 'neighborhood', 'mixed', 'kids', 'medium', 'physical'],
     difficulty: 6,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'כולם או אף אחד',
       description: 'סרטון אחד בלי חיתוך: כל אחד מכם בתורו תופס מאחורי הגב חפץ שזורקים לו. מישהו פספס? חוזרים לראשון.',
       type: 'photo',
@@ -4432,6 +4527,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['start', 'action', 'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'neighborhood', 'beach', 'cityCenter', 'mixed', 'youth', 'kids', 'adults', 'medium', 'performance', 'humor'],
     difficulty: 4,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'טייק אחד',
       description: 'סרטון אחד רצוף, בלי חיתוכים: המצלמה עוברת מאחד לשני, וכל אחד בתורו אומר את שמו ועושה תנועה אחת משלו. מי שמצלם עובר ביניכם בלי לעצור. נגמר כשכולם היו.',
       type: 'photo',
@@ -4452,6 +4548,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // street with parked cars carries one within a few minutes, and a car park
     // is near-certain.
     key: 'rare-triple-plate',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'rare-find',
     tags: ['action', 'thinking', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'neighborhood', 'cityCenter', 'mall', 'mixed', 'kids', 'youth', 'corporate', 'medium', 'hunt', 'observation'],
@@ -4475,6 +4572,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // a game. The refusal line is the floor: a team that gets turned down has a
     // stated next move instead of a stall.
     key: 'namesake-stranger',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'rare-find',
     tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'cityCenter', 'mall', 'neighborhood', 'beach', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'strangers', 'hunt'],
@@ -4499,6 +4597,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // the STRANGER performs. "Without you leading" is the self-validating clause
     // (rule 40) — the team can see for itself whether it actually taught it.
     key: 'teach-a-stranger',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     tags: ['action', 'creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'crowded', 'cityCenter', 'mall', 'neighborhood', 'beach', 'park', 'mixed', 'youth', 'adults', 'corporate', 'medium', 'strangers', 'dare'],
     difficulty: 6,
@@ -4527,10 +4626,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Rule 15: the puzzle is authored, with a real checkable answer, not a
     // mechanic label.
     key: 'thinking-room',
+    // A riddle needs no place, but a walking race may make it a station: then the pin is a loose area.
+    spot: 'anyCorner',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'office', 'school', 'mall', 'park', 'mixed', 'youth', 'adults', 'corporate', 'hard', 'educational', 'puzzle', 'calm'],
     difficulty: 8,
     build: () => anywhere({
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
       title: 'חדר החשיבה',
       description: 'השעון עצור עכשיו, אז אל תמהרו. לפניכם שמונה מטבעות שנראים זהים, אבל אחד מהם כבד מהשאר. יש לכם מאזני כפות בלבד, בלי משקולות. כמה שקילות לפחות צריך כדי למצוא אותו בוודאות? אסור לחפש בגוגל. תתווכחו עד שכולכם בטוחים.',
       type: 'numeric',
@@ -4560,6 +4662,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // result shows who took part. Familied with the other two "reproduce a
     // reference image with your bodies" missions (rule 12).
     key: 'family-photo-remake',
+    siting: 'never',
     sourceTemplateKey: 'authored',
     family: 'recreate-famous-image',
         tags: ['creative', 'camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'kids', 'youth', 'adults', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school', 'indoor', 'outdoor', 'humor', 'performance'],
@@ -4896,6 +4999,7 @@ export const TASK_BANK: TaskBankEntry[] = [
 
   {
     key: 'official-photo',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['start', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'park', 'school', 'neighborhood', 'cityCenter', 'beach', 'office', 'humor'],
     difficulty: 2,
@@ -4913,6 +5017,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'farthest-origin',
+    siting: 'never',
     family: 'farthest',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'mall', 'neighborhood', 'school', 'office', 'home', 'hunt', 'againstClock'],
@@ -4944,6 +5049,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'הפרט הקטן',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'הפרט שבתמונה נמצא פחות ממאה מטר מהנקודה שבה אתם עומדים. תמצאו אותו ותצלמו אותו מאותה זווית בדיוק.',
       type: 'photo',
       difficulty: 6,
@@ -4956,6 +5062,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'egg-teammate',
+    siting: 'never',
     family: 'team-mascot',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'ongoing', 'humor', 'strangers', 'crowded'],
@@ -4975,6 +5082,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'ongoing-spoon',
+    siting: 'never',
     family: 'team-mascot',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'mall', 'ongoing', 'humor'],
@@ -4991,6 +5099,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'movie-trailer',
+    siting: 'never',
     family: 'genre-parody',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'park', 'school', 'mall', 'historic', 'performance', 'humor'],
@@ -5009,6 +5118,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'the-translator',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'hard', 'educational', 'cityCenter', 'mall', 'neighborhood', 'beach', 'strangers'],
     difficulty: 7,
@@ -5026,6 +5136,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'who-goes-alone',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'mixed', 'medium', 'home', 'school', 'park', 'neighborhood', 'cityCenter', 'dare'],
     difficulty: 5,
@@ -5047,6 +5158,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'longest-line',
+    siting: 'never',
     // Not tagged for streets or city centres (lessons L13): a line of bags across a busy
     // sidewalk blocks people and is easy to steal from.
     sourceTemplateKey: 'mission-studio',
@@ -5068,6 +5180,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'bottle-flip',
+    siting: 'never',
     family: 'turn-rounds',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'mixed', 'medium', 'home', 'school', 'park', 'againstClock'],
@@ -5086,6 +5199,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'double-agent',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['finish', 'thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'corporate', 'medium', 'ongoing', 'puzzle'],
     difficulty: 5,
@@ -5108,6 +5222,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'reverse-shoplifting',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     // Optional prep: a team can always find something to leave, but notes or chalk make it certain.
     setup: [{
@@ -5131,42 +5246,45 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'four-places',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
-    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'park', 'neighborhood', 'school', 'cityCenter', 'puzzle', 'splitUp', 'againstClock', 'navigation'],
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'fromAnywhere', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'park', 'neighborhood', 'school', 'cityCenter', 'puzzle', 'splitUp', 'againstClock', 'navigation'],
     difficulty: 6,
-    transitMinutes: 5,
     // Rebuilt from the founder's own note on a rejected draft: name the four
     // places and their order, state the facts, and GRANT permission to split.
     // Four places and a clock make splitting the smart move; the text never says so.
+    // No pin (Ahiya, 28.10): the four places the creator names ARE the location, and they are
+    // spread apart, so one 40 m check-in point fitted none of them. Each place is its own blank,
+    // one row per place; the code screen follows the places.
     setup: [
-      PLACE_IT,
       {
         field: 'description',
         required: true,
-        prompt: 'תכתבו בגיר ספרה אחת בכל אחד מארבעה מקומות קרובים לנקודה, ותכתבו כאן את ארבעת המקומות לפי הסדר, למשל: הראשונה ליד השעון, השנייה על הברזייה.\n\nChalk one digit at each of four places near the pin, and write the four places here in order, for example: the first by the clock, the second on the drinking fountain.',
+        prompt: 'תכתבו בגיר כל ספרה של הקוד במקום אחר באזור המשחק, ותכתבו כאן איפה כל אחת, למשל: ליד השעון. את הקוד עצמו תראו במסך הבא.\n\nChalk each digit of the code at a different place in the play area, and write here where each one is, for example: by the clock. You will see the code itself on the next screen.',
       },
       {
         field: 'numericAnswer',
         required: true,
-        prompt: 'תכתבו את הקוד המלא, ארבע הספרות לפי הסדר. הספרה הראשונה לא 0, כי מספר שמתחיל ב 0 מאבד אותה.\n\nEnter the full code, the four digits in order. The first digit must not be 0: a number starting with 0 loses it.',
+        prompt: 'זה הקוד שהקבוצות צריכות למצוא, ארבע ספרות לפי הסדר. אפשר להשאיר אותו או לשנות. הספרה הראשונה לא 0, כי מספר שמתחיל ב 0 מאבד אותה.\n\nThis is the code the teams must find, four digits in order. Keep it or change it. The first digit must not be 0: a number starting with 0 loses it.',
       },
     ],
-    build: () => sited({
+    build: () => anywhere({
       title: 'ארבעה מקומות',
-      description: 'הקוד הוא ארבע ספרות, וכל ספרה כתובה במקום אחר: [הוראות ליוצר: ארבעה מקומות לפי הסדר]. יש לכם 6 דקות, ומותר לכם להתפצל.',
+      description: 'הקוד הוא ארבע ספרות, וכל ספרה כתובה במקום אחר.\nהראשונה: [הוראות ליוצר: איפה כתובה הספרה הראשונה]\nהשנייה: [הוראות ליוצר: איפה כתובה הספרה השנייה]\nהשלישית: [הוראות ליוצר: איפה כתובה הספרה השלישית]\nהרביעית: [הוראות ליוצר: איפה כתובה הספרה הרביעית]\nיש לכם 6 דקות, ומותר לכם להתפצל.',
       type: 'numeric',
       difficulty: 6,
       estimatedMinutes: 7,
       timeLimitMinutes: 6,
       pointValue: 160,
-      numericAnswer: 4821,
+      // A fresh code per built mission, first digit never 0 (same lesson as codeStation, 23.10).
+      numericAnswer: 1000 + Math.floor(Math.random() * 9000),
       numericTolerance: 0,
-      // Chalked digits on public ground: every team can read them at once.
-      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+      geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
     }),
   },
   {
     key: 'historic-speech',
+    siting: 'never',
     family: 'genre-parody',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'school', 'office', 'performance', 'humor'],
@@ -5185,6 +5303,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'one-to-five',
+    siting: 'never',
     family: 'number-hunt',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'mall', 'hunt', 'observation'],
@@ -5203,6 +5322,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'sum-to-hundred',
+    siting: 'never',
     family: 'number-hunt',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'educational', 'neighborhood', 'cityCenter', 'mall', 'hunt', 'puzzle', 'observation'],
@@ -5219,6 +5339,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'forty-seconds',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'teamwork', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'corporate', 'mixed', 'easy', 'home', 'school', 'office', 'park', 'calm'],
     difficulty: 3,
@@ -5278,6 +5399,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תכתבו את המילה שיוצאת.\n\nEnter the word it spells.',
       },
@@ -5297,6 +5419,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'cap-toss',
+    siting: 'never',
     family: 'turn-rounds',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'mixed', 'easy', 'park', 'school', 'home', 'againstClock'],
@@ -5313,6 +5436,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'nature-documentary',
+    siting: 'never',
     family: 'genre-parody',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'park', 'forest', 'beach', 'neighborhood', 'cityCenter', 'performance', 'humor', 'nature'],
@@ -5329,6 +5453,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'humans-of-the-city',
+    siting: 'never',
     family: 'stranger-question',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'educational', 'cityCenter', 'mall', 'neighborhood', 'beach', 'park', 'strangers', 'kindness'],
@@ -5409,6 +5534,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The stranger version of farthest-origin: hunting tourists is a real dare
     // with a purpose, and "we found someone from New Zealand" is the story.
     key: 'farthest-stranger',
+    siting: 'never',
     family: 'farthest',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'historic', 'beach', 'mall', 'strangers', 'hunt', 'againstClock'],
@@ -5429,6 +5555,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // "Make someone say X", the street version: any wording is legal except the
     // word itself, so the cleverness is the puzzle and the one minute video is the clock.
     key: 'three-words',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'cityCenter', 'mall', 'beach', 'neighborhood', 'strangers', 'puzzle', 'humor'],
     difficulty: 6,
@@ -5445,6 +5572,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     // Akinator in the street: the stranger is the opponent, not the joke.
     key: 'five-questions',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'cityCenter', 'mall', 'beach', 'neighborhood', 'strangers', 'puzzle'],
     difficulty: 6,
@@ -5462,6 +5590,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Looks impossible in one take; the smart move is to recruit and line the six
     // up first, then film. Crowded places only: a quiet street cannot supply six.
     key: 'city-sentence',
+    siting: 'never',
     family: 'stranger-chain',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'hard', 'cityCenter', 'mall', 'beach', 'strangers', 'humor'],
@@ -5479,6 +5608,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     // The stranger receives something: their own song back. Usually they sing.
     key: 'song-of-then',
+    siting: 'never',
     family: 'stranger-question',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'park', 'neighborhood', 'mall', 'strangers', 'music', 'kindness'],
@@ -5577,6 +5707,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     // "We found Yossi's bakery": personal, and worth a photo. Luck decides some of it.
     key: 'name-on-the-street',
+    siting: 'never',
     family: 'rare-find',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'hunt', 'againstClock'],
@@ -5596,6 +5727,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Guess first, weigh after: the gap is the tension. The clever path: a litre
     // of water weighs a little over a kilo, so whoever knows pours some out.
     key: 'exact-kilo',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'corporate', 'mixed', 'medium', 'educational', 'cityCenter', 'neighborhood', 'mall', 'puzzle', 'strangers'],
     difficulty: 6,
@@ -5637,6 +5769,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'long-receipt',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'hunt', 'strangers', 'againstClock', 'crowded'],
     difficulty: 4,
@@ -5653,6 +5786,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'three-feet',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'park', 'school', 'cityCenter', 'neighborhood', 'youth', 'adults', 'mixed', 'camera', 'medium', 'physical'],
     difficulty: 4,
@@ -5668,6 +5802,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'street-beat',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'neighborhood', 'cityCenter', 'school', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'music', 'performance'],
     difficulty: 3,
@@ -5683,6 +5818,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'ten-high-fives',
+    siting: 'never',
     family: 'crowd-count',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'againstClock', 'dare'],
@@ -5699,6 +5835,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'oldest-shop',
+    siting: 'never',
     family: 'oldest-find',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'action', 'teamwork', 'educational', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'historic', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'history', 'againstClock', 'crowded'],
@@ -5741,6 +5878,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'old-word',
+    siting: 'never',
     family: 'stranger-question',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'crowded', 'cityCenter', 'park', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'history', 'humor'],
@@ -5770,6 +5908,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תכתבו את המכנה המשותף, במילה אחת או שתיים.\n\nWrite what they share, in one or two words.',
       },
@@ -5797,12 +5936,14 @@ export const TASK_BANK: TaskBankEntry[] = [
       PLACE_IT,
       {
         field: 'orderItems',
+        sample: true,
         required: true,
         prompt: 'תכתבו חמש חנויות שנמצאות ברחוב הזה, לפי הסדר שלהן מתחילת הרחוב ועד סופו.\n\nList five shops on this street, in their order from one end of the street to the other.',
       },
     ],
     build: () => sited({
       title: 'סדר ברחוב',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'יש לכם 2 דקות לסדר את החנויות האלה לפי הסדר שלהן ברחוב, מתחילתו ועד סופו. מותר לכם להתפצל.',
       type: 'quiz',
       difficulty: 6,
@@ -5817,6 +5958,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'shoe-twins',
+    siting: 'never',
     family: 'rare-find',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'hunt'],
@@ -5833,6 +5975,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'face-in-things',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'hunt', 'humor'],
     difficulty: 3,
@@ -5875,6 +6018,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'stranger-portrait',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor'],
     difficulty: 5,
@@ -5890,6 +6034,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'water-cup',
+    siting: 'never',
     family: 'team-mascot',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'neighborhood', 'youth', 'adults', 'mixed', 'camera', 'medium', 'ongoing', 'strangers', 'crowded'],
@@ -5906,6 +6051,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'six-legs',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'forest', 'youth', 'adults', 'mixed', 'camera', 'medium', 'nature', 'hunt'],
     difficulty: 5,
@@ -5921,6 +6067,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'three-languages',
+    siting: 'never',
     family: 'stranger-chain',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'hunt'],
@@ -5963,6 +6110,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'pause-freeze',
+    siting: 'never',
     family: 'public-freeze',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'camera', 'medium', 'dare', 'humor'],
@@ -5979,6 +6127,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'pun-shop',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'hunt', 'humor', 'againstClock'],
     difficulty: 4,
@@ -5995,6 +6144,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'russian-accent',
+    siting: 'never',
     family: 'stage-rule',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'ongoing', 'humor', 'performance'],
@@ -6011,6 +6161,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'pushups-stranger',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'crowded', 'park', 'cityCenter', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'physical', 'dare'],
     difficulty: 6,
@@ -6026,6 +6177,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'slow-motion',
+    siting: 'never',
     family: 'public-freeze',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'camera', 'medium', 'dare', 'humor'],
@@ -6042,6 +6194,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'my-letter',
+    siting: 'never',
     family: 'color-hunt',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'home', 'park', 'school', 'neighborhood', 'kids', 'mixed', 'camera', 'easy', 'hunt'],
@@ -6058,6 +6211,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'four-things',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'park', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'hunt', 'splitUp', 'againstClock', 'strangers', 'crowded'],
     difficulty: 5,
@@ -6074,6 +6228,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'priciest-car',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'hunt', 'againstClock'],
     difficulty: 4,
@@ -6103,6 +6258,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       },
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תלפפו רצועת נייר עבה סביב העמוד, תכתבו עליה מילה לאורכו, תשחררו ותתלו אותה עם סלוטייפ. תכתבו כאן את המילה.\n\nWrap a thick paper strip around the pole, write a word along it, unwind it and tape it up. Enter the word here.',
       },
@@ -6131,17 +6287,19 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'תחליפו את הסוגריים בנקודת התחלה ובצעדים, למשל: מהספסל שליד המזרקה, 30 צעדים גדולים צפונה ואז 12 מזרחה. היעד צריך להיות גדול ויחיד.\n\nReplace the brackets with a start and the steps, e.g. from the bench, 30 big steps north then 12 east. The target must be big and unique.',
+        prompt: 'תכתבו מאיפה מתחילים ואיך הולכים משם, למשל: מהספסל שליד המזרקה, 30 צעדים גדולים צפונה ואז 12 מזרחה. היעד צריך להיות גדול ויחיד.\n\nWrite where to start and how to walk from there, e.g. from the bench, 30 big steps north then 12 east. The target must be big and unique.',
       },
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תכתבו מה עומד ביעד, במילה או שתיים.\n\nWrite what stands at the target, in a word or two.',
       },
     ],
     build: () => sited({
       title: 'מפת פיראטים',
-      description: '[הוראות ליוצר: נקודת ההתחלה והצעדים, למשל: מהספסל שליד המזרקה, 30 צעדים גדולים צפונה ואז 12 מזרחה]. מה עומד שם?',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
+      description: 'מתחילים ב[הוראות ליוצר: נקודת ההתחלה, למשל הספסל שליד המזרקה].\nמשם: [הוראות ליוצר: הצעדים, למשל 30 צעדים גדולים צפונה ואז 12 מזרחה].\nמה עומד שם?',
       type: 'quiz',
       difficulty: 5,
       estimatedMinutes: 6,
@@ -6245,6 +6403,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'nature-letters',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'forest', 'beach', 'kids', 'mixed', 'camera', 'easy', 'nature', 'hunt', 'building'],
     difficulty: 3,
@@ -6276,6 +6435,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'sand-wall',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'kids', 'youth', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature', 'againstClock'],
     difficulty: 4,
@@ -6292,6 +6452,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'sand-word',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature'],
     difficulty: 4,
@@ -6307,6 +6468,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'sand-sculpture',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'kids', 'adults', 'mixed', 'camera', 'easy', 'building', 'strangers', 'againstClock', 'nature', 'crowded'],
     difficulty: 3,
@@ -6323,6 +6485,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'beach-boat',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'kids', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature'],
     difficulty: 4,
@@ -6338,6 +6501,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'wave-jump',
+    siting: 'never',
     family: 'all-airborne',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'physical', 'nature'],
@@ -6406,6 +6570,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'chain-reaction',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'home', 'school', 'office', 'park', 'kids', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'building'],
     difficulty: 5,
@@ -6421,6 +6586,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'escalator-mannequins',
+    siting: 'never',
     family: 'public-freeze',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'mall', 'office', 'crowded', 'youth', 'adults', 'corporate', 'camera', 'medium', 'dare', 'humor'],
@@ -6437,6 +6603,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'weirdest-product',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'noPrep', 'fromAnywhere', 'indoor', 'outdoor', 'mall', 'cityCenter', 'neighborhood', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor', 'crowded'],
     difficulty: 4,
@@ -6452,6 +6619,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'our-sign',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'neighborhood', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'hunt', 'humor'],
     difficulty: 3,
@@ -6484,6 +6652,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'shelter',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'kids', 'youth', 'adults', 'mixed', 'camera', 'medium', 'building', 'nature', 'againstClock'],
     difficulty: 6,
@@ -6500,6 +6669,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'ninjas',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'park', 'kids', 'mixed', 'camera', 'easy', 'physical', 'nature'],
     difficulty: 3,
@@ -6515,6 +6685,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'twenty-litter',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'park', 'beach', 'neighborhood', 'youth', 'adults', 'mixed', 'camera', 'medium', 'kindness', 'againstClock', 'nature'],
     difficulty: 4,
@@ -6531,6 +6702,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'animal-signs',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'educational', 'noPrep', 'fromAnywhere', 'outdoor', 'forest', 'park', 'kids', 'mixed', 'camera', 'easy', 'nature', 'hunt', 'observation'],
     difficulty: 2,
@@ -6546,6 +6718,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'office-portrait',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'adults', 'corporate', 'camera', 'easy', 'building', 'humor', 'againstClock'],
     difficulty: 3,
@@ -6562,6 +6735,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'next-department',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'educational', 'noPrep', 'fromAnywhere', 'indoor', 'office', 'adults', 'corporate', 'camera', 'medium', 'strangers', 'crowded'],
     difficulty: 4,
@@ -6577,6 +6751,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'street-miracle',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'kids', 'mixed', 'camera', 'easy', 'hunt', 'humor'],
     difficulty: 2,
@@ -6609,6 +6784,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => codeStation({
       title: 'הסוכן בקהל',
+      geofenceRadiusMeters: AREA_PIN_RADIUS_M,
       description: 'בכיכר הזאת מסתובב הסוכן שלנו: [הוראות ליוצר: שלושה סימנים מזהים, למשל כובע ירוק וספר ביד]. תגידו לו "הציפור עפה בחצות", והוא ייתן לכם קוד.',
       difficulty: 6,
       estimatedMinutes: 6,
@@ -6617,6 +6793,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'strangers-mission',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'park', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'dare', 'crowded'],
     difficulty: 5,
@@ -6632,6 +6809,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'lie-about-city',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'creative', 'teamwork', 'educational', 'noPrep', 'fromAnywhere', 'outdoor', 'cityCenter', 'neighborhood', 'historic', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'history', 'crowded'],
     difficulty: 6,
@@ -6647,6 +6825,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'first-job',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'kindness', 'crowded'],
     difficulty: 5,
@@ -6670,6 +6849,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       PLACE_IT,
       {
         field: 'answers',
+        sample: true,
         required: true,
         prompt: 'תשימו בקופסה בנקודה חמישה חפצים שהאות הראשונה שלהם יוצרת מילה, למשל מטבע, ספוג, גזר, רימון, תפוח = מסגרת. תכתבו כאן את המילה.\n\nPut five objects in a box at the pin whose first letters spell a five letter word. Enter the word here.',
       },
@@ -6681,7 +6861,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 6,
       estimatedMinutes: 6,
       pointValue: 140,
-      answers: ['פעם'],
+      answers: ['מסגרת'],
       hint: 'רמז: תסתכלו על האות הראשונה של כל חפץ.',
       hintPenalty: 20,
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
@@ -6689,6 +6869,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'silent-library',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'teamwork', 'noPrep', 'fromAnywhere', 'indoor', 'mall', 'school', 'home', 'kids', 'mixed', 'camera', 'easy', 'humor'],
     difficulty: 2,
@@ -6704,6 +6885,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'family-feud',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor'],
     difficulty: 5,
@@ -6719,6 +6901,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'what-are-you-listening',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'thinking', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'mixed', 'camera', 'medium', 'strangers', 'music'],
     difficulty: 4,
@@ -6792,6 +6975,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'the-curse',
+    siting: 'never',
     family: 'stage-rule',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'easy', 'ongoing', 'physical'],
@@ -6808,6 +6992,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'stranger-charades',
+    siting: 'never',
     sourceTemplateKey: 'mission-studio',
     tags: ['action', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'mall', 'beach', 'park', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'performance', 'againstClock', 'crowded'],
     difficulty: 4,
@@ -6824,6 +7009,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'five-cities',
+    siting: 'never',
     family: 'farthest',
     sourceTemplateKey: 'mission-studio',
     // Strangers sign, so the team needs a pen: not every team carries one (L30). That is real prep.
@@ -6846,6 +7032,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'same-pose',
+    siting: 'never',
     family: 'camera-cut',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'park', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'humor'],
@@ -6862,6 +7049,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'flying-ball',
+    siting: 'never',
     family: 'camera-cut',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'park', 'mall', 'school', 'office', 'home', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'humor'],
@@ -6878,6 +7066,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'strangers-story',
+    siting: 'never',
     family: 'stranger-chain',
     sourceTemplateKey: 'mission-studio',
     tags: ['creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'crowded', 'cityCenter', 'mall', 'beach', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'strangers', 'humor'],
@@ -6894,6 +7083,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'victory-signs',
+    siting: 'never',
     family: 'rare-find',
     sourceTemplateKey: 'mission-studio',
     tags: ['thinking', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'cityCenter', 'neighborhood', 'mall', 'youth', 'adults', 'corporate', 'mixed', 'camera', 'medium', 'hunt', 'splitUp'],
@@ -6910,6 +7100,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'code-names',
+    siting: 'never',
     family: 'stage-rule',
     sourceTemplateKey: 'mission-studio',
     tags: ['start', 'camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'home', 'school', 'park', 'ongoing', 'humor'],
@@ -6926,6 +7117,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   },
   {
     key: 'twelve-thumbs',
+    siting: 'never',
     family: 'crowd-count',
     sourceTemplateKey: 'mission-studio',
     tags: ['camera', 'action', 'teamwork', 'noPrep', 'fromAnywhere', 'crowded', 'youth', 'adults', 'mixed', 'medium', 'cityCenter', 'mall', 'beach', 'neighborhood', 'strangers'],

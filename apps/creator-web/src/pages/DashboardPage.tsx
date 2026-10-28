@@ -28,7 +28,7 @@ import { OverflowMenu } from '../components/OverflowMenu';
 // The stamp that tells the Builder this mount is the landing from the new-game
 // wizard, so it does not stack a second guided flow on top (change:
 // creator-mobile-mechanics).
-import { JUST_CREATED_NAV_STATE, OPEN_SETUP_NAV_STATE } from '../lib/quickSetup';
+import { JUST_CREATED_NAV_STATE, OPEN_SETUP_NAV_STATE, gameToResume } from '../lib/quickSetup';
 import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
@@ -958,6 +958,30 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* ── Resume an unfinished setup (27.10): the most recent game whose walk was left open ── */}
+      {(() => {
+        const r = gameToResume(games, Date.now());
+        if (!r) return null;
+        const sf = t.setupFlow;
+        return (
+          <button type="button" onClick={() => nav(`/build/${r.game.id}`, { state: OPEN_SETUP_NAV_STATE })}
+            className="mb-5 w-full flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-3 rounded-2xl border-2 border-rp-fire/40 bg-gradient-to-l from-rp-fire/10 to-rp-amber/10 p-4 text-start hover:border-rp-fire transition-colors">
+            <span className="relative inline-flex w-14 h-14 shrink-0 items-center justify-center rounded-full bg-[--surface-0] text-ink-fire text-[16px] font-extrabold">
+              <svg aria-hidden viewBox="0 0 36 36" className="absolute inset-0 -rotate-90">
+                <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeOpacity="0.15" strokeWidth="3" />
+                <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(r.pct / 100) * 97.4} 97.4`} />
+              </svg>
+              {r.pct}%
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[17px] font-extrabold text-[--ink-1] truncate" dir="auto">{sf.resumeTitle({ title: r.game.title || '', pct: r.pct })}</span>
+              <span className="block text-[14px] text-[--ink-2]">{sf.resumeBody({ n: r.left })}</span>
+            </span>
+            <span className="w-full sm:w-auto shrink-0 inline-flex min-h-[48px] items-center justify-center rounded-xl bg-rp-fire px-4 text-[16px] font-bold text-white">{sf.resumeCta}</span>
+          </button>
+        );
+      })()}
 
       {/* ── First-run checklist (change: creator-onboarding-and-plain-language) ──
           Suppressed at zero games: the empty state below is then the single focal

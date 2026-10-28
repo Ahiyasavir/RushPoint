@@ -53,6 +53,10 @@ export function timeLimitClockStart(
   const t = task && typeof task === 'object' ? task as Parameters<typeof arrivalGateApplies>[0] : null;
   const gated = arrivalGateApplies(t, { arrivalGate: gate ?? arrivedAt !== null });
   if (!gated) return started;
+  // An arrival from an EARLIER hold of this mission (it was routed away and handed back) is not this
+  // hold's arrival: counting from it made the countdown expire on the spot (bug hunt 27.10). The
+  // clock then starts no earlier than the hand-over.
+  if (arrivedAt !== null && started !== null && Date.parse(arrivedAt) < Date.parse(started)) return started;
   return arrivedAt;
 }
 

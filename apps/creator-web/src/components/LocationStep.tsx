@@ -103,16 +103,18 @@ export default function LocationStep({ coordinates, onChange, mapClassName = 'h-
     // instead of collapsing. Manual lat/lng collapse into a details so they don't
     // steal space from the map (most creators place the pin by search/click/drag).
     return (
-      <div className="flex-1 min-h-0 flex flex-col gap-2">
+      <div className="relative flex-1 min-h-0 flex flex-col">
         <div className="flex-1 min-h-0 flex flex-col">
           <Suspense fallback={<MapSkeleton label={b.loadingMap} className="flex-1 min-h-0" />}>
             <LocationPicker lat={coordinates.lat} lng={coordinates.lng} onChange={onChange} fill
               cornerControl={cornerControl} anchors={anchors} cooperativeGestures={cooperativeGestures} />
           </Suspense>
         </div>
-        <details className="shrink-0 text-xs">
-          <summary className="cursor-pointer select-none text-[--ink-3]">{b.coordsLabel}</summary>
-          <div className="mt-1.5">{latLngFields}</div>
+        {/* A layer ON the map, never a row under it: opening it used to take its height out of
+            the map (Ahiya 27.10: "pressing it shrinks the map even more"). */}
+        <details className="absolute bottom-2 end-2 z-20 max-w-[calc(100%-1rem)] rounded-lg bg-[--surface-0]/95 px-2.5 py-1.5 text-xs shadow-md">
+          <summary className="cursor-pointer select-none text-[--ink-2] min-h-[28px] flex items-center">{b.coordsLabel}</summary>
+          <div className="mt-1.5 pb-1">{latLngFields}</div>
         </details>
       </div>
     );

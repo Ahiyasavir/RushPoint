@@ -1114,7 +1114,9 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   changing the brand in one place and not the other fails.
 - **Which host serves which app is NOT guessable from the app names** (change: marketing-to-apex,
   2026-09-01). `rush-point.com` is the **marketing site**; the participant app is
-  `player.rush-point.com`; `www.` 301s to the apex. It was the other way round until this change,
+  `player.rush-point.com`; `www.` serves the same site directly (checked live 2026-10-26: 200, every
+  page's canonical names the apex, so search engines index the apex; a real 301 would be a Firebase
+  Hosting console setting, not a repo change). It was the other way round until this change,
   so any doc, memory or habit that says "the apex is play-web" is stale. The origins are declared
   ONCE each — `CANONICAL_PLAY_URL` / `CANONICAL_MARKETING_URL`
   (`packages/shared/src/canonicalHosts.ts`) for the apps, `PLAYER_ORIGIN` / `SITE_ORIGIN`

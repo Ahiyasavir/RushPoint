@@ -16,8 +16,13 @@
 // and it no longer matches the template, that returns null and the form steps aside for the plain
 // text box. Pure and total.
 
-/** A bracket addressed to the creator or organizer. Group 1 is everything inside the brackets. */
-const SLOT = /\[((?:הוראות|הערה)\s+(?:ליוצר|למארגן|למפעיל)[^\]\n]*|(?:creator|organi[sz]er)\s*:[^\]\n]*)\]/gi;
+import { CREATOR_BLANK } from '@rushpoint/shared';
+
+/**
+ * A bracket addressed to the creator or organizer. Group 1 is everything inside the brackets.
+ * Shared with Quick Setup's "done yet?" check (`isPlaceholderValue`), so the two cannot disagree.
+ */
+const SLOT = CREATOR_BLANK;
 /** The marker words at the start of a bracket, dropped from the example shown in the blank. */
 const MARKER = /^(?:(?:הוראות|הערה)\s+(?:ליוצר|למארגן|למפעיל)|creator|organi[sz]er)\s*[:：-]?\s*/i;
 
@@ -58,6 +63,16 @@ export function asCreatorBlanks(text: string): string {
     if (words === '') return whole;
     return /[\u0590-\u05FF]/.test(words) ? `[הוראות ליוצר: ${words}]` : `[creator: ${words}]`;
   });
+}
+
+/**
+ * The text as a creator edits it on the walk's mission card (28.10): each blank as a plain bracket of
+ * its own words, without the "הוראות ליוצר:" marker. `asCreatorBlanks` turns it back, so an edit
+ * keeps every blank a blank.
+ */
+export function plainBlanks(text: unknown): string {
+  if (typeof text !== 'string') return '';
+  return parseSentence(text).map((p) => (p.kind === 'text' ? p.text : `[${p.hint}]`)).join('');
 }
 
 export function hasOpenSlots(text: unknown): boolean {

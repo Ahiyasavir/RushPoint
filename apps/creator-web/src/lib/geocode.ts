@@ -26,6 +26,9 @@ export interface GeoResult {
   detail: string;
   lat: number;
   lng: number;
+  /** The place's extent [west, south, east, north] when the provider gives one: a city is shown
+   *  as a city and a house as a street, instead of every hit at one fixed zoom. */
+  bbox?: [number, number, number, number];
 }
 
 /** The map view a search is biased towards (the creator is looking at it). */
@@ -169,7 +172,7 @@ export function parseNominatim(raw: unknown): GeoResult[] {
   const out: GeoResult[] = [];
   for (const row of raw) {
     if (!row || typeof row !== 'object') continue;
-    const r = row as { display_name?: unknown; lat?: unknown; lon?: unknown; name?: unknown };
+    const r = row as { display_name?: unknown; lat?: unknown; lon?: unknown; name?: unknown; boundingbox?: unknown };
     const lat = Number(r.lat);
     const lng = Number(r.lon);
     if (!isFiniteNum(lat) || !isFiniteNum(lng)) continue;
@@ -177,7 +180,10 @@ export function parseNominatim(raw: unknown): GeoResult[] {
       : typeof r.name === 'string' ? r.name : '';
     const { label, detail } = splitPlaceLabel(name);
     if (!label) continue;
-    out.push({ label, detail, lat, lng });
+    // Nominatim: boundingbox = [south, north, west, east], as strings.
+    const bb = Array.isArray(r.boundingbox) ? r.boundingbox.map(Number) : [];
+    const bbox = bb.length === 4 && bb.every(isFiniteNum) ? [bb[2], bb[0], bb[3], bb[1]] as [number, number, number, number] : undefined;
+    out.push(bbox ? { label, detail, lat, lng, bbox } : { label, detail, lat, lng });
   }
   return dedupe(out);
 }
@@ -189,7 +195,7 @@ export function parseMapTiler(raw: unknown): GeoResult[] {
   const out: GeoResult[] = [];
   for (const f of features) {
     if (!f || typeof f !== 'object') continue;
-    const feat = f as { place_name?: unknown; text?: unknown; center?: unknown };
+    const feat = f as { place_name?: unknown; text?: unknown; center?: unknown; bbox?: unknown };
     const center = feat.center;
     if (!Array.isArray(center) || center.length < 2) continue;
     const lng = Number(center[0]);
@@ -199,9 +205,24 @@ export function parseMapTiler(raw: unknown): GeoResult[] {
       : typeof feat.text === 'string' ? feat.text : '';
     const { label, detail } = splitPlaceLabel(name);
     if (!label) continue;
-    out.push({ label, detail, lat, lng });
+    const bb = Array.isArray(feat.bbox) ? feat.bbox.map(Number) : [];
+    const bbox = bb.length === 4 && bb.every(isFiniteNum) ? bb as [number, number, number, number] : undefined;
+    out.push(bbox ? { label, detail, lat, lng, bbox } : { label, detail, lat, lng });
   }
   return dedupe(out);
+}
+
+/**
+ * The camera for a chosen hit (2026-10-27): its own extent when it has one, framed with a margin,
+ * never closer than a street (17) nor wider than a city's surroundings (11); a hit with no extent
+ * gets a neighbourhood view (16). Pure, so the clamp is tested once.
+ */
+export function cameraForResult(r: GeoResult): { kind: 'bounds'; bounds: [[number, number], [number, number]]; maxZoom: number; minZoom: number } | { kind: 'center'; center: [number, number]; zoom: number } {
+  const b = r.bbox;
+  if (b && b[2] > b[0] && b[3] > b[1] && b[2] - b[0] < 3 && b[3] - b[1] < 3) {
+    return { kind: 'bounds', bounds: [[b[0], b[1]], [b[2], b[3]]], maxZoom: 17, minZoom: 11 };
+  }
+  return { kind: 'center', center: [r.lng, r.lat], zoom: 16 };
 }
 
 /**

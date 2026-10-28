@@ -7,7 +7,7 @@ import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, type MapMode, DEFAULT_MAP_MODE } from '@rushpoint/shared';
 import { resolveInitialView, isPlacedCoord, type LatLng } from '../lib/mapAnchor';
-import { geocodePlaces, type GeoResult } from '../lib/geocode';
+import { cameraForResult, geocodePlaces, type GeoResult } from '../lib/geocode';
 import MapModeToggle from './MapModeToggle';
 import { Input } from './ui';
 import { useT } from './LanguageContext';
@@ -199,13 +199,22 @@ export default function LocationPicker({
     setResults([]); setQuery(r.label);
     setMarker(r.lat, r.lng);
     onChangeRef.current(round(r.lat), round(r.lng));
-    map.current?.flyTo({ center: [r.lng, r.lat], zoom: 15, duration: 600 });
+    const cam = cameraForResult(r);
+    if (cam.kind === 'bounds') {
+      // The camera never goes wider than minZoom: fitBounds has no minZoom, so clamp after.
+      const fit = map.current?.cameraForBounds(cam.bounds, { padding: 48, maxZoom: cam.maxZoom });
+      if (fit && map.current) map.current.flyTo({ center: fit.center, zoom: Math.max(cam.minZoom, fit.zoom ?? cam.maxZoom), duration: 700 });
+    } else {
+      map.current?.flyTo({ center: cam.center, zoom: cam.zoom, duration: 700 });
+    }
   }
 
   return (
-    <div className={fill ? 'relative flex-1 min-h-0 flex flex-col' : 'relative'}>
-      {/* Place search */}
-      <div className={`relative mb-2 ${fill ? 'shrink-0' : ''}`}>
+    <div className={fill ? 'rp-map-search-over relative flex-1 min-h-0 flex flex-col' : 'relative'}>
+      {/* Place search. In `fill` it floats over the map's top edge (27.10: on a short laptop the row
+          above the map was a fifth of the map's height); the map's own top controls move down under
+          it (index.css .rp-map-search-over). */}
+      <div className={fill ? 'absolute top-2 inset-x-2 z-30 rounded-xl bg-[--surface-0]/95 p-1.5 shadow-md backdrop-blur' : 'relative mb-2'}>
         <div className="flex gap-2">
           <Input
             value={query}

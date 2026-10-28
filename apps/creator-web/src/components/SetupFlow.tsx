@@ -13,10 +13,10 @@
 //
 // What to show is decided in lib/setupFlow.ts (pure, tested). Every edit goes straight to the live game
 // through the Builder's own setters, so the Builder's autosave is the only save path.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { isTaskMediaValid, type Game, type Task, type TaskMedia, type TemplateWizardStep } from '@rushpoint/shared';
+import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from 'motion/react';
+import { isTaskMediaValid, isSampleStep, type Game, type Task, type TaskMedia, type TemplateWizardStep } from '@rushpoint/shared';
 import { useT, useLanguage } from './LanguageContext';
 import { Button } from './ui';
 import { Icon, type IconName } from './Icon';
@@ -29,7 +29,8 @@ import { SENTENCE_FIELDS } from '../lib/quickSetup';
 import NumberFlow from '@number-flow/react';
 import { playSetupSound, soundEnabled, setSoundEnabled, type SetupSound } from '../lib/setupSounds';
 import { TAP_CLUSTER, TAP_TARGET } from '../lib/interaction';
-import { parseSentence, hasOpenSlots, extractSlotValues, fillTemplate, generateCode } from '../lib/sentenceForm';
+import { swipeVerdict, swipePull, NO_SWIPE_SELECTOR, typingNow } from '../lib/setupSwipe';
+import { parseSentence, hasOpenSlots, extractSlotValues, fillTemplate, generateCode, plainBlanks, asCreatorBlanks } from '../lib/sentenceForm';
 import {
   buildSetupScreens, buildSetupBeats, firstBeat, praiseIndex, stageProgress, planStages,
   beforeGameList, gameFieldValue, withGameField, prepShareText, whatsappShareUrl,
@@ -113,7 +114,10 @@ export default function SetupFlow({
     const b = beats[i];
     return b && b.kind === 'item' ? { screen: screens[b.screen], item: screens[b.screen].items[b.item] } : null;
   };
-  const go = (to: number) => {
+  // A page turned by a swipe slides up or down like a feed; one turned by a button slides sideways.
+  const [vertical, setVertical] = useState(false);
+  const go = (to: number, opts?: { swipe?: boolean }) => {
+    setVertical(!!opts?.swipe);
     const clamped = Math.max(0, Math.min(beats.length - 1, to));
     const cur = itemAt(at);
     const forward = clamped > at;
@@ -158,6 +162,19 @@ export default function SetupFlow({
   useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [at]);
 
   const current = itemAt(at);
+  // "אערוך לבד" asks first while anything is still open (Ahiya 27.10). Escape and the backdrop keep
+  // the creator in the walk: leaving has to be the deliberate choice, never the accidental one.
+  const [leaveAsk, setLeaveAsk] = useState(false);
+  useEffect(() => {
+    if (!leaveAsk) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setLeaveAsk(false); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [leaveAsk]);
+  const editMyself = (stageId: string | null, taskId: string | null, force = false) => {
+    if (!force && openLeft > 0) { setLeaveAsk(true); return; }
+    onEditMyself(stageId, taskId);
+  };
   const regenerate = () => {
     if (!current || current.screen.scope !== 'task' || !onRegenerate) return;
     if (onRegenerate(current.screen.stageId, current.screen.taskId)) {
@@ -170,6 +187,8 @@ export default function SetupFlow({
   // The moment a field becomes filled: a bright drop, a "saved" mark, and Next lights up.
   const filledKey = current ? `${current.screen.key}|${current.item.stepId}` : '';
   const wasFilled = useRef<{ key: string; on: boolean }>({ key: '', on: false });
+  const touched = useRef(new Set<string>());
+  const changeTask = (stageId: string, task: Task) => { touched.current.add(filledKey); onTaskChange(stageId, task); };
   const [justFilled, setJustFilled] = useState(0);
   useEffect(() => {
     const on = !!current?.item.configured;
@@ -190,9 +209,12 @@ export default function SetupFlow({
   // Overall readiness, with the build itself counted as the first step done (endowed progress: the
   // creator starts ahead, because they are ahead).
   const items = beats.map((_, i) => itemAt(i)).filter((x): x is NonNullable<ReturnType<typeof itemAt>> => !!x);
-  const doneItems = items.filter((x) => x.item.configured).length;
-  const pct = beat.kind === 'finish' || beat.kind === 'prep' ? (finishOpen ? Math.round((100 * (1 + doneItems)) / (1 + items.length)) : 100)
-    : Math.round((100 * (1 + doneItems)) / (1 + items.length));
+  // Counted over what is REQUIRED, the same set "N more and you're done" counts: optional items in
+  // the denominator made the % crawl while the creator was nearly done (research 27.10).
+  const counted = items.some((x) => x.item.required) ? items.filter((x) => x.item.required) : items;
+  const doneItems = counted.filter((x) => x.item.configured).length;
+  const pctRaw = Math.round((100 * (1 + doneItems)) / (1 + counted.length));
+  const pct = (beat.kind === 'finish' || beat.kind === 'prep') && !finishOpen ? 100 : pctRaw;
   const openLeft = items.filter((x) => x.item.required && !x.item.configured).length;
 
   const stageIndex = current ? sortedStages.findIndex((s) => s.id === current.screen.stageId) : -1;
@@ -205,25 +227,73 @@ export default function SetupFlow({
   // Motion: short and directional, never a wait (Ahiya: "light, simple, and they must not take the
   // user's time"). Forward slides the way the reading direction moves.
   const offset = reduce ? 0 : (rtl ? -1 : 1) * 24 * dir;
-  const variants = {
-    enter: { opacity: 0, x: offset },
-    center: { opacity: 1, x: 0, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const } },
-    exit: { opacity: 0, x: -offset, transition: { duration: 0.1, ease: 'easeIn' as const } },
+  const rise = reduce ? 0 : 56 * dir;
+  const variants = vertical ? {
+    enter: { opacity: 0, y: rise, x: 0 },
+    center: { opacity: 1, y: 0, x: 0, transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] as const } },
+    exit: { opacity: 0, y: -rise, x: 0, transition: { duration: 0.08, ease: 'easeIn' as const } },
+  } : {
+    enter: { opacity: 0, x: offset, y: 0 },
+    center: { opacity: 1, x: 0, y: 0, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const } },
+    exit: { opacity: 0, x: -offset, y: 0, transition: { duration: 0.1, ease: 'easeIn' as const } },
   };
 
+  // Phone swipe (28.10), beside the buttons: up at the bottom of a screen goes on, down at its top
+  // goes back (lib/setupSwipe.ts decides). It never launches: only an item or the plan goes on.
+  const touch = useRef<{ x: number; y: number; t: number; top: boolean; bottom: boolean } | null>(null);
+  // The screen follows the finger past its end (28.10: "the scroll looks stuck"): before this, a swipe
+  // at the end moved nothing until the finger lifted, then the page jumped. `pull` is that offset.
+  const pull = useMotionValue(0);
+  const onTouchMove = (e: ReactTouchEvent) => {
+    const start = touch.current;
+    const t1 = e.touches[0];
+    if (!start || !t1 || reduce) return;
+    pull.set(swipePull({ dx: t1.clientX - start.x, dy: start.y - t1.clientY,
+      atTopAtStart: start.top, atBottomAtStart: start.bottom, canGoBack: at > 0, canGoOn: beat.kind === 'item' || beat.kind === 'plan' }));
+  };
+  const onTouchStart = (e: ReactTouchEvent) => {
+    const el = bodyRef.current;
+    const target = e.target as Element | null;
+    if (!el || e.touches.length !== 1 || window.innerWidth >= 1024 || target?.closest(NO_SWIPE_SELECTOR) || typingNow(document.activeElement)) { touch.current = null; return; }
+    const t0 = e.touches[0];
+    touch.current = { x: t0.clientX, y: t0.clientY, t: performance.now(),
+      top: el.scrollTop <= 2, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 4 };
+  };
+  const swipeNext = () => {
+    if (beat.kind === 'item' || beat.kind === 'plan') go(beat.kind === 'plan' ? at + 1 : nextFrom(at), { swipe: true });
+  };
+  const onTouchEnd = (e: ReactTouchEvent) => {
+    const start = touch.current;
+    touch.current = null;
+    const t1 = e.changedTouches[0];
+    if (!start || !t1) return;
+    const verdict = swipeVerdict({ dx: t1.clientX - start.x, dy: start.y - t1.clientY, ms: performance.now() - start.t,
+      atTopAtStart: start.top, atBottomAtStart: start.bottom });
+    if (verdict === 'next' && (beat.kind === 'item' || beat.kind === 'plan')) swipeNext();
+    else if (verdict === 'back' && at > 0) go(at - 1, { swipe: true });
+    // Not a page turn: the screen springs back under the finger. A turn leaves it where it is, so the
+    // old screen leaves from where the finger let go; `onExitComplete` zeroes it for the new one.
+    else void animate(pull, 0, { type: 'spring', stiffness: 520, damping: 38 });
+  };
+
+  const prefilledUntouched = !!current && current.item.configured && !touched.current.has(filledKey)
+    && ['smart.secretCode', 'answers', 'numericAnswer'].includes(current.item.fieldPath);
   const primary = (() => {
     if (beat.kind === 'plan') return { label: sf.planCta, onClick: () => go(at + 1), arrow: true };
     if (beat.kind === 'prep') return { label: sf.launch, onClick: onLaunch, arrow: false };
     if (current?.item.kind === 'prep' && current.item.configured) return { label: sf.prepCta, onClick: () => go(nextFrom(at)), arrow: true };
+    if (prefilledUntouched) return { label: sf.keepIt, onClick: () => go(nextFrom(at)), arrow: true };
     return { label: sf.next, onClick: () => go(nextFrom(at)), arrow: true };
   })();
   const skipping = !!current && current.item.required && !current.item.configured;
 
+  // `overflow-clip`, not hidden: the decorative orbs reach ~200px past the edge, and a hidden box can
+  // still be SCROLLED, so focusing the map search slid the whole screen sideways (27.10).
   // Portalled to the body: rendered inside the Builder it sat in the Builder's stacking context, and
   // the live-run bar (z-30, on the body) drew over it.
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={sf.aria}
-      className="fixed inset-0 z-[70] flex flex-col h-[100dvh] rp-setup-bg text-[--ink-1] overflow-hidden">
+      className="fixed inset-0 z-[70] flex flex-col h-[100dvh] rp-setup-bg text-[--ink-1] overflow-clip">
       <span aria-hidden className="rp-setup-orb rp-setup-orb-1" />
       <span aria-hidden className="rp-setup-orb rp-setup-orb-2" />
       <AnimatePresence>
@@ -238,9 +308,41 @@ export default function SetupFlow({
           </motion.div>
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {leaveAsk && (
+          <motion.div key="leave" role="alertdialog" aria-modal="true" aria-labelledby="rp-leave-title"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.1 } }}
+            onClick={() => setLeaveAsk(false)}
+            className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center bg-black/45 backdrop-blur-sm p-3 sm:p-6">
+            <motion.div onClick={(e) => e.stopPropagation()}
+              initial={reduce ? false : { y: 24, scale: 0.97 }} animate={{ y: 0, scale: 1 }}
+              transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 460, damping: 32 }}
+              className="w-full max-w-md rounded-3xl bg-[--surface-0] p-5 sm:p-6 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <span className="relative inline-flex w-14 h-14 shrink-0 items-center justify-center rounded-full bg-rp-fire/10 text-ink-fire text-[17px] font-extrabold">
+                  <svg aria-hidden viewBox="0 0 36 36" className="absolute inset-0 -rotate-90">
+                    <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeOpacity="0.15" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"
+                      strokeDasharray={`${(pct / 100) * 97.4} 97.4`} />
+                  </svg>
+                  {pct}%
+                </span>
+                <h2 id="rp-leave-title" className="text-[22px] sm:text-2xl font-extrabold leading-tight">{sf.leaveTitle}</h2>
+              </div>
+              <p className="mt-3 text-[17px] leading-snug text-[--ink-1]">{sf.leaveBody({ pct, n: openLeft, min: Math.max(1, Math.round((openLeft * 20) / 60)) })}</p>
+              <p className="mt-1.5 flex items-center gap-1.5 text-[14px] text-[--ink-2]"><Icon name="checkCircle" className="w-4 h-4 text-ink-go shrink-0" />{sf.leaveSaved}</p>
+              <div className="mt-5 flex flex-col gap-2">
+                <Button autoFocus onClick={() => setLeaveAsk(false)} className="w-full min-h-[52px] text-[17px] font-bold">{sf.leaveStay}</Button>
+                <button type="button" onClick={() => { setLeaveAsk(false); editMyself(current?.screen.stageId || null, current?.screen.taskId || null, true); }}
+                  className="min-h-[44px] text-[15px] font-semibold text-[--ink-2] hover:text-[--ink-1]">{sf.leaveGo}</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* ── Header: the progress by stage, and the side door out ───────────────────────────── */}
       <header className="relative z-10 shrink-0 border-b border-[--rp-border]/60 bg-[--surface-0]/70 backdrop-blur-xl pt-[max(env(safe-area-inset-top),0.5rem)]">
-        <div className="mx-auto w-full max-w-5xl px-4 pb-2.5">
+        <div className="mx-auto w-full max-w-5xl lg:max-w-[min(92vw,1400px)] px-4 pb-2.5">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-2 text-[15px] font-bold min-w-0">
               <span className="inline-flex w-8 h-8 shrink-0 items-center justify-center rounded-full bg-rp-fire/10 text-ink-fire"><Icon name="sparkle" className="w-4 h-4" /></span>
@@ -249,11 +351,11 @@ export default function SetupFlow({
             <div className="ms-auto shrink-0 flex items-center gap-2">
               {onRegenerate && current?.screen.scope === 'task' && (
                 <button type="button" onClick={regenerate} aria-label={sf.newMissionAria} title={sf.newMissionAria}
-                  className="min-h-[44px] px-3 rounded-xl border border-rp-fire/40 bg-rp-fire/5 text-[14px] font-semibold text-ink-fire hover:bg-rp-fire/10 transition-colors inline-flex items-center gap-1.5">
-                  <Icon name="dice" className="w-4 h-4" />{sf.newMission}
+                  className="min-h-[44px] px-3.5 rounded-xl bg-gradient-to-l from-rp-fire to-rp-amber text-white text-[14px] sm:text-[15px] font-bold shadow-md shadow-rp-fire/30 hover:brightness-110 active:scale-[0.97] transition inline-flex items-center gap-1.5">
+                  <Icon name="dice" className="w-[18px] h-[18px]" />{sf.newMission}
                 </button>
               )}
-              <button type="button" onClick={() => onEditMyself(current?.screen.stageId || null, current?.screen.taskId || null)}
+              <button type="button" onClick={() => editMyself(current?.screen.stageId || null, current?.screen.taskId || null)}
                 className="min-h-[44px] px-3 rounded-xl border border-[--rp-border] text-[14px] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors inline-flex items-center gap-1.5">
                 <Icon name="pencil" className="w-4 h-4" />{sf.editMyself}
               </button>
@@ -274,7 +376,7 @@ export default function SetupFlow({
                   </div>
                 ))}
               </div>
-              <div className="mt-1 flex gap-1.5 text-[11px] sm:text-[12px] text-[--ink-3]">
+              <div className="mt-1 flex gap-1.5 text-[11px] sm:text-[12px] text-[--ink-3] [@media(max-height:720px)]:hidden">
                 {progress.map((p, i) => (
                   <span key={p.stageId} className={`truncate text-center ${p.current ? 'text-ink-fire font-bold' : ''}`} style={{ flexGrow: p.total, flexBasis: 0 }}>
                     {sf.planStage({ n: i + 1 })}
@@ -299,34 +401,42 @@ export default function SetupFlow({
       </header>
 
       {/* ── Body: exactly the space between header and footer ──────────────────────────────── */}
-      <div ref={bodyRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        <AnimatePresence mode="wait" initial={false}>
+      <div ref={bodyRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd} className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+        <motion.div style={{ y: pull }} className="min-h-full flex flex-col">
+        <AnimatePresence mode="wait" initial={false} onExitComplete={() => pull.set(0)}>
           <motion.div key={`${at}-${swapTick}`} variants={variants} initial="enter" animate="center" exit="exit"
-            className="mx-auto w-full max-w-5xl h-full px-4 py-3 sm:py-5 flex flex-col lg:my-5 lg:h-[calc(100%-2.5rem)] lg:rounded-[28px] lg:border lg:border-white/70 lg:bg-[--surface-0]/85 lg:backdrop-blur-xl lg:px-10 lg:py-8 lg:shadow-[0_30px_80px_-40px_rgba(255,87,34,0.45)]">
+            data-audit="content" className="mx-auto w-full max-w-5xl lg:max-w-[min(92vw,1400px)] flex-1 px-4 py-3 sm:py-5 flex flex-col lg:my-3 lg:[@media(max-height:720px)]:my-1.5 lg:[@media(max-height:720px)]:py-4 lg:rounded-[28px] lg:border lg:border-white/70 lg:bg-[--surface-0]/85 lg:backdrop-blur-xl lg:px-8 lg:py-6 lg:shadow-[0_30px_80px_-40px_rgba(255,87,34,0.45)]">
             {beat.kind === 'plan' && <PlanBeat game={game} itemCount={beats.filter((b) => b.kind === 'item').length} />}
             {beat.kind === 'item' && current && (
               <ItemBeat
                 game={game} screen={current.screen} item={current.item} first={beat.firstOfMission}
                 praise={(() => { const p = praiseIndex(at, prevDone); return p === null ? '' : sf.praise[p % sf.praise.length]; })()}
                 placeLine={placeLine}
-                onTaskChange={onTaskChange} onGameChange={onGameChange} gameAnchors={gameAnchors}
-                onOpenFull={() => onEditMyself(current.screen.stageId || null, current.screen.taskId || null)}
+                onTaskChange={changeTask} onGameChange={onGameChange} gameAnchors={gameAnchors}
+                onOpenFull={() => editMyself(current.screen.stageId || null, current.screen.taskId || null)}
+                onSwap={onRegenerate && current.screen.scope === 'task' ? regenerate : undefined}
               />
+            )}
+            {(beat.kind === 'item' || beat.kind === 'plan') && (
+              <p aria-hidden className="lg:hidden mt-auto pt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[--ink-3]">
+                <Icon name="chevronUp" className="w-4 h-4 rp-swipe-hint" />{sf.swipeHint}
+              </p>
             )}
             {beat.kind === 'finish' && <RouteBeat game={game} screens={screens} beats={beats} onJump={go} onFix={startFixing} />}
             {beat.kind === 'prep' && <PrepBeat game={game} screens={screens} />}
           </motion.div>
         </AnimatePresence>
+        </motion.div>
       </div>
 
       {/* ── Footer: one primary, always live (an answering button, never a disabled one) ──────── */}
       <footer className="relative z-10 shrink-0 border-t border-[--rp-border]/60 bg-[--surface-0]/75 backdrop-blur-xl pb-[max(env(safe-area-inset-bottom),0.5rem)]">
-        <div className="mx-auto w-full max-w-5xl px-4 pt-2.5 flex items-center gap-2">
+        <div className="mx-auto w-full max-w-5xl lg:max-w-[min(92vw,1400px)] px-4 pt-2.5 flex items-center gap-2">
           {at > 0 && (
             <Button variant="ghost" onClick={() => go(at - 1)} className="shrink-0 px-3">{rtl ? '→' : '←'} {sf.back}</Button>
           )}
           {beat.kind === 'prep' && <Button variant="ghost" onClick={onDone} className="shrink-0 px-3">{sf.toBuilder}</Button>}
-          <div className="ms-auto flex items-center gap-3 min-w-0">
+          <div className="ms-auto flex items-center gap-2 sm:gap-3 min-w-0">
             {skipping && <span className="hidden sm:inline text-[13px] text-[--ink-3] truncate">{sf.later}</span>}
             <AnimatePresence>
               {current?.item.configured && current.item.kind !== 'prep' && (
@@ -338,7 +448,7 @@ export default function SetupFlow({
               )}
             </AnimatePresence>
             <Button key={`cta-${justFilled}`} onClick={primary.onClick}
-              className={`min-w-[8.5rem] sm:min-w-[11rem] text-[16px] font-bold ${justFilled > 0 && current?.item.configured ? 'rp-cta-ready' : ''}`}>
+              className={`min-w-0 px-4 sm:min-w-[11rem] text-[16px] font-bold ${justFilled > 0 && current?.item.configured ? 'rp-cta-ready' : ''}`}>
               {primary.label}{primary.arrow ? ` ${rtl ? '←' : '→'}` : ''}
             </Button>
           </div>
@@ -416,11 +526,11 @@ const TYPE_ICON: Record<string, IconName> = {
 const FILLS = new Set(['coordinates']);
 
 function ItemBeat({
-  game, screen, item, first, praise, placeLine, onTaskChange, onGameChange, gameAnchors, onOpenFull,
+  game, screen, item, first, praise, placeLine, onTaskChange, onGameChange, gameAnchors, onOpenFull, onSwap,
 }: {
   game: Game; screen: SetupScreen; item: SetupItem; first: boolean; praise: string; placeLine: string;
   onTaskChange: (stageId: string, task: Task) => void; onGameChange: (g: Game) => void;
-  gameAnchors?: SetupFlowProps['gameAnchors']; onOpenFull: () => void;
+  gameAnchors?: SetupFlowProps['gameAnchors']; onOpenFull: () => void; onSwap?: () => void;
 }) {
   const sf = useT().setupFlow;
   const reduce = useReducedMotion();
@@ -430,8 +540,18 @@ function ItemBeat({
   // An ordering quiz is finished by sorting, not by answering (found in the 23.10 checks).
   const doneKey = task?.type === 'quiz' && (task.orderItems?.length ?? 0) > 0 ? 'order' : screen.taskType;
   const fills = FILLS.has(item.fieldPath);
+  // The mission's own words, editable right on its card (Ahiya, 28.10): a pencil turns the title and
+  // the text into boxes. Leaving edit mode remounts the field below (`editRound`), so a sentence of
+  // blanks re-reads the text the creator just wrote instead of writing its old template back over it.
+  const [editing, setEditing] = useState(false);
+  const [editRound, setEditRound] = useState(0);
+  // On a phone a long text is folded to four lines, so the thing to fill is not a scroll away.
+  const [openText, setOpenText] = useState(false);
+  const longText = screen.playerText.length > 150;
+  const finishEdit = () => { setEditing(false); setEditRound((n) => n + 1); };
+  const putText = (patch: Partial<Task>) => { if (task) onTaskChange(screen.stageId, { ...task, ...patch }); };
   const field = (
-    <FieldInput game={game} screen={screen} item={item} task={task} onTaskChange={onTaskChange}
+    <FieldInput key={editRound} game={game} screen={screen} item={item} task={task} onTaskChange={onTaskChange}
       onGameChange={onGameChange} gameAnchors={gameAnchors} onOpenFull={onOpenFull} />
   );
 
@@ -439,27 +559,55 @@ function ItemBeat({
     // Desktop: the mission on one side, the action on the other, both the body's full height.
     // Phone and tablet: one column, the mission first (you need to know what happens there before you
     // place or fill it), the action taking the rest.
-    <div className={`flex-1 min-h-0 flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-8 ${fills ? '' : 'sm:justify-center lg:content-center'}`}>
+    <div className={`flex-1 flex flex-col gap-3 lg:grid ${fills ? 'lg:min-h-0 lg:grid-rows-[minmax(0,1fr)] lg:items-stretch lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]' : 'lg:items-start lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] sm:justify-center lg:content-center'} lg:gap-8`}>
       {screen.scope === 'task' && (
         <motion.section
           initial={reduce ? false : { opacity: 0, y: 10, rotate: rtl ? 1 : -1 }} animate={{ opacity: 1, y: 0, rotate: 0 }}
           transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 28 }}
-          className="shrink-0 lg:shrink lg:min-h-0 lg:overflow-y-auto rounded-3xl bg-[--surface-0] border border-[--rp-border]/70 shadow-[0_18px_40px_-28px_rgba(255,87,34,0.55)] overflow-hidden">
+          className="shrink-0 lg:self-start lg:sticky lg:top-0 rounded-3xl bg-[--surface-0] border border-[--rp-border]/70 shadow-[0_18px_40px_-28px_rgba(255,87,34,0.55)] overflow-hidden">
           <div aria-hidden className="h-1.5 bg-gradient-to-l from-rp-fire to-rp-amber" />
-          <div className="px-4 py-3.5 sm:p-5">
+          <div className="px-4 py-3.5 sm:p-5 lg:[@media(max-height:720px)]:p-4">
             <div className="flex items-start gap-3">
               <span aria-hidden className="inline-flex w-11 h-11 sm:w-12 sm:h-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-rp-fire to-rp-amber text-white shadow-md shadow-rp-fire/30">
                 <Icon name={TYPE_ICON[screen.taskType ?? ''] ?? 'flag'} className="w-5 h-5 sm:w-6 sm:h-6" />
               </span>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-[14px] sm:text-[15px] font-semibold text-ink-fire truncate">{placeLine}</div>
-                <h2 className={`font-extrabold leading-tight ${first ? 'text-[26px] sm:text-4xl' : 'text-[24px] sm:text-3xl'}`} dir="auto">{screen.title}</h2>
+                {editing && task ? (
+                  <input value={task.title ?? ''} onChange={(e) => putText({ title: e.target.value })} dir="auto" aria-label={sf.editTitleLabel}
+                    className="mt-1 w-full min-h-[44px] rounded-xl border-2 border-rp-fire/60 bg-[--surface-0] px-3 text-[20px] font-extrabold text-[--ink-1] focus:outline-none focus:border-rp-fire focus:ring-4 focus:ring-rp-fire/15" />
+                ) : (
+                  <h2 className={`font-extrabold leading-tight ${first ? 'text-[26px] sm:text-4xl' : 'text-[24px] sm:text-3xl'} lg:[@media(max-height:720px)]:text-[26px]`} dir="auto">{screen.title}</h2>
+                )}
               </div>
+              {task && (
+                // The word shows where the card has room (a tablet, a wide desktop); on a phone and in the
+                // narrow desktop column it is the pencil alone, so the mission's name keeps its line.
+                <button type="button" onClick={() => (editing ? finishEdit() : setEditing(true))} aria-pressed={editing}
+                  aria-label={editing ? sf.editTextDone : sf.editText}
+                  className={`min-h-[44px] min-w-[44px] shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl px-2.5 text-[14px] font-bold whitespace-nowrap transition-colors ${editing ? 'bg-rp-fire text-white' : 'text-ink-fire hover:bg-rp-fire/10'}`}>
+                  <Icon name={editing ? 'check' : 'pencil'} className="w-4 h-4" />
+                  <span aria-hidden className="hidden sm:inline lg:hidden 2xl:inline">{editing ? sf.editTextDone : sf.editText}</span>
+                </button>
+              )}
             </div>
-            {screen.playerText !== '' && (
+            {editing && task ? (
               <div className="mt-3">
                 <div className="text-[13px] sm:text-[14px] font-semibold text-[--ink-3]">{sf.teamsWill}</div>
-                <p className="mt-0.5 text-[16px] sm:text-lg leading-snug sm:leading-relaxed text-[--ink-1] whitespace-pre-line" dir="auto">{blanked(screen.playerText)}</p>
+                <textarea value={plainBlanks(task.description)} onChange={(e) => putText({ description: asCreatorBlanks(e.target.value) })} dir="auto" aria-label={sf.editTextLabel}
+                  rows={Math.min(9, Math.max(4, (task.description ?? '').split('\n').length + 1))}
+                  className="mt-1 w-full rounded-xl border-2 border-rp-fire/60 bg-[--surface-0] px-3 py-2 text-[16px] sm:text-lg leading-snug text-[--ink-1] focus:outline-none focus:border-rp-fire focus:ring-4 focus:ring-rp-fire/15" />
+                <p className="mt-1 text-[13px] text-[--ink-3]">{hasOpenSlots(task.description) ? `${sf.editTextNote} ${sf.editTextBlanks}` : sf.editTextNote}</p>
+              </div>
+            ) : screen.playerText !== '' && (
+              <div className="mt-3">
+                <div className="text-[13px] sm:text-[14px] font-semibold text-[--ink-3]">{sf.teamsWill}</div>
+                <p className={`mt-0.5 text-[16px] sm:text-lg leading-snug sm:leading-relaxed lg:[@media(max-height:720px)]:leading-snug text-[--ink-1] whitespace-pre-line ${longText && !openText ? 'max-lg:line-clamp-4' : ''}`} dir="auto">{blanked(screen.playerText)}</p>
+                {longText && (
+                  <button type="button" onClick={() => setOpenText((o) => !o)} className="lg:hidden min-h-[36px] text-[14px] font-bold text-ink-fire">
+                    {openText ? sf.textLess : sf.textMore}
+                  </button>
+                )}
               </div>
             )}
             {doneKey && (sf.howDone[doneKey] ?? '') !== '' && (
@@ -472,20 +620,27 @@ function ItemBeat({
                 <Icon name="eyeOff" className="w-4 h-4 mt-0.5 shrink-0" />{sf.hiddenNote}
               </p>
             )}
+            {onSwap && first && (
+              <button type="button" onClick={onSwap}
+                className="mt-3 w-full min-h-[44px] [@media(max-height:720px)]:hidden rounded-xl border-2 border-dashed border-rp-fire/50 px-3 text-[15px] font-bold text-ink-fire hover:bg-rp-fire/5 inline-flex items-center justify-center gap-2 transition-colors">
+                <Icon name="dice" className="w-[18px] h-[18px]" />{sf.swapInCard}
+              </button>
+            )}
           </div>
         </motion.section>
       )}
 
-      <section className={`min-h-0 flex flex-col ${fills ? 'flex-1' : ''} ${screen.scope === 'task' ? '' : 'lg:col-span-2 w-full max-w-2xl mx-auto'}`}>
+      <section className={`flex flex-col ${fills ? 'lg:min-h-0' : ''} ${screen.scope === 'task' ? '' : 'lg:col-span-2 w-full max-w-2xl mx-auto'}`}>
         {praise !== '' && (
           <motion.div initial={reduce ? false : { opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}
-            className="shrink-0 text-[19px] sm:text-xl font-extrabold text-ink-fire">{praise}</motion.div>
+            className={`shrink-0 text-[19px] sm:text-xl font-extrabold text-ink-fire ${fills ? 'lg:[@media(max-height:720px)]:hidden' : ''}`}>{praise}</motion.div>
         )}
         {item.kind === 'prep' ? (
+          <>
           <motion.div
             initial={reduce ? false : { opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
             transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 32, mass: 0.7 }}
-            className={`mt-1 rounded-2xl border-2 border-rp-amber/70 bg-rp-amber/10 p-3 sm:p-5 rp-prep-glow flex flex-col ${fills && !item.configured ? 'flex-1 min-h-0' : 'shrink-0'}`}>
+            className="mt-1 shrink-0 rounded-2xl border-2 border-rp-amber/70 bg-rp-amber/10 p-3 sm:p-5 rp-prep-glow flex flex-col">
             <div className="flex items-start gap-3 shrink-0">
               <motion.span
                 initial={reduce ? false : { rotate: -12 }} animate={{ rotate: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 12 }}
@@ -494,22 +649,29 @@ function ItemBeat({
               </motion.span>
               <div className="min-w-0">
                 <div className="inline-flex rounded-full bg-rp-amber/20 px-2.5 py-0.5 text-[13px] font-bold text-ink-amber">{sf.prepLabel}</div>
-                <p className="mt-1.5 text-[17px] sm:text-xl font-semibold leading-snug" dir="auto">{item.instruction}</p>
-                <p className="mt-1.5 text-[12px] sm:text-[13px] text-[--ink-2] flex items-center gap-1.5"><Icon name="checkCircle" className="w-4 h-4 text-ink-go shrink-0" />{sf.prepNote}</p>
+                <p className="mt-1.5 text-[17px] sm:text-xl lg:[@media(max-height:720px)]:text-[17px] font-semibold leading-snug" dir="auto">{item.instruction}</p>
+                <p className="mt-1.5 text-[12px] sm:text-[13px] text-[--ink-2] flex items-center gap-1.5 lg:[@media(max-height:720px)]:hidden"><Icon name="checkCircle" className="w-4 h-4 text-ink-go shrink-0" />{sf.prepNote}</p>
               </div>
             </div>
-            {!item.configured && (
-              <div className={`mt-3 rounded-xl bg-[--surface-0] p-2.5 sm:p-3 flex flex-col ${fills ? 'flex-1 min-h-0' : ''}`}>
-                {ask.title !== item.instruction && <p className="mb-2 shrink-0 text-[17px] font-bold">{ask.title}</p>}
+            {!item.configured && !fills && (
+              <div className="mt-3 rounded-xl bg-[--surface-0] p-2.5 sm:p-3 flex flex-col">
+                {ask.title !== item.instruction && <p className="mb-2 shrink-0 text-[17px] font-bold lg:[@media(max-height:720px)]:hidden">{ask.title}</p>}
                 {field}
               </div>
             )}
           </motion.div>
+          {!item.configured && fills && (
+            <>
+              {ask.title !== item.instruction && <p className="mt-3 shrink-0 text-[19px] sm:text-2xl font-extrabold">{ask.title}</p>}
+              <div className="mt-2 flex flex-col lg:flex-1 lg:min-h-0">{field}</div>
+            </>
+          )}
+          </>
         ) : (
           <>
             <h3 className="shrink-0 text-[22px] sm:text-3xl font-extrabold leading-snug">{ask.title}</h3>
             {ask.hint !== '' && <p className="mt-1 shrink-0 text-[16px] sm:text-lg text-[--ink-2] leading-snug" dir="auto">{ask.hint}</p>}
-            <div className={`mt-3 flex flex-col ${fills ? 'flex-1 min-h-0' : 'shrink-0'}`}>{field}</div>
+            <div className={`mt-3 flex flex-col ${fills ? 'lg:flex-1 lg:min-h-0' : 'shrink-0'}`}>{field}</div>
           </>
         )}
       </section>
@@ -581,7 +743,7 @@ function FieldInput({ game, screen, item, task, onTaskChange, onGameChange, game
   switch (item.fieldPath) {
     case 'coordinates':
       return (
-        <div className="flex-1 min-h-[220px] flex flex-col rounded-2xl overflow-hidden border border-[--rp-border]">
+        <div className="h-[min(60dvh,560px)] min-h-[320px] lg:h-auto lg:flex-1 lg:min-h-[260px] flex flex-col">
           <LocationStep coordinates={task.coordinates ?? { lat: 0, lng: 0 }} onChange={(lat, lng) => put({ coordinates: { lat, lng } })}
             fill anchors={gameAnchors} cooperativeGestures />
         </div>
@@ -594,7 +756,8 @@ function FieldInput({ game, screen, item, task, onTaskChange, onGameChange, game
       const setCode = (secretCode: string) => put({ smart: { ...(task.smart ?? {}), secretCode } as Task['smart'] });
       return (
         <div className="flex flex-col sm:flex-row gap-2">
-          <input className={`${BOX} font-mono tracking-[0.25em] text-center text-xl`} value={code} dir="ltr" onChange={(e) => setCode(e.target.value.toUpperCase())} />
+          <input className={`${BOX} font-mono tracking-[0.25em] text-center text-xl`} value={code} dir="ltr"
+            autoComplete="off" autoCorrect="off" spellCheck={false} enterKeyHint="done" onChange={(e) => setCode(e.target.value.toUpperCase())} />
           <Button variant="subtle" className="shrink-0 min-h-[50px]" onClick={() => setCode(generateCode())}>
             <Icon name="dice" className="w-4 h-4 me-1.5" />{sf.makeCode}
           </Button>
@@ -602,8 +765,10 @@ function FieldInput({ game, screen, item, task, onTaskChange, onGameChange, game
       );
     }
     case 'answers': {
+      // A bank sample is not the answer: the box starts empty, the sample is only a placeholder.
+      const sample = isSampleStep({ id: item.stepId });
       const choices = (task.choices ?? []).filter((c) => c.trim() !== '');
-      const answer = task.answers?.[0] ?? '';
+      const answer = sample ? '' : task.answers?.[0] ?? '';
       if (choices.length > 0) {
         return (
           <div className="flex flex-wrap gap-2">
@@ -616,19 +781,25 @@ function FieldInput({ game, screen, item, task, onTaskChange, onGameChange, game
           </div>
         );
       }
-      return <input className={BOX} value={answer} dir="auto" onChange={(e) => put({ answers: [e.target.value, ...(task.answers ?? []).slice(1)] })} />;
+      return <input className={BOX} value={answer} dir="auto" placeholder={sample ? sf.samplePlaceholder({ v: task.answers?.[0] ?? '' }) : undefined}
+        onChange={(e) => put({ answers: [e.target.value, ...(sample ? [] : (task.answers ?? []).slice(1))] })} />;
     }
-    case 'numericAnswer':
+    case 'numericAnswer': {
+      const sample = isSampleStep({ id: item.stepId });
       return <input className={`${BOX} text-center text-xl`} type="number" inputMode="decimal" dir="ltr"
-        value={Number.isFinite(task.numericAnswer) ? String(task.numericAnswer) : ''}
+        placeholder={sample && Number.isFinite(task.numericAnswer) ? sf.samplePlaceholder({ v: String(task.numericAnswer) }) : undefined}
+        value={!sample && Number.isFinite(task.numericAnswer) ? String(task.numericAnswer) : ''}
         onChange={(e) => { const n = e.target.value === '' ? undefined : Number(e.target.value); put({ numericAnswer: Number.isFinite(n) ? n : undefined }); }} />;
+    }
     case 'hint':
       return <textarea className={`${BOX} min-h-[100px]`} value={task.hint ?? ''} dir="auto" onChange={(e) => put({ hint: e.target.value })} />;
     case 'locationClue':
       return <textarea className={`${BOX} min-h-[100px]`} value={task.locationClue ?? ''} dir="auto" onChange={(e) => put({ locationClue: e.target.value })} />;
     case 'orderItems': case 'choices': {
       const key = item.fieldPath as 'orderItems' | 'choices';
-      return <ListRows rows={task[key] ?? []} ordered={key === 'orderItems'} onChange={(rows) => put({ [key]: rows } as Partial<Task>)} />;
+      const sample = isSampleStep({ id: item.stepId });
+      return <ListRows rows={sample ? [] : task[key] ?? []} placeholders={sample ? task[key] ?? [] : []} ordered={key === 'orderItems'}
+        onChange={(rows) => put({ [key]: rows } as Partial<Task>)} />;
     }
     case 'media':
       return <PhotoPick task={task} gameId={game.id} onChange={(media) => put({ media })} />;
@@ -650,8 +821,38 @@ function FieldInput({ game, screen, item, task, onTaskChange, onGameChange, game
 /** The mission's own sentence, every blank a box you type into (Ahiya: "a rectangle to fill"). */
 function SentenceBoxes({ template, values, onChange }: { template: string; values: readonly string[]; onChange: (v: string[]) => void }) {
   const parts = parseSentence(template);
+  const box = (p: { index: number; hint: string }, i: number, className: string) => (
+    <input key={i} value={values[p.index] ?? ''} placeholder={p.hint} aria-label={p.hint} dir="auto"
+      onChange={(e) => { const next = [...values]; next[p.index] = e.target.value; onChange(next); }}
+      className={`${className} min-h-[44px] rounded-xl border-2 border-dashed border-rp-fire/60 bg-rp-fire/5 px-3 text-[17px] sm:text-lg text-[--ink-1] placeholder:text-[--ink-3] focus:outline-none focus:border-solid focus:border-rp-fire focus:bg-[--surface-0] focus:ring-4 focus:ring-rp-fire/15 transition-colors`} />
+  );
+  // A text written one line per thing (a row per place, per digit) is shown as those rows: the
+  // line's words beside its box, so four places fit one screen (Ahiya, 28.10). A line with no box
+  // only repeats the card beside it, so it is left out here.
+  const lines: (typeof parts)[] = [[]];
+  for (const p of parts) {
+    if (p.kind !== 'text') { lines[lines.length - 1].push(p); continue; }
+    p.text.split('\n').forEach((chunk, k) => {
+      if (k > 0) lines.push([]);
+      if (chunk.trim() !== '') lines[lines.length - 1].push({ ...p, text: chunk });
+    });
+  }
+  if (lines.length > 1) {
+    return (
+      <div className="rounded-2xl border border-[--rp-border] bg-[--surface-1] p-3 sm:p-4 space-y-2 text-[17px] sm:text-lg leading-snug text-[--ink-1]" dir="auto">
+        {/* Only the rows that ask for something: the mission's full text is on its card beside this. */}
+        {lines.filter((l) => l.some((p) => p.kind !== 'text')).map((line, li) => (
+          <div key={li} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {line.map((p, i) => (p.kind === 'text'
+              ? <span key={i} className="max-w-full">{p.text}</span>
+              : box(p, i, 'flex-1 min-w-[12rem]')))}
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
-    <p className="rounded-2xl border border-[--rp-border] bg-[--surface-1] p-3.5 sm:p-5 text-[18px] sm:text-xl leading-[2.5] text-[--ink-1]" dir="auto">
+    <p className="whitespace-pre-line rounded-2xl border border-[--rp-border] bg-[--surface-1] p-3.5 sm:p-5 text-[18px] sm:text-xl leading-[2.5] text-[--ink-1]" dir="auto">
       {parts.map((p, i) => {
         if (p.kind === 'text') return <span key={i}>{p.text}</span>;
         const value = values[p.index] ?? '';
@@ -671,10 +872,10 @@ function SentenceBoxes({ template, values, onChange }: { template: string; value
  * A list of lines. `ordered`: the lines ARE the answer, top to bottom (an ordering mission), so each
  * row carries its place number and can be moved up or down; the teams get them shuffled.
  */
-function ListRows({ rows, onChange, ordered = false }: { rows: readonly string[]; onChange: (rows: string[]) => void; ordered?: boolean }) {
+function ListRows({ rows, onChange, ordered = false, placeholders = [] }: { rows: readonly string[]; onChange: (rows: string[]) => void; ordered?: boolean; placeholders?: readonly string[] }) {
   const sf = useT().setupFlow;
   const reduce = useReducedMotion();
-  const min = ordered ? 3 : 2;
+  const min = Math.max(ordered ? 3 : 2, placeholders.length);
   const shown = rows.length >= min ? [...rows] : [...rows, ...Array(min - rows.length).fill('')];
   const set = (next: string[]) => onChange(next);
   const move = (i: number, d: -1 | 1) => {
@@ -690,7 +891,7 @@ function ListRows({ rows, onChange, ordered = false }: { rows: readonly string[]
       {shown.map((r, i) => (
         <motion.div key={i} layout={!reduce} className="flex items-center gap-2">
           <span className={`w-8 h-8 shrink-0 inline-flex items-center justify-center rounded-full text-[15px] font-bold ${ordered ? 'bg-rp-fire text-white' : 'text-[--ink-3]'}`}>{i + 1}</span>
-          <input className={BOX} value={r} dir="auto" onChange={(e) => { const next = [...shown]; next[i] = e.target.value; set(next); }} />
+          <input className={BOX} value={r} dir="auto" placeholder={placeholders[i] ? sf.samplePlaceholder({ v: placeholders[i] }) : undefined} onChange={(e) => { const next = [...shown]; next[i] = e.target.value; set(next); }} />
           {ordered && (
             <span className="flex gap-1">
               <button type="button" className={glyph} disabled={i === 0} onClick={() => move(i, -1)} aria-label={sf.moveUp}>↑</button>
@@ -752,9 +953,9 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
     .map(({ b, i }) => ({ i, title: b.kind === 'item' ? screens[b.screen].title : '' }));
   const ready = left.length === 0;
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,8fr)_minmax(0,4fr)] lg:gap-8">
+    <div className="flex-1 flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,8fr)_minmax(0,4fr)] lg:items-stretch lg:gap-8">
       {ready && !reduce && <ConfettiBurst />}
-      <section className="flex-1 min-h-0 flex flex-col">
+      <section className="flex flex-col lg:min-h-0">
         <div className="shrink-0 flex items-center gap-3">
           <motion.span initial={reduce ? false : { scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
             transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 480, damping: 22 }}
@@ -767,12 +968,12 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
             <p className="text-[16px] sm:text-lg text-[--ink-2]">{sf.finishLead}</p>
           </div>
         </div>
-        <div className="mt-3 flex-1 min-h-[200px] rounded-2xl overflow-hidden border border-[--rp-border]">
+        <div className="mt-3 h-[min(60dvh,560px)] min-h-[300px] lg:h-auto lg:flex-1 lg:min-h-[240px] rounded-2xl overflow-hidden border border-[--rp-border]">
           <RoutePreviewMap stages={game.stages ?? []} className="h-full" fill />
         </div>
       </section>
       {left.length > 0 && (
-        <section className="shrink-0 lg:min-h-0 lg:overflow-y-auto">
+        <section className="shrink-0 lg:self-start lg:sticky lg:top-0">
           <Button onClick={onFix} className="w-full min-h-[50px] text-[16px] font-bold mb-3">
             <Icon name="sparkle" className="w-5 h-5 me-1.5" />{sf.finishFix}
           </Button>
@@ -837,7 +1038,7 @@ function PrepBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
   const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
   const share = async () => { try { await navigator.share({ text: shareText }); } catch { /* dismissed: nothing to say */ } };
   return (
-    <div className="w-full max-w-2xl mx-auto flex-1 min-h-0 flex flex-col sm:justify-center">
+    <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col sm:justify-center">
       <h1 className="shrink-0 text-[26px] sm:text-4xl font-extrabold leading-tight">{sf.prepListTitle}</h1>
       <p className="shrink-0 mt-1 text-[16px] sm:text-lg text-[--ink-2]">{sf.shareLead}</p>
       {prep.length === 0 ? (
@@ -846,9 +1047,8 @@ function PrepBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
           <p className="text-[17px] font-semibold">{sf.prepListEmpty}</p>
         </div>
       ) : (
-        // The one region that may scroll on a small phone, and only if the list is long: the share
-        // buttons below it stay in the frame either way.
-        <ul className="mt-3 min-h-0 overflow-y-auto overscroll-contain space-y-2.5 rounded-2xl border border-[--rp-border] bg-[--surface-1] p-3.5 sm:p-5">
+        // Never its own scroll: a long list makes the SCREEN scroll, once (Ahiya 27.10).
+        <ul className="mt-3 space-y-2.5 rounded-2xl border border-[--rp-border] bg-[--surface-1] p-3.5 sm:p-5">
           {prep.map((p) => (
             <li key={p.stepId} className="flex gap-3">
               <span aria-hidden className="mt-[0.55rem] h-2 w-2 shrink-0 rounded-full bg-rp-fire" />
