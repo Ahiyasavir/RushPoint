@@ -23,7 +23,8 @@ const md = readFileSync(src, 'utf8');
 const html = renderHtml(md);
 const { meta } = frontMatter(md);
 
-const browser = await chromium.launch();
+// The installed Chrome when PLAYWRIGHT_CHANNEL says so (the Playwright browsers are not always on this machine).
+const browser = await chromium.launch(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {});
 try {
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'load' });
