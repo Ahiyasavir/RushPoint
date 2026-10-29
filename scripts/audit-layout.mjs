@@ -34,7 +34,8 @@ await page.getByRole('button', { name: /^כניסה/ }).click();
 await page.getByRole('button', { name: /משחק חדש/ }).first().waitFor({ timeout: 90_000 });
 // Whatever greets a creator (tour, what's new, a restore prompt) is closed first.
 await pause(2500);
-for (let k = 0; k < 4; k++) {
+// Skipped for a given game: one of these answers ("not now") also turned the walk's own opening off.
+for (let k = 0; k < (arg('game') ? 0 : 4); k++) {
   const dlg = page.locator('[role=alertdialog], [role=dialog]').first();
   if (!(await dlg.isVisible().catch(() => false))) break;
   const close = dlg.getByRole('button', { name: /הבנתי|דלגו|סגירה|לא עכשיו|ביטול|סגור/ }).first();

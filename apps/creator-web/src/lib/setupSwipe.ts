@@ -63,3 +63,9 @@ export function swipePull(s: { dx: number; dy: number; atTopAtStart: boolean; at
   if (dy < 0 && s.atTopAtStart && s.canGoBack) return band;
   return 0;
 }
+
+/**
+ * When the walk lays its screens side by side (no swiping then): a desktop, or any landscape window
+ * from 768 px. The `walk:` screen in tailwind.config.js is this same query.
+ */
+export const WALK_WIDE_QUERY = '(min-width: 1024px), (min-width: 768px) and (orientation: landscape)';

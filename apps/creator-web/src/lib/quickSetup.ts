@@ -332,6 +332,18 @@ export function confirmEditedSamples<G extends QuickSetupGame>(prev: QuickSetupG
   return out;
 }
 
+/**
+ * A swapped mission's steps: every step of the OLD mission in that slot goes (the slot keeps its id),
+ * and the new mission's own steps come in (28.10). Dropping without adding left the new mission
+ * with nothing asked of it; one path dropped nothing and asked a stone-tower mission what the key
+ * of the previous one opens.
+ */
+export function withSwappedSteps<G extends QuickSetupGame>(game: G, taskId: string, steps: readonly TemplateWizardStep[]): G {
+  const cleared = withoutStepsForTask(game, taskId);
+  if (steps.length === 0) return cleared;
+  return { ...cleared, wizardSteps: [...(Array.isArray(cleared.wizardSteps) ? cleared.wizardSteps : []), ...steps] };
+}
+
 /** The one blocker a caller with no modal should name. `null` ⇔ the launch may proceed. */
 export function firstQuickSetupBlocker(game: QuickSetupGame | null | undefined): TemplateWizardStep | null {
   return quickSetupLaunchBlockers(game)[0] ?? null;

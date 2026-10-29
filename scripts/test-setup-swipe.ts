@@ -2,7 +2,7 @@
 // the map or a field. See apps/creator-web/src/lib/setupSwipe.ts.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { swipeVerdict, swipePull, SWIPE_PULL_MAX, NO_SWIPE_SELECTOR, typingNow } from '../apps/creator-web/src/lib/setupSwipe';
+import { swipeVerdict, swipePull, SWIPE_PULL_MAX, NO_SWIPE_SELECTOR, typingNow, WALK_WIDE_QUERY } from '../apps/creator-web/src/lib/setupSwipe';
 
 let failures = 0;
 function ok(label: string, cond: boolean, detail?: unknown): void {
@@ -34,6 +34,11 @@ ok('the follow is capped', swipePull({ ...pullBase, dy: 900 }) === -SWIPE_PULL_M
 ok('mid-screen it does not move (the page scrolls instead)', swipePull({ ...pullBase, atBottomAtStart: false }) === 0);
 ok('nothing to pull towards on the last screen or the first', swipePull({ ...pullBase, canGoOn: false }) === 0 && swipePull({ ...pullBase, dy: -100, canGoBack: false }) === 0);
 ok('a sideways drag does not pull', swipePull({ ...pullBase, dx: 200 }) === 0);
+
+// The side-by-side layout and the swipe answer the same question, in two places (28.10).
+const twConfig = readFileSync(join(process.cwd(), 'apps/creator-web/tailwind.config.js'), 'utf8');
+ok('the walk: screen in tailwind.config.js is WALK_WIDE_QUERY', twConfig.includes(`walk: { raw: '${WALK_WIDE_QUERY}' }`));
+ok('a 1000 px landscape window is wide (the founder’s zoomed laptop)', WALK_WIDE_QUERY.includes('(min-width: 768px) and (orientation: landscape)'));
 
 const flow = readFileSync(join(process.cwd(), 'apps/creator-web/src/components/SetupFlow.tsx'), 'utf8');
 ok('the walk uses swipeVerdict', flow.includes('swipeVerdict('));

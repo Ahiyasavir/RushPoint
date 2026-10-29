@@ -29,7 +29,8 @@ import { SENTENCE_FIELDS } from '../lib/quickSetup';
 import NumberFlow from '@number-flow/react';
 import { playSetupSound, soundEnabled, setSoundEnabled, type SetupSound } from '../lib/setupSounds';
 import { TAP_CLUSTER, TAP_TARGET } from '../lib/interaction';
-import { swipeVerdict, swipePull, NO_SWIPE_SELECTOR, typingNow } from '../lib/setupSwipe';
+import { swipeVerdict, swipePull, NO_SWIPE_SELECTOR, typingNow, WALK_WIDE_QUERY } from '../lib/setupSwipe';
+import { firstImageFile } from '../lib/imageInput';
 import { parseSentence, hasOpenSlots, extractSlotValues, fillTemplate, generateCode, plainBlanks, asCreatorBlanks } from '../lib/sentenceForm';
 import {
   buildSetupScreens, buildSetupBeats, firstBeat, praiseIndex, stageProgress, planStages,
@@ -254,7 +255,7 @@ export default function SetupFlow({
   const onTouchStart = (e: ReactTouchEvent) => {
     const el = bodyRef.current;
     const target = e.target as Element | null;
-    if (!el || e.touches.length !== 1 || window.innerWidth >= 1024 || target?.closest(NO_SWIPE_SELECTOR) || typingNow(document.activeElement)) { touch.current = null; return; }
+    if (!el || e.touches.length !== 1 || window.matchMedia(WALK_WIDE_QUERY).matches || target?.closest(NO_SWIPE_SELECTOR) || typingNow(document.activeElement)) { touch.current = null; return; }
     const t0 = e.touches[0];
     touch.current = { x: t0.clientX, y: t0.clientY, t: performance.now(),
       top: el.scrollTop <= 2, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 4 };
@@ -281,6 +282,7 @@ export default function SetupFlow({
   const primary = (() => {
     if (beat.kind === 'plan') return { label: sf.planCta, onClick: () => go(at + 1), arrow: true };
     if (beat.kind === 'prep') return { label: sf.launch, onClick: onLaunch, arrow: false };
+    if (beat.kind === 'finish' && !finishOpen) return { label: sf.finishCta, onClick: () => go(at + 1), arrow: true };
     if (current?.item.kind === 'prep' && current.item.configured) return { label: sf.prepCta, onClick: () => go(nextFrom(at)), arrow: true };
     if (prefilledUntouched) return { label: sf.keepIt, onClick: () => go(nextFrom(at)), arrow: true };
     return { label: sf.next, onClick: () => go(nextFrom(at)), arrow: true };
@@ -342,12 +344,20 @@ export default function SetupFlow({
       </AnimatePresence>
       {/* ── Header: the progress by stage, and the side door out ───────────────────────────── */}
       <header className="relative z-10 shrink-0 border-b border-[--rp-border]/60 bg-[--surface-0]/70 backdrop-blur-xl pt-[max(env(safe-area-inset-top),0.5rem)]">
-        <div className="mx-auto w-full max-w-5xl lg:max-w-[min(92vw,1400px)] px-4 pb-2.5">
+        <div className="mx-auto w-full max-w-5xl walk:max-w-[min(92vw,1400px)] px-4 pb-2.5 [@media(max-height:560px)]:pb-1.5">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-2 text-[15px] font-bold min-w-0">
               <span className="inline-flex w-8 h-8 shrink-0 items-center justify-center rounded-full bg-rp-fire/10 text-ink-fire"><Icon name="sparkle" className="w-4 h-4" /></span>
               <span className={`truncate ${onRegenerate && current?.screen.scope === 'task' ? 'hidden sm:inline' : ''}`}>{sf.aria}</span>
             </span>
+            {/* A short window (a laptop zoomed in, 28.10: 457 px tall) has no row to spare: the readiness
+                moves up beside the title, and the row under the bar is not drawn. */}
+            {items.length > 0 && (
+              <span className="hidden [@media(max-height:560px)]:inline-flex items-baseline gap-1 text-[13px] font-extrabold text-ink-fire shrink-0">
+                <NumberFlow value={pct} suffix="%" />
+                <span className="font-semibold">{sf.readyWord}</span>
+              </span>
+            )}
             <div className="ms-auto shrink-0 flex items-center gap-2">
               {onRegenerate && current?.screen.scope === 'task' && (
                 <button type="button" onClick={regenerate} aria-label={sf.newMissionAria} title={sf.newMissionAria}
@@ -367,7 +377,7 @@ export default function SetupFlow({
             </div>
           </div>
           {progress.length > 0 && (
-            <div className="mt-2.5" aria-hidden>
+            <div className="mt-2.5 [@media(max-height:560px)]:mt-1.5" aria-hidden>
               <div className="flex gap-1.5">
                 {progress.map((p) => (
                   <div key={p.stageId} className="h-2 rounded-full bg-[--surface-2] overflow-hidden" style={{ flexGrow: p.total, flexBasis: 0 }}>
@@ -386,7 +396,7 @@ export default function SetupFlow({
             </div>
           )}
           {items.length > 0 && (
-            <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px] sm:text-[14px]">
+            <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px] sm:text-[14px] [@media(max-height:560px)]:hidden">
               <span className="inline-flex items-baseline gap-1 font-extrabold text-ink-fire">
                 <NumberFlow value={pct} suffix="%" />
                 <span className="font-semibold">{sf.readyWord}</span>
@@ -402,10 +412,10 @@ export default function SetupFlow({
 
       {/* ── Body: exactly the space between header and footer ──────────────────────────────── */}
       <div ref={bodyRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd} className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        <motion.div style={{ y: pull }} className="min-h-full flex flex-col">
+        <motion.div style={{ y: pull }} className="min-h-full walk:h-full flex flex-col">
         <AnimatePresence mode="wait" initial={false} onExitComplete={() => pull.set(0)}>
           <motion.div key={`${at}-${swapTick}`} variants={variants} initial="enter" animate="center" exit="exit"
-            data-audit="content" className="mx-auto w-full max-w-5xl lg:max-w-[min(92vw,1400px)] flex-1 px-4 py-3 sm:py-5 flex flex-col lg:my-3 lg:[@media(max-height:720px)]:my-1.5 lg:[@media(max-height:720px)]:py-4 lg:rounded-[28px] lg:border lg:border-white/70 lg:bg-[--surface-0]/85 lg:backdrop-blur-xl lg:px-8 lg:py-6 lg:shadow-[0_30px_80px_-40px_rgba(255,87,34,0.45)]">
+            data-audit="content" className="mx-auto w-full max-w-5xl walk:max-w-[min(92vw,1400px)] flex-1 walk:min-h-0 px-4 py-3 sm:py-5 flex flex-col walk:my-3 walk:[@media(max-height:720px)]:my-1.5 walk:[@media(max-height:720px)]:py-4 walk:[@media(max-height:560px)]:my-1 walk:[@media(max-height:560px)]:py-2.5 walk:[@media(max-height:560px)]:rounded-[20px] walk:rounded-[28px] walk:border walk:border-white/70 walk:bg-[--surface-0]/85 walk:backdrop-blur-xl walk:px-8 walk:py-6 walk:shadow-[0_30px_80px_-40px_rgba(255,87,34,0.45)]">
             {beat.kind === 'plan' && <PlanBeat game={game} itemCount={beats.filter((b) => b.kind === 'item').length} />}
             {beat.kind === 'item' && current && (
               <ItemBeat
@@ -418,7 +428,7 @@ export default function SetupFlow({
               />
             )}
             {(beat.kind === 'item' || beat.kind === 'plan') && (
-              <p aria-hidden className="lg:hidden mt-auto pt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[--ink-3]">
+              <p aria-hidden className="walk:hidden mt-auto pt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[--ink-3]">
                 <Icon name="chevronUp" className="w-4 h-4 rp-swipe-hint" />{sf.swipeHint}
               </p>
             )}
@@ -431,7 +441,7 @@ export default function SetupFlow({
 
       {/* ── Footer: one primary, always live (an answering button, never a disabled one) ──────── */}
       <footer className="relative z-10 shrink-0 border-t border-[--rp-border]/60 bg-[--surface-0]/75 backdrop-blur-xl pb-[max(env(safe-area-inset-bottom),0.5rem)]">
-        <div className="mx-auto w-full max-w-5xl lg:max-w-[min(92vw,1400px)] px-4 pt-2.5 flex items-center gap-2">
+        <div className="mx-auto w-full max-w-5xl walk:max-w-[min(92vw,1400px)] px-4 pt-2.5 [@media(max-height:560px)]:pt-1.5 flex items-center gap-2">
           {at > 0 && (
             <Button variant="ghost" onClick={() => go(at - 1)} className="shrink-0 px-3">{rtl ? '→' : '←'} {sf.back}</Button>
           )}
@@ -540,6 +550,12 @@ function ItemBeat({
   // An ordering quiz is finished by sorting, not by answering (found in the 23.10 checks).
   const doneKey = task?.type === 'quiz' && (task.orderItems?.length ?? 0) > 0 ? 'order' : screen.taskType;
   const fills = FILLS.has(item.fieldPath);
+  // A field that was open when this screen came up STAYS on it once filled (28.10, found live: on a
+  // "before the game" screen the field hid itself the moment it counted as done, so picking an
+  // address made the whole map vanish, and typing the last letter of a blank removed the boxes).
+  // A prep step that arrived already done still shows only its instruction. The screen remounts on
+  // every step, so this is decided once per visit.
+  const [fieldOpenAtStart] = useState(!item.configured);
   // The mission's own words, editable right on its card (Ahiya, 28.10): a pencil turns the title and
   // the text into boxes. Leaving edit mode remounts the field below (`editRound`), so a sentence of
   // blanks re-reads the text the creator just wrote instead of writing its old template back over it.
@@ -550,6 +566,13 @@ function ItemBeat({
   const longText = screen.playerText.length > 150;
   const finishEdit = () => { setEditing(false); setEditRound((n) => n + 1); };
   const putText = (patch: Partial<Task>) => { if (task) onTaskChange(screen.stageId, { ...task, ...patch }); };
+  // The edit box is as tall as its text (28.10: a fixed height scrolled inside the card and hid half
+  // the mission). The card grows; the page scrolls, never the box.
+  const growToFit = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + 4}px`;
+  };
   const field = (
     <FieldInput key={editRound} game={game} screen={screen} item={item} task={task} onTaskChange={onTaskChange}
       onGameChange={onGameChange} gameAnchors={gameAnchors} onOpenFull={onOpenFull} />
@@ -559,14 +582,14 @@ function ItemBeat({
     // Desktop: the mission on one side, the action on the other, both the body's full height.
     // Phone and tablet: one column, the mission first (you need to know what happens there before you
     // place or fill it), the action taking the rest.
-    <div className={`flex-1 flex flex-col gap-3 lg:grid ${fills ? 'lg:min-h-0 lg:grid-rows-[minmax(0,1fr)] lg:items-stretch lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]' : 'lg:items-start lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] sm:justify-center lg:content-center'} lg:gap-8`}>
+    <div className={`flex-1 flex flex-col gap-3 walk:grid ${fills ? 'walk:min-h-0 walk:grid-rows-[minmax(0,1fr)] walk:items-stretch walk:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]' : 'walk:items-start walk:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] sm:justify-center walk:content-center'} walk:gap-8`}>
       {screen.scope === 'task' && (
         <motion.section
           initial={reduce ? false : { opacity: 0, y: 10, rotate: rtl ? 1 : -1 }} animate={{ opacity: 1, y: 0, rotate: 0 }}
           transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 28 }}
-          className="shrink-0 lg:self-start lg:sticky lg:top-0 rounded-3xl bg-[--surface-0] border border-[--rp-border]/70 shadow-[0_18px_40px_-28px_rgba(255,87,34,0.55)] overflow-hidden">
+          className="shrink-0 walk:self-start walk:sticky walk:top-0 rounded-3xl bg-[--surface-0] border border-[--rp-border]/70 shadow-[0_18px_40px_-28px_rgba(255,87,34,0.55)] overflow-hidden">
           <div aria-hidden className="h-1.5 bg-gradient-to-l from-rp-fire to-rp-amber" />
-          <div className="px-4 py-3.5 sm:p-5 lg:[@media(max-height:720px)]:p-4">
+          <div className="px-4 py-3.5 sm:p-5 walk:[@media(max-height:720px)]:p-4">
             <div className="flex items-start gap-3">
               <span aria-hidden className="inline-flex w-11 h-11 sm:w-12 sm:h-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-rp-fire to-rp-amber text-white shadow-md shadow-rp-fire/30">
                 <Icon name={TYPE_ICON[screen.taskType ?? ''] ?? 'flag'} className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -577,7 +600,7 @@ function ItemBeat({
                   <input value={task.title ?? ''} onChange={(e) => putText({ title: e.target.value })} dir="auto" aria-label={sf.editTitleLabel}
                     className="mt-1 w-full min-h-[44px] rounded-xl border-2 border-rp-fire/60 bg-[--surface-0] px-3 text-[20px] font-extrabold text-[--ink-1] focus:outline-none focus:border-rp-fire focus:ring-4 focus:ring-rp-fire/15" />
                 ) : (
-                  <h2 className={`font-extrabold leading-tight ${first ? 'text-[26px] sm:text-4xl' : 'text-[24px] sm:text-3xl'} lg:[@media(max-height:720px)]:text-[26px]`} dir="auto">{screen.title}</h2>
+                  <h2 className={`font-extrabold leading-tight ${first ? 'text-[26px] sm:text-4xl' : 'text-[24px] sm:text-3xl'} walk:[@media(max-height:720px)]:text-[26px] walk:[@media(max-height:560px)]:text-[22px]`} dir="auto">{screen.title}</h2>
                 )}
               </div>
               {task && (
@@ -587,7 +610,7 @@ function ItemBeat({
                   aria-label={editing ? sf.editTextDone : sf.editText}
                   className={`min-h-[44px] min-w-[44px] shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl px-2.5 text-[14px] font-bold whitespace-nowrap transition-colors ${editing ? 'bg-rp-fire text-white' : 'text-ink-fire hover:bg-rp-fire/10'}`}>
                   <Icon name={editing ? 'check' : 'pencil'} className="w-4 h-4" />
-                  <span aria-hidden className="hidden sm:inline lg:hidden 2xl:inline">{editing ? sf.editTextDone : sf.editText}</span>
+                  <span aria-hidden className="hidden sm:inline walk:hidden 2xl:inline">{editing ? sf.editTextDone : sf.editText}</span>
                 </button>
               )}
             </div>
@@ -595,16 +618,16 @@ function ItemBeat({
               <div className="mt-3">
                 <div className="text-[13px] sm:text-[14px] font-semibold text-[--ink-3]">{sf.teamsWill}</div>
                 <textarea value={plainBlanks(task.description)} onChange={(e) => putText({ description: asCreatorBlanks(e.target.value) })} dir="auto" aria-label={sf.editTextLabel}
-                  rows={Math.min(9, Math.max(4, (task.description ?? '').split('\n').length + 1))}
-                  className="mt-1 w-full rounded-xl border-2 border-rp-fire/60 bg-[--surface-0] px-3 py-2 text-[16px] sm:text-lg leading-snug text-[--ink-1] focus:outline-none focus:border-rp-fire focus:ring-4 focus:ring-rp-fire/15" />
+                  ref={growToFit} onInput={(e) => growToFit(e.currentTarget)} rows={3}
+                  className="mt-1 w-full resize-none overflow-hidden rounded-xl border-2 border-rp-fire/60 bg-[--surface-0] px-3 py-2 text-[16px] sm:text-lg leading-snug text-[--ink-1] focus:outline-none focus:border-rp-fire focus:ring-4 focus:ring-rp-fire/15" />
                 <p className="mt-1 text-[13px] text-[--ink-3]">{hasOpenSlots(task.description) ? `${sf.editTextNote} ${sf.editTextBlanks}` : sf.editTextNote}</p>
               </div>
             ) : screen.playerText !== '' && (
               <div className="mt-3">
                 <div className="text-[13px] sm:text-[14px] font-semibold text-[--ink-3]">{sf.teamsWill}</div>
-                <p className={`mt-0.5 text-[16px] sm:text-lg leading-snug sm:leading-relaxed lg:[@media(max-height:720px)]:leading-snug text-[--ink-1] whitespace-pre-line ${longText && !openText ? 'max-lg:line-clamp-4' : ''}`} dir="auto">{blanked(screen.playerText)}</p>
+                <p className={`mt-0.5 text-[16px] sm:text-lg leading-snug sm:leading-relaxed walk:[@media(max-height:720px)]:leading-snug text-[--ink-1] whitespace-pre-line ${longText && !openText ? 'line-clamp-4 walk:line-clamp-none walk:[@media(max-height:560px)]:line-clamp-4' : ''}`} dir="auto">{blanked(screen.playerText)}</p>
                 {longText && (
-                  <button type="button" onClick={() => setOpenText((o) => !o)} className="lg:hidden min-h-[36px] text-[14px] font-bold text-ink-fire">
+                  <button type="button" onClick={() => setOpenText((o) => !o)} className="walk:hidden walk:[@media(max-height:560px)]:block min-h-[36px] text-[14px] font-bold text-ink-fire">
                     {openText ? sf.textLess : sf.textMore}
                   </button>
                 )}
@@ -630,10 +653,10 @@ function ItemBeat({
         </motion.section>
       )}
 
-      <section className={`flex flex-col ${fills ? 'lg:min-h-0' : ''} ${screen.scope === 'task' ? '' : 'lg:col-span-2 w-full max-w-2xl mx-auto'}`}>
+      <section className={`flex flex-col ${fills ? 'walk:min-h-0' : ''} ${screen.scope === 'task' ? '' : 'walk:col-span-2 w-full max-w-2xl mx-auto'}`}>
         {praise !== '' && (
           <motion.div initial={reduce ? false : { opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}
-            className={`shrink-0 text-[19px] sm:text-xl font-extrabold text-ink-fire ${fills ? 'lg:[@media(max-height:720px)]:hidden' : ''}`}>{praise}</motion.div>
+            className={`shrink-0 text-[19px] sm:text-xl font-extrabold text-ink-fire ${fills ? 'walk:[@media(max-height:720px)]:hidden' : ''}`}>{praise}</motion.div>
         )}
         {item.kind === 'prep' ? (
           <>
@@ -649,29 +672,29 @@ function ItemBeat({
               </motion.span>
               <div className="min-w-0">
                 <div className="inline-flex rounded-full bg-rp-amber/20 px-2.5 py-0.5 text-[13px] font-bold text-ink-amber">{sf.prepLabel}</div>
-                <p className="mt-1.5 text-[17px] sm:text-xl lg:[@media(max-height:720px)]:text-[17px] font-semibold leading-snug" dir="auto">{item.instruction}</p>
-                <p className="mt-1.5 text-[12px] sm:text-[13px] text-[--ink-2] flex items-center gap-1.5 lg:[@media(max-height:720px)]:hidden"><Icon name="checkCircle" className="w-4 h-4 text-ink-go shrink-0" />{sf.prepNote}</p>
+                <p className="mt-1.5 text-[17px] sm:text-xl walk:[@media(max-height:720px)]:text-[17px] font-semibold leading-snug" dir="auto">{item.instruction}</p>
+                <p className="mt-1.5 text-[12px] sm:text-[13px] text-[--ink-2] flex items-center gap-1.5 walk:[@media(max-height:720px)]:hidden"><Icon name="checkCircle" className="w-4 h-4 text-ink-go shrink-0" />{sf.prepNote}</p>
               </div>
             </div>
-            {!item.configured && !fills && (
+            {fieldOpenAtStart && !fills && (
               <div className="mt-3 rounded-xl bg-[--surface-0] p-2.5 sm:p-3 flex flex-col">
-                {ask.title !== item.instruction && <p className="mb-2 shrink-0 text-[17px] font-bold lg:[@media(max-height:720px)]:hidden">{ask.title}</p>}
+                {ask.title !== item.instruction && <p className="mb-2 shrink-0 text-[17px] font-bold walk:[@media(max-height:720px)]:hidden">{ask.title}</p>}
                 {field}
               </div>
             )}
           </motion.div>
-          {!item.configured && fills && (
+          {fieldOpenAtStart && fills && (
             <>
-              {ask.title !== item.instruction && <p className="mt-3 shrink-0 text-[19px] sm:text-2xl font-extrabold">{ask.title}</p>}
-              <div className="mt-2 flex flex-col lg:flex-1 lg:min-h-0">{field}</div>
+              {ask.title !== item.instruction && <p className="mt-3 shrink-0 text-[19px] sm:text-2xl walk:[@media(max-height:560px)]:text-xl font-extrabold">{ask.title}</p>}
+              <div className="mt-2 flex flex-col walk:flex-1 walk:min-h-0">{field}</div>
             </>
           )}
           </>
         ) : (
           <>
-            <h3 className="shrink-0 text-[22px] sm:text-3xl font-extrabold leading-snug">{ask.title}</h3>
+            <h3 className="shrink-0 text-[22px] sm:text-3xl walk:[@media(max-height:560px)]:text-2xl font-extrabold leading-snug">{ask.title}</h3>
             {ask.hint !== '' && <p className="mt-1 shrink-0 text-[16px] sm:text-lg text-[--ink-2] leading-snug" dir="auto">{ask.hint}</p>}
-            <div className={`mt-3 flex flex-col ${fills ? 'lg:flex-1 lg:min-h-0' : 'shrink-0'}`}>{field}</div>
+            <div className={`mt-3 flex flex-col ${fills ? 'walk:flex-1 walk:min-h-0' : 'shrink-0'}`}>{field}</div>
           </>
         )}
       </section>
@@ -743,7 +766,7 @@ function FieldInput({ game, screen, item, task, onTaskChange, onGameChange, game
   switch (item.fieldPath) {
     case 'coordinates':
       return (
-        <div className="h-[min(60dvh,560px)] min-h-[320px] lg:h-auto lg:flex-1 lg:min-h-[260px] flex flex-col">
+        <div className="h-[min(60dvh,560px)] min-h-[320px] walk:h-auto walk:flex-1 walk:min-h-[260px] walk:[@media(max-height:560px)]:min-h-[170px] flex flex-col">
           <LocationStep coordinates={task.coordinates ?? { lat: 0, lng: 0 }} onChange={(lat, lng) => put({ coordinates: { lat, lng } })}
             fill anchors={gameAnchors} cooperativeGestures />
         </div>
@@ -927,12 +950,32 @@ function PhotoPick({ task, gameId, onChange }: { task: Task; gameId: string; onC
       onChange([...(latest.current.media ?? []), { id: uuid(), kind, url }]);
     } catch { setFailed(true); } finally { setPct(null); }
   };
+  // Drag a picture onto the box, or paste one (Ctrl+V) anywhere on this screen (Ahiya, 28.10). Only an
+  // image file is taken; pasting text into a box elsewhere is left alone.
+  const [over, setOver] = useState(false);
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const file = firstImageFile(e.clipboardData?.files);
+      if (!file) return;
+      e.preventDefault();
+      void pickRef.current(file);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
   return (
     <div className="flex items-stretch gap-2">
       {images.map((m) => <img key={m.id} src={m.url} alt="" className="h-24 w-24 shrink-0 rounded-xl object-cover border border-[--rp-border]" />)}
-      <label className="flex-1 flex min-h-[96px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-rp-fire/50 bg-rp-fire/5 text-ink-fire hover:bg-rp-fire/10 transition-colors">
+      <label
+        onDragOver={(e) => { if (Array.from(e.dataTransfer.items ?? []).some((i) => i.kind === 'file')) { e.preventDefault(); setOver(true); } }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); const f = firstImageFile(e.dataTransfer.files); if (f) void pick(f); else setFailed(true); }}
+        className={`flex-1 flex min-h-[96px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed text-ink-fire transition-colors ${over ? 'border-rp-fire bg-rp-fire/15' : 'border-rp-fire/50 bg-rp-fire/5 hover:bg-rp-fire/10'}`}>
         <Icon name="camera" className="w-7 h-7" />
-        <span className="text-[15px] font-semibold">{pct !== null ? sf.uploading({ pct: Math.round(pct) }) : images.length > 0 ? sf.photoAdded : sf.pickPhoto}</span>
+        <span className="text-[15px] font-semibold">{pct !== null ? sf.uploading({ pct: Math.round(pct) }) : over ? sf.photoDropNow : images.length > 0 ? sf.photoAdded : sf.pickPhoto}</span>
+        {pct === null && !over && <span className="hidden walk:block text-[13px] text-[--ink-3]">{sf.photoDropHint}</span>}
         <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void pick(f); }} />
       </label>
       {failed && <p role="alert" className="text-[13px] text-ink-fire">{sf.uploadFailed}</p>}
@@ -952,10 +995,11 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
     .filter(({ b }) => b.kind === 'item' && screens[b.screen].items[b.item].required && !screens[b.screen].items[b.item].configured)
     .map(({ b, i }) => ({ i, title: b.kind === 'item' ? screens[b.screen].title : '' }));
   const ready = left.length === 0;
+  if (ready) return <ReadyBeat game={game} screens={screens} />;
   return (
-    <div className="flex-1 flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,8fr)_minmax(0,4fr)] lg:items-stretch lg:gap-8">
+    <div className="flex-1 flex flex-col gap-3 walk:min-h-0 walk:grid walk:grid-rows-[minmax(0,1fr)] walk:grid-cols-[minmax(0,8fr)_minmax(0,4fr)] walk:items-stretch walk:gap-8">
       {ready && !reduce && <ConfettiBurst />}
-      <section className="flex flex-col lg:min-h-0">
+      <section className="flex flex-col walk:min-h-0">
         <div className="shrink-0 flex items-center gap-3">
           <motion.span initial={reduce ? false : { scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
             transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 480, damping: 22 }}
@@ -963,26 +1007,26 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
             <Icon name={ready ? 'check' : 'flag'} className="w-6 h-6" />
           </motion.span>
           <div className="min-w-0">
-            <h1 className="text-[26px] sm:text-4xl font-extrabold leading-tight">{ready ? sf.finishTitle : sf.finishTitleGaps({ n: left.length })}</h1>
+            <h1 className="text-[26px] sm:text-4xl walk:[@media(max-height:560px)]:text-3xl font-extrabold leading-tight">{ready ? sf.finishTitle : sf.finishTitleGaps({ n: left.length })}</h1>
             {ready && <FinishStats game={game} />}
             <p className="text-[16px] sm:text-lg text-[--ink-2]">{sf.finishLead}</p>
           </div>
         </div>
-        <div className="mt-3 h-[min(60dvh,560px)] min-h-[300px] lg:h-auto lg:flex-1 lg:min-h-[240px] rounded-2xl overflow-hidden border border-[--rp-border]">
+        <div className="mt-3 h-[min(60dvh,560px)] min-h-[300px] walk:h-auto walk:flex-1 walk:min-h-[240px] walk:[@media(max-height:560px)]:min-h-[160px] rounded-2xl overflow-hidden border border-[--rp-border]">
           <RoutePreviewMap stages={game.stages ?? []} className="h-full" fill />
         </div>
       </section>
       {left.length > 0 && (
-        <section className="shrink-0 lg:self-start lg:sticky lg:top-0">
+        <section className="shrink-0 walk:self-start walk:sticky walk:top-0">
           <Button onClick={onFix} className="w-full min-h-[50px] text-[16px] font-bold mb-3">
             <Icon name="sparkle" className="w-5 h-5 me-1.5" />{sf.finishFix}
           </Button>
           <h2 className="text-[17px] font-bold">{sf.finishLeft}</h2>
-          <ul className="mt-1.5 flex flex-wrap gap-2 lg:flex-col">
+          <ul className="mt-1.5 flex flex-wrap gap-2 walk:flex-col">
             {left.map((l) => (
               <li key={l.i}>
                 <button type="button" onClick={() => onJump(l.i)}
-                  className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[--rp-border] px-3 text-start hover:bg-[--surface-2] lg:w-full">
+                  className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[--rp-border] px-3 text-start hover:bg-[--surface-2] walk:w-full">
                   <Icon name="alert" className="w-4 h-4 text-ink-amber shrink-0" />
                   <span className="truncate text-[16px]" dir="auto">{l.title}</span>
                   <span className="text-[13px] font-semibold text-ink-fire">{sf.finishGo}</span>
@@ -992,6 +1036,52 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * The finish when nothing is left (28.10, "the last screen does not look nice"): it was the gaps
+ * layout with its list column empty, a third of the screen of nothing. Now the summary stands in a
+ * column of its own (what was built, and the two steps that remain: prepare, then launch) and the
+ * route map takes the rest of the screen.
+ */
+function ReadyBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
+  const sf = useT().setupFlow;
+  const reduce = useReducedMotion();
+  const prepCount = beforeGameList(screens).length;
+  const next: [IconName, string][] = [
+    ['flag', prepCount > 0 ? sf.finishNextPrep({ n: prepCount }) : sf.finishNextPrepNone],
+    ['sparkle', sf.finishNextLaunch],
+  ];
+  return (
+    <div className="flex-1 flex flex-col gap-4 walk:min-h-0 walk:grid walk:grid-rows-[minmax(0,1fr)] walk:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] walk:items-stretch walk:gap-8">
+      {!reduce && <ConfettiBurst />}
+      <section className="flex flex-col walk:justify-center">
+        <motion.span initial={reduce ? false : { scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+          transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 480, damping: 22 }}
+          className="inline-flex w-12 h-12 shrink-0 items-center justify-center rounded-full bg-rp-go text-white shadow-md shadow-rp-go/30">
+          <Icon name="check" className="w-7 h-7" />
+        </motion.span>
+        <h1 className="mt-3 text-[28px] sm:text-4xl walk:[@media(max-height:620px)]:text-3xl font-extrabold leading-tight">{sf.finishTitle}</h1>
+        <FinishStats game={game} />
+        <div className="mt-4 rounded-2xl bg-[--surface-0] border border-[--rp-border]/70 p-4 shadow-sm">
+          <h2 className="text-[15px] font-bold text-[--ink-3]">{sf.finishNextTitle}</h2>
+          <ol className="mt-2 space-y-2.5">
+            {next.map(([icon, text], i) => (
+              <li key={i} className="flex items-start gap-3 text-[16px] sm:text-lg leading-snug">
+                <span className="inline-flex w-8 h-8 shrink-0 items-center justify-center rounded-full bg-rp-fire/10 text-ink-fire">
+                  <Icon name={icon} className="w-4 h-4" />
+                </span>
+                <span className="pt-1">{text}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+      <section className="h-[min(48dvh,440px)] min-h-[240px] walk:h-auto walk:min-h-0 rounded-2xl overflow-hidden border border-[--rp-border] shadow-sm">
+        <RoutePreviewMap stages={game.stages ?? []} className="h-full" fill />
+      </section>
     </div>
   );
 }
@@ -1039,7 +1129,7 @@ function PrepBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
   const share = async () => { try { await navigator.share({ text: shareText }); } catch { /* dismissed: nothing to say */ } };
   return (
     <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col sm:justify-center">
-      <h1 className="shrink-0 text-[26px] sm:text-4xl font-extrabold leading-tight">{sf.prepListTitle}</h1>
+      <h1 className="shrink-0 text-[26px] sm:text-4xl walk:[@media(max-height:560px)]:text-3xl font-extrabold leading-tight">{sf.prepListTitle}</h1>
       <p className="shrink-0 mt-1 text-[16px] sm:text-lg text-[--ink-2]">{sf.shareLead}</p>
       {prep.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">

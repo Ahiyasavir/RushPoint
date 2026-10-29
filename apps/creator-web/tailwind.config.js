@@ -26,6 +26,11 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      // The setup walk's side-by-side layout (28.10): a desktop, OR any landscape window from 768 px.
+      // A laptop zoomed in to 1000 px wide fell under `lg` and got the phone's stacked layout, a long
+      // scroll on a 457 px tall window. Same query as WALK_WIDE_QUERY in src/lib/setupSwipe.ts
+      // (scripts/test-setup-swipe.ts checks they match).
+      screens: { walk: { raw: '(min-width: 1024px), (min-width: 768px) and (orientation: landscape)' } },
       // From the brand package (packages/brand/tokens.mjs), never restated
       // here. Both faces carry Hebrew AND Latin; the previous pairing loaded
       // latin only, so Hebrew fell through to the system font.

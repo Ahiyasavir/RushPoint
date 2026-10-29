@@ -35,7 +35,7 @@ import { useLanguage } from '../components/LanguageContext';
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
 import { downloadJson } from '../lib/downloadFile';
-import { resolveWizardTarget, type TemplateWizardStep } from '@rushpoint/shared';
+import { resolveWizardTarget, SAMPLE_STEP_PREFIX, type TemplateWizardStep } from '@rushpoint/shared';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, TagChips, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
@@ -117,7 +117,7 @@ import {
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { Icon, type IconName } from '../components/Icon';
 import SetupFlow from '../components/SetupFlow';
-import { wantsSetupFlow, setupFlowSteps, keepSeenSentenceSteps, withoutStepsForTask, confirmEditedSamples } from '../lib/quickSetup';
+import { wantsSetupFlow, setupFlowSteps, keepSeenSentenceSteps, withSwappedSteps, confirmEditedSamples } from '../lib/quickSetup';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -317,7 +317,7 @@ function markGamePreviewed(gameId: string) {
 }
 
 /** The mission swap, outside any component so the setup walk and the stage canvas share it. */
-function regenerateMissionIn(game: Game, source: Task | undefined, uid: string | undefined, onNothingLeft: () => void): Task | null {
+function regenerateMissionIn(game: Game, source: Task | undefined, uid: string | undefined, onNothingLeft: () => void): { task: Task; steps: TemplateWizardStep[] } | null {
   if (!source) return null;
 
   // The SLOT's role, not the task's: whatever mission ends up first has to be
@@ -359,7 +359,18 @@ function regenerateMissionIn(game: Game, source: Task | undefined, uid: string |
   // composer-v2-learning: a bank mission swapped away teaches the bank. Fire-and-forget.
   const swappedKey = bankKeyForTask(source, missionBankNow());
   if (swappedKey) void recordMissionSignals({ swapped: [swappedKey] }).catch(() => undefined);
-  return applyRegeneratedMission(source, built);
+  const task = applyRegeneratedMission(source, built);
+  // The swapped-in mission's OWN setup steps (28.10, found live: they were never added, while one
+  // swap path kept the old mission's, so a stone-tower mission asked "what does the key open?").
+  // Marked the way the composer marks them, so a sample answer still blocks the launch.
+  const stageId = si < 0 ? '' : game.stages[si].id;
+  const steps = (picked.setup ?? [])
+    .filter((st) => st && typeof st.field === 'string' && st.field !== '' && !(st.field === 'coordinates' && task.locationless === true))
+    .map((st, i) => ({
+      id: `${st.sample ? SAMPLE_STEP_PREFIX : ''}qs-swap-${task.id}-${offeredKeys.length}-${i}-${st.field}`,
+      stageId, taskId: task.id, targetFieldPath: st.field, instructionPrompt: st.prompt, isRequired: st.required === true,
+    }));
+  return { task, steps };
 }
 
 export default function BuilderPage() {
@@ -1269,15 +1280,14 @@ export default function BuilderPage() {
           resume={setupFlow?.resume !== false}
           onRegenerate={(stageId, taskId) => {
             const src = game.stages.find((st) => st.id === stageId)?.tasks.find((x) => x.id === taskId);
-            const next = regenerateMissionIn(game, src, user?.uid, () => { void dialog.alert(t.builder.regenerateNothingLeft); });
-            if (!next) return false;
-            // The swapped-in mission keeps the slot's id, so the old mission's authored steps (a
-            // photo, a hidden spot's clue) would otherwise be asked of it and block the launch.
+            const swap = regenerateMissionIn(game, src, user?.uid, () => { void dialog.alert(t.builder.regenerateNothingLeft); });
+            if (!swap) return false;
+            // The swapped-in mission keeps the slot's id: the old mission's steps go, its own come.
             seenSetupSteps.current = seenSetupSteps.current.filter((s) => s.taskId !== taskId);
-            setGame(withoutStepsForTask({
+            setGame(withSwappedSteps({
               ...game,
-              stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === taskId ? next : x) }),
-            }, taskId));
+              stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === taskId ? swap.task : x) }),
+            }, taskId, swap.steps));
             return true;
           }}
           onTaskChange={(stageId, task) => setGame({
@@ -1811,7 +1821,7 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {activeTab === 'build' && <StepStages game={game} setGame={setGame} onUndo={undo} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} onSwapSteps={(taskId, steps) => history.set((g) => (g ? withSwappedSteps(g, taskId, steps) : g))} onUndo={undo} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef}
           quickSetupInlineBar={qsVisible && qsStep && qsCardInline && !setupOpen ? (
             <QuickSetupBar
               inline
@@ -2792,8 +2802,10 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, quickSetupInlineBar, quickSetupGuided, onUndo: undo }: {
+function StepStages({ game, setGame, onSwapSteps, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, quickSetupInlineBar, quickSetupGuided, onUndo: undo }: {
   game: Game; setGame: (g: Game) => void;
+  /** Move a swapped mission's setup steps on the LATEST game (a functional update). */
+  onSwapSteps: (taskId: string, steps: TemplateWizardStep[]) => void;
   /** The Builder's history undo, offered by the toast after a card regenerate (composer-v2-phase0). */
   onUndo: () => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
@@ -3220,8 +3232,21 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
    *     a press immediately. `loadMissionBank()` is fired and NOT awaited, so an
    *     admin's edit is picked up by the next press.
    */
-  function regeneratedTaskFor(source: Task | undefined): Task | null {
+  function regeneratedTaskFor(source: Task | undefined): { task: Task; steps: TemplateWizardStep[] } | null {
     return regenerateMissionIn(game, source, user?.uid, () => { void dialog.alert(b.regenerateNothingLeft); });
+  }
+
+  /**
+   * The EDITOR's swap: the panel commits the mission itself (see `regenerateTask`), so only the setup
+   * steps are moved here, through a functional update that cannot write back a stale mission.
+   */
+  function regeneratedTaskForEditor(source: Task | undefined): Task | null {
+    const swap = regeneratedTaskFor(source);
+    if (!swap || !source) return null;
+    // AFTER the panel's own synchronous flush, which writes the game as this render saw it (old
+    // steps); queued behind it, the functional update lands on the game that flush produced.
+    queueMicrotask(() => onSwapSteps(source.id, swap.steps));
+    return swap.task;
   }
 
   /**
@@ -3239,13 +3264,13 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     const stage = game.stages.find((s) => s.id === stageId);
     const at = stage?.tasks.findIndex((t) => t.id === taskId) ?? -1;
     if (!stage || at < 0) return;
-    const next = regeneratedTaskFor(stage.tasks[at]);
-    if (!next) return;
-    // Like the setup walk's swap: the slot keeps its id, so the old mission's authored steps go.
-    setGame(withoutStepsForTask({
+    const swap = regeneratedTaskFor(stage.tasks[at]);
+    if (!swap) return;
+    // Like the setup walk's swap: the slot keeps its id, so the old mission's steps go, its own come.
+    setGame(withSwappedSteps({
       ...game,
-      stages: game.stages.map((st) => (st.id === stage.id ? { ...st, tasks: st.tasks.map((t, i) => (i === at ? next : t)) } : st)),
-    }, taskId));
+      stages: game.stages.map((st) => (st.id === stage.id ? { ...st, tasks: st.tasks.map((t, i) => (i === at ? swap.task : t)) } : st)),
+    }, taskId, swap.steps));
     // composer-v2-phase0: the card spins, and the way back is one press away. Undo is the Builder's
     // own history, so it restores exactly the mission that was there.
     setRegenNonce((m) => ({ ...m, [taskId]: (m[taskId] ?? 0) + 1 }));
@@ -3781,7 +3806,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           /* Returns the replacement rather than committing it — the panel owns the
              open mission's draft and commits through its own change handler. See
              `regenerateTask` for why the two paths are separate. */
-          onRegenerate={() => regeneratedTaskFor(editingTask)}
+          onRegenerate={() => regeneratedTaskForEditor(editingTask)}
           /* The SAME delete the mission card's ⋯ menu runs (change:
              mission-card-actions) — see `removeTask`, which owns the confirm and
              the three stage-level cleanups a delete drags behind it. */

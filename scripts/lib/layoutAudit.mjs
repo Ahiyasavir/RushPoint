@@ -85,7 +85,10 @@ export function auditLayoutInPage(opts) {
   const footerTop = (() => { const f = root.querySelector('footer'); return f ? f.getBoundingClientRect().top : vh; })();
   const maps = [...root.querySelectorAll('.maplibregl-map')].filter(visible).map((m) => {
     const r = m.getBoundingClientRect();
-    const underFooter = vw >= 1024 && r.bottom > footerTop + tol;
+    // Wherever the walk lays out side by side (its `walk:` screen, not only from 1024 px: 28.10, a
+    // 1000 px zoomed laptop ran the map under the footer and this rule never looked).
+    const sideBySide = window.matchMedia('(min-width: 1024px), (min-width: 768px) and (orientation: landscape)').matches;
+    const underFooter = sideBySide && r.bottom > footerTop + tol;
     // Off screen = it cannot be seen whole even after scrolling to it: taller than the space a
     // fixed header and footer leave (~78% of the window), or clipped sideways.
     return { w: Math.round(r.width), h: Math.round(r.height), share: +(r.width * r.height / (vw * vh)).toFixed(2), heightShare: +(r.height / vh).toFixed(2), offscreen: underFooter || r.height > vh * 0.78 || r.right > vw + tol || r.left < -tol };
@@ -106,6 +109,8 @@ export const AUDIT_VIEWPORTS = [
   { name: 'laptop-short', width: 1366, height: 657 },
   // The founder's own browser window on 27.10 (the screenshot that started this tool).
   { name: 'laptop-small', width: 1137, height: 588 },
+  // The founder's laptop with the browser zoomed (28.10, measured off his screenshot): 457 px tall.
+  { name: 'laptop-zoomed', width: 1000, height: 457 },
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'wide', width: 1920, height: 1080 },
 ];

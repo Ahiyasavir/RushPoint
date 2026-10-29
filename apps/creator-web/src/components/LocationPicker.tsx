@@ -21,6 +21,9 @@ ensureRtlTextPlugin(maplibregl);
 // tiles (via resolveMapStyle) + the OpenStreetMap Nominatim geocoder. That is the
 // supported default for self-run games, so we don't nag about a missing key.
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
+/** A click below this zoom (a city or wider) flies in to CLICK_ZOOM_TO, a few streets around it. */
+const CLICK_ZOOM_BELOW = 13;
+const CLICK_ZOOM_TO = 16;
 
 // Search itself lives in lib/geocode.ts — including WHY the geocoder is chosen
 // independently of the tile key (MapTiler's Hebrew address coverage lost a real
@@ -93,6 +96,8 @@ export default function LocationPicker({
   // after every edit, so this array changes while the creator is aiming, and a
   // camera that re-fitted itself mid-aim would be worse than the bug being fixed.
   const anchorsAtMount = useRef(anchors);
+  // The last position this map reported itself, so the prop echo of it does not move the camera.
+  const ownChange = useRef<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     if (!ref.current || map.current) return;
@@ -127,7 +132,11 @@ export default function LocationPicker({
 
     const place = (lngLat: maplibregl.LngLat) => {
       setMarker(lngLat.lat, lngLat.lng);
-      onChangeRef.current(round(lngLat.lat), round(lngLat.lng));
+      emit(lngLat.lat, lngLat.lng);
+      // A click on a map zoomed out to the whole country is a rough "about here": take the creator
+      // into the neighbourhood so the exact spot can be set (28.10).
+      const m = map.current;
+      if (m && m.getZoom() < CLICK_ZOOM_BELOW) m.flyTo({ center: lngLat, zoom: CLICK_ZOOM_TO, duration: 700 });
     };
     map.current.on('click', (e) => place(e.lngLat));
 
@@ -149,12 +158,16 @@ export default function LocationPicker({
     map.current?.setStyle(resolveMapStyle(KEY, mode) as maplibregl.StyleSpecification | string);
   }, [mode]);
 
-  // Reflect external numeric edits onto the marker/center.
+  // Reflect external numeric edits onto the marker/center. A change this map made itself (a click, a
+  // drag, a search pick) already moved the camera: easing again here CANCELLED the search's zoom-in
+  // a few frames in, which is why picking a neighbourhood left the map on the whole country (28.10).
   useEffect(() => {
     if (!map.current) return;
     if (hasCoord) {
       setMarker(lat, lng);
-      map.current.easeTo({ center: [lng, lat], duration: 300 });
+      const own = ownChange.current;
+      ownChange.current = null;
+      if (!own || own.lat !== round(lat) || own.lng !== round(lng)) map.current.easeTo({ center: [lng, lat], duration: 300 });
     } else {
       marker.current?.remove();
       marker.current = null;
@@ -162,13 +175,18 @@ export default function LocationPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lat, lng]);
 
+  function emit(la: number, ln: number) {
+    ownChange.current = { lat: round(la), lng: round(ln) };
+    onChangeRef.current(round(la), round(ln));
+  }
+
   function setMarker(la: number, ln: number) {
     if (!map.current) return;
     if (!marker.current) {
       marker.current = new maplibregl.Marker({ color: '#22c55e', draggable: true });
       marker.current.on('dragend', () => {
         const p = marker.current!.getLngLat();
-        onChangeRef.current(round(p.lat), round(p.lng));
+        emit(p.lat, p.lng);
       });
     }
     marker.current.setLngLat([ln, la]).addTo(map.current);
@@ -198,7 +216,7 @@ export default function LocationPicker({
   function choose(r: GeoResult) {
     setResults([]); setQuery(r.label);
     setMarker(r.lat, r.lng);
-    onChangeRef.current(round(r.lat), round(r.lng));
+    emit(r.lat, r.lng);
     const cam = cameraForResult(r);
     if (cam.kind === 'bounds') {
       // The camera never goes wider than minZoom: fitBounds has no minZoom, so clamp after.

@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { timeLimitClockStart } from '../packages/shared/src/taskTimeLimit';
 import {
-  setupFlowSteps, keepSeenSentenceSteps, quickSetupLaunchBlockers, withoutStepsForTask,
+  setupFlowSteps, keepSeenSentenceSteps, quickSetupLaunchBlockers, withoutStepsForTask, withSwappedSteps,
 } from '../apps/creator-web/src/lib/quickSetup';
 
 let failures = 0;
@@ -48,7 +48,14 @@ const game = (task: object, extra: object = {}) => ({ id: 'g', title: 'x', scori
   ok('the swapped mission\'s steps are dropped, the others kept', out.wizardSteps.map((s) => s.id).join() === 'b');
   ok('a game with nothing to drop is returned as is', withoutStepsForTask(out as never, 't1') === out);
   const builder = readFileSync(join(process.cwd(), 'apps/creator-web/src/pages/BuilderPage.tsx'), 'utf8');
-  ok('both swaps (setup walk and mission card) go through withoutStepsForTask', (builder.match(/setGame\(withoutStepsForTask\(/g) ?? []).length >= 2);
+  ok('both swaps (setup walk and mission card) go through withSwappedSteps', (builder.match(/setGame\(withSwappedSteps\(/g) ?? []).length >= 2);
+  // 28.10, found live: a swap also brings the NEW mission's own steps, and the editor's swap moves them too.
+  const swapped = withSwappedSteps(g as never, 't1', [
+    { id: 'n', stageId: 's1', taskId: 't1', targetFieldPath: 'description', instructionPrompt: 'new', isRequired: true },
+  ]) as { wizardSteps: { id: string; instructionPrompt: string }[] };
+  ok("a swap drops the old mission's steps and adds the new one's", swapped.wizardSteps.map((s) => s.id).join() === 'b,n');
+  ok("the editor's swap moves the steps too, after its own flush", /queueMicrotask\(\(\) => onSwapSteps\(source\.id, swap\.steps\)\)/.test(builder));
+  ok("the swapped-in mission's steps come from ITS bank entry", /picked\.setup \?\? \[\]/.test(builder));
 }
 
 // (5) The countdown of a mission handed back starts no earlier than the hand-over.
