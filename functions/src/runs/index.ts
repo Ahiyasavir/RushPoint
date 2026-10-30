@@ -12,6 +12,7 @@ import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from '../obs/log';
 import { enforceRateLimit } from '../rateLimitStore';
 import { db, docCachePolicy } from '../firebase';
+import { notifyCreator } from '../notify';
 import { cachedGetDoc, cachedGetCollection } from '../docCache';
 // Full-fidelity movement track on the VPS disk when configured; getRunHeatmap falls back to
 // the Firestore locationTrack collection when there is no disk file (change: vps-track-storage).
@@ -20,6 +21,7 @@ import { getLocationFreshness } from './locationFreshnessCache';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import {
+  milestonesCrossed,
   type Game,
   type Task,
   type Run,
@@ -1257,6 +1259,15 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   // above and never re-assigns. Best-effort by design: the team is already
   // committed as launched, so a routing hiccup must not fail the join — it
   // degrades to "joined, no task yet", which requestNextTask recovers from.
+  // The creator hears that their game became real (change: creator-engagement-loop): the first team,
+  // then each player milestone. Never for a rehearsal or the public self-guided demo. Best effort.
+  if (!joined.already && !r.isTestDrive && !r.selfGuided) {
+    const after = used + 1;
+    const base = { ownerUid, gameId, runId, now, params: { game: game.title ?? '', team: team.displayName ?? '' } };
+    if (used === 0) await notifyCreator({ ...base, kind: 'firstJoin' });
+    for (const milestone of milestonesCrossed(used, after)) await notifyCreator({ ...base, kind: 'players', milestone, params: { game: game.title ?? '', n: milestone } });
+  }
+
   if (selfStart && !joined.already) {
     await assignNextInActiveStage(ownerUid, gameId, runId, teamId, { lat: 31.7905, lng: 35.164 }, now, game)
       .catch((e) => logBestEffort('joinRun.selfStart.assign', { ownerUid, gameId, runId, teamId }, e));
@@ -4311,6 +4322,12 @@ export async function runPostFinalizeConsolidation(
     await sendRunSummaryEmailOnce(runRef, ownerUid, gameId, runId, game, run, teams);
   } catch (e) {
     logBestEffort('postFinalize.runSummaryEmail', { runId }, e);
+  }
+
+  // The recap is the peak of the creator's experience (change: creator-engagement-loop): tell them it
+  // is ready. Real runs only; the id is per run, so a second finalize path rewrites the same item.
+  if (!run.isTestDrive && !run.selfGuided && teams.length > 0) {
+    await notifyCreator({ ownerUid, kind: 'finished', gameId, runId, params: { game: game.title ?? '', teams: teams.length } });
   }
 }
 
@@ -8185,6 +8202,12 @@ export const submitRunFeedback = loggedCallable('submitRunFeedback', async (data
     tx.set(ref, feedback);
     return { already: false };
   });
+
+  // What players said, the first answer per run (change: creator-engagement-loop). One item per run,
+  // counting answers, so a class of thirty is one notification. Never for a rehearsal.
+  if (!result.already && !(runSnap.data() as Run | undefined)?.isTestDrive) {
+    await notifyCreator({ ownerUid: ctx.ownerUid, kind: 'rated', gameId: ctx.gameId, runId: ctx.runId, coalesce: true });
+  }
 
   return { ok: true, already: result.already };
 });

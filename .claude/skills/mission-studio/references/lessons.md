@@ -5,6 +5,37 @@ the skill now catches it. **Add an entry after every round of feedback** (SKILL.
 
 ---
 
+## 2026-10-30 · A role-play warm-up is childish for teens even with a camera
+
+### L50 · Pretend identities are a kids' mechanic, whatever the proof
+**His words:** "שמות קוד אבל זה גם ילדותי". It was the replacement chosen for "טייק אחד" in the youth
+movement template, and it was tagged youth because it had a video proof and a stage-long rule. **Rule:**
+inventing secret-agent names and calling each other by them is pretend play (G-gate: delete the role, is
+anything left?), and a teen reads it as a game for younger kids. A camera does not make it older.
+Prefer a physical team problem with a countable result (three-feet). **Detect:** any mission whose act
+is "choose a name / character / persona and use it" gets kids only. code-names lost `youth`.
+
+---
+
+## 2026-10-29 · Missions too childish for the age they were tagged
+
+### L49 · An audience tag is a promise to that age, and "mixed" is a promise to every age
+**His words:** "יש גם כל מיני משימות שהן קצת ילדותיות לגיל שתייגו אותם, כמו 'טייק אחד'". He approved
+all ten proposed retags ("Apply all"). **Evidence:** a name-and-a-movement circle (טייק אחד), find the
+digits 1 to 5 (אחד עד חמש, the teen version is בדיוק מאה), counting steps, a flag out of objects, a
+team rap, a frozen action scene, a human pyramid and a reporter skit were tagged for teens or adults;
+code names were tagged for adults, the floor letter for companies. All ten also carried `mixed`, and the
+composer scores `mixed` as a partial fit for EVERY audience, so after removing `youth`/`adults` they
+still reached 38 of 120 company games ("טייק אחד" alone 12). **Rule:** read each audience tag as "a
+group of exactly this age would not feel this is beneath them" (G18). Camp icebreakers, pretend play
+and number-hunts for the very young are kids only. `mixed` means "suits every age": a mission too
+childish for teens or adults is NOT mixed, so drop it too. **Detect:** in an audit, for every
+mission tagged youth/adults/corporate ask "would a 15 year old, or a team of 30 year olds at work, roll
+their eyes?"; then measure, do not guess: compose 120 games per audience and count how often the
+retagged keys still appear (they should vanish from the audiences they left).
+
+---
+
 ## 2026-10-22 · After the review: the bank must grow, and be richly tagged
 
 ### L48 · Every approved mission goes into the bank, with every tag that is true of it

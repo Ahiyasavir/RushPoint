@@ -1,5 +1,6 @@
 // Swiping between the setup walk's screens on a phone (Ahiya, 28.10: "scroll up and down like TikTok
-// and Instagram"), IN ADDITION to the Next and Back buttons, never instead of them.
+// and Instagram"), beside the Next button. On a touch screen it replaces Back (30.10); Back stays for a
+// mouse and for a screen reader.
 //
 // The screen has its own scroll, a map you drag and fields you type in, so a swipe only turns the
 // page when it cannot mean anything else:
@@ -8,6 +9,15 @@
 //   • the screen was ALREADY at its end when the finger went down: a swipe up from the bottom goes
 //     on, a swipe down from the top goes back. A swipe that scrolls the screen only scrolls it.
 // Pure and total, so it is pinned by scripts/test-setup-swipe.ts without a browser.
+
+// The first swipe teaches it (Ahiya, 30.10): from then on no hint, here or in the feed, per browser.
+const SWIPED_KEY = 'rp-swiped';
+export function hasSwiped(): boolean {
+  try { return localStorage.getItem(SWIPED_KEY) === '1'; } catch { return false; }
+}
+export function markSwiped(): void {
+  try { localStorage.setItem(SWIPED_KEY, '1'); } catch { /* storage off: the hint simply stays */ }
+}
 
 export interface SwipeSample {
   dx: number;

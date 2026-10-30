@@ -1,0 +1,75 @@
+---
+/**
+ * The game in three beats, for a visitor who has never seen one (change:
+ * first-visit-instant-build). A stand-in until a real event clip exists.
+ *
+ * Every beat is always on the page: the motion only moves a highlight along
+ * them, so a visitor with reduced motion gets the same three sentences as a
+ * finished frame, and no word depends on an animation having run. All of it is
+ * markup and CSS, so the hero still costs no request.
+ */
+import { Icon } from 'astro-icon/components';
+
+export interface Props {
+  beats: { icon: string; title: string; detail: string }[];
+}
+
+const { beats } = Astro.props;
+---
+
+<ol class="rp-story">
+  {
+    beats.map((beat, i) => (
+      <li class="rp-story-beat" style={`--i:${i}`}>
+        <Icon name={beat.icon} class="h-6 w-6 shrink-0 text-secondary dark:text-primary" />
+        <span class="text-start">
+          <strong class="block font-bold text-heading">{beat.title}</strong>
+          <span class="block text-sm text-muted">{beat.detail}</span>
+        </span>
+      </li>
+    ))
+  }
+</ol>
+
+<style>
+  .rp-story {
+    display: grid;
+    gap: 0.5rem;
+    margin-block-start: 1.75rem;
+  }
+  .rp-story-beat {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    border-radius: 1rem;
+    background: rgb(255 87 34 / 7%);
+  }
+  @media (min-width: 640px) {
+    .rp-story {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .rp-story-beat {
+      align-items: flex-start;
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .rp-story-beat {
+      animation: rp-story-turn 9s ease-in-out infinite;
+      animation-delay: calc(var(--i) * 3s);
+    }
+  }
+  @keyframes rp-story-turn {
+    0%,
+    30%,
+    100% {
+      background: rgb(255 87 34 / 7%);
+      transform: none;
+    }
+    6%,
+    24% {
+      background: rgb(255 87 34 / 20%);
+      transform: translateY(-3px);
+    }
+  }
+</style>

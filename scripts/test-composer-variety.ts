@@ -11,6 +11,8 @@ import { maxCompletableTasks } from '@rushpoint/shared';
 import {
   choiceExtras,
   composeGame,
+  hiddenMissionTarget,
+  HIDDEN_SEARCH_MINUTES,
   seededRng,
   type ComposerAnswers,
   type ComposerDescriptionCopy,
@@ -94,8 +96,8 @@ for (const audience of AUD) for (const seed of [1, 2, 3, 4, 5]) {
   const mine = new Set(r.wizardSteps.filter((w) => w.id.startsWith('qs-hidden-')).map((w) => w.taskId));
   const hidden = r.stages.flatMap((st) => st.tasks.filter((t) => mine.has(t.id)).map((t) => ({ st, t })));
   const bankHidden = r.stages.some((st) => st.tasks.some((t) => t.hideLocation === true && !mine.has(t.id)));
-  if (hidden.length > 1) hiddenBad.push(`${audience}/s${seed}: ${hidden.length} hidden missions added`);
-  if (hidden.length > 0 && bankHidden) hiddenBad.push(`${audience}/s${seed}: added a hidden mission to a game that had one`);
+  if (hidden.length > 1) hiddenBad.push(`${audience}/s${seed}: ${hidden.length} hidden missions added to a balanced 90 minute game`);
+  if (hidden.length > 0 && bankHidden) hiddenBad.push(`${audience}/s${seed}: added a hidden mission to a balanced game that had one`);
   if (hidden.length === 0 && !bankHidden) noneAtAll++;
   if (hidden.length === 1 && hidden[0].t.hideLocation !== true) hiddenBad.push(`${audience}/s${seed}: the chosen mission is not hidden`);
   if (hidden.length === 1) {
@@ -116,6 +118,40 @@ const noPrep = composeGame(TASK_BANK, { audience: 'youth', setting: 'outdoor', m
 ok('no hidden mission added when the creator wants no prep', !!noPrep && !noPrep.wizardSteps.some((w) => w.id.startsWith('qs-hidden-')));
 const noCopy = composeGame(TASK_BANK, { audience: 'youth', setting: 'outdoor', minutes: 90, people: 12, locationMissions: true, prepEffort: 4, difficultyPreference: 'balanced', ageBandId: 'band-14-17' } as unknown as ComposerAnswers, BASE_COPY, seededRng(1), { recentBankKeys: [] });
 ok('no hidden mission added when there is no way to ask for its clue', !!noCopy && !noCopy.wizardSteps.some((w) => w.id.startsWith('qs-hidden-')));
+
+// A harder or longer game hides more (Ahiya, 28.10): one more for hard, one more for long.
+console.log(' 4. hidden missions grow with difficulty and length');
+ok('the target: 1 by default, +1 hard, +1 for 120 minutes and up, garbage reads as default',
+  hiddenMissionTarget('balanced', 90) === 1 && hiddenMissionTarget('hard', 90) === 2 && hiddenMissionTarget('easy', 120) === 2
+  && hiddenMissionTarget('hard', 180) === 3 && hiddenMissionTarget(undefined, NaN) === 1);
+const means: Record<string, number> = {};
+for (const [pref, mins] of [['balanced', 90], ['hard', 90], ['balanced', 180], ['hard', 180]] as const) {
+  let games = 0; let added = 0; const bad: string[] = [];
+  for (const audience of AUD) for (const seed of [1, 2, 3, 4, 5]) {
+    const r = composeGame(TASK_BANK, { audience, setting: 'outdoor', minutes: mins, people: 12, locationMissions: true, prepEffort: 4, difficultyPreference: pref, ageBandId: 'band-14-17' } as unknown as ComposerAnswers, COPY, seededRng(seed), { recentBankKeys: [] });
+    if (!r) continue;
+    games++;
+    const mine = new Set(r.wizardSteps.filter((w) => w.id.startsWith('qs-hidden-')).map((w) => w.taskId));
+    const bankHidden = r.stages.some((st) => st.tasks.some((t) => t.hideLocation === true && !mine.has(t.id)));
+    const cap = hiddenMissionTarget(pref, mins) - (bankHidden ? 1 : 0);
+    added += mine.size;
+    if (mine.size > Math.max(0, cap)) bad.push(`${audience}/s${seed}: added ${mine.size}, allowed ${cap}`);
+    r.stages.forEach((st, i) => {
+      const ours = st.tasks.filter((t) => mine.has(t.id));
+      if (ours.length > 0 && (i === 0 || i === r.stages.length - 1)) bad.push(`${audience}/s${seed}: an added hidden mission in the opener or finale`);
+      if (ours.length > 0 && st.tasks.filter((t) => t.hideLocation === true).length > 1) bad.push(`${audience}/s${seed}: two hidden missions in stage ${i}`);
+      for (const t of ours) if (t.hideLocation !== true) bad.push(`${audience}/s${seed}: ${t.title} has a clue step but is not hidden`);
+    });
+    for (const id of mine) if (!r.wizardSteps.some((w) => w.taskId === id && w.targetFieldPath === 'locationClue' && w.isRequired)) bad.push(`${audience}/s${seed}: hidden without a clue step`);
+  }
+  const mean = games ? added / games : 0;
+  means[`${pref}-${mins}`] = mean;
+  console.log(`    ${pref} ${mins} min: ${games} games, ${mean.toFixed(2)} hidden added per game`);
+  ok(`${pref} ${mins} min: never past the allowance, never in the opener or finale, one per stage, each with its clue`, games > 0 && bad.length === 0, bad.slice(0, 4));
+}
+ok('a hard game and a long game hide more than the balanced 90 minute game, and hard+long the most',
+  means['hard-90'] > means['balanced-90'] && means['balanced-180'] > means['balanced-90'] && means['hard-180'] >= Math.max(means['hard-90'], means['balanced-180']), means);
+ok('the search a hidden mission adds is paid in the time estimate', HIDDEN_SEARCH_MINUTES > 0);
 
 console.log(`\n${failures === 0 ? '✅ composer variety: ALL PASS' : `❌ composer variety: ${failures} FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

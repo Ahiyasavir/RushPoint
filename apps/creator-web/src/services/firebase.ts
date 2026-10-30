@@ -20,6 +20,7 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut as fbSignOut,
+  signInAnonymously,
   onAuthStateChanged,
   type User,
 } from 'firebase/auth';
@@ -312,6 +313,43 @@ export function signUpWithEmail(
     return cred;
   });
 }
+// ── Guest creators: build first, sign up at launch (change: creator-acquisition-and-return) ──
+// A guest is an anonymous user. Upgrading LINKS a real credential onto that same user, so the uid and
+// every game built as a guest stay exactly where they are.
+
+export function startAsGuest() {
+  return signInAnonymously(auth);
+}
+
+export async function upgradeGuestWithEmail(email: string, password: string, displayName?: string) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Not signed in');
+  const cred = await linkWithCredential(user, EmailAuthProvider.credential(email, password));
+  if (displayName) await updateProfile(cred.user, { displayName });
+  await cred.user.reload();
+  return cred;
+}
+
+/**
+ * Link Google onto the guest. `credential-already-in-use` (this Google account already has a
+ * RushPoint account) is rethrown untouched for the caller to explain: signing into the other
+ * account would leave the guest's game behind, so that is the creator's choice, never ours.
+ */
+export async function upgradeGuestWithGoogle() {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Not signed in');
+  if (emulatorBuild) {
+    const { user: identity } = await signInWithPopup(googleAuth, googleProvider);
+    const claims = JSON.stringify(buildEmulatorGoogleClaims(identity));
+    const cred = await linkWithCredential(user, GoogleAuthProvider.credential(claims));
+    await cred.user.reload();
+    return cred;
+  }
+  const cred = await linkWithPopup(user, googleProvider);
+  await cred.user.reload();
+  return cred;
+}
+
 export function signInWithEmail(email: string, password: string) {
   return signInWithEmailAndPassword(auth, email, password);
 }

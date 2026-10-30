@@ -13,6 +13,7 @@ import { Input } from './ui';
 import { useT } from './LanguageContext';
 import { Icon } from './Icon';
 import { mapLocale } from '../lib/mapLocale';
+import { keepAttributionFolded } from '../lib/mapAttribution';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -129,6 +130,7 @@ export default function LocationPicker({
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.current.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-left');
+    keepAttributionFolded(map.current);
 
     const place = (lngLat: maplibregl.LngLat) => {
       setMarker(lngLat.lat, lngLat.lng);

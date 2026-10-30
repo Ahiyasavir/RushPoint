@@ -63,6 +63,10 @@ export const FIRESTORE_PATHS = {
   // console's quick-actions bar here, under `consolePrefs`.
   user:       (uid: string) => `users/${uid}`,
 
+  // A creator's notifications (change: creator-engagement-loop). Server-write-only; the owner reads.
+  notifications: (uid: string) => `users/${uid}/notifications`,
+  notification:  (uid: string, id: string) => `users/${uid}/notifications/${id}`,
+
   games:      (ownerUid: string) => `users/${ownerUid}/games`,
 
   game:       (ownerUid: string, gameId: string) =>
@@ -798,6 +802,9 @@ export interface Game {
   // no quick setup, which is every game that predates the feature.
   // See packages/shared/src/templateWizard.ts.
   wizardSteps?: import('../templateWizard').TemplateWizardStep[];
+  /** When the event is (change: creator-engagement-loop): an ISO instant. Drives the dashboard countdown
+   *  and the 3 days / tomorrow / today notifications. Absent = not told. */
+  eventAt?: string;
 }
 
 
@@ -1886,6 +1893,8 @@ export interface UpdateGamePayload {
   // clear; absent means "not sent" and leaves the stored steps alone. Steps whose
   // stage/mission no longer exists are DROPPED on save, never a refusal.
   wizardSteps?: import('../templateWizard').TemplateWizardStep[] | null;
+  /** ISO instant, or null / '' to clear (change: creator-engagement-loop). */
+  eventAt?: string | null;
 }
 
 // Run management

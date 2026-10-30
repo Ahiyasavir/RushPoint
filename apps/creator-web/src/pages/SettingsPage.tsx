@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { FIRESTORE_PATHS } from '@rushpoint/shared';
 import { Button, Card, Input, Label } from '../components/ui';
 import { useAuth } from '../components/AuthGate';
 import { useT, useLanguage } from '../components/LanguageContext';
@@ -77,6 +78,7 @@ export default function SettingsPage() {
 
       <SectionHeader>{s.sectionPreferences}</SectionHeader>
       <LanguageCard lang={lang} setLang={setLang} s={s} />
+      <EventEmailsCard s={s} uid={user?.uid ?? ''} />
       <TourCard t={t} />
 
       <SectionHeader>{s.sectionDataLegal}</SectionHeader>
@@ -93,6 +95,37 @@ function SectionHeader({ children }: { children: ReactNode }) {
     <div className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3] pt-2 text-start">
       {children}
     </div>
+  );
+}
+
+// ── Event reminder emails ─────────────────────────────
+// The email's "stop" link lands here. On by default: the creator set the date themselves.
+function EventEmailsCard({ s, uid }: { s: T['settings']; uid: string }) {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    if (!uid) return;
+    void getDoc(doc(db, FIRESTORE_PATHS.user(uid))).then((d) => setOn(d.data()?.eventEmails !== false)).catch(() => undefined);
+  }, [uid]);
+  const flip = () => {
+    const next = !on;
+    setOn(next);
+    void setDoc(doc(db, FIRESTORE_PATHS.user(uid)), { eventEmails: next }, { merge: true }).catch(() => setOn(!next));
+  };
+  return (
+    <Card className="p-6">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-[--ink-1]">{s.eventEmailsLabel}</div>
+          <p className="mt-1 text-sm text-[--ink-2]">{s.eventEmailsDesc}</p>
+        </div>
+        <button type="button" role="switch" aria-checked={on} aria-label={s.eventEmailsLabel} onClick={flip}
+          className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+          <span className={`w-11 h-6 rounded-full p-0.5 flex transition-colors ${on ? 'bg-rp-go justify-end' : 'bg-[--surface-2] justify-start'}`}>
+            <span className="w-5 h-5 rounded-full bg-white shadow" />
+          </span>
+        </button>
+      </div>
+    </Card>
   );
 }
 

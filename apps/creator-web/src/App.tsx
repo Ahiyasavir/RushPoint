@@ -1,3 +1,4 @@
+import { knownGameCountKey, readKnownGameCount } from './lib/creatorOnboarding';
 import { Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
@@ -19,6 +20,9 @@ import AppFooter from './components/AppFooter';
 // First-run guided tour (change: creator-guided-tour). Mounted once, renders
 // nothing unless it is running, and is replayable from here and from Settings.
 import CreatorTour, { restartCreatorTour } from './components/CreatorTour';
+import NotificationBell from './components/NotificationBell';
+import { SaveAccountHost, askToSaveAccount } from './components/SaveAccountSheet';
+import { isGuest } from './lib/guestCreator';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 import { Icon } from './components/Icon';
 
@@ -87,6 +91,10 @@ export default function App() {
   useEngagementTracker(!!user);
   // Decides only whether the admin dashboard appears in the menu (see useIsAdmin).
   const isAdmin = useIsAdmin(user);
+  const guest = isGuest(user);
+  // Before there is a game, a warning that it is only saved here is about nothing.
+  let guestHasGame = false;
+  try { guestHasGame = guest && (readKnownGameCount(localStorage.getItem(knownGameCountKey(user?.uid))) ?? 0) >= 1; } catch { /* storage unavailable */ }
   // The Builder is a full-width workspace (3-pane shell); every other route reads
   // best as a centred column. Widen the main container only on /build/*.
   const pathname = useLocation().pathname;
@@ -187,6 +195,7 @@ export default function App() {
           {/* On mobile the inline nav is gone; this spacer keeps the controls end-aligned. */}
           <div className="flex-1 sm:hidden" aria-hidden="true" />
           <span className="text-xs text-[--ink-3] hidden sm:block truncate max-w-[160px]">{user?.displayName ?? user?.email}</span>
+          {user?.uid && <NotificationBell uid={user.uid} />}
           {/* The help affordance: replays the guided tour from step one, for a
               creator who skipped it or wants it again. */}
           <button
@@ -205,9 +214,12 @@ export default function App() {
           >
             <Icon name={dark ? 'sun' : 'moon'} className="w-5 h-5" />
           </button>
+          {/* A guest has nothing to sign out of: signing out would throw their game away. */}
+          {!guest && (
           <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-ink-alert transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
             {t.common.signOut}
           </button>
+          )}
         </div>
         {/* Mobile nav drawer — collapses the inline links below `sm`. Closes on
             selection via the pathname effect above. */}
@@ -233,6 +245,20 @@ export default function App() {
         )}
       </header>
       )}
+      {/* The guest bar (change: creator-acquisition-and-return): a guest built this game as an
+          anonymous user, so it lives only in this browser until they save it to an account. */}
+      {guestHasGame && !isBuilder && (
+        <div className="relative z-20 bg-rp-fire/10 border-b border-rp-fire/25">
+          <div className="max-w-6xl mx-auto px-4 py-2 flex items-center justify-between gap-3">
+            <span className="text-[14px] font-medium text-[--ink-1]">{t.saveAccount.barText}</span>
+            <button type="button" onClick={() => void askToSaveAccount('bar')}
+              className="min-h-[40px] px-4 rounded-xl bg-gradient-to-l from-rp-fire to-rp-amber text-white text-[14px] font-bold shrink-0">
+              {t.saveAccount.barCta}
+            </button>
+          </div>
+        </div>
+      )}
+      <SaveAccountHost />
 
       <main className={`relative z-10 mx-auto w-full ${isBuilder ? 'max-w-[1680px] px-2 py-1.5 flex-1 min-h-0 overflow-hidden'
         : isRunConsole ? 'max-w-[1680px] px-4 py-5'

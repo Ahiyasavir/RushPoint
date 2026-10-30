@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { askToSaveAccount } from '../components/SaveAccountSheet';
+import { accountGateFor, isGuest, startIntentOpensWizard } from '../lib/guestCreator';
+import { consumeStartOccasion, MISSION_FEED_NAV_STATE } from '../lib/quickStart';
+import BuildingMoment from '../components/BuildingMoment';
+import { track } from '../lib/track';
+import type { OccasionId } from '../lib/occasions';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game, GameMode, Stage, GameFile } from '@rushpoint/shared';
 import {
-  GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED,
+  GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, daysUntilEvent,
   DEFAULT_WRONG_ANSWER_LEVEL, parseGameFile, AGE_BANDS,
 } from '@rushpoint/shared';
 import {
@@ -228,6 +234,7 @@ export default function DashboardPage() {
   const [chosen, setChosen] = useState<PickerChoice | null>(null);
   // Escape closes the template picker, matching its backdrop click. Gated on
   // `picking` because this page renders the whole dashboard behind it.
+  const [buildingAt, setBuildingAt] = useState<number | null>(null);
   useModalDismiss(() => { setPicking(false); setChosen(null); }, undefined, picking);
 
   // Arriving from the marketing CTA opens the new-game wizard straight away
@@ -239,11 +246,13 @@ export default function DashboardPage() {
   // read `false` and the intent would look like it had never arrived when
   // debugging. Guarding keeps dev and production behaving identically.
   const startIntentChecked = useRef(false);
+  const [startOccasion, setStartOccasion] = useState<OccasionId | null>(null);
   useEffect(() => {
-    if (startIntentChecked.current) return;
+    if (startIntentChecked.current || games === null) return;
     startIntentChecked.current = true;
-    if (consumeStartIntent()) setPicking(true);
-  }, []);
+    const occasion = consumeStartOccasion();
+    if (consumeStartIntent() && startIntentOpensWizard(games.length)) { setStartOccasion(occasion); setPicking(true); }
+  }, [games]);
   // Firestore-backed templates (change: admin-manage-game-templates). null = still
   // loading; [] + failed = the fetch errored. Seeded SYNCHRONOUSLY from the cache
   // (perf: template-picker-latency) so a returning creator's picker paints its menu
@@ -492,6 +501,9 @@ export default function DashboardPage() {
   async function newGame(submission: WizardSubmission) {
     const { plan } = submission;
     setPicking(false);
+    // At once: the wizard just closed over a dashboard that reads as if nothing was answered.
+    const buildStartedAt = Date.now();
+    if (plan.kind === 'smart_build') { setBuildingAt(buildStartedAt); track('build_started'); }
 
     if (plan.kind === 'blank') {
       try {
@@ -576,6 +588,7 @@ export default function DashboardPage() {
         // cause is that no places were named, and that is something they can fix
         // in one answer. Silence here is how someone finds out on the day.
         if (result.shortfall) {
+          setBuildingAt(null);
           const { askedMinutes, estimatedMinutes, namedPlaces } = result.shortfall;
           const say = namedPlaces ? d.wizard.shortWithPlaces : d.wizard.shortNoPlaces;
           await dialog.alert(say({ asked: askedMinutes, got: estimatedMinutes }));
@@ -584,12 +597,16 @@ export default function DashboardPage() {
         // "your game is ready" moment AND the plan, so a separate reveal before it was the same
         // thing said twice.
         setPicking(false);
-        nav(`/build/${gameId}`, { state: OPEN_SETUP_NAV_STATE });
+        track('game_composed', { occasion: plan.composerAnswers.occasion ?? 'other' });
+        // The next page loads under the moment, not after it. A failure here is the route's to handle.
+        await import('./BuilderPage').catch(() => undefined);
+        nav(`/build/${gameId}`, { state: { ...MISSION_FEED_NAV_STATE, rpBuildStartedAt: buildStartedAt } });
       } catch (e) {
         // Same rule as every other path here: the wizard already closed, so a
         // silent failure would leave the creator on an unchanged dashboard with
         // no game and no error. Re-open so the answers are not lost.
         console.error('[dashboard] compose game failed:', e);
+        setBuildingAt(null);
         await dialog.alert(d.templateFailed);
         setPicking(true);
       }
@@ -781,6 +798,9 @@ export default function DashboardPage() {
   }
 
   async function togglePublish(g: Game) {
+    if (g.visibility !== 'public' && accountGateFor('publish', isGuest(user)) === 'needsAccount') {
+      if (!(await askToSaveAccount('publish'))) return;
+    }
     try {
       await publishGame({ gameId: g.id, visibility: g.visibility === 'public' ? 'private' : 'public' });
       void load(true);
@@ -905,7 +925,9 @@ export default function DashboardPage() {
             room to give. Three numbers side by side is 64px and reads the same:
             these are glanceable figures, and a phone reads them in a row the way
             it reads any other row of counters. */}
-        {games.length > 0 && (
+        {/* Hidden until something has been played (research 29.10): three zeros greet a brand new
+            creator as a scoreboard they are losing. */}
+        {games.length > 0 && games.some((g) => (g.playCount ?? 0) > 0) && (
           <div className="grid grid-cols-3 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 mt-5 sm:mt-8">
             {/* The runs tile is a LINK (change: post-run-player-report). It counted
                 the one thing a creator most wants to look back at and did nothing
@@ -1051,6 +1073,15 @@ export default function DashboardPage() {
                   <div className="p-5 flex flex-col gap-4 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <h3 className="font-brand font-bold text-[--ink-1] text-base leading-snug flex-1">{g.title}</h3>
+                      {(() => {
+                        // The countdown to the real event (change: creator-engagement-loop).
+                        const left = daysUntilEvent(g.eventAt, new Date().toISOString());
+                        return left == null ? null : (
+                          <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-rp-fire/12 px-2.5 py-1 text-[12px] font-bold text-ink-fire">
+                            <Icon name="calendar" className="w-3.5 h-3.5" />{d.eventIn(left)}
+                          </span>
+                        );
+                      })()}
                       <Badge color={g.visibility === 'public' ? 'cyan' : 'zinc'}>
                         {g.visibility === 'public' ? d.visPublic : d.visPrivate}
                       </Badge>
@@ -1210,6 +1241,7 @@ export default function DashboardPage() {
 
 
       {/* ── Template picker modal ─────────────────────────────────────────── */}
+      {buildingAt !== null && <BuildingMoment />}
       {picking && createPortal(
         <div role="dialog" aria-modal="true" aria-label={d.modalTitle} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setPicking(false); setChosen(null); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
@@ -1248,6 +1280,7 @@ export default function DashboardPage() {
                    never stranded by a menu that would not load. */
                 <NewGameWizard
                   templates={wizardTemplates}
+                  occasion={startOccasion}
                   busy={busy || newGameAction.busy}
                   onSubmit={(submission) => void newGameAction.run(submission)}
                   // The SAME list the composer is handed above, so the smart

@@ -1004,6 +1004,21 @@ function stationPrompt(placePrompt: string, spot: SpotKind | null, copy: Compose
   return hint ? `${placePrompt} ${hint}` : placePrompt;
 }
 
+/** The minutes a team spends finding a hidden mission's spot from its search area and clue. */
+export const HIDDEN_SEARCH_MINUTES = 4;
+/** A game of this many minutes or more counts as long. */
+export const LONG_GAME_MINUTES = 120;
+
+/**
+ * How many hidden missions the composer itself aims to hide: one, plus one for a hard game, plus one
+ * for a long one (a hidden mission the bank brought counts as the first). Total and never negative;
+ * unknown input reads as the default game.
+ */
+export function hiddenMissionTarget(preference: unknown, minutes: unknown): number {
+  const m = typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : 0;
+  return 1 + (preference === 'hard' ? 1 : 0) + (m >= LONG_GAME_MINUTES ? 1 : 0);
+}
+
 function wantsPlacedMissions(setting: SettingTagId, locationMissions: boolean): boolean {
   return setting !== 'fromAnywhere' && locationMissions === true;
 }
@@ -1710,6 +1725,8 @@ export function composeGame(
   // Each stage's entries, for the honest time total (a team plays only `requiredTaskCount` of them).
   const stageEntries = new Map<string, TaskBankEntry[]>();
   const sitedTaskIds = new Set<string>();
+  // Missions this build hid, so the time total can pay for the search.
+  const hiddenTaskIds = new Set<string>();
   const keyOfTask = new Map<string, string>();
   const extraTaskIds: string[] = [];
 
@@ -1839,28 +1856,41 @@ export function composeGame(
     }
   }
 
-  // One hidden mission in a placed game: no pin on the players' map, only a search area and the
+  // Hidden missions in a placed game: no pin on the players' map, only a search area and the
   // creator's clue, and the spot reveals itself when a team gets there. Only a mission the composer
-  // pinned itself (it fits any spot, so any clue works), only in the middle of the game, and only
-  // when the creator accepts authoring work, because the clue is theirs to write.
+  // pinned itself (it fits any spot, so any clue works), only in the middle of the game, at most one
+  // per stage, and only when the creator accepts authoring work, because each clue is theirs to write.
+  // One by default, unless the bank already brought a hidden mission of its own (a navigation riddle
+  // is hidden by nature), which then stands as the game's surprise. A HARD game and a LONG game each
+  // hide one more on top (Ahiya, 28.10: hiding a located mission is how a game gets longer and harder
+  // without adding missions).
   const cluePrompt = oneParagraph(copyCall(copy?.hiddenCluePrompt));
-  // A game that already holds a hidden mission from the bank keeps it as its one surprise.
-  const alreadyHidden = stages.some((st) => st.tasks.some((t) => t.hideLocation === true));
-  if (placedGame && cluePrompt !== '' && ctx.prepTolerance >= 1 && stages.length >= 3 && !alreadyHidden) {
+  const bankHidden = stages.some((st) => st.tasks.some((t) => t.hideLocation === true));
+  const hiddenTarget = hiddenMissionTarget(preference, minutes) - (bankHidden ? 1 : 0);
+  let hiddenCount = 0;
+  if (placedGame && cluePrompt !== '' && ctx.prepTolerance >= 1 && stages.length >= 3 && hiddenTarget > 0) {
+    // A mission can be hidden when it has a real spot and reaching that spot is not the mission
+    // itself: a check-in or arrival mission (the start, the finish, a navigation riddle) turned into
+    // a search would hide the very thing it asks the team to find. One with a clue already has its
+    // own search. A choice-stage extra is skipped so every team meets the same surprise.
+    const hideable = (t: Task) => t.locationless !== true && t.hideLocation !== true
+      && t.type !== 'field' && t.type !== 'geofence' && !extraTaskIds.includes(t.id)
+      && !wizardSteps.some((w) => w.taskId === t.id && w.targetFieldPath === 'locationClue');
     // The middle stages, nearest the centre of the game first.
     const centre = (stages.length - 1) / 2;
     const middles = stages.slice(1, -1).sort((x, y) => Math.abs(x.order - centre) - Math.abs(y.order - centre));
-    let mid: Stage | undefined;
-    let target: Task | undefined;
     for (const st of middles) {
-      target = st.tasks.find((t) => sitedTaskIds.has(t.id) && !extraTaskIds.includes(t.id));
-      if (target) { mid = st; break; }
-    }
-    if (mid && target) {
+      if (hiddenCount >= hiddenTarget) break;
+      if (st.tasks.some((t) => t.hideLocation === true)) continue;
+      const target = st.tasks.find((t) => sitedTaskIds.has(t.id) && hideable(t))
+        ?? st.tasks.find((t) => hideable(t));
+      if (!target) continue;
       target.hideLocation = true;
+      hiddenTaskIds.add(target.id);
+      hiddenCount++;
       wizardSteps.push({
         id: `qs-hidden-${target.id}-locationClue`,
-        stageId: mid.id,
+        stageId: st.id,
         taskId: target.id,
         targetFieldPath: 'locationClue',
         instructionPrompt: cluePrompt,
@@ -1880,7 +1910,8 @@ export function composeGame(
     if (entries.length === 0) return sum;
     const all = entries.reduce((m, e) => m + missionCostMinutes(e, walk), 0);
     const share = Math.min(1, (st.requiredTaskCount ?? entries.length) / entries.length);
-    return sum + all * share;
+    const searching = st.tasks.filter((t) => hiddenTaskIds.has(t.id)).length * HIDDEN_SEARCH_MINUTES;
+    return sum + all * share + searching;
   }, 0);
 
   const descriptionAnswers = {

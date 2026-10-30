@@ -72,6 +72,7 @@ async function main() {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
     await setDoc(doc(db, `users/${OWNER}`), { displayName: 'Owner' });
+    await setDoc(doc(db, `users/${OWNER}/notifications/firstJoin-r1`), { kind: 'firstJoin', createdAt: '2026-10-29T10:00:00.000Z' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}`), { title: 'G' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}`), { status: 'live' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/teams/${TEAM}`), { score: 0 });
@@ -137,6 +138,11 @@ async function main() {
   await check('team CANNOT write its own team doc (no score self-edit)', assertFails(setDoc(doc(team, `${runPath}/teams/${TEAM}`), { score: 9999 })));
   await check('owner CANNOT write a team doc', assertFails(setDoc(doc(owner, `${runPath}/teams/${TEAM}`), { score: 9999 })));
   // composer-v2-learning: keep / swap counts are readable by any signed-in creator, writable by no client.
+  // creator-engagement-loop: the owner reads their notifications; nobody writes or forges one.
+  await check('owner CAN read own notifications', assertSucceeds(getDoc(doc(owner, `users/${OWNER}/notifications/firstJoin-r1`))));
+  await check('another user CANNOT read them', assertFails(getDoc(doc(other, `users/${OWNER}/notifications/firstJoin-r1`))));
+  await check('owner CANNOT write a notification (server only)', assertFails(setDoc(doc(owner, `users/${OWNER}/notifications/fake`), { kind: 'liked', createdAt: 'x' })));
+  await check('owner CAN stamp notificationsSeenAt on own profile', assertSucceeds(setDoc(doc(owner, `users/${OWNER}`), { notificationsSeenAt: '2026-10-29T11:00:00.000Z' }, { merge: true })));
   await check('a signed-in client CAN read mission stats', assertSucceeds(getDoc(doc(owner, 'missionStats/all'))));
   await check('an unauthenticated client CANNOT read mission stats', assertFails(getDoc(doc(anon, 'missionStats/all'))));
   await check('no client can write mission stats', assertFails(setDoc(doc(owner, 'missionStats/all'), { counts: { x: { kept: 999 } } })));

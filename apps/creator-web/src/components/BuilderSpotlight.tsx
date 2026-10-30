@@ -34,7 +34,7 @@ function anchorRect(anchor: string): DOMRect | null {
   return r.width > 0 && r.height > 0 ? r : null;
 }
 
-export default function BuilderSpotlight() {
+export default function BuilderSpotlight({ paused = false }: { paused?: boolean }) {
   const t = useT();
   const copy = t.tour.spotlight;
   const { user } = useAuth();
@@ -76,7 +76,7 @@ export default function BuilderSpotlight() {
   // and `finish()` writes the "seen" record, so being suppressed by another surface
   // permanently consumed this creator's one-shot explainer. Suppressed is not seen:
   // the record is now written only by a real dismissal, below.
-  const wants = steps !== null && steps.length > 0;
+  const wants = steps !== null && steps.length > 0 && !paused;
   useGuidanceCandidate('spotlight', wants);
   const visible = useGuidanceVisible('spotlight');
 

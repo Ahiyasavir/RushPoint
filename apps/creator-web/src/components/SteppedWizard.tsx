@@ -13,8 +13,17 @@
 // uses: the smart build asks six or seven, and a single scroll of seven chip
 // rows on a 390px phone is a form, not a conversation. The progress bar is what
 // makes that trade honest — a creator can always see how much is left.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+//
+// Swipe, not "Next" (Ahiya, 30.10: "אני לא אוהב את ה'הבא'"). The questions are slides in an Embla
+// carousel: a swipe moves between them with real snap physics (RTL aware), and a step marked
+// `autoAdvance` (one answer from a list) moves on by itself once it is answered, so the common path
+// is tap, tap, tap. The Next button remains only where an answer needs confirming: several choices,
+// typed text, and the final "build my game".
+import { useEffect, useRef, type ReactNode } from 'react';
+import useEmblaCarousel from 'embla-carousel-react';
+import AutoHeight from 'embla-carousel-auto-height';
 import { Button } from './ui';
+import { Icon } from './Icon';
 import { haptic } from '../lib/haptics';
 
 /**
@@ -59,6 +68,10 @@ export interface WizardStepConfig {
   title: string;
   subtitle?: string;
   render: () => ReactNode;
+  /** One answer from a list: the caller moves on by itself once it is picked, so no Next button. */
+  autoAdvance?: boolean;
+  /** The last answer is the go signal: picking it builds, so the step has no finish button. */
+  finishOnAnswer?: boolean;
 }
 
 export interface SteppedWizardProps {
@@ -67,6 +80,8 @@ export interface SteppedWizardProps {
   index: number;
   onBack: () => void;
   onNext: () => void;
+  /** A swipe landed on another question. The caller moves its own index there. */
+  onSwipeTo?: (index: number) => void;
   /** False disables Next — for a question that genuinely cannot be skipped. */
   canAdvance?: boolean;
   /**
@@ -86,37 +101,49 @@ export interface SteppedWizardProps {
     finish: string;
     /** "step 2 of 7" — the caller formats it, so word order stays translatable. */
     progress: (step: number, total: number) => string;
+    /** Under a question that moves on by itself: "tap an answer, or swipe". */
+    swipeHint?: string;
   };
 }
 
 export default function SteppedWizard({
-  steps, index, onBack, onNext, canAdvance = true, busy, labels, finalNote,
+  steps, index, onBack, onNext, onSwipeTo, canAdvance = true, busy, labels, finalNote,
 }: SteppedWizardProps) {
   const total = steps.length;
   const step = steps[index];
+  const rtl = typeof document !== 'undefined' && document.documentElement.dir === 'rtl';
 
-  // Which way the last move went, so the question animates in from the side it
-  // came from. A ref, not state: it is read during the render that the index
-  // change already triggered, and making it state would cost a second render to
-  // say something the first one already knew.
-  const previousIndex = useRef(index);
-  const direction = index >= previousIndex.current ? 1 : -1;
+  const [viewportRef, embla] = useEmblaCarousel(
+    { direction: rtl ? 'rtl' : 'ltr', startIndex: Math.max(0, index), align: 'start', duration: 24 },
+    [AutoHeight()],
+  );
+
+  // The index is owned by the caller. A swipe reports where it landed; a tap that moved the
+  // caller's index scrolls the carousel there. The ref keeps the swipe handler from echoing a
+  // move the caller itself just made.
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const swipeTo = useRef(onSwipeTo);
+  swipeTo.current = onSwipeTo;
   useEffect(() => {
-    // Advancing is the moment worth acknowledging. `haptic` is itself a silent
-    // no-op without vibration support and under reduced motion, so no guard is
-    // needed here and a device without it simply advances.
+    if (!embla) return;
+    const onSelect = () => {
+      const i = embla.selectedScrollSnap();
+      if (i !== indexRef.current) swipeTo.current?.(i);
+    };
+    embla.on('select', onSelect);
+    return () => { embla.off('select', onSelect); };
+  }, [embla]);
+  useEffect(() => {
+    if (embla && index >= 0 && index < total && embla.selectedScrollSnap() !== index) embla.scrollTo(index);
+  }, [embla, index, total]);
+
+  // Advancing is the moment worth acknowledging. `haptic` is itself a silent no-op without
+  // vibration support and under reduced motion.
+  const previousIndex = useRef(index);
+  useEffect(() => {
     if (index !== previousIndex.current) haptic('tap');
     previousIndex.current = index;
-  }, [index]);
-
-  // Re-keying on the index restarts the entry animation for each question.
-  // `motion-safe:` is what honours a reduced-motion preference — under it the
-  // question simply appears, which is the correct behaviour, not a degraded one.
-  const [entered, setEntered] = useState(false);
-  useEffect(() => {
-    setEntered(false);
-    const id = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(id);
   }, [index]);
 
   // An out-of-range index is a real state (the flow just finished, or the parent
@@ -126,6 +153,7 @@ export default function SteppedWizard({
 
   const isLast = index === total - 1;
   const percent = total > 0 ? Math.round(((index + 1) / total) * 100) : 0;
+  const showNext = !step.finishOnAnswer && (isLast || !step.autoAdvance);
 
   return (
     <div className="flex flex-col gap-3">
@@ -136,10 +164,6 @@ export default function SteppedWizard({
           <ProgressRing step={index + 1} total={total} label={labels.progress(index + 1, total)} />
           <span className="text-[13px] text-[--ink-3]">{labels.progress(index + 1, total)}</span>
         </div>
-        {/* The bar stays: the ring reads as "how far", the bar as "how much is
-            left", and on a narrow screen the bar is the one visible at a glance.
-            aria-hidden because the ring above already announces the same values,
-            and two progressbars would be read twice. */}
         <div className="mt-1.5 h-1 rounded-full bg-[--surface-2] overflow-hidden" aria-hidden="true">
           <div
             className="h-full bg-rp-fire transition-all duration-300 motion-reduce:transition-none"
@@ -148,21 +172,20 @@ export default function SteppedWizard({
         </div>
       </div>
 
-      <div
-        key={index}
-        className={[
-          'flex flex-col gap-3',
-          'motion-safe:transition-all motion-safe:duration-200 motion-safe:ease-out',
-          entered ? 'opacity-100 translate-x-0' : 'motion-safe:opacity-0',
-          entered ? '' : direction > 0 ? 'motion-safe:translate-x-4' : 'motion-safe:-translate-x-4',
-        ].join(' ')}
-      >
-        <div>
-          <h3 className="font-brand font-bold text-[--ink-1] text-lg">{step.title}</h3>
-          {step.subtitle && <p className="text-[--ink-3] text-[13px] mt-0.5">{step.subtitle}</p>}
+      {/* Every question is a slide; only the current one is exposed to assistive tech. */}
+      <div ref={viewportRef} className="overflow-hidden -mx-1 touch-pan-y">
+        <div className="flex items-start transition-[height] duration-200 motion-reduce:transition-none">
+          {steps.map((s, i) => (
+            <section key={s.id} aria-hidden={i !== index} {...(i !== index ? { inert: "" } : {})}
+              className="min-w-0 shrink-0 grow-0 basis-full px-1 flex flex-col gap-3">
+              <div>
+                <h3 className="font-brand font-bold text-[--ink-1] text-lg">{s.title}</h3>
+                {s.subtitle && <p className="text-[--ink-3] text-[13px] mt-0.5">{s.subtitle}</p>}
+              </div>
+              <div className="flex flex-col gap-3">{s.render()}</div>
+            </section>
+          ))}
         </div>
-
-        <div className="flex flex-col gap-3">{step.render()}</div>
       </div>
 
       {isLast && finalNote && (
@@ -171,18 +194,25 @@ export default function SteppedWizard({
         </div>
       )}
 
-      <div className="flex gap-2">
-        <Button variant="ghost" onClick={onBack} className="min-h-[44px]">
+      <div className="flex items-center gap-2">
+        {/* A finger swipes back (Ahiya, 30.10); the button stays for a mouse and for a screen reader. */}
+        <Button variant="ghost" onClick={onBack} className="min-h-[44px] [@media(pointer:coarse)]:sr-only">
           {labels.back}
         </Button>
-        <Button
-          onClick={onNext}
-          disabled={!canAdvance}
-          loading={isLast ? busy : false}
-          className="flex-1 min-h-[44px]"
-        >
-          {isLast ? labels.finish : labels.next}
-        </Button>
+        {showNext ? (
+          <Button
+            onClick={onNext}
+            disabled={!canAdvance}
+            loading={isLast ? busy : false}
+            className="flex-1 min-h-[44px]"
+          >
+            {isLast ? labels.finish : labels.next}
+          </Button>
+        ) : (
+          labels.swipeHint && index === 0 ? (
+            <p className="flex-1 flex justify-center"><span className="ltr:rotate-90 rtl:-rotate-90 inline-flex"><Icon name="chevronUp" role="img" aria-hidden={false} aria-label={labels.swipeHint} className="w-7 h-7 text-ink-fire rp-swipe-hint" /></span></p>
+          ) : <span className="flex-1" />
+        )}
       </div>
     </div>
   );

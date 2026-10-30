@@ -53,8 +53,10 @@ function Check() {
 // phone, which is what forced the modal to scroll.
 const GRID = 'grid grid-cols-4 gap-1.5';
 
-export function ChoiceCardRow<T extends string>({ label, options, value, onChange, render }: {
+export function ChoiceCardRow<T extends string>({ label, hideLabel, options, value, onChange, render }: {
   label: string;
+  /** The question above already says it. Still the group's name for a screen reader. */
+  hideLabel?: boolean;
   options: readonly T[];
   value: T;
   onChange: (v: T) => void;
@@ -62,7 +64,7 @@ export function ChoiceCardRow<T extends string>({ label, options, value, onChang
 }) {
   return (
     <div>
-      <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>
+      {!hideLabel && <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>}
       <div className={GRID} role="radiogroup" aria-label={label}>
         {options.map((o) => {
           const on = o === value;

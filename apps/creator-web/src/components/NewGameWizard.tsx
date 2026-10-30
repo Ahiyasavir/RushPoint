@@ -27,6 +27,8 @@ import {
 import { blendGameDescription, derivedGameTags, type NewGameDescriptionCopy } from '../lib/describeNewGame';
 import type { ComposerAnswers } from '../lib/composeGame';
 import { Icon, type IconName } from './Icon';
+import { quickGameTitle } from '../lib/quickStart';
+import type { OccasionId } from '../lib/occasions';
 
 /** What the wizard needs to know about each available template. */
 export interface WizardTemplate extends WizardTemplateOption {
@@ -48,8 +50,10 @@ export interface WizardSubmission {
   tags?: string[];
 }
 
-export default function NewGameWizard({ templates, busy, onSubmit, recentBankKeys }: {
+export default function NewGameWizard({ templates, busy, onSubmit, recentBankKeys, occasion }: {
   templates: readonly WizardTemplate[];
+  /** What the front page already asked (change: first-visit-instant-build). */
+  occasion?: OccasionId | null;
   busy?: boolean;
   onSubmit: (submission: WizardSubmission) => void;
   /** Passed straight through to the smart build — see its own prop note. */
@@ -58,7 +62,10 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
   const t = useT();
   const d = t.dashboard;
   const w = d.wizard;
-  const [state, dispatch] = useReducer(wizardReducer, undefined, initialWizardState);
+  // Every new game opens straight on the short questions. Naming and the other ways in stay one tap
+  // behind them: asking for a name before there is anything to name was the first wall (Ahiya, 30.10).
+  const [quick, setQuick] = useState(true);
+  const [state, dispatch] = useReducer(wizardReducer, undefined, () => wizardReducer(initialWizardState(), { type: 'choosePath', path: 'smart_build' }));
   // The path step SELECTS and then confirms (change: builder-mobile-simplification),
   // so the choice needs somewhere to live between the two taps. It starts on the
   // recommended path: the step can then never present a disabled Next, and a
@@ -268,10 +275,14 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
   // decides what happens when it finishes or is backed out of.
   if (state.step === 'smartBuildDetails') {
     return (
+      <>
       <SmartBuildWizard
+        key={quick ? 'quick' : 'full'}
         busy={busy}
+        quick={quick}
+        occasion={quick ? occasion : undefined}
         recentBankKeys={recentBankKeys}
-        onLeave={() => dispatch({ type: 'back' })}
+        onLeave={() => { setQuick(false); dispatch({ type: 'back' }); }}
         onFinish={(answers: ComposerAnswers, seed: number) => {
           // Record the answers AND the seed, THEN finish — `buildCreationPlan`
           // reads them off the state, so finishing first would compose from the
@@ -279,10 +290,17 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
           // is the one the live shape panel predicted.
           const withAnswers = wizardReducer(state, { type: 'setComposerAnswers', answers, seed });
           const done = wizardReducer(withAnswers, { type: 'next' });
-          const plan = buildCreationPlan(done, d.untitledGame);
+          const plan = buildCreationPlan(done, quickGameTitle('', answers.occasion, w.autoTitles, d.untitledGame));
           if (plan) onSubmit({ plan });
         }}
       />
+      {quick && (
+        <button type="button" onClick={() => { setQuick(false); dispatch({ type: 'back' }); }}
+          className="mt-1 w-full min-h-[44px] text-[13px] font-medium text-[--ink-3] hover:text-[--ink-1]">
+          {w.otherWays}
+        </button>
+      )}
+      </>
     );
   }
 

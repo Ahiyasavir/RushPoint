@@ -496,8 +496,8 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     // A weekly peula, plus the time it takes to gather everybody.
     sessionMinutes: [45, 80],
     stages: [
-      { title: 'פתיחה', keys: ['open-one-take-intro'] },
-      { title: 'גוף הפעולה', keys: ['longest-line', 'human-letter', 'blind-describe', 'historic-speech'] },
+      { title: 'פתיחה', keys: ['open-everyone-airborne'] },
+      { title: 'גוף הפעולה', keys: ['longest-line', 'human-letter', 'three-feet', 'blind-describe', 'historic-speech'] },
       { title: 'השיא', keys: ['thinking-room'] },
       { title: 'סיכום', keys: ['finish-what-we-didnt-know'] },
     ],

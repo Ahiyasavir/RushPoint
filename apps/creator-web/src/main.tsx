@@ -6,10 +6,12 @@ import { AuthProvider } from './components/AuthGate';
 import { LanguageProvider } from './components/LanguageContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { initTelemetry } from './services/telemetry';
+import { armAudio } from './lib/sound';
 import './index.css';
 
 // Install global crash/rejection handlers + (DSN-gated) crash reporter before render.
 initTelemetry();
+armAudio();
 
 // In playtest the app is served under Vite base `/creator/` (single-origin
 // tunnel); the router must know that prefix. `/` for normal dev.

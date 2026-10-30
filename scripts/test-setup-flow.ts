@@ -88,10 +88,11 @@ check('one screen per mission plus the game screen first', screens.length === 4 
 check('missions keep the order their steps came in', screens.slice(1).map((s) => s.taskId).join() === 't-cairn-record,t-common-thread,t-hand-drawn-map');
 const cairn = screens[1];
 check('the mission screen carries the title players see', cairn.title === 'השיא של הקודמים', cairn.title);
-check('and the full text players will read, never cut', cairn.playerText.startsWith('כאן כבר עומד מגדל אבנים') && cairn.playerText.endsWith('ואל תפרקו אותם.'), cairn.playerText);
+check('and the full text players will read, never cut', cairn.playerText.startsWith('ליד ') && cairn.playerText.includes('כבר עומד מגדל אבנים') && cairn.playerText.endsWith('ואל תפרקו אותם.'), cairn.playerText);
 check('within a mission: the place first, then the preparation', cairn.items.map((i) => i.fieldPath).join() === 'coordinates,description' && cairn.items[1].kind === 'prep', cairn.items.map((i) => `${i.fieldPath}:${i.kind}`));
 check('the instruction is in the interface language only, in full', cairn.items[1].instruction.startsWith('לפני המשחק, תבנו בנקודה מגדל אבנים קטן') && !/[A-Za-z]/.test(cairn.items[1].instruction), cairn.items[1].instruction);
-check('a preparation whose field is already written needs no input (the tower case)', cairn.items[1].configured === true);
+// 29.10: the tower's text names its spot through a creator blank, so its preparation waits for that.
+check('a preparation whose text still has a blank waits for it (the tower case)', cairn.items[1].configured === false);
 check('an unplaced mission is not done', cairn.done === false && cairn.items[0].configured === false);
 const thread = screens[2];
 check('a preparation that also needs a file is prep AND still open (common thread)', thread.items.some((i) => i.fieldPath === 'media' && i.kind === 'prep' && !i.configured), thread.items);
@@ -108,10 +109,10 @@ check('the before-the-game list names every preparation with its mission', list.
 check('the flow opens on the first screen with something required open', firstOpenScreen(screens) === 1, firstOpenScreen(screens));
 const placed = {
   ...game,
-  stages: game.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t, coordinates: { lat: 31.78, lng: 35.21 } })) })),
+  stages: game.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t, coordinates: { lat: 31.78, lng: 35.21 }, description: String(t.description ?? '').replace(/\[הוראות ליוצר:[^\]]*\]/g, 'הסלע הגדול') })) })),
 } as Game;
 const after = buildSetupScreens(placed, steps, 'he');
-check('placing a mission whose only open item was its pin completes its screen', after[1].done === true, after[1].items);
+check('placing a mission and filling its spot completes its screen', after[1].done === true, after[1].items);
 check('the count of what is left falls as fields are filled', openRequiredCount(after) < openRequiredCount(screens), [openRequiredCount(screens), openRequiredCount(after)]);
 check('everything done opens on the first screen', firstOpenScreen([{ ...after[0], done: true }]) === 0);
 

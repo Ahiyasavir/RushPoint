@@ -131,6 +131,15 @@
         { "order": "ASCENDING", "queryScope": "COLLECTION" },
         { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
       ]
+    },
+    {
+      "_comment": "The daily event reminders (change: creator-engagement-loop, functions/src/digest-cron.ts) run a RANGE collection-group query: collectionGroup('games').where('eventAt','>=',a).where('eventAt','<',b). Collection-group single-field indexes are not automatic, and an override REPLACES the automatic collection index, so both scopes are listed. Deploy BEFORE the cron that uses it.",
+      "collectionGroup": "games",
+      "fieldPath": "eventAt",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
     }
   ]
 }

@@ -3,7 +3,10 @@
   "description": "A platform for building live mission races with real stations, navigation on the phone and automatic scoring. Outdoors, at home or at a party. No judges, no paper, no chasing everyone around.",
   "tagline": "A live race for any group",
   "headline": "Give any group their own <span class=\"text-primary\">Amazing Race</span>",
-  "subhead": "Without all the hassle it usually takes.",
+  "subhead": "Teams head out, solve missions on their phones and race for first place.",
+  "heroStartTitle": "What are you celebrating?",
+  "heroOccasions": [{"id": "birthday", "label": "Birthday"}, {"id": "mitzvah", "label": "Bar or bat mitzvah"}, {"id": "wedding", "label": "Wedding"}, {"id": "teamBuilding", "label": "Team building"}, {"id": "youthGroup", "label": "Youth group"}, {"id": "other", "label": "Something else"}],
+  "heroStory": [{"icon": "tabler:brand-whatsapp", "title": "Send a code on WhatsApp", "detail": "Everyone joins from their phone, nothing to download"}, {"icon": "tabler:run", "title": "The teams head out", "detail": "Mission after mission, out in the field"}, {"icon": "tabler:trophy", "title": "The scoring runs itself", "detail": "At the end you see who won"}],
   "primaryAction": "Build your first race in 5 minutes",
   "secondaryAction": "Play a real mission now",
   "ideasAction": "Ideas by occasion",
@@ -130,7 +133,7 @@
       "icon": "tabler:eye"
     }
   ],
-  "ctaTitle": "Your first game is about half an hour away",
+  "ctaTitle": "Your first game is a few minutes away",
   "ctaSubtitle": "No card needed. Start from a ready made game and change it, and if something is missing, write to me.",
   "tryMission": {
     "tagline": "No signup, no download",
@@ -608,7 +611,7 @@
     },
     {
       "title": "How long does it take to build a game?",
-      "description": "A sensible first game takes about half an hour. You can also start from a ready template and edit it, or answer a few questions about your event and let the system assemble one for you."
+      "description": "Answer a few questions about your event and the system assembles a full game in a few minutes. Then change anything you like. You can also start from a ready template."
     }
   ]
 }

@@ -292,8 +292,9 @@ export function EmptyState({ icon, title, body, action }: {
  * Deliberately WRAPS rather than scrolls — a horizontally scrolling option row
  * hides options on a phone, and a hidden option is an unasked question.
  */
-export function ChipRow<T extends string | number>({ label, options, value, onChange, render }: {
+export function ChipRow<T extends string | number>({ label, hideLabel, options, value, onChange, render }: {
   label: string;
+  hideLabel?: boolean;
   options: readonly T[];
   value: T;
   onChange: (v: T) => void;
@@ -301,7 +302,7 @@ export function ChipRow<T extends string | number>({ label, options, value, onCh
 }) {
   return (
     <div>
-      <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>
+      {!hideLabel && <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>}
       <div className="flex flex-wrap gap-1.5">
         {options.map((o) => {
           const on = o === value;

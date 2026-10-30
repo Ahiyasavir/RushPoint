@@ -151,6 +151,8 @@ export const EXPORTED_GAME_KEYS = [
 export const DELIBERATELY_EXCLUDED_GAME_KEYS = [
   'id', 'ownerUid', 'visibility', 'playCount', 'createdAt', 'updatedAt',
   'deletedAt', 'deletedBy', 'integrationWebhookUrl', 'integrationPlatform',
+  // The date of ONE occasion (change: creator-engagement-loop); a file is reused for another one.
+  'eventAt',
   // Admin template curation: set only by setGameTemplateFlag. A file that could carry them would
   // let anyone publish a template into every creator's new-game menu.
   'isTemplate', 'pinnedFirst', 'templateEmoji', 'templateGenre', 'templateGroupKey', 'templateHidden',

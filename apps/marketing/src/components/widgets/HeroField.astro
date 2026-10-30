@@ -40,6 +40,7 @@ import { Icon } from 'astro-icon/components';
 
 import Button from '~/components/ui/Button.astro';
 import PhoneFrame from '~/components/PhoneFrame.astro';
+import HeroStory from '~/components/HeroStory.astro';
 import HeroMissionTaste, { type Props as HeroMissionTasteProps } from '~/components/HeroMissionTaste.astro';
 import TopoBackdrop from '~/components/TopoBackdrop.astro';
 import type { MediaItem } from '~/components/Media.astro';
@@ -50,6 +51,10 @@ export interface Props {
   /** May carry markup, e.g. a highlighted word. */
   headline: string;
   subhead: string;
+  /** The generator's first question: answering it is starting. */
+  start?: { title: string; options: { label: string; href: string }[] };
+  /** The game in three beats, on every screen size. */
+  story?: { icon: string; title: string; detail: string }[];
   actions?: CallToAction[];
   /** Social proof, framed on engagement depth. */
   trust: string;
@@ -66,7 +71,7 @@ export interface Props {
   id?: string;
 }
 
-const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, taste, id } = Astro.props;
+const { tagline, headline, subhead, start, story, actions = [], trust, challenge, join, clip, taste, id } = Astro.props;
 ---
 
 <section class="rp-hero relative overflow-hidden md:-mt-[76px]" {...id ? { id } : {}}>
@@ -97,6 +102,26 @@ const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, 
         <p class="mx-auto mb-8 max-w-xl text-lg leading-relaxed text-muted lg:mx-0 lg:text-xl" set:html={subhead} />
 
         {
+          start && (
+            <div class="mb-5">
+              <p class="mb-3 font-heading text-2xl font-extrabold text-heading">{start.title}</p>
+              <div class="mx-auto grid max-w-md grid-cols-2 gap-2 lg:mx-0">
+                {start.options.map((o) => (
+                  <a
+                    class="rp-hero-chip inline-flex min-h-14 items-center justify-center rounded-2xl border-2 border-primary/50 px-3 text-base font-bold text-heading hover:bg-primary/10"
+                    href={o.href}
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    {o.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )
+        }
+
+        {
           actions.length > 0 && (
             <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-center lg:justify-start">
               {actions.map((action) => (
@@ -121,6 +146,8 @@ const { tagline, headline, subhead, actions = [], trust, challenge, join, clip, 
             </p>
           )
         }
+
+        {story && <HeroStory beats={story} />}
 
         <p class="mt-6 flex items-start justify-center gap-2.5 text-sm text-muted lg:justify-start">
           <Icon name="tabler:users" class="mt-0.5 h-5 w-5 shrink-0 text-secondary dark:text-primary" />

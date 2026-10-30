@@ -418,6 +418,10 @@ export interface RegenerateRequest {
   /** composer-v2-quality: prefer stronger missions (default on); creators' keep / swap counts. */
   quality?: boolean;
   missionStats?: Readonly<Record<string, Partial<MissionStats>>>;
+  /** Bank keys of the game's OTHER missions (lib/tasteProfile `swapGameFit`): never offered again. */
+  inGameKeys?: readonly string[];
+  /** The audiences the game serves (`swapGameFit`); a mission missing one is offered only as a last resort. */
+  audiences?: readonly string[];
 }
 
 /**
@@ -467,13 +471,28 @@ export function chooseRegeneratedMission(req: RegenerateRequest | null | undefin
     bank.filter((e) => e && offered.has(e.key) && typeof e.family === 'string').map((e) => e.family as string),
   );
 
-  const eligible = bank.filter((e) => e && typeof e.key === 'string' && playable(e, ctx));
+  // A mission already in the game is never offered: the game would hold it twice (29.10).
+  const inGame = new Set(tagsOf(req!.inGameKeys));
+  const inGameFamilies = new Set(
+    bank.filter((e) => e && inGame.has(e.key) && typeof e.family === 'string').map((e) => e.family as string),
+  );
+  const audiences = tagsOf(req!.audiences);
+  const servesAll = (e: TaskBankEntry) => {
+    const t = tagsOf(e.tags);
+    return t.includes('mixed') || audiences.every((a) => t.includes(a));
+  };
+  const fitsGame = (e: TaskBankEntry) => !(typeof e.family === 'string' && inGameFamilies.has(e.family)) && servesAll(e);
+
+  const eligible = bank.filter((e) => e && typeof e.key === 'string' && playable(e, ctx) && !inGame.has(e.key));
   if (eligible.length === 0) return null;
 
+  // Widest-first fallbacks: fresh AND fitting the game; then fitting the game with the history
+  // dropped; only then anything playable, so the button never reaches a dead end.
   const fresh = eligible.filter(
-    (e) => !offered.has(e.key) && !(typeof e.family === 'string' && offeredFamilies.has(e.family)),
+    (e) => fitsGame(e) && !offered.has(e.key) && !(typeof e.family === 'string' && offeredFamilies.has(e.family)),
   );
-  const pool = fresh.length > 0 ? fresh : eligible;
+  const fitting = fresh.length > 0 ? fresh : eligible.filter(fitsGame);
+  const pool = fitting.length > 0 ? fitting : eligible;
 
   const taste = typeof req!.taste === 'string' ? req!.taste : undefined;
   const scored = pool.map((e) => ({

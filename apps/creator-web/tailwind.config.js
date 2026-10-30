@@ -49,6 +49,9 @@ export default {
         'rp-signal': '#7C3AED',
         'rp-go':     '#10B981',
         'rp-alert':  '#EF4444',
+        // Notification red, Instagram's (change: creator-engagement-loop). ONLY the unread badge and dot
+        // use it, so red keeps meaning "something new for you".
+        'rp-badge':  '#FF3040',
 
         // ── Legacy "Warm Trail" tokens (kept for backward compat) ─────────────
         'app-bg':       '#FBF7F0',

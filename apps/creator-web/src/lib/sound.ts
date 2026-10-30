@@ -7,6 +7,8 @@
 // Everything degrades silently: no Web Audio, or a context not yet unlocked by a
 // user gesture (autoplay policy) → no-op, never a throw.
 
+import { warmReward } from './rewardSound';
+
 let ctx: AudioContext | null = null;
 
 type AudioCtor = typeof AudioContext;
@@ -25,11 +27,34 @@ export function unlockAudio(): void {
   try {
     const Ctor = audioCtor();
     if (!Ctor) return;
-    if (!ctx) ctx = new Ctor();
+    if (!ctx) {
+      ctx = new Ctor({ latencyHint: 'interactive' });
+      warmReward(ctx);
+    }
     if (ctx.state === 'suspended') void ctx.resume();
   } catch {
     /* unsupported / blocked — silent no-op */
   }
+}
+
+let armed = false;
+
+/**
+ * Open audio on the first press anywhere, so a sound never waits for the device to open (Ahiya, 30.10: no
+ * delay between the press and the sound). All four events, for good: a touch only unlocks audio on its
+ * pointerup, a swipe never does, and a phone that was locked hands back a suspended context.
+ */
+export function armAudio(): void {
+  if (armed || typeof window === 'undefined') return;
+  armed = true;
+  for (const ev of ['pointerdown', 'pointerup', 'touchend', 'keydown']) {
+    window.addEventListener(ev, unlockAudio, { capture: true, passive: true });
+  }
+}
+
+/** The shared context, once a press has made one. For the reward sounds (setupSounds.ts). */
+export function audioContext(): AudioContext | null {
+  return ctx;
 }
 
 // Urgent two-tone — matches the play-web 'alert' envelope so the cue is familiar.

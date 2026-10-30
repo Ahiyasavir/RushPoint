@@ -495,6 +495,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     requiresGuardianConsent: true, minAge: true, safeZone: true, benchmarkOptOut: true,
     integrationWebhookUrl: true, integrationPlatform: true, allowInstantPlay: true,
     photoFeedEnabled: true, powerUpsEnabled: true, instructions: true, manualLeaderboardReveal: true,
+    // creator-engagement-loop: the date of ONE occasion, deliberately not exported.
+    eventAt: true,
     // Test mode (change: test-mode-hidden-scoring) — authored play behaviour, so
     // it is EXPORTED: an exported game that silently lost its assessment mode
     // would re-run as a scored race.

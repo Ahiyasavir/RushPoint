@@ -62,6 +62,9 @@ collections:
           - { label: 'תגית קטנה מעל הכותרת', name: tagline, widget: string }
           - { label: 'הכותרת הגדולה', name: headline, widget: string, hint: 'אפשר להדגיש מילה עם <span class="text-accent">מילה</span>' }
           - { label: 'משפט מתחת לכותרת', name: subhead, widget: text }
+          - { label: 'שאלת הפתיחה', name: heroStartTitle, widget: string }
+          - { label: 'כפתורי אירוע', name: heroOccasions, widget: list, fields: [{ label: 'מזהה', name: id, widget: string }, { label: 'טקסט', name: label, widget: string }] }
+          - { label: 'שלושה שלבים', name: heroStory, widget: list, fields: [{ label: 'אייקון', name: icon, widget: string }, { label: 'כותרת', name: title, widget: string }, { label: 'פירוט', name: detail, widget: text }] }
           - { label: 'כפתור ראשי', name: primaryAction, widget: string }
           - { label: 'כפתור משני', name: secondaryAction, widget: string }
           - { label: 'קישור לרעיונות', name: ideasAction, widget: string }
@@ -344,6 +347,9 @@ collections:
           - { label: 'תגית קטנה מעל הכותרת', name: tagline, widget: string }
           - { label: 'הכותרת הגדולה', name: headline, widget: string, hint: 'אפשר להדגיש מילה עם <span class="text-accent">מילה</span>' }
           - { label: 'משפט מתחת לכותרת', name: subhead, widget: text }
+          - { label: 'שאלת הפתיחה', name: heroStartTitle, widget: string }
+          - { label: 'כפתורי אירוע', name: heroOccasions, widget: list, fields: [{ label: 'מזהה', name: id, widget: string }, { label: 'טקסט', name: label, widget: string }] }
+          - { label: 'שלושה שלבים', name: heroStory, widget: list, fields: [{ label: 'אייקון', name: icon, widget: string }, { label: 'כותרת', name: title, widget: string }, { label: 'פירוט', name: detail, widget: text }] }
           - { label: 'כפתור ראשי', name: primaryAction, widget: string }
           - { label: 'כפתור משני', name: secondaryAction, widget: string }
           - { label: 'קישור לרעיונות', name: ideasAction, widget: string }

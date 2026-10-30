@@ -26,7 +26,8 @@ import {
   type PublicLike,
   type PublicLikeKind,
 } from '@rushpoint/shared';
-import { RECOMMENDED_TAGS, normalizeTags } from '@rushpoint/shared';
+import { RECOMMENDED_TAGS, normalizeTags, shouldNotifyLike, israelDayKey } from '@rushpoint/shared';
+import { notifyCreator } from '../notify';
 import { bumpPublicSignals, publicItemPath, scoreFor } from './popularityStore';
 import { MISSION_STATS_DOC, parseMissionSignals, statsIncrements } from './missionSignals';
 import {
@@ -396,6 +397,18 @@ export const incrementTaskCopyCount = loggedCallable('incrementTaskCopyCount', a
   // function bundle is esbuild-built, so a CommonJS require of admin isn't
   // resolvable. Everything goes through the ESM imports above.)
   const res = await bumpPublicSignals('task', publicTaskId, { uses: 1 });
+  // Someone put your mission in their game (change: creator-engagement-loop). Best effort.
+  if (res.applied) {
+    try {
+      const t = (await db.doc(FIRESTORE_PATHS.publicTask(publicTaskId)).get()).data() ?? {};
+      const ownerUid = String(t.ownerUid ?? '');
+      const now = new Date().toISOString();
+      if (shouldNotifyLike({ likerUid: context.auth.uid, ownerUid })) {
+        await notifyCreator({ ownerUid, kind: 'copied', taskId: publicTaskId, gameId: t.gameId ? String(t.gameId) : undefined,
+          day: israelDayKey(now) ?? undefined, params: { title: String(t.title ?? '') }, coalesce: true, now });
+      }
+    } catch { /* a notification never fails the copy */ }
+  }
   return { ok: true, applied: res.applied };
 });
 
@@ -436,7 +449,9 @@ export const setPublicLike = loggedCallable('setPublicLike', async (data, contex
   const itemRef = db.doc(publicItemPath(kind, itemId));
   const now = new Date().toISOString();
 
-  return db.runTransaction(async (tx) => {
+  let likedOwner: { ownerUid: string; title: string; gameId?: string } | null = null;
+  const result = await db.runTransaction(async (tx) => {
+    likedOwner = null;
     // Both reads before any write — Firestore transactions require it.
     const [likeSnap, itemSnap] = await Promise.all([tx.get(likeRef), tx.get(itemRef)]);
     if (!itemSnap.exists) {
@@ -457,10 +472,21 @@ export const setPublicLike = loggedCallable('setPublicLike', async (data, contex
     const likeCount = Math.max(0, (Number(item.likeCount) || 0) + delta);
     const popularity = scoreFor(kind, { ...item, likeCount } as never);
     tx.update(itemRef, { likeCount, popularity });
+    if (delta === 1) likedOwner = { ownerUid: String(item.ownerUid ?? ''), title: String(item.title ?? ''), gameId: kind === 'game' ? itemId : (item.gameId ? String(item.gameId) : undefined) };
 
     // Authoritative state, so the UI's optimistic guess is reconciled, not trusted.
     return { liked, likeCount, popularity };
   });
+  // Someone else liked your work (change: creator-engagement-loop). After the commit, best effort,
+  // one item per item per Israel day that counts the likes.
+  const lo = likedOwner as { ownerUid: string; title: string; gameId?: string } | null;
+  if (lo && shouldNotifyLike({ likerUid: uid, ownerUid: lo.ownerUid })) {
+    await notifyCreator({
+      ownerUid: lo.ownerUid, kind: 'liked', gameId: lo.gameId, taskId: kind === 'task' ? itemId : undefined,
+      day: israelDayKey(now) ?? undefined, params: { title: lo.title, item: kind }, coalesce: true, now,
+    });
+  }
+  return result;
 });
 
 

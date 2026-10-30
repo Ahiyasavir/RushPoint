@@ -10,7 +10,7 @@
 // leaking into the product, and `bankTagLabel` returns '' for an unknown id
 // rather than falling back to the id itself, so that leak cannot happen even by
 // accident.
-import { useEffect, useMemo, useReducer, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 // `ChipRow` and `RatingRow` are deliberately still here. The card grid is for
 // questions whose options are KINDS of thing — an occasion, an audience, a place,
 // a difficulty — where a picture carries meaning. `people` and `duration` are
@@ -32,8 +32,8 @@ import {
   SMART_BUILD_GROUP_SIZES,
   preferredTagOptions,
   SMART_BUILD_AREAS,
-  SMART_BUILD_QUESTION_ORDER,
   hasLeftSmartBuild,
+  smartBuildQuestions,
   initialSmartBuildState,
   isSmartBuildComplete,
   smartBuildAnswers,
@@ -46,9 +46,14 @@ import type { TaskBankEntry } from '../taskBank';
 // authored bank on a cold mount — so the first render never waits, and the
 // load below corrects the previews in place.
 import { loadMissionBank, missionBankNow } from '../lib/missionBank';
+import type { OccasionId } from '../lib/occasions';
 
-export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKeys }: {
+export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKeys, quick, occasion }: {
   busy?: boolean;
+  /** The short way in: only the questions that change the game most (lib/smartBuildWizard). */
+  quick?: boolean;
+  /** What the front page already asked. */
+  occasion?: OccasionId | null;
   /** The creator backed out through the first question. */
   onLeave: () => void;
   /**
@@ -68,9 +73,35 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
   const t = useT();
   const { lang } = useLanguage();
   const w = t.dashboard.wizard;
-  const [state, dispatch] = useReducer(smartBuildReducer, undefined, initialSmartBuildState);
+  const [state, dispatch] = useReducer(smartBuildReducer, undefined, () => initialSmartBuildState({ quick, occasion }));
 
   const a = state.answers;
+  const order = smartBuildQuestions(state);
+
+  // One answer from a list moves on by itself (Ahiya, 30.10: no "Next" for every question). A short
+  // beat first, so the tap visibly lands before the slide moves. A second tap inside the beat
+  // re-arms it instead of skipping two questions.
+  const advanceTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(advanceTimer.current), []);
+  const answerAndGo = (action: Parameters<typeof dispatch>[0]) => {
+    dispatch(action);
+    window.clearTimeout(advanceTimer.current);
+    advanceTimer.current = window.setTimeout(() => dispatch({ type: 'next' }), 280);
+  };
+
+  // A quick run ends on its last answer rather than on a button.
+  const finished = useRef(false);
+  useEffect(() => {
+    if (!quick || finished.current || !isSmartBuildComplete(state)) return;
+    finished.current = true;
+    onFinish(smartBuildAnswers(state), state.seed);
+  }, [quick, state, onFinish]);
+  const chooseOnePlace = (area: (typeof SMART_BUILD_AREAS)[number]) => {
+    for (const old of a.areas) if (old !== area) dispatch({ type: 'toggleArea', area: old });
+    if (!a.areas.includes(area)) dispatch({ type: 'toggleArea', area });
+    window.clearTimeout(advanceTimer.current);
+    advanceTimer.current = window.setTimeout(() => dispatch({ type: 'next' }), 280);
+  };
 
   // The previews below must draw from the SAME pool the composer will, or a
   // creator is shown a plan built from missions an admin has since edited away.
@@ -128,9 +159,10 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
 
   // One entry per SMART_BUILD_QUESTION_ORDER id, in the same order — the shell
   // indexes into this array with the reducer's index, so the two must not drift.
-  const steps: WizardStepConfig[] = [
+  const allSteps: WizardStepConfig[] = [
     {
       id: 'occasion',
+      autoAdvance: true,
       title: w.occasionTitle,
       subtitle: w.occasionSub,
       render: () => (
@@ -139,7 +171,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
             label={w.occasionLabel}
             options={SMART_BUILD_OCCASIONS}
             value={a.occasion}
-            onChange={(v) => dispatch({ type: 'setAnswer', key: 'occasion', value: v })}
+            onChange={(v) => answerAndGo({ type: 'setAnswer', key: 'occasion', value: v })}
             render={(v) => w.occasionOptions[v] ?? ''}
           />
           <p className="text-[13px] text-[--ink-3]">{w.occasionHint}</p>
@@ -148,6 +180,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     },
     {
       id: 'who',
+      autoAdvance: true,
       title: w.whoTitle,
       subtitle: w.whoSub,
       render: () => (
@@ -155,7 +188,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
           label={w.whoLabel}
           options={SMART_BUILD_WHO.map((o) => o.id)}
           value={a.who}
-          onChange={(v) => dispatch({ type: 'setAnswer', key: 'who', value: v })}
+          onChange={(v) => answerAndGo({ type: 'setAnswer', key: 'who', value: v })}
           render={(v) => w.whoOptions[v] ?? ''}
         />
       ),
@@ -163,8 +196,19 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     {
       id: 'areas',
       title: w.areasTitle,
-      subtitle: w.areasSub,
-      render: () => (
+      subtitle: quick ? w.quickAreasSub : w.areasSub,
+      autoAdvance: quick,
+      finishOnAnswer: quick,
+      render: () => quick ? (
+        <ChoiceCardRow
+          label={w.areasLabel}
+          hideLabel
+          options={SMART_BUILD_AREAS}
+          value={a.areas[0] as (typeof SMART_BUILD_AREAS)[number]}
+          onChange={chooseOnePlace}
+          render={(v) => tagLabel(v)}
+        />
+      ) : (
         // Just the places now. Whether missions get PINNED to real spots used to
         // be a second question here — it is a preparation level, and it is asked
         // as one (see the prep step below).
@@ -180,6 +224,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     },
     {
       id: 'people',
+      autoAdvance: true,
       title: w.smartPeopleTitle,
       subtitle: w.smartPeopleSub,
       render: () => (
@@ -187,7 +232,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
           label={w.peopleLabel}
           options={SMART_BUILD_GROUP_SIZES.map((b) => b.people)}
           value={a.people}
-          onChange={(v) => dispatch({ type: 'setAnswer', key: 'people', value: v })}
+          onChange={(v) => answerAndGo({ type: 'setAnswer', key: 'people', value: v })}
           render={(v) => (v >= (SMART_BUILD_GROUP_SIZES[SMART_BUILD_GROUP_SIZES.length - 1]?.people ?? 40)
             ? w.peoplePlus(v) : w.peopleUpTo(v))}
         />
@@ -195,20 +240,23 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     },
     {
       id: 'duration',
+      autoAdvance: true,
       title: w.smartDurationTitle,
       subtitle: w.smartDurationSub,
       render: () => (
         <ChipRow
           label={w.durationLabel}
+          hideLabel={quick}
           options={SMART_BUILD_DURATIONS}
           value={a.minutes}
-          onChange={(v) => dispatch({ type: 'setAnswer', key: 'minutes', value: v })}
+          onChange={(v) => answerAndGo({ type: 'setAnswer', key: 'minutes', value: v })}
           render={(v) => w.minutesShort(v)}
         />
       ),
     },
     {
       id: 'difficulty',
+      autoAdvance: true,
       title: w.difficultyTitle,
       subtitle: w.difficultySub,
       render: () => (
@@ -216,13 +264,14 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
           label={w.difficultyLabel}
           options={SMART_BUILD_DIFFICULTIES}
           value={a.difficultyPreference}
-          onChange={(v) => dispatch({ type: 'setAnswer', key: 'difficultyPreference', value: v })}
+          onChange={(v) => answerAndGo({ type: 'setAnswer', key: 'difficultyPreference', value: v })}
           render={(v) => difficultyLabel(v)}
         />
       ),
     },
     {
       id: 'prep',
+      autoAdvance: true,
       title: w.prepTitle,
       subtitle: w.prepSub,
       render: () => (
@@ -231,7 +280,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
             label={w.prepLabel}
             options={SMART_BUILD_PREP_LEVELS}
             value={a.prepEffort}
-            onChange={(v) => dispatch({ type: 'setAnswer', key: 'prepEffort', value: v })}
+            onChange={(v) => answerAndGo({ type: 'setAnswer', key: 'prepEffort', value: v })}
             render={(v) => prepLabel(v)}
             hint={prepHint(a.prepEffort)}
           />
@@ -259,6 +308,8 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     },
   ];
 
+  const steps = order.flatMap((id) => allSteps.filter((x) => x.id === id));
+
   // Sits below the last question's chips, above the CTA.
   const previewLine = preview.possible
     ? w.previewCount(preview.missionCount)
@@ -270,6 +321,15 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     // comparing indexes here, is what keeps that rule in one place.
     if (isSmartBuildComplete(next)) { onFinish(smartBuildAnswers(next), next.seed); return; }
     dispatch({ type: 'next' });
+  }
+
+  // A swipe landed on another question: walk the reducer there one step at a time, so its own
+  // rules (and only its rules) decide what each move means.
+  function handleSwipeTo(i: number) {
+    window.clearTimeout(advanceTimer.current);
+    const from = Math.min(state.index, order.length - 1);
+    const steps = Math.abs(i - from);
+    for (let k = 0; k < steps; k++) dispatch({ type: i > from ? 'next' : 'back' });
   }
 
   function handleBack() {
@@ -290,7 +350,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     // from `lg` it becomes the trailing column, which in the RTL default leaves
     // the questions in the reading-start position.
     <div className="flex flex-col gap-2 lg:flex-row-reverse lg:items-start lg:gap-5">
-      <div className="lg:w-64 lg:shrink-0">
+      {!quick && <div className="lg:w-64 lg:shrink-0">
         <SmartBuildShapePanel
           stages={shape.stages}
           possible={shape.possible}
@@ -302,23 +362,25 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
             empty: w.shapeEmpty,
           }}
         />
-      </div>
+      </div>}
 
       {/* min-w-0 so a long question cannot push the flex row wider than the
           viewport and start the page scrolling sideways. */}
       <div className="flex-1 min-w-0">
         <SteppedWizard
           steps={steps}
-          index={Math.min(state.index, SMART_BUILD_QUESTION_ORDER.length - 1)}
+          index={Math.min(state.index, order.length - 1)}
           onBack={handleBack}
           onNext={handleNext}
+          onSwipeTo={handleSwipeTo}
           busy={busy}
-          finalNote={previewLine}
+          finalNote={quick ? undefined : previewLine}
           labels={{
             back: w.back,
             next: w.next,
             finish: w.smartFinish,
             progress: (step, total) => w.smartProgress(step, total),
+            swipeHint: w.swipeHint,
           }}
         />
       </div>

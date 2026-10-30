@@ -129,6 +129,8 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // it is bounded rather than free — but a creator legitimately makes one per
   // person they are sending it to.
   createGameShareLink: { max: 30, windowMs: 10 * MIN },
+  createGuestClaim: { max: 10, windowMs: 60 * MIN },
+  claimGuestGames: { max: 20, windowMs: 60 * MIN },
   // Starting a run through somebody else's share link. Tight: every call creates
   // a run, an access code and a staff invite in the OWNER's account, and the
   // per-link cap (MAX_LAUNCHES_PER_SHARE_LINK) bounds the total either way. A

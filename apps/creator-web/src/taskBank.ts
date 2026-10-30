@@ -2772,7 +2772,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'youth-winning-rap',
     siting: 'never',
     sourceTemplateKey: 'youth-missions',
-    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium', 'performance', 'music', 'humor', 'againstClock'],
+    tags: ['kids', 'camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'medium', 'performance', 'music', 'humor', 'againstClock'],
     difficulty: 5,
     build: () => anywhere({
       title: 'ראפ מנצח',
@@ -2790,7 +2790,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // owner's curation pass. Rule 82 — shown the pair he removed the weaker one
     // rather than relying on the family to keep them apart, and the survivor is
     // the harvested half (rule 80).
-    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'performance', 'humor'],
+    tags: ['kids', 'camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'home', 'medium', 'performance', 'humor'],
     difficulty: 5,
     build: () => anywhere({
       geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
@@ -2815,7 +2815,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // from a game that really ran with teenagers (rule 80), so the honest fix is
     // the second — NARROW the audience and keep it. `mixed` is a claim that a
     // corporate offsite would climb on each other in public, and it is false.
-    tags: ['action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'medium', 'park', 'beach', 'forest', 'school', 'physical', 'building'],
+    tags: ['kids', 'action', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'medium', 'park', 'beach', 'forest', 'school', 'physical', 'building'],
     difficulty: 5,
     build: () => anywhere({
       geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
@@ -2892,7 +2892,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     family: 'genre-parody',
     spot: 'bench',
     sourceTemplateKey: 'youth-missions',
-    tags: ['camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'youth', 'mixed', 'medium', 'cityCenter', 'neighborhood', 'mall', 'park', 'performance', 'humor'],
+    tags: ['kids', 'camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'medium', 'cityCenter', 'neighborhood', 'mall', 'park', 'performance', 'humor'],
     difficulty: 5,
     build: () => anywhere({
       geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
@@ -2980,7 +2980,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // The placeless finale, for the same reason the pyramid is the placeless
     // opener. Building something together and photographing it is a real closing
     // beat, and it is the last mission of the source template's own final stage.
-    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'youth', 'mixed', 'medium', 'park', 'beach', 'forest', 'school', 'building', 'hunt'],
+    tags: ['kids', 'finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere', 'home', 'medium', 'park', 'beach', 'forest', 'school', 'building', 'hunt'],
     difficulty: 5,
     build: () => anywhere({
       title: 'גאווה ישראלית',
@@ -3171,7 +3171,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'human-letter',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-        tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'mixed', 'youth', 'kids', 'corporate', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'school', 'indoor', 'outdoor', 'physical'],
+        tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'youth', 'kids', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'school', 'indoor', 'outdoor', 'physical'],
     difficulty: 4,
     build: () => anywhere({
       geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
@@ -3268,8 +3268,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: { enabled: true, verificationType: 'code_verification', secretCode: generateCode() },
       hideLocation: true,
       locationClue: '',
-      hint: 'רמז: הוראות קצרות (ימינה, שמאלה, קרוב) עובדות יותר טוב ממשפטים ארוכים.\n\nHint: short directions (left, right, closer) work better than long sentences.',
-      hintPenalty: 20,
+      // No paid hint (29.10): the one it had was advice to the CREATOR about writing the clue
+      // ("short directions work better"), in two languages, so a team paid points to read it.
       // The one real, physical key: only one team can ever be searching for it
       // at a time, no matter how many teams the event has. See
       // TaskBankEntry.exclusiveStation.
@@ -3676,7 +3676,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'how-many-steps',
     sourceTemplateKey: 'authored',
     family: 'count-estimate',
-    tags: ['thinking', 'teamwork', 'action', 'needsSetup', 'locationBased', 'outdoor', 'park', 'neighborhood', 'school', 'beach', 'cityCenter', 'mixed', 'kids', 'youth', 'easy', 'observation'],
+    tags: ['thinking', 'teamwork', 'action', 'needsSetup', 'locationBased', 'outdoor', 'park', 'neighborhood', 'school', 'beach', 'cityCenter', 'kids', 'easy', 'observation'],
     difficulty: 3,
     transitMinutes: 5,
     setup: [
@@ -4037,10 +4037,15 @@ export const TASK_BANK: TaskBankEntry[] = [
         required: true,
         prompt: 'תכתבו את שם החפץ שהחלטתם לשנות. חייב להתאים בדיוק לאחת האפשרויות שכתבתם.\n\nEnter the name of the object you changed. Must exactly match one of the options above.',
       },
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תכתבו איפה בדיוק החפצים מסודרים, כך שהקבוצות יגיעו אליהם במבט אחד.\n\nSay exactly where the objects are laid out, so the teams find them at a glance.',
+      },
     ],
     build: () => sited({
       title: 'משחק קים',
-      description: 'מה השתנה כאן מאז שצולמה התמונה?',
+      description: 'מה השתנה [הוראות ליוצר: איפה החפצים, למשל על הספסל ליד השער] מאז שצולמה התמונה?',
       type: 'quiz',
       difficulty: 5,
       estimatedMinutes: 6,
@@ -4524,7 +4529,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'open-one-take-intro',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-    tags: ['start', 'action', 'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'neighborhood', 'beach', 'cityCenter', 'mixed', 'youth', 'kids', 'adults', 'medium', 'performance', 'humor'],
+    tags: ['start', 'action', 'camera', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'home', 'park', 'school', 'neighborhood', 'beach', 'cityCenter', 'kids', 'medium', 'performance', 'humor'],
     difficulty: 4,
     build: () => anywhere({
       geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
@@ -5306,7 +5311,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     siting: 'never',
     family: 'number-hunt',
     sourceTemplateKey: 'mission-studio',
-    tags: ['camera', 'action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'adults', 'mixed', 'medium', 'neighborhood', 'cityCenter', 'mall', 'hunt', 'observation'],
+    tags: ['camera', 'action', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'medium', 'neighborhood', 'cityCenter', 'mall', 'hunt', 'observation'],
     difficulty: 5,
     // Two phases because videos cap at 60 seconds: plan and find, then film the
     // run in one take. Planning the route together is the teamwork.
@@ -5485,12 +5490,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'לפני המשחק, תבנו בנקודה מגדל אבנים קטן, בערך בגובה הברך, כדי שגם לקבוצה הראשונה יהיה שיא לשבור. תבחרו מקום שיש בו אבנים.\n\nBefore the game, build a small stone tower at the pin, about knee high, so even the first team has a record to beat. Choose a spot that has stones.',
+        prompt: 'לפני המשחק, תבנו בנקודה מגדל אבנים קטן, בערך בגובה הברך, ליד משהו שקל לזהות, כדי שגם לקבוצה הראשונה יהיה שיא לשבור. תבחרו מקום שיש בו אבנים.\n\nBefore the game, build a small stone tower at the pin, about knee high, next to something easy to spot, so even the first team has a record to beat. Choose a spot that has stones.',
       },
     ],
     build: () => sited({
       title: 'השיא של הקודמים',
-      description: 'כאן כבר עומד מגדל אבנים, ואולי גם כמה שקבוצות קודמות בנו. תבנו לידם מגדל גבוה מכולם, שעומד לבד. תצלמו את כל המגדלים ביחד, ואל תפרקו אותם.',
+      description: 'ליד [הוראות ליוצר: ציון דרך, למשל הסלע הגדול] כבר עומד מגדל אבנים, ואולי גם כמה שקבוצות קודמות בנו. תבנו לידם מגדל גבוה מכולם, שעומד לבד. תצלמו את כל המגדלים ביחד, ואל תפרקו אותם.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -5520,7 +5525,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'לוח השיאים',
-      description: 'תשברו את השיא שעל הלוח: שכיבות סמיכה ב 30 שניות. אחד מכם מנסה, ואתם כותבים את התוצאה שלכם על הלוח. סרטון אחד.',
+      description: 'תשברו את השיא שעל הלוח שתלוי [הוראות ליוצר: איפה בדיוק, למשל על עמוד התאורה ליד הספסלים]: שכיבות סמיכה ב 30 שניות. אחד מכם מנסה, ואתם כותבים את התוצאה שלכם על הלוח. סרטון אחד.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 5,
@@ -5755,10 +5760,15 @@ export const TASK_BANK: TaskBankEntry[] = [
         required: true,
         prompt: 'תסמנו בניין עם מעלית ומדרגות, לפחות 3 קומות, ששחקנים יכולים להיכנס אליו.\n\nMark a building with a lift and stairs, at least 3 floors, that players can enter.',
       },
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תכתבו איזו מעלית בדיוק, כך שהקבוצות לא יחפשו אותה בבניין.\n\nSay exactly which lift, so the teams do not search the building for it.',
+      },
     ],
     build: () => sited({
       title: 'נגד המעלית',
-      description: 'תלחצו במעלית על הקומה העליונה ותצאו לפני שהדלת נסגרת. עכשיו כולכם במדרגות: צריך להגיע למעלה לפני שהמעלית נפתחת שם. סרטון.',
+      description: 'תלחצו ב[הוראות ליוצר: איזו מעלית, למשל המעלית שליד הכניסה הראשית] על הקומה העליונה ותצאו לפני שהדלת נסגרת. עכשיו כולכם במדרגות: צריך להגיע למעלה לפני שהמעלית נפתחת שם. סרטון.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 4,
@@ -5864,10 +5874,15 @@ export const TASK_BANK: TaskBankEntry[] = [
         required: true,
         prompt: 'תדביקו על קיר בנקודה פתק דביק ראשון בגובה 2 מטר, ותשאירו לידו חבילת פתקים דביקים ועט. תסמנו כאן את הקיר.\n\nStick a first sticky note 2 metres up a wall at the pin, and leave a pad of sticky notes and a pen beside it. Mark the wall here.',
       },
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תכתבו איזה קיר בדיוק, כך שהקבוצות יזהו אותו במבט אחד.\n\nSay exactly which wall, so the teams spot it at a glance.',
+      },
     ],
     build: () => sited({
       title: 'השם הכי גבוה',
-      description: 'תכתבו את שם הקבוצה על פתק דביק ותדביקו אותו על הקיר כאן, גבוה מכל הפתקים שכבר עליו. מותר לעמוד רק אחד על השני. סרטון.',
+      description: 'תכתבו את שם הקבוצה על פתק דביק ותדביקו אותו על [הוראות ליוצר: איזה קיר בדיוק, למשל הקיר הלבן ליד הכניסה], גבוה מכל הפתקים שכבר עליו. מותר לעמוד רק אחד על השני. סרטון.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 6,
@@ -6326,7 +6341,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'החלפה במטמון',
-      description: 'בקופסה שמוסתרת כאן יש חפץ שהשאירה הקבוצה שלפניכם. תיקחו אותו ותשאירו במקומו חפץ טוב ממנו. תצלמו את שניהם.',
+      description: 'בקופסה שמוסתרת ליד [הוראות ליוצר: ציון דרך, למשל הברז שבפינת הגינה] יש חפץ שהשאירה הקבוצה שלפניכם. תיקחו אותו ותשאירו במקומו חפץ טוב ממנו. תצלמו את שניהם.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 4,
@@ -6853,10 +6868,15 @@ export const TASK_BANK: TaskBankEntry[] = [
         required: true,
         prompt: 'תשימו בקופסה בנקודה חמישה חפצים שהאות הראשונה שלהם יוצרת מילה, למשל מטבע, ספוג, גזר, רימון, תפוח = מסגרת. תכתבו כאן את המילה.\n\nPut five objects in a box at the pin whose first letters spell a five letter word. Enter the word here.',
       },
+      {
+        field: 'description',
+        required: true,
+        prompt: 'תכתבו ליד מה הקופסה עומדת, כך שהקבוצות ימצאו אותה במבט אחד.\n\nSay what the box stands next to, so the teams find it at a glance.',
+      },
     ],
     build: () => sited({
       title: 'חמישה חפצים',
-      description: 'בקופסה שכאן יש חמישה חפצים. איזו מילה הם מסתירים?',
+      description: 'בקופסה שליד [הוראות ליוצר: ציון דרך, למשל הספסל הירוק] יש חמישה חפצים. איזו מילה הם מסתירים?',
       type: 'quiz',
       difficulty: 6,
       estimatedMinutes: 6,
@@ -7103,7 +7123,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     siting: 'never',
     family: 'stage-rule',
     sourceTemplateKey: 'mission-studio',
-    tags: ['start', 'camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'mixed', 'easy', 'home', 'school', 'park', 'ongoing', 'humor'],
+    tags: ['start', 'camera', 'creative', 'teamwork', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'easy', 'home', 'school', 'park', 'ongoing', 'humor'],
     difficulty: 2,
     build: () => anywhere({
       title: 'שמות קוד',

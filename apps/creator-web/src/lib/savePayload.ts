@@ -57,6 +57,8 @@ export const BUILDER_EDITABLE_FIELDS = [
   // fields AND the Builder diffs the payload, so a field missing from this list never
   // saves *and* never registers as a change - the control round-trips through local
   // state and looks perfectly alive.
+  // The event date (change: creator-engagement-loop). A top-level null clears it.
+  'eventAt',
   'autoStartLateJoiners',
   'autoApproveAllMedia',
   // change: every-member-plays.

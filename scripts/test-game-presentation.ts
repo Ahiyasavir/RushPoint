@@ -33,6 +33,7 @@ const fullGame = {
   ownerUid: 'owner-1',
   title: 'Old City Hunt',
   description: 'A walk through the alleys',
+  eventAt: '2026-11-01T08:00:00.000Z',
   mode: 'team',
   // The task carries a Builder-editable TASK-level field (pause-clock-tasks) so the
   // guard below proves the `stages` passthrough really carries per-task authorship.

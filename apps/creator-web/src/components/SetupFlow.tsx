@@ -13,28 +13,35 @@
 //
 // What to show is decided in lib/setupFlow.ts (pure, tested). Every edit goes straight to the live game
 // through the Builder's own setters, so the Builder's autosave is the only save path.
-import { useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from 'motion/react';
-import { isTaskMediaValid, isSampleStep, type Game, type Task, type TaskMedia, type TemplateWizardStep } from '@rushpoint/shared';
+import { isSampleStep, type Game, type Task, type TaskMedia, type TemplateWizardStep } from '@rushpoint/shared';
 import { useT, useLanguage } from './LanguageContext';
 import { Button } from './ui';
 import { Icon, type IconName } from './Icon';
+import { track, trackLeaving } from '../lib/track';
+import { walkEnding, calendarUrl } from '../lib/walkEnding';
+import { friendLink, shareWithFriends } from '../lib/friendShare';
+import { daysUntilEvent } from '@rushpoint/shared';
 import LocationStep from './LocationStep';
 import RoutePreviewMap from './RoutePreviewMap';
 import ConfettiBurst from './ConfettiBurst';
 import TaskWizard from './TaskWizard';
 import { uploadTaskMedia } from '../services/firebase';
-import { SENTENCE_FIELDS } from '../lib/quickSetup';
+import { SENTENCE_FIELDS, setupReadinessPct } from '../lib/quickSetup';
 import NumberFlow from '@number-flow/react';
 import { playSetupSound, soundEnabled, setSoundEnabled, type SetupSound } from '../lib/setupSounds';
 import { TAP_CLUSTER, TAP_TARGET } from '../lib/interaction';
-import { swipeVerdict, swipePull, NO_SWIPE_SELECTOR, typingNow, WALK_WIDE_QUERY } from '../lib/setupSwipe';
+import { swipeVerdict, swipePull, NO_SWIPE_SELECTOR, typingNow, WALK_WIDE_QUERY, hasSwiped, markSwiped } from '../lib/setupSwipe';
 import { firstImageFile } from '../lib/imageInput';
 import { parseSentence, hasOpenSlots, extractSlotValues, fillTemplate, generateCode, plainBlanks, asCreatorBlanks } from '../lib/sentenceForm';
+import { isAcceptedTaskMedia } from '../lib/mediaAccept';
+import { toast } from './toast';
+import { rollNames } from '../lib/missionNames';
 import {
-  buildSetupScreens, buildSetupBeats, firstBeat, praiseIndex, stageProgress, planStages,
-  beforeGameList, gameFieldValue, withGameField, prepShareText, whatsappShareUrl,
+  buildSetupScreens, buildSetupBeats, firstBeat, hasRouteToShow, praiseIndex, stageProgress, planStages,
+  beforeGameList, codeNeedsSign, gameFieldValue, withGameField, prepShareText, whatsappShareUrl,
   type SetupItem, type SetupScreen, type SetupBeat,
 } from '../lib/setupFlow';
 
@@ -63,6 +70,8 @@ export interface SetupFlowProps {
   steps: readonly TemplateWizardStep[];
   /** Arriving from the composer starts at the plan; resumed later it opens on the first open item. */
   resume: boolean;
+  /** Coming back to a finished game that waits for its date: open on the ready screen. */
+  startReady?: boolean;
   onTaskChange: (stageId: string, task: Task) => void;
   onGameChange: (game: Game) => void;
   /** "I'll edit it myself": leave the walk for the full editor, on this mission when there is one. */
@@ -70,11 +79,20 @@ export interface SetupFlowProps {
   /** "Another mission": swap this mission for another from the bank, in place. False when none is left. */
   onRegenerate?: (stageId: string, taskId: string) => boolean;
   onLaunch: () => void;
+  /** Saves now, so a link sent to a friend shows what the creator sees. */
+  onFlush: () => Promise<unknown>;
+  /** The ready screen's way out: back to the creator's games. */
+  onHome: () => void;
+  /** A guest only. */
+  onSaveAccount?: () => void;
+  /** "Play it myself": a test run of this game, opened from the walk (the moment it is seen working). */
+  onTestDrive?: () => void;
   onDone: () => void;
   gameAnchors?: readonly { lat: number; lng: number }[];
 }
 
 type SF = ReturnType<typeof useT>['setupFlow'];
+
 
 function taskIn(game: Game, stageId: string, taskId: string): Task | null {
   const st = (game.stages ?? []).find((s) => s.id === stageId);
@@ -82,7 +100,7 @@ function taskIn(game: Game, stageId: string, taskId: string): Task | null {
 }
 
 export default function SetupFlow({
-  game, steps, resume, onTaskChange, onGameChange, onEditMyself, onRegenerate, onLaunch, onDone, gameAnchors,
+  game, steps, resume, startReady, onTaskChange, onGameChange, onEditMyself, onRegenerate, onLaunch, onFlush, onHome, onSaveAccount, onTestDrive, onDone, gameAnchors,
 }: SetupFlowProps) {
   const sf = useT().setupFlow;
   const { lang } = useLanguage();
@@ -117,24 +135,55 @@ export default function SetupFlow({
   };
   // A page turned by a swipe slides up or down like a feed; one turned by a button slides sideways.
   const [vertical, setVertical] = useState(false);
+  // Finishing a stage is a moment of its own (goal gradient: the next stage starts with a win).
+  const stageClosedBy = (to: number) => {
+    const cur = itemAt(at);
+    if (to <= at || !cur || cur.screen.scope !== 'task' || beats[to]?.kind !== 'item') return false;
+    const next = itemAt(to);
+    return next?.screen.stageId !== cur.screen.stageId
+      && screens.filter((x) => x.stageId === cur.screen.stageId).every((x) => x.done);
+  };
+  const soundOfMove = (to: number): SetupSound => {
+    if (stageClosedBy(to)) return 'stage';
+    return to > at && itemAt(at)?.item.configured ? 'step' : 'tap';
+  };
+  // A click arrives when the finger lifts, which is late for a sound: the button plays on the press
+  // and the move itself stays on the click, so it can still be cancelled by sliding off.
+  const pressedAt = useRef(0);
+  const pressMove = (to: number) => {
+    pressedAt.current = Date.now();
+    play(soundOfMove(to));
+  };
+  const [swiped, setSwiped] = useState(hasSwiped);
   const go = (to: number, opts?: { swipe?: boolean }) => {
     setVertical(!!opts?.swipe);
+    if (opts?.swipe && !swiped) { setSwiped(true); markSwiped(); }
     const clamped = Math.max(0, Math.min(beats.length - 1, to));
     const cur = itemAt(at);
     const forward = clamped > at;
     setPrevDone(!!cur && cur.item.configured && forward);
-    // Finishing a stage is a moment of its own (goal gradient: the next stage starts with a win).
-    const next = itemAt(clamped);
-    const stageClosed = forward && !!cur && cur.screen.scope === 'task'
-      && (!next || next.screen.stageId !== cur.screen.stageId)
-      && screens.filter((x) => x.stageId === cur.screen.stageId).every((x) => x.done);
-    if (stageClosed && beats[clamped]?.kind === 'item') {
+    const sounded = Date.now() - pressedAt.current < 1000;
+    pressedAt.current = 0;
+    if (!sounded) play(soundOfMove(clamped));
+    if (stageClosedBy(clamped) && cur) {
       const n = sortedStages.findIndex((x) => x.id === cur.screen.stageId) + 1;
-      if (n > 0) { setCheer(n); play('stage'); void burst(0.35); }
-    } else play(forward && cur?.item.configured ? 'step' : 'tap');
+      if (n > 0) { setCheer(n); void burst(0.35); }
+    }
     setDir(clamped >= at ? 1 : -1);
     setAt(clamped);
   };
+
+  const [ready, setReady] = useState(false);
+  const ending = walkEnding(game.eventAt, new Date().toISOString());
+  const stepNow = useRef('');
+  stepNow.current = beat.kind === 'item' ? `item:${at}` : beat.kind;
+  useEffect(() => { track('walk_started'); return trackLeaving(() => ({ where: 'walk', step: stepNow.current })); }, []);
+  useEffect(() => {
+    track('walk_step', { step: stepNow.current });
+    if (beat.kind === 'finish') track('walk_finished');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at, beat.kind]);
+  const openReady = () => { setReady(true); track('walk_ready'); play('finish'); void burst(1); };
 
   const isOpen = (i: number) => { const x = itemAt(i); return !!x && x.item.required && !x.item.configured; };
   const finishAt = beats.findIndex((b) => b.kind === 'finish');
@@ -163,6 +212,10 @@ export default function SetupFlow({
   useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [at]);
 
   const current = itemAt(at);
+  // A map screen and the finish fill exactly the window, so the map takes what is left. Every other
+  // screen grows with its content and the window scrolls as one page: capping those at the window
+  // height pushed their top out of reach and cut their cards at the frame (29.10, 1000x457).
+  const fillsScreen = beat.kind === 'finish' || (beat.kind === 'item' && !!current && FILLS.has(current.item.fieldPath));
   // "אערוך לבד" asks first while anything is still open (Ahiya 27.10). Escape and the backdrop keep
   // the creator in the walk: leaving has to be the deliberate choice, never the accidental one.
   const [leaveAsk, setLeaveAsk] = useState(false);
@@ -176,14 +229,40 @@ export default function SetupFlow({
     if (!force && openLeft > 0) { setLeaveAsk(true); return; }
     onEditMyself(stageId, taskId);
   };
-  const regenerate = () => {
-    if (!current || current.screen.scope !== 'task' || !onRegenerate) return;
-    if (onRegenerate(current.screen.stageId, current.screen.taskId)) {
-      play('swap');
-      setSwapped(current.screen.taskId);
+  const land = (stageId: string, taskId: string) => {
+    if (!onRegenerate) return;
+    if (onRegenerate(stageId, taskId)) {
+      setSwapped(taskId);
       setDir(1);
       setSwapTick((n) => n + 1);
     }
+  };
+  // The roll (change: creator-engagement-loop, variable reward): for a moment the dice spins through
+  // real mission names from the bank before the new one lands. The anticipation is the point (the
+  // dopamine studies put the response on the cue, strongest while the outcome is unknown), so it is
+  // short (about 400ms), every name in it is a real mission, and a second press lands at once.
+  // No quality label: the ratings stay hidden from creators (his decision, 22.10).
+  const [rolling, setRolling] = useState<string | null>(null);
+  const roll = useRef<{ timer: number; stageId: string; taskId: string } | null>(null);
+  useEffect(() => () => { if (roll.current) window.clearInterval(roll.current.timer); }, []);
+  const regenerate = () => {
+    if (!current || current.screen.scope !== 'task' || !onRegenerate) return;
+    if (roll.current) {
+      const r = roll.current; window.clearInterval(r.timer); roll.current = null; setRolling(null); land(r.stageId, r.taskId); return;
+    }
+    // On the press, with the roll: the sound is the dice, and it was landing 400ms after the finger.
+    play('swap');
+    const { stageId, taskId } = current.screen;
+    const names = reduce ? [] : rollNames(4);
+    if (names.length === 0) { land(stageId, taskId); return; }
+    let i = 0;
+    setRolling(names[0]);
+    const timer = window.setInterval(() => {
+      i++;
+      if (i < names.length) { setRolling(names[i]); return; }
+      window.clearInterval(timer); roll.current = null; setRolling(null); land(stageId, taskId);
+    }, 95);
+    roll.current = { timer, stageId, taskId };
   };
   // The moment a field becomes filled: a bright drop, a "saved" mark, and Next lights up.
   const filledKey = current ? `${current.screen.key}|${current.item.stepId}` : '';
@@ -207,16 +286,20 @@ export default function SetupFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beat.kind]);
 
-  // Overall readiness, with the build itself counted as the first step done (endowed progress: the
-  // creator starts ahead, because they are ahead).
+  // Overall readiness, with every mission already built counted as a step done (endowed progress: the
+  // creator starts ahead, because they are ahead; setupReadinessPct says why the build counts in full).
   const items = beats.map((_, i) => itemAt(i)).filter((x): x is NonNullable<ReturnType<typeof itemAt>> => !!x);
   // Counted over what is REQUIRED, the same set "N more and you're done" counts: optional items in
   // the denominator made the % crawl while the creator was nearly done (research 27.10).
   const counted = items.some((x) => x.item.required) ? items.filter((x) => x.item.required) : items;
   const doneItems = counted.filter((x) => x.item.configured).length;
-  const pctRaw = Math.round((100 * (1 + doneItems)) / (1 + counted.length));
+  const missionCount = sortedStages.reduce((n, s) => n + (s.tasks?.length ?? 0), 0);
+  const pctRaw = setupReadinessPct({ missions: missionCount, done: doneItems, required: counted.length });
   const pct = (beat.kind === 'finish' || beat.kind === 'prep') && !finishOpen ? 100 : pctRaw;
+  // A game with nothing open reads 100 from its first screen, above a bar that has barely moved.
+  const showPct = items.length > 0 && (pct < 100 || beat.kind === 'finish');
   const openLeft = items.filter((x) => x.item.required && !x.item.configured).length;
+  useLayoutEffect(() => { if (startReady && openLeft === 0 && (ending === 'later' || ending === 'today')) setReady(true); }, [startReady]);
 
   const stageIndex = current ? sortedStages.findIndex((s) => s.id === current.screen.stageId) : -1;
   const missionNumber = current && current.screen.scope === 'task' ? missionScreens.findIndex((s) => s.key === current.screen.key) + 1 : 0;
@@ -280,12 +363,19 @@ export default function SetupFlow({
   const prefilledUntouched = !!current && current.item.configured && !touched.current.has(filledKey)
     && ['smart.secretCode', 'answers', 'numericAnswer'].includes(current.item.fieldPath);
   const primary = (() => {
-    if (beat.kind === 'plan') return { label: sf.planCta, onClick: () => go(at + 1), arrow: true };
-    if (beat.kind === 'prep') return { label: sf.launch, onClick: onLaunch, arrow: false };
-    if (beat.kind === 'finish' && !finishOpen) return { label: sf.finishCta, onClick: () => go(at + 1), arrow: true };
-    if (current?.item.kind === 'prep' && current.item.configured) return { label: sf.prepCta, onClick: () => go(nextFrom(at)), arrow: true };
-    if (prefilledUntouched) return { label: sf.keepIt, onClick: () => go(nextFrom(at)), arrow: true };
-    return { label: sf.next, onClick: () => go(nextFrom(at)), arrow: true };
+    if (beat.kind === 'plan') return { label: sf.planCta, to: at + 1, onClick: () => go(at + 1), arrow: true };
+    // Launch never bounces the creator out of the walk to a list of problems: while something required is
+    // open, it brings them to the first one, inside the walk (research 29.10).
+    if (beat.kind === 'prep') return { label: openLeft > 0 ? sf.launch : ending === 'later' ? sf.readyCta : ending === 'today' ? sf.launchToday : sf.launch, to: undefined, onClick: () => {
+      const first = beats.findIndex((b, i) => b.kind === 'item' && (() => { const x = itemAt(i); return !!x && x.item.required && !x.item.configured; })());
+      if (first < 0) { if (ending === 'later') openReady(); else onLaunch(); return; }
+      toast.info(sf.launchFirstLeft({ n: openLeft }));
+      go(first);
+    }, arrow: false };
+    if (beat.kind === 'finish' && !finishOpen) return { label: sf.finishCta, to: at + 1, onClick: () => go(at + 1), arrow: true };
+    if (current?.item.kind === 'prep' && current.item.configured) return { label: sf.prepCta, to: nextFrom(at), onClick: () => go(nextFrom(at)), arrow: true };
+    if (prefilledUntouched) return { label: sf.keepIt, to: nextFrom(at), onClick: () => go(nextFrom(at)), arrow: true };
+    return { label: sf.next, to: nextFrom(at), onClick: () => go(nextFrom(at)), arrow: true };
   })();
   const skipping = !!current && current.item.required && !current.item.configured;
 
@@ -296,6 +386,7 @@ export default function SetupFlow({
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={sf.aria}
       className="fixed inset-0 z-[70] flex flex-col h-[100dvh] rp-setup-bg text-[--ink-1] overflow-clip">
+      {ready && <LaterEnding game={game} onFlush={onFlush} onHome={onHome} onEdit={onDone} onSaveAccount={onSaveAccount} onLaunch={onLaunch} />}
       <span aria-hidden className="rp-setup-orb rp-setup-orb-1" />
       <span aria-hidden className="rp-setup-orb rp-setup-orb-2" />
       <AnimatePresence>
@@ -304,9 +395,10 @@ export default function SetupFlow({
             initial={reduce ? { opacity: 0 } : { opacity: 0, y: -16, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, transition: { duration: 0.15 } }}
             transition={reduce ? { duration: 0.1 } : { type: 'spring', stiffness: 420, damping: 24 }}
-            className="pointer-events-none fixed inset-x-0 top-28 z-[80] mx-auto w-fit max-w-[90vw] rounded-3xl bg-gradient-to-l from-rp-fire to-rp-amber px-6 py-3.5 text-center text-white shadow-2xl shadow-rp-fire/40">
-            <div className="flex items-center justify-center gap-2 text-[20px] sm:text-2xl font-extrabold"><Icon name="trophy" className="w-6 h-6" />{sf.stageDone({ n: cheer })}</div>
-            <div className="text-[14px] sm:text-[15px] font-semibold opacity-95">{sf.stageDoneSub}</div>
+            // On a short window it rides over the header instead of the step's own heading (29.10).
+            className="pointer-events-none fixed inset-x-0 top-28 [@media(max-height:560px)]:top-1.5 z-[80] mx-auto w-fit max-w-[90vw] rounded-3xl bg-gradient-to-l from-rp-fire to-rp-amber px-6 py-3.5 [@media(max-height:560px)]:py-2 text-center text-white shadow-2xl shadow-rp-fire/40">
+            <div className="flex items-center justify-center gap-2 text-[20px] sm:text-2xl [@media(max-height:560px)]:text-[18px] font-extrabold"><Icon name="trophy" className="w-6 h-6" />{sf.stageDone({ n: cheer })}</div>
+            <div className="text-[14px] sm:text-[15px] font-semibold opacity-95 [@media(max-height:560px)]:hidden">{sf.stageDoneSub}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -352,7 +444,7 @@ export default function SetupFlow({
             </span>
             {/* A short window (a laptop zoomed in, 28.10: 457 px tall) has no row to spare: the readiness
                 moves up beside the title, and the row under the bar is not drawn. */}
-            {items.length > 0 && (
+            {showPct && (
               <span className="hidden [@media(max-height:560px)]:inline-flex items-baseline gap-1 text-[13px] font-extrabold text-ink-fire shrink-0">
                 <NumberFlow value={pct} suffix="%" />
                 <span className="font-semibold">{sf.readyWord}</span>
@@ -362,7 +454,8 @@ export default function SetupFlow({
               {onRegenerate && current?.screen.scope === 'task' && (
                 <button type="button" onClick={regenerate} aria-label={sf.newMissionAria} title={sf.newMissionAria}
                   className="min-h-[44px] px-3.5 rounded-xl bg-gradient-to-l from-rp-fire to-rp-amber text-white text-[14px] sm:text-[15px] font-bold shadow-md shadow-rp-fire/30 hover:brightness-110 active:scale-[0.97] transition inline-flex items-center gap-1.5">
-                  <Icon name="dice" className="w-[18px] h-[18px]" />{sf.newMission}
+                  <Icon name="dice" className={`w-[18px] h-[18px] shrink-0 ${rolling ? 'animate-spin' : ''}`} />
+                  <span className="inline-block max-w-[9rem] truncate" aria-live="off" dir="auto">{rolling ?? sf.newMission}</span>
                 </button>
               )}
               <button type="button" onClick={() => editMyself(current?.screen.stageId || null, current?.screen.taskId || null)}
@@ -395,7 +488,7 @@ export default function SetupFlow({
               </div>
             </div>
           )}
-          {items.length > 0 && (
+          {showPct && (
             <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px] sm:text-[14px] [@media(max-height:560px)]:hidden">
               <span className="inline-flex items-baseline gap-1 font-extrabold text-ink-fire">
                 <NumberFlow value={pct} suffix="%" />
@@ -412,11 +505,11 @@ export default function SetupFlow({
 
       {/* ── Body: exactly the space between header and footer ──────────────────────────────── */}
       <div ref={bodyRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd} className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        <motion.div style={{ y: pull }} className="min-h-full walk:h-full flex flex-col">
+        <motion.div style={{ y: pull }} className={`min-h-full flex flex-col ${fillsScreen ? 'walk:h-full' : ''}`}>
         <AnimatePresence mode="wait" initial={false} onExitComplete={() => pull.set(0)}>
           <motion.div key={`${at}-${swapTick}`} variants={variants} initial="enter" animate="center" exit="exit"
-            data-audit="content" className="mx-auto w-full max-w-5xl walk:max-w-[min(92vw,1400px)] flex-1 walk:min-h-0 px-4 py-3 sm:py-5 flex flex-col walk:my-3 walk:[@media(max-height:720px)]:my-1.5 walk:[@media(max-height:720px)]:py-4 walk:[@media(max-height:560px)]:my-1 walk:[@media(max-height:560px)]:py-2.5 walk:[@media(max-height:560px)]:rounded-[20px] walk:rounded-[28px] walk:border walk:border-white/70 walk:bg-[--surface-0]/85 walk:backdrop-blur-xl walk:px-8 walk:py-6 walk:shadow-[0_30px_80px_-40px_rgba(255,87,34,0.45)]">
-            {beat.kind === 'plan' && <PlanBeat game={game} itemCount={beats.filter((b) => b.kind === 'item').length} />}
+            data-audit="content" className={`mx-auto w-full max-w-5xl walk:max-w-[min(92vw,1400px)] flex-1 ${fillsScreen ? 'walk:min-h-0' : ''} px-4 py-3 sm:py-5 flex flex-col walk:my-3 walk:[@media(max-height:720px)]:my-1.5 walk:[@media(max-height:720px)]:py-4 walk:[@media(max-height:560px)]:my-1 walk:[@media(max-height:560px)]:py-2.5 walk:[@media(max-height:560px)]:rounded-[20px] walk:rounded-[28px] walk:border walk:border-white/70 walk:bg-[--surface-0]/85 walk:backdrop-blur-xl walk:px-8 walk:py-6 walk:shadow-[0_30px_80px_-40px_rgba(255,87,34,0.45)]`}>
+            {beat.kind === 'plan' && <PlanBeat game={game} itemCount={beats.filter((b) => b.kind === 'item').length} onTestDrive={onTestDrive} onGameChange={onGameChange} />}
             {beat.kind === 'item' && current && (
               <ItemBeat
                 game={game} screen={current.screen} item={current.item} first={beat.firstOfMission}
@@ -427,13 +520,13 @@ export default function SetupFlow({
                 onSwap={onRegenerate && current.screen.scope === 'task' ? regenerate : undefined}
               />
             )}
-            {(beat.kind === 'item' || beat.kind === 'plan') && (
-              <p aria-hidden className="walk:hidden mt-auto pt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[--ink-3]">
-                <Icon name="chevronUp" className="w-4 h-4 rp-swipe-hint" />{sf.swipeHint}
+            {(beat.kind === 'item' || beat.kind === 'plan') && !swiped && (
+              <p className="walk:hidden mt-auto pt-4 flex justify-center">
+                <Icon name="chevronUp" role="img" aria-hidden={false} aria-label={sf.swipeHint} className="w-7 h-7 text-ink-fire rp-swipe-hint" />
               </p>
             )}
             {beat.kind === 'finish' && <RouteBeat game={game} screens={screens} beats={beats} onJump={go} onFix={startFixing} />}
-            {beat.kind === 'prep' && <PrepBeat game={game} screens={screens} />}
+            {beat.kind === 'prep' && <PrepBeat game={game} screens={screens} onTestDrive={onTestDrive} onGameChange={onGameChange} />}
           </motion.div>
         </AnimatePresence>
         </motion.div>
@@ -443,7 +536,7 @@ export default function SetupFlow({
       <footer className="relative z-10 shrink-0 border-t border-[--rp-border]/60 bg-[--surface-0]/75 backdrop-blur-xl pb-[max(env(safe-area-inset-bottom),0.5rem)]">
         <div className="mx-auto w-full max-w-5xl walk:max-w-[min(92vw,1400px)] px-4 pt-2.5 [@media(max-height:560px)]:pt-1.5 flex items-center gap-2">
           {at > 0 && (
-            <Button variant="ghost" onClick={() => go(at - 1)} className="shrink-0 px-3">{rtl ? '→' : '←'} {sf.back}</Button>
+            <Button variant="ghost" onPointerDown={() => pressMove(at - 1)} onClick={() => go(at - 1)} className="shrink-0 px-3 [@media(pointer:coarse)]:sr-only">{rtl ? '→' : '←'} {sf.back}</Button>
           )}
           {beat.kind === 'prep' && <Button variant="ghost" onClick={onDone} className="shrink-0 px-3">{sf.toBuilder}</Button>}
           <div className="ms-auto flex items-center gap-2 sm:gap-3 min-w-0">
@@ -457,7 +550,7 @@ export default function SetupFlow({
                 </motion.span>
               )}
             </AnimatePresence>
-            <Button key={`cta-${justFilled}`} onClick={primary.onClick}
+            <Button key={`cta-${justFilled}`} onClick={primary.onClick} onPointerDown={() => { if (primary.to !== undefined) pressMove(primary.to); }}
               className={`min-w-0 px-4 sm:min-w-[11rem] text-[16px] font-bold ${justFilled > 0 && current?.item.configured ? 'rp-cta-ready' : ''}`}>
               {primary.label}{primary.arrow ? ` ${rtl ? '←' : '→'}` : ''}
             </Button>
@@ -471,7 +564,7 @@ export default function SetupFlow({
 
 // ─── The plan ─────────────────────────────────────────────────────────────────────────────────
 
-function PlanBeat({ game, itemCount }: { game: Game; itemCount: number }) {
+function PlanBeat({ game, itemCount, onTestDrive, onGameChange }: { game: Game; itemCount: number; onTestDrive?: () => void; onGameChange: (g: Game) => void }) {
   const sf = useT().setupFlow;
   const reduce = useReducedMotion();
   const stages = planStages(game);
@@ -520,6 +613,50 @@ function PlanBeat({ game, itemCount }: { game: Game; itemCount: number }) {
           </span>
         </p>
       )}
+      <EventDateRow game={game} onGameChange={onGameChange} />
+      {onTestDrive && <TryItCard onTestDrive={onTestDrive} />}
+    </div>
+  );
+}
+
+/** When the game is (change: creator-engagement-loop): a real date is a real reason to come back, and it
+ *  drives the dashboard countdown and the day-before reminder. Asked once, in the plan, never required. */
+function EventDateRow({ game, onGameChange }: { game: Game; onGameChange: (g: Game) => void }) {
+  const sf = useT().setupFlow;
+  const toDate = (iso?: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return Number.isFinite(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+  };
+  // A cleared date is sent as null (an explicit clear), never undefined, which the save would not send.
+  const when = walkEnding(game.eventAt, new Date().toISOString());
+  const days = daysUntilEvent(game.eventAt ?? null, new Date().toISOString());
+  const hint = when === 'today' ? sf.eventHintToday : when === 'now' ? sf.eventHintPast : when === 'later' && days !== null ? sf.readyDays({ n: days }) : sf.eventHint;
+  const set = (v: string) => onGameChange({ ...game, eventAt: v ? new Date(`${v}T10:00:00`).toISOString() : (null as unknown as undefined) });
+  return (
+    <label className="mt-3 shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-[--rp-border] bg-[--surface-0] px-3.5 py-2.5 [@media(max-height:560px)]:py-1.5">
+      <span className="inline-flex w-10 h-10 shrink-0 items-center justify-center rounded-xl bg-rp-fire/10 text-ink-fire"><Icon name="calendar" className="w-5 h-5" /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[16px] font-bold leading-tight">{sf.eventQ}</span>
+        <span className="block text-[13px] sm:text-[14px] text-[--ink-2] leading-snug [@media(max-height:560px)]:hidden">{hint}</span>
+      </span>
+      <input type="date" value={toDate(game.eventAt)} onChange={(e) => set(e.target.value)}
+        className="shrink-0 min-h-[44px] rounded-xl border border-[--rp-border] bg-[--surface-1] px-3 text-[16px] text-[--ink-1]" />
+    </label>
+  );
+}
+
+/** The "I saw it work" moment, offered where the plan is seen and again before launch (research 29.10). */
+function TryItCard({ onTestDrive }: { onTestDrive: () => void }) {
+  const sf = useT().setupFlow;
+  return (
+    <div className="mt-3 shrink-0 flex items-center gap-3 rounded-2xl border border-[--rp-border] bg-[--surface-0] px-3.5 py-2.5 [@media(max-height:560px)]:py-1.5">
+      <span className="inline-flex w-10 h-10 shrink-0 items-center justify-center rounded-xl bg-rp-plasma/15 text-ink-plasma"><Icon name="phone" className="w-5 h-5" /></span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[16px] font-bold leading-tight">{sf.tryItTitle}</p>
+        <p className="text-[13px] sm:text-[14px] text-[--ink-2] leading-snug [@media(max-height:560px)]:hidden">{sf.tryItBody}</p>
+      </div>
+      <Button variant="subtle" onClick={onTestDrive} className="shrink-0 px-3"><Icon name="play" className="w-4 h-4 me-1.5" />{sf.tryItCta}</Button>
     </div>
   );
 }
@@ -534,6 +671,8 @@ const TYPE_ICON: Record<string, IconName> = {
 
 /** Fields whose control is one big surface: it takes the rest of the screen. */
 const FILLS = new Set(['coordinates']);
+/** How many missions the finish screen lists before "and N more" (the fix button walks all of them). */
+const FINISH_LIST_MAX = 5;
 
 function ItemBeat({
   game, screen, item, first, praise, placeLine, onTaskChange, onGameChange, gameAnchors, onOpenFull, onSwap,
@@ -591,7 +730,7 @@ function ItemBeat({
           <div aria-hidden className="h-1.5 bg-gradient-to-l from-rp-fire to-rp-amber" />
           <div className="px-4 py-3.5 sm:p-5 walk:[@media(max-height:720px)]:p-4">
             <div className="flex items-start gap-3">
-              <span aria-hidden className="inline-flex w-11 h-11 sm:w-12 sm:h-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-rp-fire to-rp-amber text-white shadow-md shadow-rp-fire/30">
+              <span aria-hidden className="inline-flex w-11 h-11 sm:w-12 sm:h-12 walk:[@media(max-height:560px)]:w-9 walk:[@media(max-height:560px)]:h-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-rp-fire to-rp-amber text-white shadow-md shadow-rp-fire/30">
                 <Icon name={TYPE_ICON[screen.taskType ?? ''] ?? 'flag'} className="w-5 h-5 sm:w-6 sm:h-6" />
               </span>
               <div className="min-w-0 flex-1">
@@ -600,7 +739,7 @@ function ItemBeat({
                   <input value={task.title ?? ''} onChange={(e) => putText({ title: e.target.value })} dir="auto" aria-label={sf.editTitleLabel}
                     className="mt-1 w-full min-h-[44px] rounded-xl border-2 border-rp-fire/60 bg-[--surface-0] px-3 text-[20px] font-extrabold text-[--ink-1] focus:outline-none focus:border-rp-fire focus:ring-4 focus:ring-rp-fire/15" />
                 ) : (
-                  <h2 className={`font-extrabold leading-tight ${first ? 'text-[26px] sm:text-4xl' : 'text-[24px] sm:text-3xl'} walk:[@media(max-height:720px)]:text-[26px] walk:[@media(max-height:560px)]:text-[22px]`} dir="auto">{screen.title}</h2>
+                  <h2 className={`font-extrabold leading-tight ${first ? 'text-[26px] sm:text-4xl' : 'text-[24px] sm:text-3xl'} walk:[@media(max-height:720px)]:text-[26px] walk:[@media(max-height:560px)]:text-[20px]`} dir="auto">{screen.title}</h2>
                 )}
               </div>
               {task && (
@@ -623,8 +762,8 @@ function ItemBeat({
                 <p className="mt-1 text-[13px] text-[--ink-3]">{hasOpenSlots(task.description) ? `${sf.editTextNote} ${sf.editTextBlanks}` : sf.editTextNote}</p>
               </div>
             ) : screen.playerText !== '' && (
-              <div className="mt-3">
-                <div className="text-[13px] sm:text-[14px] font-semibold text-[--ink-3]">{sf.teamsWill}</div>
+              <div className="mt-3 walk:[@media(max-height:560px)]:mt-2">
+                <div className="text-[13px] sm:text-[14px] font-semibold text-[--ink-3] walk:[@media(max-height:560px)]:hidden">{sf.teamsWill}</div>
                 <p className={`mt-0.5 text-[16px] sm:text-lg leading-snug sm:leading-relaxed walk:[@media(max-height:720px)]:leading-snug text-[--ink-1] whitespace-pre-line ${longText && !openText ? 'line-clamp-4 walk:line-clamp-none walk:[@media(max-height:560px)]:line-clamp-4' : ''}`} dir="auto">{blanked(screen.playerText)}</p>
                 {longText && (
                   <button type="button" onClick={() => setOpenText((o) => !o)} className="walk:hidden walk:[@media(max-height:560px)]:block min-h-[36px] text-[14px] font-bold text-ink-fire">
@@ -634,12 +773,12 @@ function ItemBeat({
               </div>
             )}
             {doneKey && (sf.howDone[doneKey] ?? '') !== '' && (
-              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-rp-fire/10 px-3 py-1.5 text-[14px] sm:text-[15px] font-semibold text-ink-fire">
+              <p className="mt-3 walk:[@media(max-height:560px)]:mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-fire/10 px-3 py-1.5 walk:[@media(max-height:560px)]:py-1 text-[14px] sm:text-[15px] walk:[@media(max-height:560px)]:text-[13px] font-semibold text-ink-fire">
                 <Icon name="flag" className="w-4 h-4 shrink-0" />{sf.howDone[doneKey]}
               </p>
             )}
             {task?.hideLocation === true && (
-              <p className="mt-2 flex items-start gap-1.5 rounded-2xl bg-violet-600/10 px-3 py-2 text-[14px] sm:text-[15px] font-semibold text-violet-800 dark:text-violet-300">
+              <p className="mt-2 flex items-start gap-1.5 rounded-2xl bg-violet-600/10 px-3 py-2 walk:[@media(max-height:560px)]:py-1.5 text-[14px] sm:text-[15px] walk:[@media(max-height:560px)]:text-[13px] font-semibold text-violet-800 dark:text-violet-300">
                 <Icon name="eyeOff" className="w-4 h-4 mt-0.5 shrink-0" />{sf.hiddenNote}
               </p>
             )}
@@ -946,7 +1085,7 @@ function PhotoPick({ task, gameId, onChange }: { task: Task; gameId: string; onC
     setFailed(false); setPct(0);
     try {
       const { url, kind } = await uploadTaskMedia(file, { gameId, taskId: task.id }, setPct);
-      if (!isTaskMediaValid({ kind, url })) { setFailed(true); return; }
+      if (!isAcceptedTaskMedia({ kind, url })) { setFailed(true); return; }
       onChange([...(latest.current.media ?? []), { id: uuid(), kind, url }]);
     } catch { setFailed(true); } finally { setPct(null); }
   };
@@ -996,6 +1135,15 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
     .map(({ b, i }) => ({ i, title: b.kind === 'item' ? screens[b.screen].title : '' }));
   const ready = left.length === 0;
   if (ready) return <ReadyBeat game={game} screens={screens} />;
+  // One row per mission, not per missing field: three blanks of "מפת פיראטים" read as three
+  // identical rows (29.10). The list is capped so it fits beside the map on a short window.
+  const groups: { i: number; title: string; n: number }[] = [];
+  for (const l of left) {
+    const g = groups.find((x) => x.title === l.title);
+    if (g) g.n += 1; else groups.push({ ...l, n: 1 });
+  }
+  const shown = groups.slice(0, FINISH_LIST_MAX);
+  const more = groups.length - shown.length;
   return (
     <div className="flex-1 flex flex-col gap-3 walk:min-h-0 walk:grid walk:grid-rows-[minmax(0,1fr)] walk:grid-cols-[minmax(0,8fr)_minmax(0,4fr)] walk:items-stretch walk:gap-8">
       {ready && !reduce && <ConfettiBurst />}
@@ -1012,9 +1160,9 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
             <p className="text-[16px] sm:text-lg text-[--ink-2]">{sf.finishLead}</p>
           </div>
         </div>
-        <div className="mt-3 h-[min(60dvh,560px)] min-h-[300px] walk:h-auto walk:flex-1 walk:min-h-[240px] walk:[@media(max-height:560px)]:min-h-[160px] rounded-2xl overflow-hidden border border-[--rp-border]">
+        {hasRouteToShow(game.stages) && <div className="mt-3 h-[min(60dvh,560px)] min-h-[300px] walk:h-auto walk:flex-1 walk:min-h-[240px] walk:[@media(max-height:560px)]:min-h-[160px] rounded-2xl overflow-hidden border border-[--rp-border]">
           <RoutePreviewMap stages={game.stages ?? []} className="h-full" fill />
-        </div>
+        </div>}
       </section>
       {left.length > 0 && (
         <section className="shrink-0 walk:self-start walk:sticky walk:top-0">
@@ -1023,17 +1171,19 @@ function RouteBeat({ game, screens, beats, onJump, onFix }: {
           </Button>
           <h2 className="text-[17px] font-bold">{sf.finishLeft}</h2>
           <ul className="mt-1.5 flex flex-wrap gap-2 walk:flex-col">
-            {left.map((l) => (
+            {shown.map((l) => (
               <li key={l.i}>
                 <button type="button" onClick={() => onJump(l.i)}
                   className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[--rp-border] px-3 text-start hover:bg-[--surface-2] walk:w-full">
                   <Icon name="alert" className="w-4 h-4 text-ink-amber shrink-0" />
                   <span className="truncate text-[16px]" dir="auto">{l.title}</span>
-                  <span className="text-[13px] font-semibold text-ink-fire">{sf.finishGo}</span>
+                  {l.n > 1 && <span className="shrink-0 text-[13px] text-[--ink-3]">{sf.finishLeftCount({ n: l.n })}</span>}
+                  <span className="ms-auto shrink-0 text-[13px] font-semibold text-ink-fire">{sf.finishGo}</span>
                 </button>
               </li>
             ))}
           </ul>
+          {more > 0 && <p className="mt-2 text-[14px] text-[--ink-3]">{sf.finishLeftMore({ n: more })}</p>}
         </section>
       )}
     </div>
@@ -1050,27 +1200,30 @@ function ReadyBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
   const sf = useT().setupFlow;
   const reduce = useReducedMotion();
   const prepCount = beforeGameList(screens).length;
+  const route = hasRouteToShow(game.stages);
   const next: [IconName, string][] = [
     ['flag', prepCount > 0 ? sf.finishNextPrep({ n: prepCount }) : sf.finishNextPrepNone],
     ['sparkle', sf.finishNextLaunch],
   ];
   return (
-    <div className="flex-1 flex flex-col gap-4 walk:min-h-0 walk:grid walk:grid-rows-[minmax(0,1fr)] walk:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] walk:items-stretch walk:gap-8">
+    <div className={route
+      ? 'flex-1 flex flex-col gap-4 walk:min-h-0 walk:grid walk:grid-rows-[minmax(0,1fr)] walk:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] walk:items-stretch walk:gap-8'
+      : 'flex-1 flex flex-col gap-4 justify-center w-full max-w-xl mx-auto'}>
       {!reduce && <ConfettiBurst />}
       <section className="flex flex-col walk:justify-center">
         <motion.span initial={reduce ? false : { scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
           transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 480, damping: 22 }}
-          className="inline-flex w-12 h-12 shrink-0 items-center justify-center rounded-full bg-rp-go text-white shadow-md shadow-rp-go/30">
+          className="inline-flex w-12 h-12 shrink-0 items-center justify-center rounded-full bg-rp-go text-white shadow-md shadow-rp-go/30 walk:[@media(max-height:560px)]:hidden">
           <Icon name="check" className="w-7 h-7" />
         </motion.span>
-        <h1 className="mt-3 text-[28px] sm:text-4xl walk:[@media(max-height:620px)]:text-3xl font-extrabold leading-tight">{sf.finishTitle}</h1>
+        <h1 className="mt-3 walk:[@media(max-height:560px)]:mt-0 text-[28px] sm:text-4xl walk:[@media(max-height:620px)]:text-3xl walk:[@media(max-height:560px)]:text-[26px] font-extrabold leading-tight">{sf.finishTitle}</h1>
         <FinishStats game={game} />
-        <div className="mt-4 rounded-2xl bg-[--surface-0] border border-[--rp-border]/70 p-4 shadow-sm">
-          <h2 className="text-[15px] font-bold text-[--ink-3]">{sf.finishNextTitle}</h2>
-          <ol className="mt-2 space-y-2.5">
+        <div className="mt-4 walk:[@media(max-height:560px)]:mt-2 rounded-2xl bg-[--surface-0] border border-[--rp-border]/70 p-4 walk:[@media(max-height:560px)]:p-3 shadow-sm">
+          <h2 className="text-[15px] font-bold text-[--ink-3] walk:[@media(max-height:560px)]:text-[14px]">{sf.finishNextTitle}</h2>
+          <ol className="mt-2 walk:[@media(max-height:560px)]:mt-1 space-y-2.5 walk:[@media(max-height:560px)]:space-y-1.5">
             {next.map(([icon, text], i) => (
-              <li key={i} className="flex items-start gap-3 text-[16px] sm:text-lg leading-snug">
-                <span className="inline-flex w-8 h-8 shrink-0 items-center justify-center rounded-full bg-rp-fire/10 text-ink-fire">
+              <li key={i} className="flex items-start gap-3 text-[16px] sm:text-lg walk:[@media(max-height:560px)]:text-[15px] leading-snug">
+                <span className="inline-flex w-8 h-8 walk:[@media(max-height:560px)]:w-7 walk:[@media(max-height:560px)]:h-7 shrink-0 items-center justify-center rounded-full bg-rp-fire/10 text-ink-fire">
                   <Icon name={icon} className="w-4 h-4" />
                 </span>
                 <span className="pt-1">{text}</span>
@@ -1079,9 +1232,9 @@ function ReadyBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
           </ol>
         </div>
       </section>
-      <section className="h-[min(48dvh,440px)] min-h-[240px] walk:h-auto walk:min-h-0 rounded-2xl overflow-hidden border border-[--rp-border] shadow-sm">
+      {route && <section className="h-[min(48dvh,440px)] min-h-[240px] walk:h-auto walk:min-h-0 rounded-2xl overflow-hidden border border-[--rp-border] shadow-sm">
         <RoutePreviewMap stages={game.stages ?? []} className="h-full" fill />
-      </section>
+      </section>}
     </div>
   );
 }
@@ -1097,9 +1250,9 @@ function FinishStats({ game }: { game: Game }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {stats.map(([n, label]) => (
-        <span key={label} className="inline-flex items-baseline gap-1.5 rounded-2xl bg-[--surface-0] border border-[--rp-border]/70 px-3 py-1.5 shadow-sm">
-          <NumberFlow value={shown ? n : 0} className="text-[20px] sm:text-2xl font-extrabold text-ink-fire" />
-          <span className="text-[14px] sm:text-[15px] font-semibold text-[--ink-2]">{label}</span>
+        <span key={label} className="inline-flex items-baseline gap-1.5 rounded-2xl bg-[--surface-0] border border-[--rp-border]/70 px-3 py-1.5 walk:[@media(max-height:560px)]:px-2.5 walk:[@media(max-height:560px)]:py-1 shadow-sm">
+          <NumberFlow value={shown ? n : 0} className="text-[20px] sm:text-2xl walk:[@media(max-height:560px)]:text-[18px] font-extrabold text-ink-fire" />
+          <span className="text-[14px] sm:text-[15px] walk:[@media(max-height:560px)]:text-[13px] font-semibold text-[--ink-2]">{label}</span>
         </span>
       ))}
     </div>
@@ -1108,17 +1261,72 @@ function FinishStats({ game }: { game: Game }) {
 
 // ─── The finish, part 2: what to prepare, as points to copy and share ──────────────────────────
 
-function PrepBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
+/** The end of a game that is played later (change: creator-stays-to-the-end): done, and nothing is lost. */
+function LaterEnding({ game, onFlush, onHome, onEdit, onSaveAccount, onLaunch }: {
+  game: Game; onFlush: () => Promise<unknown>; onHome: () => void; onEdit: () => void; onSaveAccount?: () => void; onLaunch: () => void;
+}) {
+  const t = useT();
+  const sf = t.setupFlow;
+  const token = useRef<string | null>(null);
+  const [note, setNote] = useState('');
+  const days = daysUntilEvent(game.eventAt ?? null, new Date().toISOString());
+  const today = days === 0;
+  const share = async () => {
+    setNote('');
+    try {
+      await onFlush();
+      const result = await shareWithFriends(game, t.missionFeed.shareText({ title: game.title }), token);
+      if (result === 'shared' || result === 'copied') track('feed_shared', { from: 'ready' });
+      if (result === 'copied') setNote(t.missionFeed.shareCopied);
+      if (result === 'failed') setNote(t.missionFeed.shareFailed);
+    } catch { setNote(t.missionFeed.shareFailed); }
+  };
+  // Opened by hand so the entry can carry the game's link, which has to be minted first. Named before the
+  // await, or a phone's popup blocker takes the new window.
+  const addToCalendar = async () => {
+    const win = window.open('', '_blank');
+    let link = '';
+    try { await onFlush(); link = await friendLink(game, token); } catch { /* the entry still has its date */ }
+    const url = calendarUrl({ title: game.title, eventAt: game.eventAt ?? '', details: link ? `${sf.readyCalendarDetails} ${link}` : '' });
+    if (!url) { win?.close(); return; }
+    track('calendar_added');
+    if (win) win.location.href = url; else window.location.href = url;
+  };
+  return (
+    <div className="absolute inset-0 z-20 rp-setup-bg overflow-y-auto">
+      <div className="min-h-full w-full max-w-md mx-auto flex flex-col justify-center gap-3 px-6 py-10">
+        <span className="self-center inline-flex w-16 h-16 items-center justify-center rounded-full bg-rp-go/15 text-ink-go"><Icon name="checkCircle" className="w-8 h-8" /></span>
+        <h1 className="text-center font-brand text-[34px] font-extrabold leading-tight">{today ? sf.todayTitle : sf.readyTitle}</h1>
+        <p className="text-center text-[18px] font-bold text-ink-fire" dir="auto">{game.title}</p>
+        {days !== null && days > 0 && <p className="text-center text-[22px] font-extrabold">{sf.readyDays({ n: days })}</p>}
+        <p className="text-center text-[16px] leading-snug text-[--ink-2]">{today ? sf.todaySub : sf.readySub}</p>
+        {today && <Button onClick={onLaunch} className="mt-3 min-h-[56px] text-[17px]">{sf.launchToday}</Button>}
+        <Button variant={today ? 'subtle' : undefined} onClick={() => void share()} className={today ? 'min-h-[48px]' : 'mt-3 min-h-[56px] text-[17px]'}>{sf.readyShare}</Button>
+        <p role="status" className="min-h-[20px] text-center text-[15px] font-semibold text-ink-fire">{note}</p>
+        {!today && <Button variant="subtle" onClick={() => void addToCalendar()} className="min-h-[48px]"><Icon name="calendar" className="w-4 h-4 me-1.5" />{sf.readyCalendar}</Button>}
+        {onSaveAccount && <Button variant="subtle" onClick={onSaveAccount} className="min-h-[48px]">{sf.readySave}</Button>}
+        <Button variant="ghost" onClick={onEdit} className="min-h-[48px]">{sf.readyEdit}</Button>
+        <Button variant="ghost" onClick={onHome} className="min-h-[48px]">{sf.readyHome}</Button>
+        {!today && <button type="button" onClick={onLaunch} className="min-h-[44px] text-[14px] font-semibold text-[--ink-2] underline underline-offset-2">{sf.readyLaunchNow}</button>}
+      </div>
+    </div>
+  );
+}
+
+function PrepBeat({ game, screens, onTestDrive, onGameChange }: { game: Game; screens: SetupScreen[]; onTestDrive?: () => void; onGameChange: (g: Game) => void }) {
   const sf = useT().setupFlow;
   // The preparations, plus a sign for every station code, in route order.
   const listed = beforeGameList(screens);
-  const prep = screens.flatMap((s) => [
-    ...listed.filter((p) => p.taskId === s.taskId && s.scope === 'task'),
-    ...s.items.filter((i) => i.fieldPath === 'smart.secretCode').map((i) => ({
-      stepId: `${i.stepId}:sign`, taskId: s.taskId, title: s.title,
-      text: sf.prepCodeLine({ code: taskIn(game, s.stageId, s.taskId)?.smart?.secretCode ?? '' }),
-    })),
-  ]).concat(listed.filter((p) => !screens.some((s) => s.scope === 'task' && s.taskId === p.taskId)));
+  // A mission's code sign joins that mission's entry: listed apart, one mission read as two (29.10).
+  const prep = screens.flatMap((s) => {
+    const own = listed.filter((p) => p.taskId === s.taskId && s.scope === 'task').map((p) => ({ ...p }));
+    for (const i of s.items.filter((it) => it.fieldPath === 'smart.secretCode' && codeNeedsSign(it.instruction))) {
+      const sign = sf.prepCodeLine({ code: taskIn(game, s.stageId, s.taskId)?.smart?.secretCode ?? '' });
+      if (own.length > 0) own[own.length - 1].text = `${own[own.length - 1].text} ${sign}`;
+      else own.push({ stepId: `${i.stepId}:sign`, taskId: s.taskId, title: s.title, text: sign });
+    }
+    return own;
+  }).concat(listed.filter((p) => !screens.some((s) => s.scope === 'task' && s.taskId === p.taskId)));
   const shareText = prepShareText(game.title ?? '', prep, { heading: sf.shareHeading, empty: sf.prepListEmpty });
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -1158,6 +1366,8 @@ function PrepBeat({ game, screens }: { game: Game; screens: SetupScreen[] }) {
         </a>
         {canShare && <Button variant="ghost" onClick={share} className="col-span-2 sm:col-span-1"><Icon name="link" className="w-4 h-4 me-1.5" />{sf.share}</Button>}
       </div>}
+      <EventDateRow game={game} onGameChange={onGameChange} />
+      {onTestDrive && <TryItCard onTestDrive={onTestDrive} />}
     </div>
   );
 }

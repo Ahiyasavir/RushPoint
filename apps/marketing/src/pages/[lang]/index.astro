@@ -79,10 +79,12 @@ const metadata = {
     join={{ prompt: t.heroJoinPrompt, action: t.heroJoinAction, href: `${PLAYER_ORIGIN}/` }}
     clip={t.heroClip}
     taste={t.heroTaste}
-    actions={[
-      { variant: 'primary', text: t.primaryAction, href: CREATOR_BUILD_URL, target: '_blank' },
-      { text: t.secondaryAction, href: `#${TRY_MISSION_ID}` },
-    ]}
+    start={{
+      title: t.heroStartTitle,
+      options: t.heroOccasions.map((o) => ({ label: o.label, href: `${CREATOR_BUILD_URL}&occasion=${o.id}` })),
+    }}
+    story={t.heroStory}
+    actions={[{ text: t.secondaryAction, href: `#${TRY_MISSION_ID}` }]}
   />
 
   {

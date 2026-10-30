@@ -62,6 +62,13 @@ export const SMART_BUILD_QUESTION_ORDER = [
 ] as const;
 export type SmartBuildQuestion = typeof SMART_BUILD_QUESTION_ORDER[number];
 
+/**
+ * The short way in (change: first-visit-instant-build): only what changes the game most, one tap each.
+ * Everything else keeps its default, and every default was already built to compose. `occasion` drops
+ * off when the front page has asked it.
+ */
+export const QUICK_BUILD_QUESTIONS: readonly SmartBuildQuestion[] = ['occasion', 'who', 'duration', 'areas'];
+
 // The options each question offers. Drawn from the canonical registries rather
 // than re-listed, so a chip can never render a tag the composer does not score.
 /**
@@ -219,6 +226,15 @@ export interface SmartBuildState {
    * answers can still yield a different game on a second run.
    */
   seed: number;
+  /** Which questions this run asks. Absent means the full SMART_BUILD_QUESTION_ORDER. */
+  questions?: readonly SmartBuildQuestion[];
+}
+
+const orderOf = (s: SmartBuildState): readonly SmartBuildQuestion[] => s.questions ?? SMART_BUILD_QUESTION_ORDER;
+
+/** The questions this run asks, in order. */
+export function smartBuildQuestions(state: SmartBuildState): readonly SmartBuildQuestion[] {
+  return orderOf(safeState(state));
 }
 
 export type SmartBuildAction =
@@ -278,8 +294,17 @@ export function drawSmartBuildSeed(random: () => number = Math.random): number {
   return Math.floor(safe * 0xffffffff) >>> 0;
 }
 
-export function initialSmartBuildState(): SmartBuildState {
-  return { index: 0, answers: smartBuildDefaults(), seed: drawSmartBuildSeed() };
+export function initialSmartBuildState(
+  opts: { quick?: boolean; occasion?: OccasionId | null } = {},
+): SmartBuildState {
+  const base = { index: 0, answers: smartBuildDefaults(), seed: drawSmartBuildSeed() };
+  if (!opts.quick) return base;
+  const known = !!opts.occasion && SMART_BUILD_OCCASIONS.includes(opts.occasion);
+  return {
+    ...base,
+    answers: known ? { ...base.answers, occasion: opts.occasion as OccasionId } : base.answers,
+    questions: known ? QUICK_BUILD_QUESTIONS.filter((q) => q !== 'occasion') : QUICK_BUILD_QUESTIONS,
+  };
 }
 
 const isState = (s: unknown): s is SmartBuildState =>
@@ -305,6 +330,7 @@ function safeState(s: unknown): SmartBuildState {
     index: s.index,
     answers: { ...smartBuildDefaults(), ...s.answers },
     seed: safeSeed(s.seed),
+    ...(Array.isArray(s.questions) ? { questions: s.questions } : {}),
   };
 }
 
@@ -318,7 +344,7 @@ const oneOf = <T extends string>(v: unknown, options: readonly T[], fallback: T)
 export function smartBuildReducer(state: SmartBuildState, action: SmartBuildAction): SmartBuildState {
   const s = safeState(state);
   const a = (action ?? {}) as SmartBuildAction;
-  const last = SMART_BUILD_QUESTION_ORDER.length - 1;
+  const last = orderOf(s).length - 1;
 
   switch (a?.type) {
     case 'next':
@@ -396,7 +422,7 @@ function sanitizeAnswers(answers: Partial<SmartBuildAnswers>): SmartBuildAnswers
 
 /** Has the creator answered every question? */
 export function isSmartBuildComplete(state: SmartBuildState): boolean {
-  return isState(state) && state.index >= SMART_BUILD_QUESTION_ORDER.length;
+  return isState(state) && state.index >= orderOf(state).length;
 }
 
 /** Did the creator back out through the top? */
@@ -407,14 +433,14 @@ export function hasLeftSmartBuild(state: SmartBuildState): boolean {
 /** What the stepped shell shows: "step N of M". 1-based for display. */
 export function smartBuildProgress(state: SmartBuildState): { step: number; total: number } {
   const s = safeState(state);
-  const total = SMART_BUILD_QUESTION_ORDER.length;
+  const total = orderOf(s).length;
   return { step: Math.min(Math.max(s.index, 0) + 1, total + 1), total };
 }
 
 /** Which question is showing, or null when the flow is finished or abandoned. */
 export function currentSmartBuildQuestion(state: SmartBuildState): SmartBuildQuestion | null {
   const s = safeState(state);
-  return SMART_BUILD_QUESTION_ORDER[s.index] ?? null;
+  return orderOf(s)[s.index] ?? null;
 }
 
 /**

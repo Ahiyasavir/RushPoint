@@ -78,6 +78,45 @@ export function bankKeyForTask(task: Partial<Task> | null | undefined, bank: rea
   return (title && Array.isArray(bank) ? bankTitles(bank).get(title)?.key : undefined) ?? null;
 }
 
+const SWAP_AUDIENCES = ['kids', 'youth', 'adults', 'corporate'] as const;
+/** The share of a game's bank missions that makes an audience one the game clearly serves. */
+const SWAP_AUDIENCE_SHARE = 0.7;
+
+/**
+ * What a swap must respect about the GAME it lands in (found 29.10: swapping every mission of 24
+ * composed games brought one already in the game 14% of the time, a family twin of one 14%, and a
+ * mission for another audience 5%, an office mission in a kids' game). Read from the game's other
+ * unedited bank missions: their keys, and the audiences most of them serve. A game with no bank
+ * missions (hand-built) has neither, and the swap is then left as it was. Total, never throws.
+ */
+export function swapGameFit(
+  game: { stages?: readonly Stage[] } | null | undefined,
+  sourceTaskId: string,
+  bank: readonly TaskBankEntry[],
+): { inGameKeys: string[]; audiences: string[] } {
+  const inGameKeys: string[] = [];
+  const stages = Array.isArray(game?.stages) ? game!.stages : [];
+  for (const st of stages) {
+    for (const t of Array.isArray(st?.tasks) ? st.tasks : []) {
+      if (!t || t.id === sourceTaskId) continue;
+      const key = bankKeyForTask(t, bank);
+      if (key && !inGameKeys.includes(key)) inGameKeys.push(key);
+    }
+  }
+  // Every audience that most of the game's bank missions serve (a 'mixed' one serves them all). A
+  // composed kids' game also holds missions tagged for teens, so "the" audience is not one tag: the
+  // replacement has to serve each audience the game clearly serves.
+  const audiences: string[] = [];
+  if (inGameKeys.length > 0) {
+    const tagsByKey = new Map(bank.map((e) => [e.key, e.tags as readonly string[]]));
+    for (const a of SWAP_AUDIENCES) {
+      const n = inGameKeys.filter((k) => (tagsByKey.get(k) ?? []).includes(a) || (tagsByKey.get(k) ?? []).includes('mixed')).length;
+      if (n >= inGameKeys.length * SWAP_AUDIENCE_SHARE) audiences.push(a);
+    }
+  }
+  return { inGameKeys, audiences };
+}
+
 /**
  * The taste tags of a mission in a game. An UNEDITED bank mission (its title matches a bank mission
  * exactly) carries its bank tags, mechanics included; anything else is read from the mission itself,

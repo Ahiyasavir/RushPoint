@@ -403,7 +403,7 @@ We **do not sell or rent** personal data. We share data with:
 
 **Authorities:** we will disclose data to law enforcement only when required by an explicit legal obligation or a valid court order.
 
-**Resend**: our transactional-email provider, used solely to deliver the automated run-summary email described in Section 3.7 to the Creator (or a designated recipient). Receives the email content (standings, team names, feedback comments) and the recipient address only.
+**Resend**: our transactional-email provider, used solely to deliver the automated run-summary email described in Section 3.7 to the Creator (or a designated recipient), and reminders of an event date the Creator set for their own game, which can be turned off in account settings. Receives the email content (standings, team names, feedback comments, or the game title and date) and the recipient address only.
 
 **Sub-processor list updates:** we will update this list whenever we add or replace a material sub-processor, and will notify users of such changes per Section 15 (Policy Changes).
 

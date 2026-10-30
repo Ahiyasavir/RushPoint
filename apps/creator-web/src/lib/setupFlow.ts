@@ -19,6 +19,7 @@ import {
   isWizardStepConfigured, resolveWizardTarget, readWizardFieldValue,
   type Game, type Task, type TemplateWizardStep,
 } from '@rushpoint/shared';
+import { isPlacedCoord } from './mapAnchor';
 import { quickSetupFocusPlan, type QuickSetupCopyKey, type TaskEditorTab, type TaskOptInGroup } from './quickSetup';
 
 export type SetupLang = 'he' | 'en';
@@ -185,12 +186,45 @@ export function buildSetupScreens(
 
 export interface BeforeGameEntry { stepId: string; taskId: string; title: string; text: string }
 
+/**
+ * A preparation as it reads on the before-the-game sheet. The same instruction is shown in the walk,
+ * beside the box it talks about, so it says "תכתבו כאן את המילה" or "תסמנו כאן את הקיר". On the sheet,
+ * which the organizer saves or sends to whoever prepares the field, there is no "here" to type into
+ * (found 29.10), so the in-app part is dropped and only the work in the field is kept. Hebrew only:
+ * the walk shows the interface language, and the English prompts never say "here" this way.
+ */
+const IN_APP_SENTENCE = /^\s*ו?(?:(?:תכתבו|תסמנו|תרשמו)\s+(?:כאן|פה)(?=[\s.,]|$)|תחליפו את הסוגריים)/;
+const IN_APP_CLAUSE = /,\s*ו(?:תכתבו|תסמנו|תרשמו)\s+(?:כאן|פה)(?=[\s.,]|$)[^.]*/g;
+export function prepSheetText(instruction: string): string {
+  if (typeof instruction !== 'string') return '';
+  const sentences = instruction.replace(IN_APP_CLAUSE, '').split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter((x) => !IN_APP_SENTENCE.test(x));
+  return (kept.length > 0 ? kept : sentences).join(' ').trim();
+}
+
+/**
+ * Does a station code need a sign at the mission's point? Only when nothing in its setup says how the
+ * code reaches the teams. Every bank code mission has its own way: a contact person or a stall hands
+ * it over, a note sits inside what the key opens, chalk marks a hidden spot, or a second place holds
+ * it. For those a sign at the point gives the answer away at the start (found 29.10 on "תיבת המת").
+ */
+const CODE_DELIVERY = /תתאמו|כתבתם|תשימו|פתק|מדבקה|גיר|נותן|במקום השני/;
+export function codeNeedsSign(instruction: string): boolean {
+  return !CODE_DELIVERY.test(typeof instruction === 'string' ? instruction : '');
+}
+
 /** Every preparation the game asks for, in route order, for the finish screen. */
 export function beforeGameList(screens: readonly SetupScreen[]): BeforeGameEntry[] {
   const out: BeforeGameEntry[] = [];
   for (const s of screens) {
     for (const i of s.items) {
-      if (i.kind === 'prep' && i.instruction !== '') out.push({ stepId: i.stepId, taskId: s.taskId, title: s.title, text: i.instruction });
+      if (i.kind !== 'prep' || i.instruction === '') continue;
+      const text = prepSheetText(i.instruction);
+      if (text === '') continue;
+      // One mission, one entry: two preparations of the same mission read as the mission twice.
+      const last = out[out.length - 1];
+      if (last && last.taskId === s.taskId && s.taskId !== '') last.text = `${last.text} ${text}`;
+      else out.push({ stepId: i.stepId, taskId: s.taskId, title: s.title, text });
     }
   }
   return out;
@@ -259,6 +293,11 @@ export function buildSetupBeats(screens: readonly SetupScreen[]): SetupBeat[] {
  * need nothing (a preparation whose text is written), so "something is configured" says nothing about
  * whether the creator has been here before.
  */
+/** A game with no placed mission has no route: its finish screen must not show an empty map. */
+export function hasRouteToShow(stages: readonly { tasks?: readonly { coordinates?: unknown }[] }[] | undefined): boolean {
+  return (stages ?? []).some((st) => (st.tasks ?? []).some((x) => isPlacedCoord(x.coordinates)));
+}
+
 export function firstBeat(beats: readonly SetupBeat[], screens: readonly SetupScreen[], resume: boolean): number {
   if (!resume) return 0;
   const i = beats.findIndex((b) => b.kind === 'item' && screens[b.screen].items[b.item].required && !screens[b.screen].items[b.item].configured);

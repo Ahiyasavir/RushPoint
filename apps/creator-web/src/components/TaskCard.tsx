@@ -268,7 +268,7 @@ export default function TaskCard({
       <div className="flex items-center gap-3 min-w-0 text-xs text-[--ink-3]">
         <span className="truncate flex-1" dir="auto">{taskPreviewLine(task, previewLabels)}</span>
         <DifficultyDots difficulty={task.difficulty} />
-        <span className="shrink-0 tabular-nums inline-flex items-center gap-0.5" title={b.estimatedMinutesTitle}><Icon name="stopwatch" className="w-3.5 h-3.5" />{task.estimatedMinutes}m</span>
+        <span className="shrink-0 tabular-nums inline-flex items-center gap-0.5" title={b.estimatedMinutesTitle}><Icon name="stopwatch" className="w-3.5 h-3.5" />{b.minutesTile(task.estimatedMinutes)}</span>
         <span className="shrink-0 tabular-nums inline-flex items-center gap-0.5" title={b.pointsTitle}><Icon name="star" className="w-3.5 h-3.5" />{task.pointValue}</span>
       </div>
     </div>

@@ -82,6 +82,7 @@ export * from './games/index';
 export * from './games/share';
 export * from './gallery/index';
 export { updateMyProfile, exportMyData, deleteMyAccount } from './users/index';
+export { createGuestClaim, claimGuestGames } from './users/guestClaim';
 export {
   pruneExpiredRunData, pruneExpiredRunDataNow, pruneRunNow, purgeDeletedGamesNow,
   backfillPublicTaskCoordinatesNow,

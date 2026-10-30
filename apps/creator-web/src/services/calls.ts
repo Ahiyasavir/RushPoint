@@ -400,6 +400,8 @@ export function loadPopularTags(limit = 20): Promise<string[]> {
 
 // ── Account management ──
 export const updateMyProfile = callable<{ displayName: string }, { ok: boolean; displayName: string }>('updateMyProfile');
+export const createGuestClaim = callable<void, { code: string }>('createGuestClaim');
+export const claimGuestGames = callable<{ code: string }, { moved: string[] }>('claimGuestGames');
 export const exportMyData    = callable<void, MyDataExport>('exportMyData');
 export const deleteMyAccount = callable<{ confirm: boolean }, { ok: boolean }>('deleteMyAccount');
 

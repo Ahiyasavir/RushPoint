@@ -8,7 +8,7 @@ import {
   readStartIntent, markStartIntent, hasStartIntent,
 } from '../lib/creatorOnboarding';
 import { doc, setDoc } from 'firebase/firestore';
-import {
+import { startAsGuest,
   watchAuth,
   signInWithGoogle,
   signInWithEmail,
@@ -19,15 +19,21 @@ import {
   db,
 } from '../services/firebase';
 import { Button, Card, Input, Label, Spinner } from './ui';
-import { claimReferral } from '../services/calls';
+import { claimGuestGames, claimReferral, createGuestClaim } from '../services/calls';
+import { claimIsFinished, dropGuestClaim, keepGuestClaim, readGuestClaim } from '../lib/guestClaim';
 import { dialog, DialogHost } from './dialog';
 import { authErrorInfo } from '../lib/authError';
 import { ToastHost } from './toast';
-import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
+import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { TAP_TEXT } from '../lib/interaction';
 import { resolvePublicCreatorRoute } from '../lib/publicCreatorPath';
 import { Icon, type IconName } from './Icon';
+import { defaultAuthMode, hasSignedInBefore, markSignedIn } from '../lib/guestCreator';
+import { markStartOccasion, readStartOccasion } from '../lib/quickStart';
+import { SMART_BUILD_OCCASIONS } from '../lib/smartBuildWizard';
+import type { OccasionId } from '../lib/occasions';
+import { track } from '../lib/track';
 
 const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
 // A game shared by link (change: game-share-link). Served WITHOUT an account for
@@ -68,6 +74,8 @@ if (incomingRef) { try { localStorage.setItem(REF_KEY, incomingRef); } catch { /
 // survive whatever the auth flow does to the URL next — a Google redirect, or the
 // post-signup `nav('/', ...)` — and both of those drop the query string.
 if (readStartIntent(window.location.search)) markStartIntent();
+const siteOccasion = readStartOccasion(window.location.search);
+if (siteOccasion) { markStartOccasion(siteOccasion); track('occasion_chosen', { occasion: siteOccasion, from: 'site' }); }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const t = useT();
@@ -76,6 +84,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [, bump] = useState(0); // force a re-render after an in-place user.reload()
 
   useEffect(() => watchAuth((u) => { setUser(u); setReady(true); }), []);
+  // Remember that this browser has a real account, so the next visit opens on sign in, not sign up.
+  useEffect(() => { if (user && !user.isAnonymous) markSignedIn(); }, [user]);
+  // Someone who left a guest game behind to sign in: it comes with them, and they land on it.
+  useEffect(() => {
+    const code = readGuestClaim();
+    if (!user || user.isAnonymous || !code) return;
+    void claimGuestGames({ code }).then(({ moved }) => {
+      dropGuestClaim();
+      if (moved.length > 0) window.location.assign(`${import.meta.env.BASE_URL}build/${moved[moved.length - 1]}`);
+    }, (e: { code?: string }) => { if (claimIsFinished(e?.code)) dropGuestClaim(); });
+  }, [user]);
+  // Leaving a guest session by any door takes a claim first: nothing else can reach those games afterwards.
+  async function signOutKeepingGames() {
+    if (auth.currentUser?.isAnonymous) {
+      try { keepGuestClaim((await createGuestClaim()).code); } catch { /* the caller that must not lose it checks readGuestClaim */ }
+    }
+    await fbSignOut();
+  }
 
   // Re-read the (mutated-in-place) Auth user — used after a profile rename so
   // the header/nav reflect the new display name without a full re-login.
@@ -129,10 +155,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   if (!user) return <LoginScreen />;
 
-  return <Ctx.Provider value={{ user, signOut: () => fbSignOut(), refreshUser }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, signOut: signOutKeepingGames, refreshUser }}>{children}</Ctx.Provider>;
 }
 
-const GOOGLE_SVG = (
+export const GOOGLE_SVG = (
   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -149,18 +175,27 @@ function LoginScreen() {
   // (change: post-signup-redirect). AuthProvider is mounted INSIDE BrowserRouter
   // (main.tsx), so a navigate here is safe.
   const nav = useNavigate();
-  const [mode, setMode] = useState<'in' | 'up'>('in');
+  // A stranger opens on sign UP; a browser that has signed in before, on sign in (change:
+  // creator-acquisition-and-return). Opening every stranger on "welcome back" was asking them to
+  // find the small sign-up link first.
+  const [mode, setMode] = useState<'in' | 'up'>(() => defaultAuthMode(hasSignedInBefore()));
+  // "Build a game" from the marketing site: a stranger goes straight in as a guest and lands in the
+  // new-game wizard; the account is asked for at launch, once there is a game worth saving.
+  const [startingGuest, setStartingGuest] = useState(() => hasStartIntent() && !hasSignedInBefore());
+  useEffect(() => {
+    if (!startingGuest) return;
+    startAsGuest().catch(() => setStartingGuest(false));
+  }, [startingGuest]);
 
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [confirm, setConfirm]   = useState('');
 
   const [err, setErr]   = useState('');
   const [busy, setBusy] = useState(false);
 
   function switchMode(next: 'in' | 'up') {
-    setMode(next); setErr(''); setPassword(''); setConfirm('');
+    setMode(next); setErr(''); setPassword('');
   }
 
   // Every auth failure is shown as a popup, not raw red text under the field
@@ -188,7 +223,6 @@ function LoginScreen() {
     if (!fullName.trim()) return t.auth.validationName;
     if (!email.trim())    return t.auth.validationEmail;
     if (password.length < 8) return t.auth.validationPwdLen;
-    if (password !== confirm) return t.auth.validationPwdMatch;
     return null;
   }
 
@@ -260,7 +294,7 @@ function LoginScreen() {
   }
 
   const isSignInReady = email.trim() && password;
-  const isSignUpReady = fullName.trim() && email.trim() && password && confirm;
+  const isSignUpReady = fullName.trim() && email.trim() && password;
 
   const l = t.landing;
 
@@ -313,7 +347,7 @@ function LoginScreen() {
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
-              onKeyDown={(e) => mode === 'in' && e.key === 'Enter' && submit()} />
+              onKeyDown={(e) => e.key === 'Enter' && submit()} />
             {mode === 'up' && password && (
               <div className="flex gap-1 mt-1.5">
                 {[...Array(4)].map((_, i) => (
@@ -333,19 +367,6 @@ function LoginScreen() {
                 className={`${TAP_TEXT} px-2 -me-2 text-xs text-[--ink-3] hover:text-ink-fire transition-colors disabled:opacity-40`}>
                 {t.auth.forgotPassword}
               </button>
-            </div>
-          )}
-
-          {mode === 'up' && (
-            <div>
-              <Label>{t.auth.confirmPassword}</Label>
-              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
-                placeholder="••••••••" autoComplete="new-password"
-                onKeyDown={(e) => e.key === 'Enter' && submit()}
-                className={confirm && confirm !== password ? '!border-rp-alert/60 !ring-rp-alert/20' : ''} />
-              {confirm && confirm !== password && (
-                <p className="text-[13px] text-ink-alert mt-1">{t.auth.passwordsMismatch}</p>
-              )}
             </div>
           )}
 
@@ -397,9 +418,21 @@ function LoginScreen() {
   // Read, never consumed, here: this screen re-renders on a failed password or a
   // switch to sign-up, and each of those still needs the bare layout. The
   // Dashboard is what spends the intent, once, when it acts on it.
+  if (startingGuest) {
+    return (
+      <div className="min-h-screen bg-[--surface-0] flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-rp-fire/20 border-t-rp-fire animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <>
-      {hasStartIntent() ? <BareSignIn authCard={authCard} /> : <Landing authCard={authCard} />}
+      {hasStartIntent() ? <BareSignIn authCard={authCard} /> : <Landing authCard={authCard} onStart={(occasion) => {
+        markStartIntent();
+        if (occasion) { markStartOccasion(occasion); track('occasion_chosen', { occasion, from: 'landing' }); }
+        setStartingGuest(true);
+      }} />}
       <DialogHost />
       <ToastHost />
     </>
@@ -421,7 +454,7 @@ function BareSignIn({ authCard }: { authCard: ReactNode }) {
   );
 }
 
-function Landing({ authCard }: { authCard: ReactNode }) {
+function Landing({ authCard, onStart }: { authCard: ReactNode; onStart: (occasion?: OccasionId) => void }) {
   const t = useT();
   const l = t.landing;
 
@@ -476,13 +509,23 @@ function Landing({ authCard }: { authCard: ReactNode }) {
               </span>
             </h1>
             <p className="text-[--ink-2] text-lg sm:text-xl mt-6 max-w-md leading-relaxed">{l.heroSub}</p>
-            <div className="flex flex-wrap items-center gap-3 mt-8">
-              <a href="#signin"><Button className="!px-7 !py-3 !text-base">{l.ctaPrimary}</Button></a>
+            {/* The first question of the generator IS the call to action: answering it is starting. */}
+            <p className="mt-7 font-brand text-xl font-extrabold text-[--ink-1]">{l.chipsTitle}</p>
+            <div className="mt-3 grid grid-cols-2 gap-2 max-w-md" data-testid="start-chips">
+              {SMART_BUILD_OCCASIONS.map((o) => (
+                <button key={o} type="button" onClick={() => onStart(o)}
+                  className="min-h-[52px] rounded-2xl border-2 border-rp-fire/40 bg-[--surface-0] px-3 text-[15px] font-bold text-[--ink-1] hover:bg-rp-fire/10 active:scale-95 transition motion-reduce:transform-none">
+                  {t.dashboard.wizard.occasionOptions[o]}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-3 mt-4">
               <a href={DEMO_URL} target="_blank" rel="noreferrer">
                 <Button variant="ghost" className="!px-6 !py-3 !text-base">{l.tryDemo}</Button>
               </a>
               <a href="#how" className="text-sm font-medium text-[--ink-2] hover:text-[--ink-1] px-3 py-2.5 rounded-xl hover:bg-[--surface-2] transition-colors">{l.ctaSecondary}</a>
             </div>
+            <p className="mt-3 text-[14px] font-medium text-[--ink-2]">{l.noSignupNote}</p>
             {/* The return half of the cross-app link (change: cross-app-discovery).
                 play-web's join screen points here for would-be organizers; this
                 points back for a player who followed a creator link by mistake.
@@ -496,7 +539,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-7 text-xs text-[--ink-3] font-medium">
               <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustNoCc}</span>
               <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustDemo}</span>
-              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN)}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {PAYMENTS_ENABLED ? l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN) : l.trustAllFree}</span>
             </div>
 
             {/* Use-case strip — leads with the launch wedges (events) */}
@@ -553,7 +596,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
             ))}
           </div>
           <div className="text-center mt-10">
-            <a href="#signin"><Button className="!px-8 !py-2.5">{l.ctaPrimary}</Button></a>
+            <Button className="!px-8 !py-2.5" onClick={() => onStart()}>{l.ctaPrimary}</Button>
           </div>
         </div>
 

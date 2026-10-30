@@ -12,7 +12,7 @@ import { useEffect, useRef, useState, type ReactNode, type ChangeEvent, type Dra
 import { createPortal } from 'react-dom';
 import type { Task, TaskStep, TaskType, TaskMedia } from '@rushpoint/shared';
 import {
-  normalizeTriggerMode, parseYouTubeId, youTubeEmbedUrl, isTaskMediaValid,
+  normalizeTriggerMode, parseYouTubeId, youTubeEmbedUrl,
   validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
   locationLeakWarnings,
@@ -62,6 +62,7 @@ import {
 } from '../lib/guidedEditor';
 import { Icon } from './Icon';
 import { ICON_PATHS } from '@rushpoint/shared';
+import { isAcceptedTaskMedia } from '../lib/mediaAccept';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -1299,7 +1300,7 @@ function MediaSection({ task, set, b, gameId, replace }: {
       // The SAME predicate the server enforces. An upload that returns a url the server
       // will not accept used to look like a success and then quietly vanish on the next
       // autosave; the creator finds out now instead.
-      if (!isTaskMediaValid({ kind, url })) { setUploadError(true); return; }
+      if (!isAcceptedTaskMedia({ kind, url })) { setUploadError(true); return; }
       const entry: TaskMedia = { id: uuid(), kind, url };
       const current = latest.current;
       const next = [...(current.media ?? []), entry];
@@ -1378,7 +1379,7 @@ function MediaSection({ task, set, b, gameId, replace }: {
       // outbound request only when the browser genuinely cannot.
       try {
         const viaServer = await ingestTaskMediaFromUrl(url, { gameId: gameId ?? 'draft', taskId: task.id });
-        if (viaServer && isTaskMediaValid(viaServer)) {
+        if (viaServer && isAcceptedTaskMedia(viaServer)) {
           const current = latest.current;
           const next = [...(current.media ?? []), { id: uuid(), ...viaServer } as TaskMedia];
           if (replace) replace({ ...current, media: next });

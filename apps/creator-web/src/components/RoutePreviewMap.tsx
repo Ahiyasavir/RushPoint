@@ -8,6 +8,7 @@ import { resolveMapStyle, isValidCoord, type MapMode, DEFAULT_MAP_MODE } from '@
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
 import { mapLocale } from '../lib/mapLocale';
+import { keepAttributionFolded } from '../lib/mapAttribution';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -79,6 +80,7 @@ export default function RoutePreviewMap({ stages, className = '', fill = false }
       attributionControl: { compact: true },
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    keepAttributionFolded(map.current);
     map.current.on('load', () => drawRouteRef.current());
     map.current.on('styledata', () => drawRouteRef.current()); // re-add the line after a tile-style swap
     return () => { map.current?.remove(); map.current = null; };

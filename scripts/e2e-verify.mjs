@@ -1789,6 +1789,74 @@ async function main() {
 
   }); // scenario: locationless uncapped
 
+  // change: creator-engagement-loop. The creator hears about REAL activity on their own game: the
+  // first team, each player milestone once, the finished run, and a like from someone else. A retried
+  // join writes nothing new, a rehearsal writes nothing, and your own like writes nothing.
+  await scenario('creator notifications (first join, milestone, finished, like; rehearsal and self silent)', async () => {
+    const adminDb = adminSdk.firestore();
+    const ownerUid = creatorCred.user.uid;
+    const notes = async () => (await adminDb.collection(`users/${ownerUid}/notifications`).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const { gameId: gN } = await creator.call('createGame', { title: 'Notify Game', mode: 'individual' });
+    await creator.call('updateGame', { gameId: gN, scoringPreset: 'fixed_points_speed', stages: [
+      { id: 'nt-s', order: 0, title: 'Stage', isFinal: true, tasks: [
+        { id: 'nt-1', title: 'Anywhere', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 2, pointValue: 20, maxConcurrentTeams: 50 } ] },
+    ] });
+
+    // A rehearsal is silent.
+    const { runId: rT, accessCode: cT } = await creator.call('launchRun', { gameId: gN, testDrive: true });
+    const rehearsal = makeParty('notifyRehearsal');
+    await signInAnonymously(rehearsal.auth);
+    await rehearsal.call('joinRun', { code: cT, displayName: 'Rehearsal' });
+    check('a test drive join writes no notification', !(await notes()).some((n) => n.runId === rT), JSON.stringify(await notes()));
+    await creator.call('finalizeRun', { gameId: gN, runId: rT });
+
+    // A real run: the first team, then the 5 milestone, each once.
+    const { runId: rN, accessCode: cN } = await creator.call('launchRun', { gameId: gN });
+    const players = [];
+    for (let i = 0; i < 5; i++) {
+      const p = makeParty(`notifyPlayer${i}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: cN, displayName: `Team ${i}` });
+      players.push(p);
+    }
+    await players[0].call('joinRun', { code: cN, displayName: 'Team 0' }); // retried join
+    const afterJoin = (await notes()).filter((n) => n.runId === rN);
+    check('the first team writes exactly one firstJoin, naming the team',
+      afterJoin.filter((n) => n.kind === 'firstJoin').length === 1 && afterJoin.find((n) => n.kind === 'firstJoin')?.params?.team === 'Team 0',
+      JSON.stringify(afterJoin));
+    check('passing 5 players writes the milestone once', afterJoin.filter((n) => n.kind === 'players' && n.params?.n === 5).length === 1, JSON.stringify(afterJoin));
+    check('every item has a parseable createdAt', afterJoin.every((n) => Number.isFinite(Date.parse(n.createdAt))));
+
+    // Finished: the recap is ready.
+    await creator.call('startTeams', { gameId: gN, runId: rN });
+    await creator.call('finalizeRun', { gameId: gN, runId: rN });
+    const fin = (await notes()).filter((n) => n.kind === 'finished' && n.runId === rN);
+    check('a finalized real run writes one finished item', fin.length === 1 && fin[0].params?.teams === 5, JSON.stringify(fin));
+    check('the finalized rehearsal writes none', !(await notes()).some((n) => n.kind === 'finished' && n.runId === rT));
+
+    // Likes: someone else's counts, coalesced; your own does not.
+    await creator.call('publishGame', { gameId: gN, visibility: 'public' });
+    await creator.call('setPublicLike', { kind: 'game', itemId: gN, liked: true });
+    check('your own like writes nothing', !(await notes()).some((n) => n.kind === 'liked' && n.gameId === gN));
+    for (let i = 0; i < 2; i++) {
+      const fan = makeParty(`notifyFan${i}`);
+      await signInAnonymously(fan.auth);
+      await fan.call('setPublicLike', { kind: 'game', itemId: gN, liked: true });
+    }
+    const likes = (await notes()).filter((n) => n.kind === 'liked' && n.gameId === gN);
+    check('two likes from others are ONE item counting 2', likes.length === 1 && likes[0].count === 2, JSON.stringify(likes));
+
+    // The event date: stored normalised, junk refused out loud, null clears.
+    await creator.call('updateGame', { gameId: gN, eventAt: '2026-11-01T10:00:00+02:00' });
+    const withDate = (await adminDb.doc(`users/${ownerUid}/games/${gN}`).get()).data();
+    check('eventAt is stored as a normalised ISO instant', withDate?.eventAt === '2026-11-01T08:00:00.000Z', String(withDate?.eventAt));
+    await expectError('eventAt junk is refused', creator.call('updateGame', { gameId: gN, eventAt: 'next friday' }), { codeIn: ['functions/invalid-argument', 'invalid-argument'] });
+    await creator.call('updateGame', { gameId: gN, eventAt: null });
+    const cleared = (await adminDb.doc(`users/${ownerUid}/games/${gN}`).get()).data();
+    check('eventAt null clears the date', cleared?.eventAt === undefined, String(cleared?.eventAt));
+  }); // scenario: creator notifications
+
   await scenario('paid hints (reveal once, charge once)', async () => {
 
   // ── 13. Paid hints (reveal text, charge once, idempotent) ───────────────────
@@ -15402,6 +15470,39 @@ async function main() {
     await expectError('startPlayerSession: a finished run makes no more identities',
       makeParty('session-fallback-late').call('startPlayerSession', { code: sc }), { codeIn: ['functions/failed-precondition'] });
   }); // scenario: startPlayerSession
+
+  await scenario('guest games follow the creator into an existing account', async () => {
+    const guest = makeParty('claimGuest');
+    await signInAnonymously(guest.auth);
+    const guestUid = guest.auth.currentUser.uid;
+    const { gameId } = await guest.call('createGame', { title: 'Guest game' });
+    const link = await guest.call('createGameShareLink', { gameId });
+    const { code } = await guest.call('createGuestClaim', {});
+    check('a guest gets a claim code', typeof code === 'string' && code.length === 32);
+    await expectError('a guest cannot spend a claim', guest.call('claimGuestGames', { code }));
+
+    const acct = makeParty('claimAcct');
+    await signInWithCustomToken(acct.auth, await adminSdk.auth().createCustomToken('e2e-claim-account'));
+    await expectError('an account cannot mint a claim', acct.call('createGuestClaim', {}));
+    await expectError('an unknown code moves nothing', acct.call('claimGuestGames', { code: 'x'.repeat(32) }));
+    const first = await acct.call('claimGuestGames', { code });
+    check('the game moved to the account', first.moved.includes(gameId), JSON.stringify(first));
+    const fs = adminSdk.firestore();
+    const there = await fs.doc(`users/e2e-claim-account/games/${gameId}`).get();
+    check('the game is in the account, under the same id, owned by it', there.exists && there.data().ownerUid === 'e2e-claim-account');
+    check('the game keeps what was built', there.data().title === 'Guest game');
+    check('the guest copy is gone', !(await fs.doc(`users/${guestUid}/games/${gameId}`).get()).exists);
+    const listed = await acct.call('listGames', {});
+    check('listGames shows it', JSON.stringify(listed).includes(gameId));
+    const token = link?.link?.token ?? link?.link?.id;
+    check('the share link exists', !!token);
+    check('a share link already sent still resolves', (await fs.doc(`gameShareLinks/${token}`).get()).data()?.ownerUid === 'e2e-claim-account');
+    const again = await acct.call('claimGuestGames', { code });
+    check('spending it twice is harmless', Array.isArray(again.moved) && again.moved.length === 0);
+    const thief = makeParty('claimThief');
+    await signInWithCustomToken(thief.auth, await adminSdk.auth().createCustomToken('e2e-claim-thief'));
+    await expectError('one code never serves a second account', thief.call('claimGuestGames', { code }));
+  });
 
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();

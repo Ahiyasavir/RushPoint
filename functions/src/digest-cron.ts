@@ -34,6 +34,22 @@ async function main(): Promise<void> {
   if (!admin.apps.length) admin.initializeApp();
   const db = admin.firestore();
 
+  // The creators' event countdown items (change: creator-engagement-loop). First and on its own: a
+  // failure here must never cost the operator their digest, and vice versa.
+  try {
+    const { writeEventReminders } = await import('./eventReminders');
+    const { sendCreatorEmail } = await import('./runs/runSummaryEmail');
+    const n = await writeEventReminders(db, new Date(), {
+      emailOf: (uid) => admin.auth().getUser(uid).then((u) => u.email ?? null, () => null),
+      send: sendCreatorEmail,
+    });
+    // eslint-disable-next-line no-console
+    console.log(`digest-cron: ${n} event reminder(s) written`);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('digest-cron: event reminders FAILED', e);
+  }
+
   const timeZone = process.env.RUN_DIGEST_TIMEZONE || DEFAULT_TZ;
   const operatorUid = process.env.RUN_DIGEST_OWNER_UID || '';
   const { startIso, endIso, label } = previousLocalDayBounds(new Date(), timeZone);

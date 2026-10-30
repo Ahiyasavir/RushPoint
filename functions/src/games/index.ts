@@ -78,6 +78,7 @@ import {
   pruneWizardSteps,
   // Benched missions (change: mission-card-actions) — never published.
   playableTasks,
+  normalizeEventAt,
 } from '@rushpoint/shared';
 import { assertGameNotDeleted, assertNotShareLocked, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
 // Read-only share links for an unpublished game (change: game-share-link).
@@ -420,7 +421,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
     autoStartLateJoiners, autoApproveAllMedia, requireAllMembersOnline,
-    instructions, pinnedFirst, wizardSteps,
+    instructions, pinnedFirst, wizardSteps, eventAt,
   } = data as UpdateGamePayload;
   const { staffDefaults } = data as { staffDefaults?: unknown };
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
@@ -451,6 +452,12 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (title !== undefined)              updates.title = stripUnsafeDisplayChars(title).trim();
   if (description !== undefined)        updates.description = description ? stripUnsafeProseChars(description).trim() : description;
   if (mode !== undefined)               updates.mode = mode;
+  // The event date (change: creator-engagement-loop): null or '' clears it, junk is refused out loud.
+  if (eventAt !== undefined) {
+    const ev = normalizeEventAt(eventAt);
+    if (!ev) throw new functions.https.HttpsError('invalid-argument', 'eventAt must be a date');
+    updates.eventAt = ev.value ?? (admin.firestore.FieldValue.delete() as unknown as undefined);
+  }
   if (stages !== undefined) {
     // Save-time validation. Unlockable tasks (change: unlockable-tasks): the
     // per-stage prerequisite graph must be sound — no self-reference, no

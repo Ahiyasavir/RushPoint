@@ -161,6 +161,9 @@ const homePages = defineCollection({
     /** The curiosity gap beside the hero map: a challenge, not a caption. */
     heroChallenge: z.string(),
     /** The door for a visitor who came to PLAY, shown under the hero CTAs. */
+    heroStartTitle: z.string(),
+    heroOccasions: z.array(z.object({ id: z.string(), label: z.string() })),
+    heroStory: z.array(z.object({ icon: z.string(), title: z.string(), detail: z.string() })),
     heroJoinPrompt: z.string(),
     heroJoinAction: z.string(),
     /** Friction reduction, immediately above the playable mission. */

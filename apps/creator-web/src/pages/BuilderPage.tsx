@@ -1,4 +1,6 @@
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { askToSaveAccount } from '../components/SaveAccountSheet';
+import { accountGateFor, isGuest, guestSaveMoment, readGuestEdits, bumpGuestEdits, softAskSeen, markSoftAskSeen } from '../lib/guestCreator';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { isPlacedCoord } from '../lib/mapAnchor';
 // Keeping a popover inside the viewport (change: popover-stays-on-screen) — the
@@ -100,7 +102,7 @@ import {
   applyRegeneratedMission, seedFor,
 } from '../lib/regenerateMission';
 import { readOfferedKeys, recordOfferedKey } from '../lib/regenerateHistory';
-import { readTaste, writeTaste, recordTaste, tasteTagsForTask, recordLaunchTaste, bankKeyForTask } from '../lib/tasteProfile';
+import { readTaste, writeTaste, recordTaste, tasteTagsForTask, recordLaunchTaste, bankKeyForTask, swapGameFit } from '../lib/tasteProfile';
 import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib/gamePresentation';
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 // Builder header stage/mission breadcrumb (change: builder-clarity-mission-hierarchy).
@@ -117,7 +119,12 @@ import {
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { Icon, type IconName } from '../components/Icon';
 import SetupFlow from '../components/SetupFlow';
-import { wantsSetupFlow, setupFlowSteps, keepSeenSentenceSteps, withSwappedSteps, confirmEditedSamples } from '../lib/quickSetup';
+import { returnsToReady } from '../lib/walkEnding';
+import MissionFeed from '../components/MissionFeed';
+import { wantsMissionFeed } from '../lib/quickStart';
+import BuildingMoment from '../components/BuildingMoment';
+import { track } from '../lib/track';
+import { OPEN_SETUP_NAV_STATE, wantsSetupFlow, setupFlowSteps, keepSeenSentenceSteps, withSwappedSteps, confirmEditedSamples } from '../lib/quickSetup';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -331,6 +338,7 @@ function regenerateMissionIn(game: Game, source: Task | undefined, uid: string |
   void loadMissionBank();
   void loadMissionStats();
   const offeredKeys = readOfferedKeys(uid, game.id, source.id);
+  const fit = swapGameFit(game, source.id, missionBankNow());
   const picked = chooseRegeneratedMission({
     bank: missionBankNow(),
     profile: missionTagProfile(source, role),
@@ -340,6 +348,8 @@ function regenerateMissionIn(game: Game, source: Task | undefined, uid: string |
     seed: seedFor(source.id, offeredKeys.length),
     taste: readTaste(uid),
     missionStats: missionStatsNow(),
+    inGameKeys: fit.inGameKeys,
+    audiences: fit.audiences,
   });
   if (!picked) { onNothingLeft(); return null; }
 
@@ -386,6 +396,15 @@ export default function BuilderPage() {
   // open by itself, before the ordinary builder is ever shown. Read in the same breath as the stamp
   // above, because that stamp is consumed (replaced) right after.
   const openSetupOnArrival = useRef(wantsSetupFlow(location.state));
+  // Fresh from the composer the mission feed comes first, once: the stamp is spent below, because
+  // React Router state survives a reload.
+  const openFeedOnArrival = useRef(wantsMissionFeed(location.state));
+  const arrivedWithPlan = useRef(justCreated.current || openSetupOnArrival.current || openFeedOnArrival.current);
+  const readyChecked = useRef(false);
+  const [feedOpen, setFeedOpen] = useState(() => wantsMissionFeed(location.state));
+  const buildStartedAt = useRef((location.state as { rpBuildStartedAt?: unknown } | null)?.rpBuildStartedAt);
+  const feedOpenRef = useRef(false);
+  feedOpenRef.current = feedOpen;
   // Consume the stamp once read (change: quick-setup-reachable). Router state lives
   // in history.state, which SURVIVES a reload, so leaving it in place deferred the
   // invitation on every refresh too. The ref above keeps this mount's answer.
@@ -552,6 +571,13 @@ export default function BuilderPage() {
       if (seq === saveSeq.current) {
         savedSnapshot.current = snap;
         setSaveError(null);
+        // A guest's free edits (lib/guestCreator): after GUEST_FREE_EDITS saved edits, keeping on
+        // building needs an account, so a guest who declines loses at most a few minutes of work.
+        // Swapping in the feed is tasting, not building: it never spends them.
+        if (guestRef.current && !feedOpenRef.current) {
+          const edits = bumpGuestEdits(g.id);
+          if (guestSaveMoment({ guest: true, edits, softSeen: true }) === 'required') askRequiredSave();
+        }
         // If the user kept editing during the round-trip, stay 'unsaved'.
         const latest = gameRef.current;
         setStatus(latest && serializeGame(latest) !== snap ? 'unsaved' : 'saved');
@@ -579,6 +605,25 @@ export default function BuilderPage() {
       return false;
     }
   }, []);
+
+  // ── Guest creators (change: creator-acquisition-and-return) ──────────────────
+  // Asked softly once when the composed game first opens, then required after the free edits.
+  const guest = isGuest(user);
+  const guestRef = useRef(guest);
+  guestRef.current = guest;
+  const requiredAsking = useRef(false);
+  function askRequiredSave() {
+    if (requiredAsking.current) return;
+    requiredAsking.current = true;
+    void askToSaveAccount('continue', { required: true }).finally(() => { requiredAsking.current = false; });
+  }
+  // Closing the tab as a guest: the browser's own "leave site?" prompt, the last safety net.
+  useEffect(() => {
+    if (!guest) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [guest]);
 
   // Debounced auto-save: mark dirty immediately, persist after a short pause.
   useEffect(() => {
@@ -780,7 +825,9 @@ export default function BuilderPage() {
     }
   }
 
-  async function saveAndLaunch(testDrive = false) {
+  // `fromWalk`: the setup walk has just told the creator a test run works before everything is ready,
+  // so its unfinished-game warning would only ask again what they already chose (research 29.10).
+  async function saveAndLaunch(testDrive = false, { fromWalk = false }: { fromWalk?: boolean } = {}) {
     if (!game) return;
     // A TEST DRIVE opens the participant app, not the organizer console
     // (change: test-drive-straight-to-play). "בדיקה" means "show me my game the
@@ -809,7 +856,7 @@ export default function BuilderPage() {
         await dialog.alert(b.launchBlockedSeeReadiness);
         return;
       }
-      if (soft.length > 0 || quickSetupMissing.length > 0) {
+      if (!fromWalk && (soft.length > 0 || quickSetupMissing.length > 0)) {
         const ok = await dialog.confirm(
           b.testDriveNotReadyBody(soft.length + quickSetupMissing.length),
           b.testDriveNotReadyCta,
@@ -874,6 +921,11 @@ export default function BuilderPage() {
     // and jumped to it, while the teams joined the run launched two days earlier. A game that is
     // already running is OPENED. Only the real launch asks; a test run never does, and so never
     // needs this await before its popup opens below.
+    // A guest saves the game to an account before it goes out to real people; a test drive never asks
+    // (change: creator-acquisition-and-return). After saving, the launch simply carries on.
+    if (accountGateFor(testDrive ? 'testDrive' : 'launch', isGuest(user)) === 'needsAccount') {
+      if (!(await askToSaveAccount('launch'))) return;
+    }
     if (!testDrive) {
       const choice = await decideLaunchOverLiveRun({
         gameId: game.id,
@@ -991,14 +1043,62 @@ export default function BuilderPage() {
   // The full-screen setup walk (change: setup-flow-full-screen) is how Quick Setup is done now: every
   // entry that used to start the step card (the invitation, the menu, the launch refusal) opens it,
   // and the composer opens it on arrival. `resume` decides where it starts (lib/setupFlow firstBeat).
-  const [setupFlow, setSetupFlow] = useState<{ resume: boolean } | null>(null);
+  const [setupFlow, setSetupFlow] = useState<{ resume: boolean; ready?: boolean } | null>(null);
   const setupOpen = setupFlow !== null || qsState.status === 'running';
+  const swapMission = (stageId: string, taskId: string): boolean => {
+    if (!game) return false;
+    const src = game.stages.find((st) => st.id === stageId)?.tasks.find((x) => x.id === taskId);
+    const swap = regenerateMissionIn(game, src, user?.uid, () => { void dialog.alert(t.builder.regenerateNothingLeft); });
+    if (!swap) return false;
+    // The swapped-in mission keeps the slot's id: the old mission's steps go, its own come.
+    seenSetupSteps.current = seenSetupSteps.current.filter((s) => s.taskId !== taskId);
+    setGame(withSwappedSteps({
+      ...game,
+      stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === taskId ? swap.task : x) }),
+    }, taskId, swap.steps));
+    return true;
+  };
+  const guestGameId = guest ? game?.id : undefined;
+  // One thing on screen at a time: nothing floats over an open mission, or over the save sheet.
+  const missionOpen = new URLSearchParams(location.search).has('task');
+  const [saveAsking, setSaveAsking] = useState(false);
+  useEffect(() => {
+    if (!guestGameId) return;
+    const moment = guestSaveMoment({ guest: true, edits: readGuestEdits(guestGameId), softSeen: softAskSeen(guestGameId) });
+    if (moment === 'required') { askRequiredSave(); return; }
+    // Let them read their game first: the soft ask waits until the reveal and the walk are closed.
+    if (moment !== 'soft' || setupOpen || feedOpen || missionOpen) return;
+    const timer = window.setTimeout(() => {
+      markSoftAskSeen(guestGameId);
+      setSaveAsking(true);
+      void askToSaveAccount('reveal').finally(() => setSaveAsking(false));
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [guestGameId, setupOpen, feedOpen, missionOpen]);
   useEffect(() => {
     if (!game || !openSetupOnArrival.current) return;
     openSetupOnArrival.current = false;
+    if (openFeedOnArrival.current) {
+      openFeedOnArrival.current = false;
+      setFeedOpen(true);
+      nav(`${location.pathname}${location.search}`, { replace: true, state: OPEN_SETUP_NAV_STATE });
+      return;
+    }
     // Always, even with nothing to fill: the plan and the route at the end are the point of arriving
     // from the composer (Ahiya: "the game is ready, then it shows him the plan"), not only the fields.
     setSetupFlow({ resume: false });
+  }, [game]);
+  // Coming back to a game that waits for its date (change: creator-stays-to-the-end): once a visit, the
+  // ready screen with its countdown, or the walk when something is still open. Then they came to edit.
+  useEffect(() => {
+    if (!game || readyChecked.current) return;
+    readyChecked.current = true;
+    const key = `rp-ready-seen:${game.id}`;
+    let seen = arrivedWithPlan.current;
+    try { seen = seen || sessionStorage.getItem(key) !== null; sessionStorage.setItem(key, '1'); } catch { /* a blocked store only means it shows again */ }
+    if (returnsToReady({ gameId, eventAt: game.eventAt, nowIso: new Date().toISOString(), path: location.pathname, search: location.search, seen })) {
+      setSetupFlow({ resume: true, ready: true });
+    }
   }, [game]);
   // WHICH mission the flow is on, for the guided mission editor (change:
   // quick-setup-guided-editor). Resolved from the step itself so it is right the
@@ -1035,7 +1135,7 @@ export default function BuilderPage() {
   //    declares ONLY its own eligibility; `GuidanceProvider` decides which single
   //    one may be on screen, using the order in lib/builderGuidance.ts. Declared
   //    here, above the early returns, because these are hooks (React #300).
-  const qsWantsScreen = setupOpen || qsState.status === 'welcome' || Boolean(qsStep) || qsCelebrating;
+  const qsWantsScreen = setupOpen || feedOpen || qsState.status === 'welcome' || Boolean(qsStep) || qsCelebrating;
   const qsVisible = useGuidanceSlot('quick-setup', qsWantsScreen);
   const nudgeVisible = useGuidanceSlot(
     'ready-nudge',
@@ -1265,7 +1365,7 @@ export default function BuilderPage() {
           practice that makes this the SCRATCH creator's explainer. */}
       {/* The spotlight no longer needs telling what else is on screen — it declares
           candidacy and GuidanceProvider answers (change: builder-guidance-arbiter). */}
-      <BuilderSpotlight />
+      <BuilderSpotlight paused={missionOpen || saveAsking} />
       {/* הקמה מהירה: the floating step bar and the launch refusal
           (change: quick-setup-wizard). Both are fixed-position, so they stay legible
           over the mission drawer — which is exactly where the creator is while they
@@ -1273,23 +1373,24 @@ export default function BuilderPage() {
       {/* The one-time invitation. Offered on a freshly cloned template rather than
           waiting to be discovered — and it moves nothing on the canvas until the
           creator accepts, so declining costs exactly one click. */}
+      {feedOpen && !game && <BuildingMoment />}
+      {feedOpen && game && (
+        <MissionFeed
+          game={game}
+          buildStartedAt={buildStartedAt.current}
+          onSwap={swapMission}
+          onTitle={(title) => setGame({ ...game, title })}
+          onFlush={save}
+          onDone={() => { setFeedOpen(false); setSetupFlow({ resume: false }); }}
+        />
+      )}
       {setupOpen && game && (
         <SetupFlow
           game={game}
           steps={setupSteps}
           resume={setupFlow?.resume !== false}
-          onRegenerate={(stageId, taskId) => {
-            const src = game.stages.find((st) => st.id === stageId)?.tasks.find((x) => x.id === taskId);
-            const swap = regenerateMissionIn(game, src, user?.uid, () => { void dialog.alert(t.builder.regenerateNothingLeft); });
-            if (!swap) return false;
-            // The swapped-in mission keeps the slot's id: the old mission's steps go, its own come.
-            seenSetupSteps.current = seenSetupSteps.current.filter((s) => s.taskId !== taskId);
-            setGame(withSwappedSteps({
-              ...game,
-              stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === taskId ? swap.task : x) }),
-            }, taskId, swap.steps));
-            return true;
-          }}
+          startReady={setupFlow?.ready === true}
+          onRegenerate={swapMission}
           onTaskChange={(stageId, task) => setGame({
             ...game,
             stages: game.stages.map((st) => st.id !== stageId ? st : { ...st, tasks: st.tasks.map((x) => x.id === task.id ? task : x) }),
@@ -1297,8 +1398,13 @@ export default function BuilderPage() {
           onGameChange={setGame}
           gameAnchors={(game.stages ?? []).flatMap((st) => st.tasks ?? []).map((x) => x.coordinates).filter(isPlacedCoord)}
           onDone={closeSetupFlow}
-          onLaunch={() => { closeSetupFlow(); void saveAndLaunch(false); }}
+          onFlush={save}
+          onHome={() => { closeSetupFlow(); void Promise.resolve(save()).finally(() => nav('/')); }}
+          onSaveAccount={isGuest(user) ? () => { void askToSaveAccount('bar'); } : undefined}
+          onLaunch={() => { track('launch_pressed'); closeSetupFlow(); void saveAndLaunch(false); }}
+          onTestDrive={() => { track('test_drive_pressed'); void saveAndLaunch(true, { fromWalk: true }); }}
           onEditMyself={(stageId, taskId) => {
+            track('walk_left');
             closeSetupFlow();
             if (stageId && taskId) goToQuickSetupStep({ id: 'edit-myself', stageId, taskId, targetFieldPath: 'title', instructionPrompt: '', isRequired: false });
           }}

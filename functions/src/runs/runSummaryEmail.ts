@@ -58,6 +58,28 @@ export async function sendDigestEmail(
 }
 
 /**
+ * An email to a creator rather than to the operator. Goes out only from the address in CREATOR_EMAIL_FROM:
+ * the Resend sandbox sender delivers to the account owner alone, so without a verified domain a send to
+ * anyone else is refused. Says whether it left, so the caller can try again.
+ */
+export async function sendCreatorEmail(
+  composed: { subject: string; text: string; html: string },
+  recipient: string,
+): Promise<boolean> {
+  const from = process.env.CREATOR_EMAIL_FROM;
+  if (!from) {
+    logBestEffort('creator.email.noSender', { subject: composed.subject }, 'no CREATOR_EMAIL_FROM');
+    return false;
+  }
+  try {
+    return await deliver(composed, recipient, from);
+  } catch (e) {
+    logBestEffort('creator.email.failed', { subject: composed.subject }, e);
+    return false;
+  }
+}
+
+/**
  * The one place an email actually leaves the process. Best-effort and never
  * throws to its caller. Emits a breadcrumb on EVERY path — including the disabled
  * and no-credential paths — which is what makes "did this code even run?"
@@ -68,11 +90,12 @@ export async function sendDigestEmail(
 async function deliver(
   { subject, text, html }: { subject: string; text: string; html: string },
   recipient: string | null | undefined,
-): Promise<void> {
+  sender?: string,
+): Promise<boolean> {
   if (!RUN_SUMMARY_EMAIL_ENABLED || !recipient) {
     // Disabled or no recipient resolved — nothing to send.
     logBestEffort('runSummary.email.skipped', { subject }, 'disabled or no recipient');
-    return;
+    return false;
   }
 
   const apiKey = process.env.RESEND_API_KEY;
@@ -80,10 +103,10 @@ async function deliver(
     // No provider credential (the emulator / e2e env): a pure log-and-return. No
     // socket is opened, so tests never hit the network.
     logBestEffort('runSummary.email.noProvider', { subject }, 'no RESEND_API_KEY');
-    return;
+    return false;
   }
 
-  const from = process.env.RUN_SUMMARY_EMAIL_FROM ?? DEFAULT_FROM;
+  const from = sender ?? process.env.RUN_SUMMARY_EMAIL_FROM ?? DEFAULT_FROM;
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -95,7 +118,8 @@ async function deliver(
 
   if (!res.ok) {
     logBestEffort('runSummary.email.failed', { subject, status: res.status }, `provider ${res.status}`);
-    return;
+    return false;
   }
   logBestEffortOk('runSummary.email.sent', { subject });
+  return true;
 }

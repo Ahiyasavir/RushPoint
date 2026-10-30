@@ -291,7 +291,23 @@ export function setupResume(game: QuickSetupGame | null | undefined): { pct: num
   if (steps.length === 0) return null;
   const done = steps.filter((s) => isWizardStepConfigured(game, s)).length;
   const left = steps.length - done;
-  return left === 0 ? null : { pct: Math.round((100 * (1 + done)) / (1 + steps.length)), left };
+  const missions = (game.stages ?? []).reduce((n, s) => n + (s.tasks?.length ?? 0), 0);
+  return left === 0 ? null : { pct: setupReadinessPct({ missions, done, required: steps.length }), left };
+}
+
+/**
+ * How ready a game reads, in the walk and on the dashboard (research 29.10). Every mission already
+ * in the game is a step done, because building it WAS the work: a composed game with 16 missions and
+ * 4 open pins is 80%, not the 20% it read when the whole build counted as one step. An empty game
+ * still counts its build as one. Never 100 while anything is open. Total: junk reads as zero.
+ */
+export function setupReadinessPct({ missions, done, required }: { missions: number; done: number; required: number }): number {
+  const n = (v: number) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  const total = n(required);
+  const finished = Math.min(n(done), total);
+  if (finished >= total) return 100;
+  const built = Math.max(1, n(missions));
+  return Math.min(99, Math.round((100 * (built + finished)) / (built + total)));
 }
 
 /** The one game the dashboard offers to resume: the most recently touched with setup still open. */

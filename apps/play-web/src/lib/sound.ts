@@ -8,6 +8,7 @@
 // throw, never a queued-then-replayed cue.
 import { haptic } from './haptics';
 import { loadSound } from '../store';
+import { playReward, warmReward, type RewardSound } from './rewardSound';
 
 // ── Pure, DOM-free core (unit-tested in scripts/test-sound.ts) ───────────────
 
@@ -43,6 +44,12 @@ export const ENVELOPES: Record<Cue, Envelope> = {
   // Time up: a falling buzz.
   timeUp: { freqs: [440, 330, 220],  durationMs: 420, type: 'sawtooth', gain: 0.18 },
 };
+
+/**
+ * The cues that say "you did it" are real struck sounds (rewardSound.ts). Their ENVELOPES stay as the
+ * fallback, so a device that cannot build the graph still hears something.
+ */
+const REWARD_CUES: Partial<Record<Cue, RewardSound>> = { task: 'task', stage: 'stage', rankUp: 'rankUp' };
 
 /** Haptic pattern paired with each cue (see lib/haptics.ts). */
 export const CUE_HAPTIC: Record<Cue, 'tap' | 'success' | 'warn' | 'error'> = {
@@ -111,7 +118,10 @@ export function unlockAudio(): void {
   try {
     const Ctor = audioCtor();
     if (!Ctor) return;
-    if (!ctx) ctx = new Ctor();
+    if (!ctx) {
+      ctx = new Ctor({ latencyHint: 'interactive' });
+      warmReward(ctx);
+    }
     if (ctx.state === 'suspended') void ctx.resume();
   } catch {
     /* unsupported / blocked — silent no-op */
@@ -125,6 +135,10 @@ export function unlockAudio(): void {
 export function playCue(cue: Cue): void {
   try {
     if (!ctx || ctx.state !== 'running') return; // not unlocked → drop, don't queue
+    const reward = REWARD_CUES[cue];
+    if (reward) {
+      try { playReward(ctx, reward); return; } catch { /* fall through to the plain envelope */ }
+    }
     const env = ENVELOPES[cue];
     const now = ctx.currentTime;
     const total = env.durationMs / 1000;

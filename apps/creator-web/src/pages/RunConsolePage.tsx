@@ -35,6 +35,7 @@ import {
 // submission, any review status — reuses the same flatten the review queue uses
 // so the two views can never disagree about what counts as "this team's media".
 import { buildRunMediaGallery } from '../lib/runMediaGallery';
+import MomentsFeed from '../components/MomentsFeed';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
@@ -91,6 +92,7 @@ import { resolveTeamLabel, resolveTaskLabel, resolveEnumLabel, shortId } from '.
 // Clarity + navigation (change: run-console-clarity): what needs the organizer
 // right now, and the copy contract every panel renders through. Both pure.
 import { buildRunSignals, type RunSignal } from '../lib/runConsoleSignals';
+import { endRunCall } from '../lib/endRunCall';
 // Live-stream freshness (change: run-console-live-stream-resilience): the pure,
 // total "is the teams board stale" verdict, so a failed poll surfaces instead of
 // freezing the board silently.
@@ -423,6 +425,12 @@ export default function RunConsolePage() {
   // the browser's back button closes it.
   const [searchParams, setSearchParams] = useSearchParams();
   const openTeamId = searchParams.get('team');
+  // The moments feed lives in the URL too (?moments=1), so the "finished" notification can open it and
+  // the back button closes it (change: creator-engagement-loop).
+  const momentsOpen = searchParams.get('moments') === '1';
+  const setMoments = useCallback((on: boolean) => {
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); if (on) n.set('moments', '1'); else n.delete('moments'); return n; });
+  }, [setSearchParams]);
   const openTeamPage = useCallback((id: string) => {
     setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('team', id); return n; });
   }, [setSearchParams]);
@@ -941,7 +949,12 @@ export default function RunConsolePage() {
       : t.runConsole.finalizeConfirmMessage;
     if (!(await dialog.confirm(message, t.runConsole.finalizeConfirmTitle, true))) return;
     setBusy(true);
-    try { await finalizeRun({ gameId: gameId!, runId: runId! }); toast.success(t.runConsole.finalizedRun); }
+    try {
+      await finalizeRun({ gameId: gameId!, runId: runId! });
+      toast.success(t.runConsole.finalizedRun);
+      // The end is the peak: open the run's moments straight away when there are any.
+      if (mediaGalleryRows.length > 0) setMoments(true);
+    }
     catch { await dialog.alert(t.runConsole.finalizeFailed); }
     finally { setBusy(false); }
   }
@@ -1205,6 +1218,9 @@ export default function RunConsolePage() {
   // Pure verdict, rendered as one chip row under the header so it is visible
   // whatever section the rail is showing. A quiet run produces [] and this
   // renders nothing at all.
+  const startedCount = teams.filter((tm) => tm.launched).length;
+  const finishedCount = teams.filter((tm) => tm.launched && tm.finished).length;
+  const endCall = endRunCall({ status: run.status, started: startedCount, finished: finishedCount });
   const signals = buildRunSignals({
     status: runStatus,
     alertCount: alerts.length,
@@ -2191,7 +2207,7 @@ export default function RunConsolePage() {
           />
         );
       case 'feed': return <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} items={feedItems} />;
-      case 'mediaGallery': return <RunMediaGalleryConsole rows={mediaGalleryRows} taskTitles={taskTitles} />;
+      case 'mediaGallery': return <RunMediaGalleryConsole rows={mediaGalleryRows} taskTitles={taskTitles} onOpenMoments={() => setMoments(true)} />;
       case 'chat':
         return (
           <ChatConsole
@@ -2306,6 +2322,29 @@ export default function RunConsolePage() {
           teams panel, so the console could say "6 teams" while three of them
           were stuck and a queue that was BLOCKING players sat off screen. A
           quiet run produces no signals and this renders nothing at all. */}
+      {/* ── THE CALL TO END ────────────────────────────────────────────────────
+          Ahiya, 30.10: hosts do not end their runs. Once the teams are done, ending is the reveal,
+          not a risk, so it moves to the top and says what it gives (lib/endRunCall.ts). */}
+      {endCall !== 'none' && (
+        <div data-testid="end-run-call" className={`rounded-2xl p-4 sm:p-5 flex flex-wrap items-center gap-4 ${endCall === 'ready'
+          ? 'bg-gradient-to-l from-rp-fire to-rp-amber text-white shadow-lg shadow-rp-fire/30'
+          : 'border-2 border-rp-fire/40 bg-rp-fire/8'}`}>
+          <Icon name="trophy" className={`w-9 h-9 shrink-0 ${endCall === 'ready' ? 'text-white' : 'text-ink-fire'}`} aria-hidden />
+          <div className="flex-1 min-w-[14rem]">
+            <div className={`text-[17px] font-extrabold leading-snug ${endCall === 'ready' ? 'text-white' : 'text-[--ink-1]'}`}>
+              {endCall === 'ready' ? rc.endCallReady : rc.endCallMostly({ n: finishedCount, total: startedCount })}
+            </div>
+            <p className={`text-[14px] mt-1 leading-snug ${endCall === 'ready' ? 'text-white/90' : 'text-[--ink-2]'}`}>{rc.endCallSub}</p>
+          </div>
+          <button type="button" disabled={busy} onClick={finalize}
+            className={`min-h-[48px] px-6 rounded-2xl text-[16px] font-extrabold transition-transform active:scale-95 disabled:opacity-60 ${endCall === 'ready'
+              ? 'bg-white text-ink-fire shadow-md'
+              : 'bg-gradient-to-l from-rp-fire to-rp-amber text-white shadow-md shadow-rp-fire/30'}`}>
+            {rc.endCallCta}
+          </button>
+        </div>
+      )}
+
       {signals.length > 0 && (
         <nav aria-label={rc.signalsTitle} className="flex flex-wrap items-center gap-2">
           {/* A raised SOS already gets an audio cue + a tab title flash, but the
@@ -2483,6 +2522,12 @@ export default function RunConsolePage() {
             <PanelLanes layout={sectionLayout} render={renderPanel} />
           </section>
         </div>
+      )}
+
+      {momentsOpen && (
+        <MomentsFeed runId={runId ?? ''} gameTitle={gameTitle} rows={mediaGalleryRows}
+          taskLabel={(id) => resolveTaskLabel(id, taskTitles, (x) => rc.unknownTask({ id: x }))}
+          onClose={() => setMoments(false)} onNextGame={() => nav('/')} />
       )}
 
       {openTeamId && (() => {
@@ -3834,8 +3879,9 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
 // downloaded.
 const MEDIA_DOWNLOAD_DELAY_MS = 250;
 
-function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; taskTitles: ReadonlyMap<string, string> }) {
+function RunMediaGalleryConsole({ rows, taskTitles, onOpenMoments }: { rows: SubmissionRow[]; taskTitles: ReadonlyMap<string, string>; onOpenMoments: () => void }) {
   const rc = useT().runConsole;
+  const tm = useT().moments;
   const [downloading, setDownloading] = useState(false);
   const taskLabel = (taskId: string) => resolveTaskLabel(taskId, taskTitles, (id) => rc.unknownTask({ id }));
 
@@ -3900,14 +3946,19 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
       panel="mediaGallery"
       badge={rows.length > 0 ? <Badge>{rc.mediaGalleryCount({ n: rows.length })}</Badge> : undefined}
       actions={readyCount > 0 ? (
-        <Button
-          variant="subtle"
-          className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
-          disabled={downloading}
-          onClick={() => void downloadAll()}
-        >
-          {rc.mediaGalleryDownloadAll({ n: readyCount })}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button className="min-h-0 px-3 py-1.5 text-xs rounded-lg" onClick={onOpenMoments}>
+            <Icon name="play" className="w-3.5 h-3.5 me-1" />{tm.open}
+          </Button>
+          <Button
+            variant="subtle"
+            className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
+            disabled={downloading}
+            onClick={() => void downloadAll()}
+          >
+            {rc.mediaGalleryDownloadAll({ n: readyCount })}
+          </Button>
+        </div>
       ) : undefined}
     >
       {rows.length === 0
