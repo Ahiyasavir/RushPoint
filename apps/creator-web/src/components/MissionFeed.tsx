@@ -163,7 +163,7 @@ export default function MissionFeed({ game, buildStartedAt, onSwap, onTitle, onF
         {shown.map(({ stage, stageNumber, task }, i) => {
           const spin = rolling?.taskId === task.id;
           return (
-            <section key={task.id} aria-hidden={i !== at} className="relative h-full snap-start snap-always flex flex-col justify-center px-4 pt-20 pb-36">
+            <section key={task.id} aria-hidden={i !== at} className="relative h-full snap-start snap-always flex flex-col justify-center px-4 pt-20 pb-44">
               <motion.div key={swapTick} initial={reduce ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}
                 className="mx-auto w-full max-w-xl rounded-3xl border border-[--rp-border] bg-[--surface-0] p-6 shadow-lg shadow-rp-fire/10">
                 <p className="text-[15px] font-bold text-ink-fire" dir="auto">{f.stage({ n: stageNumber, title: stage.title ?? '' })}</p>
@@ -171,12 +171,17 @@ export default function MissionFeed({ game, buildStartedAt, onSwap, onTitle, onF
                 <p className={`mt-4 text-[18px] leading-relaxed text-[--ink-2] transition-opacity motion-reduce:transition-none ${spin ? 'opacity-20' : ''}`} dir="auto">{task.description}</p>
               </motion.div>
               <div className="absolute inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+28px)] flex flex-col items-center gap-3">
+                {/* Above the swap button and in words: below it, the arrow pointed AT the button (Ahiya, 1.11). */}
+                {i === 0 && !swiped && (
+                  <p className="inline-flex items-center gap-1.5 text-[15px] font-bold text-ink-fire">
+                    <Icon name="chevronUp" className="w-5 h-5 shrink-0 rp-swipe-hint" />{f.swipeHint}
+                  </p>
+                )}
                 <button type="button" onClick={() => swap(stage.id, task.id)} disabled={!!rolling}
                   onPointerDown={(e) => { if (e.pointerType === 'mouse' && !rolling) { pressedAt.current = Date.now(); play('swap'); } }}
                   className="inline-flex min-h-[52px] items-center gap-2 rounded-2xl border-2 border-dashed border-rp-fire/50 bg-[--surface-0] px-6 text-[17px] font-bold text-ink-fire active:scale-95 transition-transform motion-reduce:transform-none hover:bg-rp-fire/10">
                   <Icon name="dice" className="w-5 h-5" />{f.swap}
                 </button>
-                {i === 0 && !swiped && <Icon name="chevronUp" role="img" aria-hidden={false} aria-label={f.swipeHint} className="w-7 h-7 text-ink-fire rp-swipe-hint" />}
               </div>
             </section>
           );

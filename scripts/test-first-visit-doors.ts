@@ -17,4 +17,12 @@ const compose = read('docker-compose.api.yml');
 assert.doesNotMatch(compose, /onboarding@resend\.dev/, 'no production mail leaves from the sandbox sender');
 assert.match(compose, /RUN_SUMMARY_EMAIL_FROM: "RushPoint <hello@rush-point\.com>"/);
 
-console.log('first-visit doors: 5 of 5 hold');
+// His notes of 1.11: several places must be answerable, the arrow must not point at the swap button.
+const wizard = read('apps/creator-web/src/components/SmartBuildWizard.tsx');
+const areas = wizard.slice(wizard.indexOf("id: 'areas'"), wizard.indexOf("id: 'people'"));
+assert.match(areas, /MultiChoiceCardRow/, 'the place question takes several places');
+assert.doesNotMatch(areas, /autoAdvance/, 'the place question never moves on by itself');
+const feed = read('apps/creator-web/src/components/MissionFeed.tsx');
+assert.ok(feed.indexOf('{f.swipeHint}') < feed.indexOf('{f.swap}'), 'the swipe hint sits above the swap button');
+
+console.log('first-visit doors: 8 of 8 hold');

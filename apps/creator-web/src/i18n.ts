@@ -520,7 +520,6 @@ const HE = {
       occasionTitle: 'מה האירוע?',
       occasionSub:   'נתאים את סוג המשימות, את מבנה השלבים ואת שמות השלבים.',
       occasionLabel: 'סוג האירוע',
-      quickAreasSub: 'בחרו מקום אחד, והמשחק נבנה מיד.',
       otherWays: 'דרכים אחרות להתחיל',
       autoTitles: {
         birthday: 'יום ההולדת הגדול',
@@ -4163,7 +4162,6 @@ const EN: typeof HE = {
       occasionTitle: 'What is the occasion?',
       occasionSub:   'We will match the missions, the stage structure and the stage titles.',
       occasionLabel: 'Kind of event',
-      quickAreasSub: 'Pick one place and the game builds right away.',
       otherWays: 'Other ways to start',
       autoTitles: {
         birthday: 'The big birthday',

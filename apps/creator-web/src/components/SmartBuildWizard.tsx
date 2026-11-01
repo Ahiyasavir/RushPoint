@@ -89,20 +89,6 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     advanceTimer.current = window.setTimeout(() => dispatch({ type: 'next' }), 280);
   };
 
-  // A quick run ends on its last answer rather than on a button.
-  const finished = useRef(false);
-  useEffect(() => {
-    if (!quick || finished.current || !isSmartBuildComplete(state)) return;
-    finished.current = true;
-    onFinish(smartBuildAnswers(state), state.seed);
-  }, [quick, state, onFinish]);
-  const chooseOnePlace = (area: (typeof SMART_BUILD_AREAS)[number]) => {
-    for (const old of a.areas) if (old !== area) dispatch({ type: 'toggleArea', area: old });
-    if (!a.areas.includes(area)) dispatch({ type: 'toggleArea', area });
-    window.clearTimeout(advanceTimer.current);
-    advanceTimer.current = window.setTimeout(() => dispatch({ type: 'next' }), 280);
-  };
-
   // The previews below must draw from the SAME pool the composer will, or a
   // creator is shown a plan built from missions an admin has since edited away.
   const [bank, setBank] = useState<TaskBankEntry[]>(missionBankNow);
@@ -196,19 +182,9 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     {
       id: 'areas',
       title: w.areasTitle,
-      subtitle: quick ? w.quickAreasSub : w.areasSub,
-      autoAdvance: quick,
-      finishOnAnswer: quick,
-      render: () => quick ? (
-        <ChoiceCardRow
-          label={w.areasLabel}
-          hideLabel
-          options={SMART_BUILD_AREAS}
-          value={a.areas[0] as (typeof SMART_BUILD_AREAS)[number]}
-          onChange={chooseOnePlace}
-          render={(v) => tagLabel(v)}
-        />
-      ) : (
+      subtitle: w.areasSub,
+      // Several places are a real answer (Ahiya, 1.11), so this question never moves on by itself.
+      render: () => (
         // Just the places now. Whether missions get PINNED to real spots used to
         // be a second question here — it is a preparation level, and it is asked
         // as one (see the prep step below).

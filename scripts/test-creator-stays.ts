@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { pickHighlights, buildMsLeft, BUILD_MS, MAX_HIGHLIGHTS } from '../apps/creator-web/src/lib/quickStart';
+import { pickHighlights, buildMsLeft, BUILD_MS, BUILD_NAME_MS, MAX_HIGHLIGHTS } from '../apps/creator-web/src/lib/quickStart';
 import { walkEnding, calendarUrl } from '../apps/creator-web/src/lib/walkEnding';
 import { FUNNEL_EVENTS } from '../apps/creator-web/src/lib/track';
 
@@ -19,6 +19,8 @@ assert.deepEqual(h, [...h].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)
 assert.deepEqual(pickHighlights([]), []);
 
 // The building moment is one moment: time already shown counts, and a bad clock never stalls it.
+assert.ok(BUILD_NAME_MS >= 900, 'a mission name stays up long enough to read');
+assert.ok(BUILD_MS / BUILD_NAME_MS >= 3, 'the moment shows a few names, not one');
 assert.equal(buildMsLeft(1000, 1000), BUILD_MS);
 assert.equal(buildMsLeft(1000, 1500), BUILD_MS - 500);
 assert.equal(buildMsLeft(1000, 1000 + BUILD_MS + 5), 0);

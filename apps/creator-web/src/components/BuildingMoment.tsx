@@ -5,12 +5,15 @@
 // nothing to skip to.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { motion, useReducedMotion } from 'motion/react';
 import { useT } from './LanguageContext';
 import { Icon } from './Icon';
 import { rollNames } from '../lib/missionNames';
+import { BUILD_NAME_MS } from '../lib/quickStart';
 
 export default function BuildingMoment({ onSkip }: { onSkip?: () => void }) {
   const t = useT();
+  const reduce = useReducedMotion();
   const [name, setName] = useState('');
   useEffect(() => {
     let names = rollNames(10);
@@ -20,7 +23,7 @@ export default function BuildingMoment({ onSkip }: { onSkip?: () => void }) {
       if (names.length === 0) names = rollNames(10); // The bank may land a moment after we rise.
       i += 1;
       setName(names[i % Math.max(1, names.length)] ?? '');
-    }, 170);
+    }, BUILD_NAME_MS);
     return () => window.clearInterval(tick);
   }, []);
   return createPortal(
@@ -31,7 +34,8 @@ export default function BuildingMoment({ onSkip }: { onSkip?: () => void }) {
       >
         <Icon name="dice" className="w-12 h-12 text-ink-fire animate-spin motion-reduce:animate-none" />
         <span className="font-brand text-[26px] font-extrabold">{t.missionFeed.building}</span>
-        <span className="min-h-[28px] text-[18px] font-semibold text-ink-fire" dir="auto">{name}</span>
+        <motion.span key={name} initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
+          className="min-h-[56px] text-[20px] font-semibold text-ink-fire" dir="auto">{name}</motion.span>
       </button>
     </div>,
     document.body,

@@ -48,7 +48,9 @@ export function quickGameTitle(
 export const MISSION_FEED_NAV_STATE = { ...OPEN_SETUP_NAV_STATE, rpMissionFeed: true } as const;
 
 /** The building moment's length, counted once across the dashboard and the feed. */
-export const BUILD_MS = 1900;
+/** How long one mission name stays up: long enough to actually read it (Ahiya, 1.11). */
+export const BUILD_NAME_MS = 1000;
+export const BUILD_MS = 4 * BUILD_NAME_MS;
 
 export function buildMsLeft(startedAt: unknown, now: number): number {
   if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt > now) return BUILD_MS;

@@ -70,8 +70,6 @@ export interface WizardStepConfig {
   render: () => ReactNode;
   /** One answer from a list: the caller moves on by itself once it is picked, so no Next button. */
   autoAdvance?: boolean;
-  /** The last answer is the go signal: picking it builds, so the step has no finish button. */
-  finishOnAnswer?: boolean;
 }
 
 export interface SteppedWizardProps {
@@ -153,7 +151,7 @@ export default function SteppedWizard({
 
   const isLast = index === total - 1;
   const percent = total > 0 ? Math.round(((index + 1) / total) * 100) : 0;
-  const showNext = !step.finishOnAnswer && (isLast || !step.autoAdvance);
+  const showNext = isLast || !step.autoAdvance;
 
   return (
     <div className="flex flex-col gap-3">
