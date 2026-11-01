@@ -119,6 +119,7 @@ import {
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { Icon, type IconName } from '../components/Icon';
 import SetupFlow from '../components/SetupFlow';
+import { EventDateRow } from '../components/EventDateRow';
 import { returnsToReady } from '../lib/walkEnding';
 import MissionFeed from '../components/MissionFeed';
 import { wantsMissionFeed } from '../lib/quickStart';
@@ -500,6 +501,7 @@ export default function BuilderPage() {
   );
   const saveLevel = saveHealthState.level;
   const [error, setError] = useState<string | null>(null);
+  const [gameMissing, setGameMissing] = useState(false);
   const [loadKey, setLoadKey] = useState(0);
   // Share this game by link, published or not (change: game-share-link).
   const [shareOpen, setShareOpen] = useState(false);
@@ -547,6 +549,9 @@ export default function BuilderPage() {
         setStatus(repaired === game ? 'saved' : 'unsaved');
       })
       .catch((e) => {
+        // A game that is not in this account stays missing however often we retry, and the server's
+        // words are English: this person needs the way out, not the reason.
+        setGameMissing((e as { code?: string })?.code === 'functions/not-found');
         setError(e instanceof Error ? e.message.replace('Firebase: ', '') : b.cannotLoad);
       });
   }, [gameId, loadKey]);
@@ -1318,6 +1323,14 @@ export default function BuilderPage() {
     return parts.filter(Boolean).join(' · ');
   }, [game, t, b]);
 
+  if (error && !game && gameMissing) return (
+    <Card className="p-8 text-center space-y-4">
+      <div className="text-ink-amber flex justify-center"><Icon name="alert" className="w-8 h-8" /></div>
+      <p className="font-semibold text-[--ink-1]">{b.gameMissingTitle}</p>
+      <p className="text-sm text-[--ink-3]">{b.gameMissingSub}</p>
+      <Button onClick={() => nav('/')}>{b.gameMissingCta}</Button>
+    </Card>
+  );
   if (error && !game) return (
     <Card className="p-8 text-center space-y-4">
       <div className="text-ink-amber flex justify-center"><Icon name="alert" className="w-8 h-8" /></div>
@@ -2210,6 +2223,7 @@ function StepDetails({ game, patch, qsAnchor }: {
   const modeLabel: Record<GameMode, string> = { individual: b.modeIndividual, team: b.modeTeam };
   return (
     <Card className="p-5 space-y-4">
+      <EventDateRow game={game} onGameChange={(g) => patch({ eventAt: g.eventAt })} />
       <div>
         <Label>{b.mode}</Label>
         <div className="flex gap-2">

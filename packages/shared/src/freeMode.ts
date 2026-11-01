@@ -38,6 +38,10 @@ export const PAYMENTS_ENABLED = false;
 //
 // RAISED 150 -> 250 -> 500 (change: race-multi-phone-capacity, 2026-10-10) in step with MAX_RUN_DEVICES,
 // which this must never sit below (scripts/test-free-mode.ts).
+//
+// Since 31.10 (Ahiya: a free game holds 50) this is the OPERATOR's ceiling: an account with the admin
+// claim launches up to it, everyone else gets FREE_PARTICIPANTS_PER_FREE_RUN. A load test beyond 50
+// must launch from an admin account.
 export const FREE_MODE_MAX_PARTICIPANTS = 500;
 
 /**
@@ -74,7 +78,7 @@ export type LaunchBilling =
 export function resolveLaunchBilling(
   paymentsEnabled: boolean,
   wallet: LaunchBillingWallet,
-  opts?: { testDrive?: boolean },
+  opts?: { testDrive?: boolean; operator?: boolean },
 ): LaunchBilling {
   // Test-drive (rehearsal) launches short-circuit FIRST, before any billing
   // ladder (change: test-drive-mode): free, capped at 2, wallet-independent —
@@ -83,7 +87,7 @@ export function resolveLaunchBilling(
     return { ok: true, billingType: 'test', maxParticipants: TEST_DRIVE_MAX_PARTICIPANTS, consume: 'none' };
   }
   if (!paymentsEnabled) {
-    return { ok: true, billingType: 'free', maxParticipants: FREE_MODE_MAX_PARTICIPANTS, consume: 'none' };
+    return { ok: true, billingType: 'free', maxParticipants: opts?.operator ? FREE_MODE_MAX_PARTICIPANTS : FREE_PARTICIPANTS_PER_FREE_RUN, consume: 'none' };
   }
 
   const plan = wallet.plan ?? 'free';

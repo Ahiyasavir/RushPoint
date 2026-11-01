@@ -431,6 +431,9 @@ function LoginScreen() {
       {hasStartIntent() ? <BareSignIn authCard={authCard} /> : <Landing authCard={authCard} onStart={(occasion) => {
         markStartIntent();
         if (occasion) { markStartOccasion(occasion); track('occasion_chosen', { occasion, from: 'landing' }); }
+        // The landing also answers a game link opened by a stranger. Starting a game must leave that
+        // address, or the new guest lands on someone else's game.
+        nav('/', { replace: true });
         setStartingGuest(true);
       }} />}
       <DialogHost />
@@ -539,7 +542,7 @@ function Landing({ authCard, onStart }: { authCard: ReactNode; onStart: (occasio
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-7 text-xs text-[--ink-3] font-medium">
               <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustNoCc}</span>
               <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustDemo}</span>
-              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {PAYMENTS_ENABLED ? l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN) : l.trustAllFree}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {PAYMENTS_ENABLED ? l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN) : l.trustAllFree(FREE_PARTICIPANTS_PER_FREE_RUN)}</span>
             </div>
 
             {/* Use-case strip — leads with the launch wedges (events) */}

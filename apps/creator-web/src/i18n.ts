@@ -109,7 +109,7 @@ const HE = {
     trustNoCc:          'ללא כרטיס אשראי',
     trustDemo:          'משחק לדוגמה לנסות עכשיו',
     trustFreePlayers:   (n: number) => `${n} שחקנים חינם / ריצה`,
-    trustAllFree:       'חינם לגמרי, בלי הגבלת שחקנים',
+    trustAllFree:       (n: number) => `חינם לגמרי, עד ${n} שחקנים`,
     signupBandTitle: 'צרו חשבון חינמי',
     signupBandSub:   'המשחק הראשון שלכם לוקח כחמש דקות.',
     features: [
@@ -2793,6 +2793,9 @@ const HE = {
     untitledGame: 'משחק ללא שם',
     routedSuffix: ' (מנותב)',
     cannotLoad: 'לא ניתן לטעון את המשחק',
+    gameMissingTitle: 'המשחק הזה לא נמצא כאן',
+    gameMissingSub: 'אם בניתם אותו במכשיר אחר, היכנסו מאותו חשבון. אפשר גם להתחיל משחק חדש.',
+    gameMissingCta: 'למשחקים שלי',
     tryAgain: 'נסו שוב',
     loadingBuilder: 'טוען בונה…',
     loadingGame: [
@@ -3765,7 +3768,7 @@ const EN: typeof HE = {
     trustNoCc:          'No credit card',
     trustDemo:          'A sample game to try right now',
     trustFreePlayers:   (n: number) => `${n} free players / run`,
-    trustAllFree:       'Completely free, no player limit',
+    trustAllFree:       (n: number) => `Completely free, up to ${n} players`,
     signupBandTitle: 'Create your free account',
     signupBandSub:   'Your first game takes about five minutes.',
     features: [
@@ -6375,6 +6378,9 @@ const EN: typeof HE = {
     untitledGame: 'Untitled',
     routedSuffix: ' (routed)',
     cannotLoad: 'Could not load game',
+    gameMissingTitle: 'This game is not here',
+    gameMissingSub: 'If you built it on another device, sign in with the same account. You can also start a new game.',
+    gameMissingCta: 'My games',
     tryAgain: 'Try again',
     loadingBuilder: 'Loading builder…',
     loadingGame: [

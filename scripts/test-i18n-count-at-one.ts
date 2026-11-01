@@ -73,6 +73,8 @@ const ALLOWED: Record<string, string> = {
   'creator.en.dashboard.wizard.longerThanAsked': 'shown only when the game runs LONGER than asked, many minutes',
   'creator.he.landing.trustFreePlayers': 'the argument is the free tier cap, never 1',
   'creator.en.landing.trustFreePlayers': 'the argument is the free tier cap, never 1',
+  'creator.he.landing.trustAllFree': 'the argument is the free tier cap, never 1',
+  'creator.en.landing.trustAllFree': 'the argument is the free tier cap, never 1',
   'creator.he.wallet.packageMaxP': 'the argument is a package size, never 1',
   'creator.en.wallet.packageMaxP': 'the argument is a package size, never 1',
   'play.he.play.streak': 'shown from a streak of 2 up',

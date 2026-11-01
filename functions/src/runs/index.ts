@@ -498,12 +498,14 @@ export async function closeTaskForAllTeams(
  * that this launch is ALLOWED at all is the caller's job.
  */
 export async function launchRunCore(
-  { ownerUid, gameId, testDrive, prepare, event }: {
+  { ownerUid, gameId, testDrive, prepare, event, operator }: {
     ownerUid: string; gameId: string; testDrive?: boolean;
     /** Prepare the run ahead of the day (change: prepared-run): a draft, not billed, not a play. */
     prepare?: boolean;
     /** Event details for a prepared run, validated by cleanRunEventDetails. */
     event?: unknown;
+    /** The caller has the admin claim: launches past the free cap. */
+    operator?: boolean;
   },
 ): Promise<{ runId: string; accessCode: string; status: Run['status'] }> {
   const uid = ownerUid;
@@ -610,7 +612,7 @@ export async function launchRunCore(
     //    written in the SAME transaction that consumes the credit, so a write
     //    failure can never burn a paid credit without producing a run. ──
     await db.runTransaction(async (t) => {
-      const billing = await consumeLaunchBilling(t, uid, runRef.id, game.title);
+      const billing = await consumeLaunchBilling(t, uid, runRef.id, game.title, operator === true);
       t.set(runRef, buildRun(billing.billingType, billing.maxParticipants));
       t.set(accessCodeRef, accessCode);
     });
@@ -667,10 +669,10 @@ function assertGameLaunchable(game: Game): void {
  * (PAYMENTS_ENABLED === false) touches the wallet not at all.
  */
 async function consumeLaunchBilling(
-  t: FirebaseFirestore.Transaction, uid: string, runId: string, gameTitle: string,
+  t: FirebaseFirestore.Transaction, uid: string, runId: string, gameTitle: string, operator: boolean,
 ): Promise<{ billingType: Run['billingType']; maxParticipants: number }> {
   if (!PAYMENTS_ENABLED) {
-    const free = resolveLaunchBilling(false, {});
+    const free = resolveLaunchBilling(false, {}, { operator });
     return {
       billingType: free.ok ? free.billingType : 'free',
       maxParticipants: free.ok ? free.maxParticipants : FREE_PARTICIPANTS_PER_FREE_RUN,
@@ -730,7 +732,7 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   const { gameId, testDrive, prepare, event } = data as { gameId: string; testDrive?: boolean; prepare?: boolean; event?: unknown };
   // The owner IS the caller here. Ownership is re-checked inside the core against
   // the loaded document, so this line is a route, not a trust boundary.
-  return launchRunCore({ ownerUid: uid, gameId, testDrive: testDrive === true, prepare: prepare === true, event });
+  return launchRunCore({ ownerUid: uid, gameId, testDrive: testDrive === true, prepare: prepare === true, event, operator: context.auth?.token.admin === true });
 });
 
 // ─── A run prepared ahead of the day (change: prepared-run) ──────────────────
@@ -778,7 +780,7 @@ export const openRun = loggedCallable('openRun', async (data, context) => {
     if (cur?.status !== 'draft') {
       throw new functions.https.HttpsError('failed-precondition', 'Only a prepared run can be opened', { reason: 'run-finished' });
     }
-    const billing = await consumeLaunchBilling(t, uid, ref.id, game.title);
+    const billing = await consumeLaunchBilling(t, uid, ref.id, game.title, context.auth?.token.admin === true);
     const now = new Date().toISOString();
     t.update(ref, {
       status: 'live', launchedAt: now, updatedAt: now,
@@ -1209,14 +1211,13 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     // (PAYMENTS_ENABLED === false, the launch default) EVERY run is billed as 'free', and the
     // Event Credit and Pro branches of resolveLaunchBilling are never reached — so telling a
     // turned-away participant's host to buy a credit sends them looking for a purchase that
-    // does not exist. Say the true thing instead: the ceiling is fixed for this run and can
-    // only be raised before the NEXT one is launched.
+    // does not exist. A free game holds what it holds, so the message just says so.
     const msg = r.billingType === 'test'
       ? `This is a ${cap}-person test run. Launch a real run to invite more players.`
       : r.billingType === 'free'
         ? (PAYMENTS_ENABLED
           ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
-          : `This run is full (${cap} participants max). The limit is fixed when a run is launched, so the host would need to launch a new run to raise it.`)
+          : `This run is full (${cap} participants max).`)
         : `This run is full (${cap} participants max).`;
     throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
   }

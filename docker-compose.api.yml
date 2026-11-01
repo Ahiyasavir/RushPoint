@@ -64,7 +64,7 @@ services:
       # Run-summary emails (Resend): the on/off flag + sender/recipient defaults
       # live here; the actual RESEND_API_KEY comes from ./api.env (gitignored,
       # see api.env.example) via env_file above so the secret never lands in git.
-      RUN_SUMMARY_EMAIL_FROM: "onboarding@resend.dev"
+      RUN_SUMMARY_EMAIL_FROM: "RushPoint <hello@rush-point.com>"
       RUN_SUMMARY_EMAIL_TO: "admin.rushpoint@gmail.com"
       # The marketing site's contact form recipient (change: marketing-site). Set
       # explicitly rather than relying on the RUN_SUMMARY_EMAIL_TO fallback in

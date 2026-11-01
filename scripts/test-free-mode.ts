@@ -11,6 +11,7 @@ import {
   resolveLaunchBilling,
   isFeatureUnlocked,
   FREE_RUNS_LIFETIME,
+  FREE_PARTICIPANTS_PER_FREE_RUN,
   PRO_DEFAULT_MAX_PARTICIPANTS,
   MAX_RUN_DEVICES,
 } from '../packages/shared/src/index';
@@ -45,8 +46,11 @@ function check(label: string, cond: boolean, detail = ''): void {
   check('payments off → ok', r.ok === true);
   check('payments off → billingType "free"', r.ok && r.billingType === 'free');
   check('payments off → consume "none"', r.ok && r.consume === 'none');
-  check('payments off → maxParticipants is FREE_MODE_MAX_PARTICIPANTS',
-    r.ok && r.maxParticipants === FREE_MODE_MAX_PARTICIPANTS);
+  check('payments off → a free game holds 50 players', r.ok && r.maxParticipants === 50);
+  check('payments off → the 50 is the one free-run constant', FREE_PARTICIPANTS_PER_FREE_RUN === 50);
+  const operator = resolveLaunchBilling(false, worst, { operator: true });
+  check('payments off → the operator launches up to the safety ceiling',
+    operator.ok && operator.maxParticipants === FREE_MODE_MAX_PARTICIPANTS);
 
   const empty = resolveLaunchBilling(false, {});
   check('payments off → empty wallet still launches free', empty.ok === true && empty.consume === 'none');

@@ -11,11 +11,9 @@ import GamePlanner from '~/components/widgets/GamePlanner.astro';
 import FAQs from '~/components/widgets/FAQs.astro';
 import { Icon } from 'astro-icon/components';
 
-import LiveEventBanner from '~/components/widgets/LiveEventBanner.astro';
 
 import {
   LANGUAGES,
-  liveEventPath,
   alternatesFor,
   pageUrl,
   pagePath,
@@ -87,23 +85,6 @@ const metadata = {
     actions={[{ text: t.secondaryAction, href: `#${TRY_MISSION_ID}` }]}
   />
 
-  {
-    /*
-      The one dated, scarce offer on a page that is otherwise evergreen
-      (change: rushpoint-live-signup). Directly under the hero because that is
-      where a time-bound announcement has to be to do its job, and ABOVE the
-      occasion doors because those are four evergreen ways in and this is a
-      deadline.
-
-      BOTH languages now (change: rushpoint-live-english). It used to render on
-      the Hebrew page only, which shut out the large part of Israel that reads
-      English first. The English band carries `israelOnly`, so it reveals itself
-      only where there is no positive evidence the reader is somewhere else; the
-      Hebrew one is unconditional, because that page's readers are in Israel
-      essentially by definition.
-    */
-  }
-  <LiveEventBanner href={liveEventPath(language)} language={language} israelOnly={language === 'en'} />
 
   {
     /*

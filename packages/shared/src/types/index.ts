@@ -1540,11 +1540,11 @@ export interface AccessCode {
 // ─── Wallet & Payments ────────────────────────────────────────────────────────
 
 // ── Event-Credits pricing model ──
-// A "free run" is a whole event capped at 5 participants; every creator gets a
+// A "free run" is a whole event capped at 50 participants; every creator gets a
 // few for life. Beyond that, runs cost 1 Event Credit (bought in packages) or
 // are unlimited under Creator Pro.
 export const FREE_RUNS_LIFETIME              = 3;
-export const FREE_PARTICIPANTS_PER_FREE_RUN  = 5;
+export const FREE_PARTICIPANTS_PER_FREE_RUN  = 50;
 export const PRO_DEFAULT_MAX_PARTICIPANTS    = 50;
 export const PRO_MONTHLY_ILS                 = 149;
 export const PRO_ANNUAL_ILS                  = 990;

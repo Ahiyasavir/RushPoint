@@ -689,7 +689,7 @@ The Company will respond to requests within 30 days.
 
 ### 7.1 ריצות חינמיות
 
-כל חשבון חדש מקבל ריצות חינמיות לכל החיים עד 5 משתתפים כל אחת. ריצות חינמיות אינן ניתנות להמרה לכסף.
+כל חשבון חדש מקבל ריצות חינמיות לכל החיים עד 50 משתתפים כל אחת. ריצות חינמיות אינן ניתנות להמרה לכסף.
 
 ### 7.2 Event Credits: קרדיטי אירועים
 
@@ -944,7 +944,7 @@ By joining a game, every participant acknowledges that they:
 
 ### 7.1 Free Runs
 
-Every new account receives lifetime free runs of up to 5 participants each. Free runs are not redeemable for cash.
+Every new account receives lifetime free runs of up to 50 participants each. Free runs are not redeemable for cash.
 
 ### 7.2 Event Credits
 
