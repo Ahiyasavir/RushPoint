@@ -1,3 +1,5 @@
+import { usePlanGate } from '../components/PlanSheet';
+import { translations } from '../i18n';
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { askToSaveAccount } from '../components/SaveAccountSheet';
 import { accountGateFor, isGuest, guestSaveMoment, readGuestEdits, bumpGuestEdits, softAskSeen, markSoftAskSeen } from '../lib/guestCreator';
@@ -99,7 +101,7 @@ import { buildSavePayload } from '../lib/savePayload';
 import { loadMissionBank, missionBankNow, loadMissionStats, missionStatsNow } from '../lib/missionBank';
 import {
   missionTagProfile, missionRoleAt, regenerateContext, chooseRegeneratedMission,
-  applyRegeneratedMission, seedFor,
+  applyRegeneratedMission, seedFor, swapPlace, withPlaceLine,
 } from '../lib/regenerateMission';
 import { readOfferedKeys, recordOfferedKey } from '../lib/regenerateHistory';
 import { readTaste, writeTaste, recordTaste, tasteTagsForTask, recordLaunchTaste, bankKeyForTask, swapGameFit } from '../lib/tasteProfile';
@@ -340,10 +342,12 @@ function regenerateMissionIn(game: Game, source: Task | undefined, uid: string |
   void loadMissionStats();
   const offeredKeys = readOfferedKeys(uid, game.id, source.id);
   const fit = swapGameFit(game, source.id, missionBankNow());
+  const spot = swapPlace(game, source.id, [translations.he.dashboard.wizard.goToPlace, translations.en.dashboard.wizard.goToPlace]);
   const picked = chooseRegeneratedMission({
     bank: missionBankNow(),
     profile: missionTagProfile(source, role),
     context: regenerateContext(game, source),
+    place: source.placeTrack ?? spot.place,
     drift: offeredKeys.length,
     offeredKeys,
     seed: seedFor(source.id, offeredKeys.length),
@@ -370,7 +374,7 @@ function regenerateMissionIn(game: Game, source: Task | undefined, uid: string |
   // composer-v2-learning: a bank mission swapped away teaches the bank. Fire-and-forget.
   const swappedKey = bankKeyForTask(source, missionBankNow());
   if (swappedKey) void recordMissionSignals({ swapped: [swappedKey] }).catch(() => undefined);
-  const task = applyRegeneratedMission(source, built);
+  const task = withPlaceLine(applyRegeneratedMission(source, built), picked.tags, { ...spot, place: source.placeTrack ?? spot.place });
   // The swapped-in mission's OWN setup steps (28.10, found live: they were never added, while one
   // swap path kept the old mission's, so a stone-tower mission asked "what does the key open?").
   // Marked the way the composer marks them, so a sample answer still blocks the launch.
@@ -413,6 +417,7 @@ export default function BuilderPage() {
     if (justCreated.current) nav(location.pathname + location.search, { replace: true, state: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const planGate = usePlanGate();
   const { user } = useAuth();
   const t = useT();
   const b = t.builder;
@@ -581,7 +586,8 @@ export default function BuilderPage() {
         // Swapping in the feed is tasting, not building: it never spends them.
         if (guestRef.current && !feedOpenRef.current) {
           const edits = bumpGuestEdits(g.id);
-          if (guestSaveMoment({ guest: true, edits, softSeen: true }) === 'required') askRequiredSave();
+          const missionOpen = new URLSearchParams(window.location.search).has('task');
+          if (guestSaveMoment({ guest: true, edits, softSeen: true, missionOpen }) === 'required') askRequiredSave();
         }
         // If the user kept editing during the round-trip, stay 'unsaved'.
         const latest = gameRef.current;
@@ -739,6 +745,7 @@ export default function BuilderPage() {
   // one autosave behind what is on screen.
   async function exportToFile() {
     if (!game) return;
+    if (planGate.blocked('export', game.title)) return;
     window.clearTimeout(saveTimer.current);
     if (!(await save())) { await dialog.alert(b.saveFailed); return; }
     try {
@@ -941,6 +948,7 @@ export default function BuilderPage() {
       });
       if (choice.kind === 'open') { nav(`/run/${choice.run.gameId}/${choice.run.runId}`); return; }
       if (choice.kind === 'cancel') return;
+      if (!(await planGate.confirmLaunch(game.title))) return;
     }
     const playTab = testDrive ? window.open('about:blank', '_blank') : null;
     // True once the tab has been sent somewhere real. Every path that ends
@@ -1069,7 +1077,7 @@ export default function BuilderPage() {
   const [saveAsking, setSaveAsking] = useState(false);
   useEffect(() => {
     if (!guestGameId) return;
-    const moment = guestSaveMoment({ guest: true, edits: readGuestEdits(guestGameId), softSeen: softAskSeen(guestGameId) });
+    const moment = guestSaveMoment({ guest: true, edits: readGuestEdits(guestGameId), softSeen: softAskSeen(guestGameId), missionOpen });
     if (moment === 'required') { askRequiredSave(); return; }
     // Let them read their game first: the soft ask waits until the reveal and the walk are closed.
     if (moment !== 'soft' || setupOpen || feedOpen || missionOpen) return;
@@ -1366,6 +1374,7 @@ export default function BuilderPage() {
     // Fills the fixed-height main (App sets it for /build/*): header is fixed, the
     // body flexes to the remaining height. The page itself never scrolls.
     <div className="h-full flex flex-col rounded-2xl border border-[--rp-border] bg-[--surface-1]/60 overflow-hidden shadow-soft">
+      {planGate.sheet}
       <LaunchLiftoff
         open={launching}
         title={t.launch.title}
@@ -1619,7 +1628,7 @@ export default function BuilderPage() {
             </button>
             <button
               role="menuitem"
-              onClick={() => importInput.current?.click()}
+              onClick={() => { if (!planGate.blocked('import')) importInput.current?.click(); }}
               title={b.importFileHint}
               className={HEADER_MENU_ITEM_CLASS}
             >
@@ -1805,7 +1814,7 @@ export default function BuilderPage() {
               </button>
               <button
                 role="menuitem"
-                onClick={() => importInput.current?.click()}
+                onClick={() => { if (!planGate.blocked('import')) importInput.current?.click(); }}
                 title={b.importFileHint}
                 className={HEADER_MENU_ITEM_CLASS}
               >

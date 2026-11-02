@@ -22,7 +22,7 @@ export type WizardStep = (typeof WIZARD_STEPS)[number];
 // The declared step sequence. The tabs, the bodies and the labels all read this
 // one array, so a tab and the body under it can never disagree.
 export type WizardStepKey = 'location' | 'details' | 'execution';
-export const WIZARD_STEP_ORDER: readonly WizardStepKey[] = ['location', 'details', 'execution'];
+export const WIZARD_STEP_ORDER: readonly WizardStepKey[] = ['details', 'location', 'execution'];
 
 /** The key of the step at a 1 based position (clamped to the declared order). */
 export function stepKeyAt(position: number): WizardStepKey {
@@ -99,9 +99,9 @@ export function isTaskLocationValid(task: Task): boolean {
   return taskPlacementState(task) !== 'unplaced';
 }
 
-// Naming is the wizard's ONLY forward gate. It lives on the DETAILS step, which
-// is now step 2, so the gate guards 2 → 3 (change:
-// task-editor-progressive-disclosure). Location and execution never block: an
+// Naming is the wizard's ONLY forward gate. It lives on the DETAILS step, step 1 since
+// a real creator spent three minutes on the map of a mission that had no name yet (change:
+// blank-start-clarity). Location and execution never block: an
 // unpinned or answer-key-less task is reported by the readiness surface, not by a
 // disabled control (change: builder-first-task-flow).
 export function canGoNext(step: WizardStepKey, task: Task): boolean {

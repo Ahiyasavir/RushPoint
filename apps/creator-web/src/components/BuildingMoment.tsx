@@ -36,6 +36,8 @@ export default function BuildingMoment({ onSkip }: { onSkip?: () => void }) {
         <span className="font-brand text-[26px] font-extrabold">{t.missionFeed.building}</span>
         <motion.span key={name} initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
           className="min-h-[56px] text-[20px] font-semibold text-ink-fire" dir="auto">{name}</motion.span>
+        {/* Said out loud: the whole screen always skipped, and nobody could know (Ahiya, 2.11). */}
+        {onSkip && <span className="mt-2 inline-flex min-h-[44px] items-center rounded-full border-2 border-[--rp-border] bg-[--surface-0] px-6 text-[16px] font-bold text-[--ink-1]">{t.missionFeed.skip}</span>}
       </button>
     </div>,
     document.body,

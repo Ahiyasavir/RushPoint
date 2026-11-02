@@ -83,6 +83,7 @@ What makes it HARD, in one sentence (if the obvious move beats it, there is no c
 The one constraint that removes the easy path:
 Is any of it pretend play? (delete the role: is anything left to do?)
 Time limit, if any: what a sharp team needs × 1.5, rounded down:
+Where can it be played? Go through all nine places one by one, tag every yes (G23, L51):
 Where does it NOT work? (picture each area tag at its busiest):
 Does it depend on where the team stands? Then it is located (opens on arrival):
 The countable target (a number and a clock beat "until it works"):

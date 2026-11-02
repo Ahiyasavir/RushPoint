@@ -185,6 +185,7 @@ export const EXPORTED_TASK_KEYS = [
   // pause-clock-tasks: pure authorship (the run-side `excludedMs` lives on the
   // team record, not here), so it round trips like any other authored flag.
   'pausesTimer',
+  'placeTrack',
   // mission-time-limit: the absolute close and the per team countdown.
   'expiresAt', 'timeLimitMinutes',
   // game-file-full-settings (2026-09-27): authored mission fields the export used to drop.
@@ -422,6 +423,7 @@ const TASK_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   // pause-clock-tasks: a boolean or nothing. A file saying `"yes"` is REFUSED by
   // name here rather than coerced — the flag decides how a whole run is timed.
   pausesTimer: 'boolean',
+  placeTrack: 'text',
   revealOutcomePoints: 'boolean',
   requiredContributors: 'number',
   answerOutcomes: 'objectList',

@@ -1,4 +1,6 @@
 // Typed wrappers around every creator-facing Cloud Function callable.
+import type { CreatorPlanView } from '@rushpoint/shared';
+import type { EngagementDevice } from '@rushpoint/shared';
 import { callable, publicCallable } from './api';
 import type { WaivableKind, RunEventDetails, PrintRecordKey } from '@rushpoint/shared';
 import type {
@@ -496,7 +498,7 @@ export const listPlatformUsers = callable<
 // calls this for THEMSELVES; the server takes the uid from the token and clamps the value,
 // so the payload can only ever move the caller's own total, forward, by a bounded amount.
 export const recordEngagement = callable<
-  { deltaMs: number },
+  { deltaMs: number; device?: EngagementDevice },
   { ok: boolean; applied: number }
 >('recordEngagement');
 
@@ -504,6 +506,11 @@ export const recordEngagement = callable<
 // An empty `note` CLEARS it (the server deletes the document rather than storing a blank).
 // `emailed` is OPTIONAL on purpose: omitting it leaves the tick untouched, so saving a
 // note never clears the tick and ticking never wipes the note.
+export const getMyPlan = callable<void, CreatorPlanView>('getMyPlan');
+export const setCreatorPlan = callable<
+  { uid: string; plan?: 'community' | 'unlimited'; addRuns?: number }, CreatorPlanView
+>('setCreatorPlan');
+
 export const setUserNote = callable<
   { uid: string; note: string; emailed?: boolean },
   {

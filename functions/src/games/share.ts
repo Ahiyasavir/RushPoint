@@ -24,6 +24,7 @@
  *
  * Taking a COPY does require an account — the copy has to land somewhere.
  */
+import { assertCanLaunch, ownerMayShareGames } from '../plans';
 import * as functions from 'firebase-functions';
 import { randomBytes } from 'node:crypto';
 
@@ -92,6 +93,8 @@ async function loadUsableLink(
     : mode === 'launch' ? shareLinkLaunchRefusal(link, now)
     : shareLinkRefusal(link, now);
   if (refusal) refuseShareLink(refusal);
+  // Checked at USE, so a link made before the plan existed closes too. Reading the game stays open.
+  if (mode !== 'read' && !(await ownerMayShareGames((link as GameShareLink).ownerUid))) refuseShareLink('copy-not-allowed');
   return { link: link as GameShareLink, ref };
 }
 
@@ -320,6 +323,8 @@ export const getSharedGame = loggedCallable('getSharedGame', async (data, contex
 
   const { token } = (data ?? {}) as { token?: string };
   const { link, ref } = await loadUsableLink(token, 'read');
+  // The page must not offer a button the server will refuse.
+  const shareable = await ownerMayShareGames(link.ownerUid);
 
   const snap = await db.doc(FIRESTORE_PATHS.game(link.ownerUid, link.gameId)).get();
   if (!snap.exists) refuseShareLink('not-found');
@@ -338,13 +343,13 @@ export const getSharedGame = loggedCallable('getSharedGame', async (data, contex
 
   return {
     game: sanitizeGameForShare(game, link.revealAnswers === true),
-    allowCopy: link.allowCopy === true,
+    allowCopy: link.allowCopy === true && shareable,
     // What the holder may DO is told to the holder — the alternative is a page
     // that offers a button the server will refuse, or hides one it would honour.
     // `launchExhausted` separates "the owner said no" from "this link has already
     // started its allowance of runs": the second is fixable by asking for a new
     // link, and a page that cannot tell them apart says the wrong thing to both.
-    allowLaunch: shareLinkLaunchRefusal(link, new Date().toISOString()) === null,
+    allowLaunch: shareLinkLaunchRefusal(link, new Date().toISOString()) === null && shareable,
     launchExhausted: shareLinkLaunchRefusal(link, new Date().toISOString()) === 'launch-limit',
     // The viewer is told what they may do, never who owns it: `ownerUid` is not
     // in the projection and is not returned here either.
@@ -376,6 +381,8 @@ export const launchSharedRun = loggedCallable('launchSharedRun', async (data, co
 
   const { token } = (data ?? {}) as { token?: string };
   const { link, ref } = await loadUsableLink(token, 'launch');
+  // Before the copy is written: a refused launch must not leave a game behind.
+  await assertCanLaunch(uid, context.auth?.token.admin === true);
 
   const sourceSnap = await db.doc(FIRESTORE_PATHS.game(link.ownerUid, link.gameId)).get();
   if (!sourceSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');

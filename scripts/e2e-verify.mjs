@@ -306,6 +306,8 @@ const ALLOWED_TASK_KEYS = new Set([
   // whole point — a team that does not know will still hurry), so the flag is
   // deliberately participant-visible. It reveals no answer and no secret.
   'pausesTimer',
+  // parallel place tracks: the mission's text already says where to go, so the set name hides nothing.
+  'placeTrack',
   // every-member-plays: how many DISTINCT teammates must each do their part. The
   // participant is told, because a mission the team cannot finish without three of them
   // is one they need to know about - and it reveals no answer and no secret.
@@ -1645,6 +1647,96 @@ async function main() {
   check('team finished after the single required task', s2?.team?.status === 'finished', s2?.team?.status);
 
   }); // scenario: partial-completion
+
+  await scenario('community plan (launches, head count, doors out of the account)', async () => {
+  const host = makeParty('planHost');
+  const outsider = makeParty('planOutsider');
+  const hostCred = await signInAnonymously(host.auth);
+  await signInAnonymously(outsider.auth);
+  const hostUid = hostCred.user.uid;
+  // A stored plan is obeyed under the emulator too: this is the production gate, not a copy of it.
+  await platformAdmin.call('setCreatorPlan', { uid: hostUid, plan: 'community' });
+  await expectError('plan: a creator cannot open their own plan', host.call('setCreatorPlan', { uid: hostUid, plan: 'unlimited' }), { codeIn: ['functions/permission-denied'] });
+  let plan = await host.call('getMyPlan', {});
+  check('plan: a new account has 3 launches', plan?.runsLeft === 3 && plan?.plan === 'community', JSON.stringify(plan));
+
+  const { gameId } = await host.call('createGame', { title: 'Plan Game', mode: 'team' });
+  await host.call('updateGame', {
+    gameId, scoringPreset: 'fixed_points_speed',
+    stages: [{ id: 'pl-s', order: 0, title: 'One', isFinal: true, tasks: [
+      { id: 'pl-t', title: 'Task', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 100 },
+    ] }],
+  });
+
+  await host.call('launchRun', { gameId, testDrive: true });
+  plan = await host.call('getMyPlan', {});
+  check('plan: a test drive is not counted', plan?.runsUsed === 0, JSON.stringify(plan));
+
+  const { accessCode: planCode } = await host.call('launchRun', { gameId });
+  await host.call('launchRun', { gameId });
+  await host.call('launchRun', { gameId });
+  plan = await host.call('getMyPlan', {});
+  check('plan: three launches are counted', plan?.runsUsed === 3 && plan?.runsLeft === 0, JSON.stringify(plan));
+  await expectError('plan: the fourth launch is refused', host.call('launchRun', { gameId }), { codeIn: ['functions/failed-precondition'] });
+  await expectError('plan: a prepared run is refused early', host.call('launchRun', { gameId, prepare: true }), { codeIn: ['functions/failed-precondition'] });
+
+  // 3 teams and 15 people.
+  const joinTeam = async (name, memberNames) => {
+    const p = makeParty(`planTeam${name}`);
+    await signInAnonymously(p.auth);
+    return p.call('joinRun', { code: planCode, displayName: name, memberNames });
+  };
+  const eight = (n) => Array.from({ length: 8 }, (_, i) => `${n}${i}`);
+  await joinTeam('A', eight('a'));
+  await expectError('plan: a team past 15 people is refused', joinTeam('B', eight('b')), { codeIn: ['functions/resource-exhausted'] });
+  await joinTeam('C', ['c']);
+  await joinTeam('D', ['d']);
+  await expectError('plan: a fourth team is refused', joinTeam('E', ['e']), { codeIn: ['functions/resource-exhausted'] });
+
+  // The doors out of the account.
+  await expectError('plan: publishing is refused', host.call('publishGame', { gameId, visibility: 'public' }), { codeIn: ['functions/failed-precondition'] });
+  await expectError('plan: the game file is refused', host.call('exportGameFile', { gameId }), { codeIn: ['functions/failed-precondition'] });
+  await expectError('plan: loading a file is refused', host.call('importGameFile', { file: {} }), { codeIn: ['functions/failed-precondition'] });
+  const { link: planLink } = await host.call('createGameShareLink', { gameId, allowCopy: true, allowLaunch: true });
+  const shared = await outsider.call('getSharedGame', { token: planLink.token });
+  check('plan: a link still shows the game, and offers no copy or launch', !!shared?.game && shared.allowCopy === false && shared.allowLaunch === false, JSON.stringify({ c: shared?.allowCopy, l: shared?.allowLaunch }));
+  await expectError('plan: copying through a link is refused', outsider.call('duplicateGame', { shareToken: planLink.token }));
+  await expectError('plan: launching through a link is refused', outsider.call('launchSharedRun', { token: planLink.token }));
+
+  // What he does when someone writes in.
+  await platformAdmin.call('setCreatorPlan', { uid: hostUid, addRuns: 1 });
+  await host.call('launchRun', { gameId });
+  await expectError('plan: an opened launch is spent like any other', host.call('launchRun', { gameId }), { codeIn: ['functions/failed-precondition'] });
+  await platformAdmin.call('setCreatorPlan', { uid: hostUid, plan: 'unlimited' });
+  await host.call('launchRun', { gameId });
+  await host.call('publishGame', { gameId, visibility: 'public' });
+  const exported = await host.call('exportGameFile', { gameId });
+  check('plan: an opened account has every door', !!exported?.file, 'file');
+  });
+
+  await scenario('parallel place tracks (a team stays on the set it started)', async () => {
+  const player = makeParty('trackPlayer');
+  await signInAnonymously(player.auth);
+  const { gameId } = await creator.call('createGame', { title: 'Two Places', mode: 'individual' });
+  const trackTask = (id, placeTrack) => ({ id, placeTrack, title: id, type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 100 });
+  await creator.call('updateGame', {
+    gameId, scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'st-tracks', order: 0, title: 'Two places', isFinal: true, requiredTaskCount: 2,
+      tasks: [trackTask('tr-a1', 'beach'), trackTask('tr-a2', 'beach'), trackTask('tr-b1', 'park'), trackTask('tr-b2', 'park')],
+    }],
+  });
+  const { runId, accessCode } = await creator.call('launchRun', { gameId });
+  await player.call('joinRun', { code: accessCode, displayName: 'Track' });
+  await creator.call('startTeams', { gameId, runId });
+  let state = await player.call('getMyTeamState', { code: accessCode });
+  const first = state?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+  check('tracks: the first mission is handed out', !!first, first?.taskId);
+  await player.call('completeTask', { taskId: first.taskId, code: accessCode, lat: 31.78, lng: 35.21 });
+  state = await player.call('getMyTeamState', { code: accessCode });
+  const second = state?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+  check('tracks: the second mission is on the same set', second?.taskId?.slice(0, 4) === first.taskId.slice(0, 4), `${first.taskId} then ${second?.taskId}`);
+  }); // scenario: place tracks
 
   await scenario('rejoin replaces the lost phone (no slot used, sender moves, foreign uid ignored)', async () => {
   // change: rejoin-replaces-lost-phone. A phone that lost its sign-in rejoins as a NEW identity and
@@ -8594,12 +8686,14 @@ async function main() {
     // value is CLAMPED. A participant calling it must therefore SUCCEED (it is their
     // own row) while being unable to touch anyone else's, which is why it is absent
     // from the denial matrix above.
-    await creator.call('recordEngagement', { deltaMs: 60_000 });
-    await creator.call('recordEngagement', { deltaMs: 60_000 });
+    await creator.call('recordEngagement', { deltaMs: 60_000, device: 'fridge' });
+    await creator.call('recordEngagement', { deltaMs: 60_000, device: 'phone' });
     const afterTwo = await platformAdmin.call('listPlatformUsers', { limit: 300 });
     const meAfterTwo = (afterTwo?.users ?? []).find((r) => r.uid === OWNER);
     check('engagement: two flushes accumulate onto the creator row',
       (meAfterTwo?.engagementMs ?? 0) >= 120_000, JSON.stringify(meAfterTwo?.engagementMs));
+    check('engagement: the device is kept, and a junk one is not', meAfterTwo?.lastDevice === 'phone',
+      JSON.stringify(meAfterTwo?.lastDevice));
 
     // A single absurd claim must be clamped, not stored. 30 days would otherwise land
     // verbatim and make the metric meaningless for that account forever.

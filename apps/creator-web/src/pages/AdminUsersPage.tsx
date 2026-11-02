@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../services/firebase';
-import { listPlatformUsers, setUserNote } from '../services/calls';
+import { listPlatformUsers, setCreatorPlan, setUserNote } from '../services/calls';
 import {
   summarizePlatform, activationStage, engagementParts,
   type AdminUserSummary, type ActivationStage,
@@ -255,7 +255,7 @@ export default function AdminUsersPage() {
                     <div className="flex justify-between"><dt>{ta.colGames}</dt><dd className="text-[--ink-1]">{u.gamesCreatedCount}</dd></div>
                     <div className="flex justify-between"><dt>{ta.colRuns}</dt><dd className="text-[--ink-1]">{u.runsLaunchedCount}</dd></div>
                     <div className="flex justify-between"><dt>{ta.colPlayers}</dt><dd className="text-[--ink-1]">{u.participantsReached}</dd></div>
-                    <div className="flex justify-between"><dt>{ta.colTime}</dt><dd className="text-[--ink-1]">{duration(u.engagementMs)}</dd></div>
+                    <div className="flex justify-between"><dt>{ta.colTime}</dt><dd className="text-[--ink-1]">{duration(u.engagementMs)}{u.lastDevice ? ` · ${ta.deviceLabels[u.lastDevice]}` : ''}</dd></div>
                     <div className="flex justify-between col-span-2"><dt>{ta.colLastActive}</dt><dd className="text-[--ink-1]">{u.lastActiveAt ? formatTxDate(u.lastActiveAt) : ta.never}</dd></div>
                   </dl>
                   <div className="mt-2 flex gap-2">
@@ -304,7 +304,7 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="p-2"><Badge color={STAGE_COLOR[stage]}>{ta.stage[stage]}</Badge></td>
                       <td className="p-2">{u.lastActiveAt ? formatTxDate(u.lastActiveAt) : ta.never}</td>
-                      <td className="p-2">{duration(u.engagementMs)}</td>
+                      <td className="p-2">{duration(u.engagementMs)}{u.lastDevice ? ` · ${ta.deviceLabels[u.lastDevice]}` : ''}</td>
                       <td className="p-2">
                         <button
                           type="button"
@@ -335,6 +335,30 @@ export default function AdminUsersPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Open launches for a creator who wrote in, or lift the plan altogether. */
+function PlanControl({ user, onSaved }: {
+  user: AdminUserSummary;
+  onSaved: (uid: string, patch: Partial<AdminUserSummary>) => void;
+}) {
+  const p = useT().plan;
+  const [busy, setBusy] = useState(false);
+  async function change(input: { addRuns?: number; plan?: 'community' | 'unlimited' }) {
+    setBusy(true);
+    try {
+      const v = await setCreatorPlan({ uid: user.uid, ...input });
+      onSaved(user.uid, { plan: { plan: v.plan, runsUsed: v.runsUsed, runsLeft: v.runsLeft } });
+    } finally { setBusy(false); }
+  }
+  const unlimited = user.plan?.plan === 'unlimited';
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-[--ink-2]">
+      <span>{unlimited ? p.adminUnlimited : p.adminCommunity(user.plan?.runsUsed ?? 0, user.plan?.runsLeft ?? 0)}</span>
+      {!unlimited && <Button variant="ghost" disabled={busy} onClick={() => void change({ addRuns: 3 })}>{p.adminAdd}</Button>}
+      <Button variant="ghost" disabled={busy} onClick={() => void change({ plan: unlimited ? 'community' : 'unlimited' })}>{unlimited ? p.adminBack : p.adminOpen}</Button>
     </div>
   );
 }
@@ -402,6 +426,7 @@ function NoteEditor({ user, ta, onSaved }: {
           <span className="text-xs text-[--ink-3]">{ta.emailedOn(formatTxDate(user.emailedAt))}</span>
         )}
       </label>
+      <PlanControl user={user} onSaved={onSaved} />
       <label className="text-xs uppercase text-[--ink-3] block mb-1" htmlFor={`note-${user.uid}`}>
         {ta.noteLabel}
       </label>

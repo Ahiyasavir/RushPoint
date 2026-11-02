@@ -7,6 +7,8 @@
 //   As teams complete tasks → requestNextTask, verifyStationCode, etc.
 //   Owner calls finalizeRun → scores computed, leaderboard written
 
+import { assertCanLaunch, planRefusal, planViewOf } from '../plans';
+import { planRunLimits, runHasRoomForPeople, type CreatorPlanDoc } from '@rushpoint/shared';
 import { randomInt, randomBytes } from 'node:crypto';
 import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from '../obs/log';
@@ -535,9 +537,10 @@ export async function launchRunCore(
 
   const accessCodeRef = db.doc(`accessCodes/${code}`);
   // Build the run + access-code docs once a billing decision is known.
-  const buildRun = (billingType: Run['billingType'], maxParticipants: number): Run => ({
+  const buildRun = (billingType: Run['billingType'], maxParticipants: number, maxPeople?: number): Run => ({
     id: runRef.id, gameId, ownerUid: uid, status: prepare ? 'draft' : 'live', accessCode: code,
     billingType, maxParticipants, participantCount: 0,
+    ...(maxPeople ? { maxPeople, peopleCount: 0 } : {}),
     // Only test-drive runs carry the flag — normal runs stay free of the field.
     ...(testDrive ? { isTestDrive: true } : {}),
     // Copied from the game at LAUNCH, never read from the template mid run
@@ -557,6 +560,8 @@ export async function launchRunCore(
   const accessCode: AccessCode = { code, ownerUid: uid, gameId, runId: runRef.id, status: 'unused', createdAt: now };
 
   if (prepare) {
+    // Said a week early, not on the morning of the event.
+    await assertCanLaunch(uid, operator === true);
     // Not billed: the decision is made by openRun, through the same billing function, so a
     // cancelled or postponed event never paid. The run carries the free plan's cap until then,
     // for display only; openRun writes the real one.
@@ -612,8 +617,8 @@ export async function launchRunCore(
     //    written in the SAME transaction that consumes the credit, so a write
     //    failure can never burn a paid credit without producing a run. ──
     await db.runTransaction(async (t) => {
-      const billing = await consumeLaunchBilling(t, uid, runRef.id, game.title, operator === true);
-      t.set(runRef, buildRun(billing.billingType, billing.maxParticipants));
+      const billing = await consumeLaunchBilling(t, uid, runRef.id, game.title, operator === true, game.mode);
+      t.set(runRef, buildRun(billing.billingType, billing.maxParticipants, billing.maxPeople));
       t.set(accessCodeRef, accessCode);
     });
   }
@@ -669,6 +674,21 @@ function assertGameLaunchable(game: Game): void {
  * (PAYMENTS_ENABLED === false) touches the wallet not at all.
  */
 async function consumeLaunchBilling(
+  t: FirebaseFirestore.Transaction, uid: string, runId: string, gameTitle: string, operator: boolean, mode: unknown,
+): Promise<{ billingType: Run['billingType']; maxParticipants: number; maxPeople?: number }> {
+  // The plan first, inside the same transaction: reads come before the writes below, and a launch that
+  // fails to write can never spend one (change: community-plan).
+  const planRef = db.doc(FIRESTORE_PATHS.creatorPlan(uid));
+  const plan = planViewOf((await t.get(planRef)).data() as CreatorPlanDoc | undefined, operator);
+  if (plan.plan === 'community' && plan.runsLeft <= 0) throw planRefusal('launch', plan);
+  const billing = await billLaunch(t, uid, runId, gameTitle, operator);
+  const limits = planRunLimits(plan, mode);
+  if (!limits) return billing;
+  t.set(planRef, { runsUsed: FieldValue.increment(1), updatedAt: new Date().toISOString() }, { merge: true });
+  return { ...billing, ...limits };
+}
+
+async function billLaunch(
   t: FirebaseFirestore.Transaction, uid: string, runId: string, gameTitle: string, operator: boolean,
 ): Promise<{ billingType: Run['billingType']; maxParticipants: number }> {
   if (!PAYMENTS_ENABLED) {
@@ -780,11 +800,12 @@ export const openRun = loggedCallable('openRun', async (data, context) => {
     if (cur?.status !== 'draft') {
       throw new functions.https.HttpsError('failed-precondition', 'Only a prepared run can be opened', { reason: 'run-finished' });
     }
-    const billing = await consumeLaunchBilling(t, uid, ref.id, game.title, context.auth?.token.admin === true);
+    const billing = await consumeLaunchBilling(t, uid, ref.id, game.title, context.auth?.token.admin === true, game.mode);
     const now = new Date().toISOString();
     t.update(ref, {
       status: 'live', launchedAt: now, updatedAt: now,
       billingType: billing.billingType, maxParticipants: billing.maxParticipants,
+      ...(billing.maxPeople ? { maxPeople: billing.maxPeople, peopleCount: 0 } : {}),
       // Copied on the day, like a launch does (late-joiner-autostart): the template may have
       // changed since the run was prepared.
       ...(game.autoApproveAllMedia === true ? { autoApproveAllMedia: true } : {}),
@@ -1221,6 +1242,10 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
         : `This run is full (${cap} participants max).`;
     throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
   }
+  const peopleJoining = game.mode === 'team' ? (memberNames.length || 1) : 1;
+  if (!runHasRoomForPeople(r, peopleJoining)) {
+    throw new functions.https.HttpsError('resource-exhausted', `This run is full (${r.maxPeople} people max).`, { cap: r.maxPeople, used: r.peopleCount ?? 0 });
+  }
   // Global per-run phone ceiling — additive to the billing cap above. The founding
   // phone counts as one device. Legacy runs (no deviceCount) fall back to the team
   // count as a lower bound; the field becomes exact once written here.
@@ -1250,6 +1275,7 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     await runRef.update({
       participantCount: FieldValue.increment(1),
       deviceCount: FieldValue.increment(1),
+      ...(r.maxPeople ? { peopleCount: FieldValue.increment(peopleJoining) } : {}),
       updatedAt: now,
     });
     return { already: false };
@@ -5652,6 +5678,10 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
       `This run is full (${MAX_RUN_DEVICES} devices max).`,
       { cap: MAX_RUN_DEVICES, used: usedDevices },
     );
+  }
+  // A run's head count holds phones too: 3 teams must not become 40 phones on the community plan.
+  if (!mayReplace && typeof runNow?.maxPeople === 'number' && usedDevices >= runNow.maxPeople) {
+    throw new functions.https.HttpsError('resource-exhausted', `This run is full (${runNow.maxPeople} people max).`, { cap: runNow.maxPeople, used: usedDevices });
   }
   let replaced = false;
   const attached = await withLockRetry(() => db.runTransaction(async (tx) => {

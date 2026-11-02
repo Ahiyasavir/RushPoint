@@ -1,0 +1,4 @@
+- [x] RED: `scripts/test-creator-plan.ts`, e2e scenario "community plan"
+- [x] GREEN: pure plan, launch transaction, join caps, doors out of the account
+- [x] GREEN: PlanSheet, home chip, share dialog, admin control
+- [ ] Gates, e2e, browser check at phone width

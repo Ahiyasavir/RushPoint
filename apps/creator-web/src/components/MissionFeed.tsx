@@ -20,7 +20,6 @@ import { TAP_TARGET } from '../lib/interaction';
 import { track, trackLeaving } from '../lib/track';
 import { playSetupSound, soundEnabled, type SetupSound } from '../lib/setupSounds';
 import { unlockAudio } from '../lib/sound';
-import { hasSwiped, markSwiped } from '../lib/setupSwipe';
 
 export interface MissionFeedProps {
   game: Game;
@@ -40,7 +39,8 @@ export default function MissionFeed({ game, buildStartedAt, onSwap, onTitle, onF
   const reduce = useReducedMotion();
   const [building, setBuilding] = useState(!reduce);
   const [at, setAt] = useState(0);
-  const [swiped, setSwiped] = useState(hasSwiped);
+  // Per feed, never per device: a device wide flag hid the hint from anyone who had ever swiped (Ahiya, 2.11).
+  const [swiped, setSwiped] = useState(false);
   const [swapTick, setSwapTick] = useState(0);
   const [rolling, setRolling] = useState<{ taskId: string; name: string } | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -88,7 +88,7 @@ export default function MissionFeed({ game, buildStartedAt, onSwap, onTitle, onF
   const landOn = (i: number) => {
     if (i === at) return;
     setAt(i);
-    if (i > 0 && !swiped) { setSwiped(true); markSwiped(); }
+    if (i > 0) setSwiped(true);
     if (i > lastAt.current) {
       play(i >= nameAt ? 'stage' : 'check');
       if (i === atRest) track('feed_rest'); else track('feed_card', { n: i + 1 });
@@ -151,7 +151,7 @@ export default function MissionFeed({ game, buildStartedAt, onSwap, onTitle, onF
           <span className="text-[14px] font-bold text-[--ink-2]">
             {at < total ? f.count({ n: at + 1, total }) : f.lastCount({ total: cards.length })}
           </span>
-          <button type="button" onClick={finish} className={`${TAP_TARGET} -m-2 px-3 text-[14px] font-semibold text-[--ink-2] hover:text-[--ink-1]`}>{f.skip}</button>
+          <button type="button" onClick={finish} className="min-h-[44px] rounded-full border-2 border-[--rp-border] bg-[--surface-0] px-5 text-[15px] font-bold text-[--ink-1] hover:bg-[--surface-2]">{f.skip}</button>
         </div>
       </div>
 
@@ -171,17 +171,17 @@ export default function MissionFeed({ game, buildStartedAt, onSwap, onTitle, onF
                 <p className={`mt-4 text-[18px] leading-relaxed text-[--ink-2] transition-opacity motion-reduce:transition-none ${spin ? 'opacity-20' : ''}`} dir="auto">{task.description}</p>
               </motion.div>
               <div className="absolute inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+28px)] flex flex-col items-center gap-3">
-                {/* Above the swap button and in words: below it, the arrow pointed AT the button (Ahiya, 1.11). */}
-                {i === 0 && !swiped && (
-                  <p className="inline-flex items-center gap-1.5 text-[15px] font-bold text-ink-fire">
-                    <Icon name="chevronUp" className="w-5 h-5 shrink-0 rp-swipe-hint" />{f.swipeHint}
-                  </p>
-                )}
                 <button type="button" onClick={() => swap(stage.id, task.id)} disabled={!!rolling}
                   onPointerDown={(e) => { if (e.pointerType === 'mouse' && !rolling) { pressedAt.current = Date.now(); play('swap'); } }}
                   className="inline-flex min-h-[52px] items-center gap-2 rounded-2xl border-2 border-dashed border-rp-fire/50 bg-[--surface-0] px-6 text-[17px] font-bold text-ink-fire active:scale-95 transition-transform motion-reduce:transform-none hover:bg-rp-fire/10">
                   <Icon name="dice" className="w-5 h-5" />{f.swap}
                 </button>
+                {/* Under the swap button and pointing DOWN, away from it. Above it a down arrow points AT the button (Ahiya, 2.11). */}
+                {i === 0 && !swiped && (
+                  <p className="inline-flex items-center gap-2 rounded-full bg-rp-fire px-4 py-2 text-[16px] font-bold text-white shadow-md shadow-rp-fire/30">
+                    <span className="inline-flex rotate-180"><Icon name="chevronUp" className="w-5 h-5 shrink-0 rp-swipe-hint" /></span>{f.swipeHint}
+                  </p>
+                )}
               </div>
             </section>
           );

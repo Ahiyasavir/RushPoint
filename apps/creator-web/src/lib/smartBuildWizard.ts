@@ -67,7 +67,7 @@ export type SmartBuildQuestion = typeof SMART_BUILD_QUESTION_ORDER[number];
  * Everything else keeps its default, and every default was already built to compose. `occasion` drops
  * off when the front page has asked it.
  */
-export const QUICK_BUILD_QUESTIONS: readonly SmartBuildQuestion[] = ['occasion', 'who', 'duration', 'areas'];
+export const QUICK_BUILD_QUESTIONS: readonly SmartBuildQuestion[] = ['occasion', 'who', 'duration', 'areas', 'prep'];
 
 // The options each question offers. Drawn from the canonical registries rather
 // than re-listed, so a chip can never render a tag the composer does not score.

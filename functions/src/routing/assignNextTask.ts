@@ -9,6 +9,7 @@
 //   TransitNorm  = walking distance, normalised to 30-min cap
 //   Ω            = adaptive difficulty match (team strength ↔ task difficulty)
 
+import { stickToPlaceTrack } from '@rushpoint/shared';
 import { FieldValue } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions';
 import { db } from '../firebase';
@@ -217,7 +218,7 @@ export async function buildRecommendations(
     return true;
   });
 
-  return candidates
+  return stickToPlaceTrack(candidates, tasks, completedTaskIds)
     .map((task) => ({
       task,
       priority: priorityScore(task, teamLocation, skillRatio, taskCounts, hotZone, nowMs),
@@ -395,7 +396,7 @@ export async function assignTask(
       return { reason: reason === 'expired' ? 'none' : reason };
     }
 
-    const chosen = candidates.sort(
+    const chosen = stickToPlaceTrack(candidates, tasks, completedTaskIds).sort(
       (a, b) =>
         priorityScore(b, teamLocation, skillRatio, taskCounts, hotZone, nowMs) -
         priorityScore(a, teamLocation, skillRatio, taskCounts, hotZone, nowMs),

@@ -5,9 +5,9 @@
 // the caller can carry straight on with what the creator was doing.
 import { useEffect, useState } from 'react';
 import { doc, setDoc } from 'firebase/firestore';
-import { db, signOut as fbSignOutOnly, upgradeGuestWithEmail, upgradeGuestWithGoogle } from '../services/firebase';
+import { db, signInFromGoogleConflict, signInWithEmail, signOut as fbSignOutOnly, upgradeGuestWithEmail, upgradeGuestWithGoogle } from '../services/firebase';
 import { createGuestClaim } from '../services/calls';
-import { keepGuestClaim, readGuestClaim } from '../lib/guestClaim';
+import { dropGuestClaim, keepGuestClaim, readGuestClaim } from '../lib/guestClaim';
 import { useAuth, GOOGLE_SVG } from './AuthGate';
 import { useT } from './LanguageContext';
 import { Button, Input, Label } from './ui';
@@ -81,6 +81,21 @@ function SaveAccountSheet({ reason, required, onDone }: { reason: SaveReason; re
     await fbSignOutOnly();
   }
 
+  // They already have an account: that is a sign in, not a dead end (Ahiya, 2.11). The claim comes first,
+  // AuthGate moves the game and opens it. Returns false when it did not work and we stay on the sheet.
+  async function intoExistingAccount(signIn: () => Promise<unknown>) {
+    try {
+      keepGuestClaim((await createGuestClaim()).code);
+      if (!readGuestClaim()) throw new Error('no storage');
+    } catch { setErr(ts.handoverFailed); return false; }
+    try {
+      await signIn();
+    } catch { dropGuestClaim(); return false; }
+    markSignedIn();
+    onDone(false);
+    return true;
+  }
+
   function explain(e: unknown) {
     const code = (e as { code?: string } | null)?.code ?? '';
     if (code.includes('credential-already-in-use') || code.includes('email-already-in-use')) { setErr(ts.alreadyHasAccount); return; }
@@ -92,7 +107,10 @@ function SaveAccountSheet({ reason, required, onDone }: { reason: SaveReason; re
   async function google() {
     setErr(''); setBusy(true);
     try { const cred = await upgradeGuestWithGoogle(); await finish(cred.user); }
-    catch (e) { explain(e); }
+    catch (e) {
+      const inUse = ((e as { code?: string } | null)?.code ?? '').includes('credential-already-in-use');
+      if (!inUse || !(await intoExistingAccount(() => signInFromGoogleConflict(e)))) explain(e);
+    }
     finally { setBusy(false); }
   }
 
@@ -103,7 +121,10 @@ function SaveAccountSheet({ reason, required, onDone }: { reason: SaveReason; re
     if (password.length < 8) { setErr(t.auth.validationPwdLen); return; }
     setBusy(true);
     try { const cred = await upgradeGuestWithEmail(email.trim(), password, name.trim()); await finish(cred.user); }
-    catch (e) { explain(e); }
+    catch (e) {
+      const inUse = ((e as { code?: string } | null)?.code ?? '').includes('email-already-in-use');
+      if (!inUse || !(await intoExistingAccount(() => signInWithEmail(email.trim(), password)))) explain(e);
+    }
     finally { setBusy(false); }
   }
 

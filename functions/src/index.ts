@@ -77,6 +77,7 @@ import { flashClaimVerdict, resumedStartedAt, type FlashMissionDoc } from '@rush
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
+export { getMyPlan, setCreatorPlan } from './plans';
 export * from './games/index';
 // Read-only share links for an unpublished game (change: game-share-link).
 export * from './games/share';

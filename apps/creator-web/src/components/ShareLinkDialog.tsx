@@ -8,6 +8,7 @@
 // and offers to publish the game, which is the exact thing this flow exists to
 // avoid. It does borrow the same three affordances (QR, copy, native share),
 // because a link people send from a phone needs all three.
+import { usePlanGate } from './PlanSheet';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
@@ -41,6 +42,9 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
 }) {
   const t = useT();
   const s = t.share;
+  const planGate = usePlanGate();
+  // Community games stay in their account: the two doors that move one are not offered (the server holds them too).
+  const mayMove = planGate.plan?.canMoveGames !== false;
   const [links, setLinks] = useState<LinkRow[] | null>(null);
   const [allowCopy, setAllowCopy] = useState(true);
   const [revealAnswers, setRevealAnswers] = useState(false);
@@ -75,9 +79,9 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
     try {
       await createGameShareLink({
         gameId,
-        allowCopy,
+        allowCopy: allowCopy && mayMove,
         revealAnswers,
-        allowLaunch,
+        allowLaunch: allowLaunch && mayMove,
         ...(expiresInDays > 0 ? { expiresInDays } : {}),
       });
       await reload();
@@ -163,7 +167,7 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
 
         {/* ── What the next link will allow ── */}
         <div className="rounded-xl border border-[--rp-border] p-3 space-y-3 mb-4">
-          <label className="flex items-start gap-2 text-sm cursor-pointer">
+          {mayMove && (<label className="flex items-start gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
               checked={allowCopy}
@@ -174,7 +178,7 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
               <span className="font-medium">{s.allowCopy}</span>
               <span className="block text-xs text-[--ink-3]">{s.allowCopyHelp}</span>
             </span>
-          </label>
+          </label>)}
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
@@ -187,7 +191,7 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
               <span className="block text-xs text-[--ink-3]">{s.revealAnswersHelp}</span>
             </span>
           </label>
-          <label className="flex items-start gap-2 text-sm cursor-pointer">
+          {mayMove && (<label className="flex items-start gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
               checked={allowLaunch}
@@ -198,7 +202,9 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
               <span className="font-medium">{s.allowLaunch}</span>
               <span className="block text-xs text-[--ink-3]">{s.allowLaunchHelp}</span>
             </span>
-          </label>
+          </label>)}
+          {!mayMove && (<button type="button" onClick={() => planGate.blocked('share')} className="min-h-[44px] w-full rounded-lg text-start text-sm font-semibold text-ink-fire">{t.plan.shareNote}</button>)}
+          {planGate.sheet}
           <div>
             <div className="text-xs text-[--ink-3] mb-1">{s.expiry}</div>
             <div className="flex flex-wrap gap-1.5">

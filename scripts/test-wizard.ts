@@ -80,7 +80,8 @@ ok(WIZARD_STEPS.length === 3, 'three wizard steps');
 ok(WIZARD_STEP_ORDER.every((k) => STEP_LABELS[k]?.trim()), 'every step has a label');
 // Reordered by task-editor-progressive-disclosure: location leads (it owns the
 // map), execution closes (verification + the opt-in chips).
-ok(WIZARD_STEP_ORDER[0] === 'location', 'location is the FIRST step');
+ok(WIZARD_STEP_ORDER[0] === 'details', 'what the mission is comes FIRST');
+ok(WIZARD_STEP_ORDER[1] === 'location', 'where it happens comes second');
 ok(WIZARD_STEP_ORDER[2] === 'execution', 'execution is the last step');
 
 console.log(failed === 0

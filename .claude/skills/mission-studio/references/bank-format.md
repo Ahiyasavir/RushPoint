@@ -43,6 +43,11 @@ payload carries, never set it on a Task).
   one that is true of it (he: "לכל משימה תכניס הרבה תיוגים שהם רלוונטיים"). A `strangers` mission
   also carries `crowded`; a mission about the past at a real place also carries `historic`.
 
+Area kinds are not ranking hints (L51, G23): the composer gives each stage one place and picks only
+missions tagged for it, and adds "לכו ל..." itself when a mission does not fit every place in the game.
+No kind tag at all means "plays anywhere". `crowded` and `historic` are qualities, not places.
+Never write the "לכו ל<place>" line into `description`.
+
 Tag what is true, not what flatters (bank rule 13). `mixed` claims it suits ten year olds AND a
 corporate offsite; it usually is false. Anything the creator must arrange is `needsSetup`, and
 every such action gets a Quick Setup step (bilingual prompt "עברית\n\nEnglish").

@@ -59,6 +59,7 @@ export const COLLECTIONS = {
 } as const;
 
 export const FIRESTORE_PATHS = {
+  creatorPlan: (uid: string) => `creatorPlans/${uid}`,
   // A creator's own profile doc (owner-writable). quick-dial-and-actions keeps the
   // console's quick-actions bar here, under `consolePrefs`.
   user:       (uid: string) => `users/${uid}`,
@@ -423,6 +424,9 @@ export interface Task {
   // Carries no secret — the player MUST be told the clock stopped, or they hurry
   // anyway — so it is a sanitizer passthrough.
   pausesTimer?: boolean;
+  // Which parallel set of a stage this mission belongs to (a place id). Routing keeps a team on the set
+  // it started in `stickToPlaceTrack`. Not a secret: the mission's text already says where to go.
+  placeTrack?: string;
   // ── Verification config by type. Answer keys (answers/numericAnswer/
   //    steps[].answer) are SERVER-SECRET — stripped from the participant payload. ──
   // quiz: render `choices` as buttons (if present) else a text box; correct
@@ -945,6 +949,9 @@ export interface RunLeaderboard {
 }
 
 export interface Run {
+  // Head count of a run on a limited plan (change: community-plan). Absent on every other run.
+  maxPeople?: number;
+  peopleCount?: number;
   id: string;
   gameId: string;
   ownerUid: string;

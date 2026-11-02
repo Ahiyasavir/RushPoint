@@ -4,6 +4,7 @@
 // Ownership is enforced: only the creator (ownerUid === context.auth.uid)
 // may update/delete their own games.
 
+import { assertCanMoveGames } from '../plans';
 import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from '../obs/log';
 import { db } from '../firebase';
@@ -989,6 +990,8 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
 export const publishGame = loggedCallable('publishGame', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, visibility } = data as { gameId: string; visibility: 'public' | 'private' };
+  // Taking a game OUT of the gallery stays open to everyone.
+  if (visibility === 'public') await assertCanMoveGames(uid, context.auth?.token.admin === true, 'publish');
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
   if (visibility !== 'public' && visibility !== 'private') {
@@ -1396,6 +1399,7 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
 
 export const exportGameFile = loggedCallable('exportGameFile', async (data, context) => {
   const uid = requireAuth(context);
+  await assertCanMoveGames(uid, context.auth?.token.admin === true, 'export');
   const { gameId } = (data ?? {}) as { gameId?: string };
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
 
@@ -1414,6 +1418,7 @@ export const exportGameFile = loggedCallable('exportGameFile', async (data, cont
 
 export const importGameFile = loggedCallable('importGameFile', async (data, context) => {
   const uid = requireAuth(context);
+  await assertCanMoveGames(uid, context.auth?.token.admin === true, 'import');
   const { file, targetGameId } = (data ?? {}) as { file?: unknown; targetGameId?: unknown };
   if (targetGameId !== undefined && (typeof targetGameId !== 'string' || !targetGameId.trim())) {
     throw new functions.https.HttpsError('invalid-argument', 'targetGameId must be a game id');

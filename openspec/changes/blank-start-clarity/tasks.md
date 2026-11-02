@@ -1,0 +1,10 @@
+- [x] RED: `scripts/test-blank-start-clarity.ts`, step order in `test-wizard` and `builderFirstTaskFlow`, device check in e2e
+- [x] GREEN: details first, wall waits for the mission to close, Next answers
+- [x] GREEN: device kept on `userEngagement`, shown on the admin roster, one minute flush
+- [ ] Browser check of the blank path at phone width
+- [ ] Gates: `npm run verify`, `npm run e2e`
+- [x] RED then GREEN: one place per stage, hard filter with fallback (place beats the closing tag), swap keeps the place, line read back from the text
+- [x] Quick flow asks how much to prepare; a mission bound to a place gets a pin step with its place
+- [x] mission-studio: L51, G23, bank-format, engine card
+- [x] RED then GREEN: big games (24 people and up, two places) run a middle stage in two full sets, `Task.placeTrack`; routing splits by load on the first mission and then keeps the team on its set, fail open
+- [x] Scroll hint moved under the swap button

@@ -218,6 +218,7 @@ const projectSrc = viewSrc.slice(
 
 /** Task fields the share view deliberately does NOT project, each with a reason. */
 const WITHHELD_TASK_FIELDS: Record<string, string> = {
+  placeTrack: 'routing only: the text of the mission already says where it is',
   status: 'a live per-run operator override, not part of the authored template',
   currentTeamCount: 'a runtime counter maintained per run, meaningless on a template',
   maxDurationMinutes: 'staff-console warning threshold; no meaning outside a live run',

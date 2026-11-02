@@ -15,12 +15,21 @@
 // error, lose work, or have the console degrade because a metric write failed.
 import { useEffect, useRef } from 'react';
 import { recordEngagement } from '../services/calls';
-import { MAX_ENGAGEMENT_FLUSH_MS } from '@rushpoint/shared';
+import { MAX_ENGAGEMENT_FLUSH_MS, engagementDevice, type EngagementDevice } from '@rushpoint/shared';
 
-const FLUSH_INTERVAL_MS = 2 * 60 * 1000;
+// One minute, not two: closing a tab usually kills the last flush, so a three and a half minute
+// visit read as two (change: blank-start-clarity). Short first visits are the ones worth reading.
+const FLUSH_INTERVAL_MS = 60 * 1000;
 /** Below this, a flush is not worth a write. Also stops a rapid visible/hidden flicker
  *  (alt tabbing) from emitting a burst of near empty calls. */
 const MIN_FLUSH_MS = 5_000;
+
+function currentDevice(): EngagementDevice {
+  return engagementDevice({
+    coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+    shortSide: Math.min(window.screen.width, window.screen.height),
+  });
+}
 
 function isVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible';
@@ -60,7 +69,7 @@ export function useEngagementTracker(enabled: boolean): void {
       if (deltaMs < MIN_FLUSH_MS) return;
       pendingMs.current = 0;
       // Fire and forget, and swallow everything: a failed metric write must be invisible.
-      void recordEngagement({ deltaMs }).catch(() => { /* analytics is never load bearing */ });
+      void recordEngagement({ deltaMs, device: currentDevice() }).catch(() => { /* analytics is never load bearing */ });
     };
 
     const onVisibility = () => {

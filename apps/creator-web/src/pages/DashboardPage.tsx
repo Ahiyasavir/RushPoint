@@ -1,3 +1,4 @@
+import { PlanChip, usePlanGate } from '../components/PlanSheet';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { askToSaveAccount } from '../components/SaveAccountSheet';
 import { accountGateFor, isGuest, startIntentOpensWizard } from '../lib/guestCreator';
@@ -213,6 +214,7 @@ const TASK_TYPE_ICON: Record<string, IconName> = {
 export default function DashboardPage() {
   const nav = useNavigate();
   const { user } = useAuth();
+  const planGate = usePlanGate();
   const t = useT();
   const d = t.dashboard;
   const b = t.builder;
@@ -475,6 +477,8 @@ export default function DashboardPage() {
     occasionStageNames: (occasion, role) => d.wizard.occasionStageNames[occasion]?.[role] ?? [],
     // Asked only for a mission the composer just pinned — see siteableInPlacedGame.
     placeMissionPrompt: () => d.wizard.placeMissionPrompt,
+    goToPlace: (area) => d.wizard.goToPlace[area] ?? '',
+    placeMissionAt: (area) => d.wizard.placeMissionAt[area] ?? '',
     // The station's spot kind, appended to the prompt (change: composer-siting-by-station).
     placeSpotHint: (spot) => d.wizard.placeSpotHint[spot] ?? '',
     // The clue of the one hidden mission a placed game gets (change: composer-variety).
@@ -701,8 +705,9 @@ export default function DashboardPage() {
     // already passed). Shares its flag with the Builder header.
     // Ask, but burn the one-time flag only after a successful launch below — a
     // launch failure must leave the gate intact for the next attempt.
+    // The plan's own moment says it warmly, with the launch number: a community creator needs only one.
     const needFirstLaunchConfirm = !opts?.testDrive && !hasConfirmedFirstLaunch(user?.uid);
-    if (needFirstLaunchConfirm) {
+    if (needFirstLaunchConfirm && !planGate.isCommunity) {
       const ok = await dialog.confirm(t.builder.firstLaunchConfirmBody, t.builder.firstLaunchConfirmCta);
       if (!ok) return;
     }
@@ -717,6 +722,7 @@ export default function DashboardPage() {
       });
       if (choice.kind === 'open') { nav(`/run/${choice.run.gameId}/${choice.run.runId}`); return; }
       if (choice.kind === 'cancel') return;
+      if (!(await planGate.confirmLaunch(g.title))) return;
     }
     // Show the liftoff overlay for the launch wait, always cleared in `finally` so
     // an error can never leave it stuck open (change: creator-launch-liftoff). On
@@ -798,6 +804,7 @@ export default function DashboardPage() {
   }
 
   async function togglePublish(g: Game) {
+    if (g.visibility !== 'public' && planGate.blocked('publish', g.title)) return;
     if (g.visibility !== 'public' && accountGateFor('publish', isGuest(user)) === 'needsAccount') {
       if (!(await askToSaveAccount('publish'))) return;
     }
@@ -859,6 +866,8 @@ export default function DashboardPage() {
             <h1 className="font-brand text-3xl sm:text-4xl font-extrabold tracking-tight leading-none bg-gradient-to-r from-rp-fire via-rp-amber to-rp-amber bg-clip-text text-transparent">
               {d.title}
             </h1>
+            {planGate.plan && <div className="mt-3"><PlanChip plan={planGate.plan} onOpen={planGate.showInfo} /></div>}
+            {planGate.sheet}
             {/* Desktop only (change: phone-dashboard-shows-your-games). This
                 sentence explains what RushPoint is — to someone already signed in,
                 looking at their own games, on the screen with the least room to
@@ -884,7 +893,7 @@ export default function DashboardPage() {
               <Button
                 variant="ghost"
                 disabled={busy}
-                onClick={() => importInput.current?.click()}
+                onClick={() => { if (!planGate.blocked('import')) importInput.current?.click(); }}
                 title={d.importGameHint}
                 aria-label={d.importGameAria}
                 className="!px-4 !py-2.5 !text-sm"

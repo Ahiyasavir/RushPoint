@@ -363,6 +363,9 @@ gameShareLinks/{token}                                       read-only SHARE lin
                                                              written to publicGames/publicTasks: not publishing
                                                              is the whole point.
 auditLogs/{id}                                               immutable admin trail (CF only)
+creatorPlans/{uid}                                           community plan: launches used/opened (CF only, change:
+                                                             community-plan). No document = 3 launches, 3 teams,
+                                                             15 people; the admin is never limited.
 ```
 
 **Run / team / score / leaderboard docs are SERVER-WRITE-ONLY.** `firestore.rules` deny client

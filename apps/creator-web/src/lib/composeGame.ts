@@ -69,6 +69,7 @@ import {
   type BankTagId,
   type BookendTagId,
   type SettingTagId,
+  AREA_KIND_TAG_IDS,
   AREA_TAG_IDS,
   type AreaTagId,
   prepTierOf,
@@ -193,6 +194,10 @@ export interface ComposerDescriptionCopy extends NewGameDescriptionCopy {
    * property of the DECISION this composition made.
    */
   placeMissionPrompt(): string;
+  /** "Go to the beach." for a mission not every one of the game's places can host. '' leaves the text alone. */
+  goToPlace?(area: AreaTagId): string;
+  /** The Quick Setup question for a mission bound to a place: "this one is at the beach, pick the spot". */
+  placeMissionAt?(area: AreaTagId): string;
   /**
    * A short line naming the kind of spot a station wants ("a bench works"),
    * appended to the place prompt (change: composer-siting-by-station). Optional:
@@ -1034,6 +1039,52 @@ function wantsPlacedMissions(setting: SettingTagId, locationMissions: boolean): 
  *
  * A mission already tied to a place is not "siteable" — it is simply sited.
  */
+const isPlaceKind = (t: string) => (AREA_KIND_TAG_IDS as readonly string[]).includes(t);
+
+/**
+ * Which of the game's places a mission must be played in (Ahiya, 2.11: a sand wall in a game that is not
+ * only on the beach has to say so). Null when the game has one place, or when the mission fits all of them
+ * or carries no place of its own. A mission that fits several goes to its stage's place. Total.
+ */
+export function goToAreaFor(
+  tags: readonly string[] | undefined,
+  areas: readonly string[] | undefined,
+  stagePlace?: string | null,
+): AreaTagId | null {
+  const wanted = (areas ?? []).filter(isPlaceKind);
+  if (wanted.length < 2) return null;
+  const fit = wanted.filter((a) => (tags ?? []).includes(a));
+  if (fit.length === 0 || fit.length === wanted.length) return null;
+  return (stagePlace && fit.includes(stagePlace) ? stagePlace : fit[0]) as AreaTagId;
+}
+
+/**
+ * The place each stage is played in. Missions inside a stage come in any order, so a stage split between
+ * two places walks a team back and forth; one place per stage is what makes "go to the beach" a route and
+ * not a zigzag. Null for every stage when the creator named no place. Total.
+ */
+export function stagePlaces(areas: readonly string[] | undefined, stageCount: number): (AreaTagId | null)[] {
+  const wanted = (areas ?? []).filter(isPlaceKind);
+  return Array.from({ length: Math.max(0, stageCount) }, (_, s) =>
+    wanted.length > 0 ? (wanted[s % wanted.length] as AreaTagId) : null);
+}
+
+/** Can this mission be played at this place? One with no place of its own can be played anywhere. */
+export function missionFitsPlace(tags: readonly string[] | undefined, place: string | null | undefined): boolean {
+  if (!place) return true;
+  const own = (tags ?? []).filter(isPlaceKind);
+  return own.length === 0 || own.includes(place);
+}
+
+/** The place a mission's text sends the team to, read back from the line the composer wrote. */
+export function placeLineOf(description: string | undefined, lines: Record<string, string>): AreaTagId | null {
+  const text = (description ?? '').trimStart();
+  for (const [area, line] of Object.entries(lines)) {
+    if (line && text.startsWith(line)) return area as AreaTagId;
+  }
+  return null;
+}
+
 export function siteableInPlacedGame(entry: TaskBankEntry): boolean {
   return bankSiting(entry) === 'possible';
 }
@@ -1392,6 +1443,8 @@ interface Slot {
   stage: number;
   index: number;
   requiredTag?: BookendTagId;
+  /** A second set's place, when it is not the stage's own. Such a slot stays empty rather than leave it. */
+  place?: AreaTagId;
 }
 
 /**
@@ -1594,6 +1647,26 @@ export function previewShape(
 
 /** A stage never grows past this many missions: more is setup work, not variety. */
 const MAX_STAGE_TASKS = 6;
+/** A stage with two full sets holds twice what a team plays. */
+const MAX_TRACK_STAGE_TASKS = 10;
+/** From here one place at a time is a crowd: at the size where `choiceExtras` gives its second extra. */
+const PLACE_TRACK_PEOPLE = 24;
+
+/**
+ * The second place a big game's middle stage also runs in, or null. A small group stays in one place per
+ * stage; a big one is split across two so nobody queues (Ahiya, 2.11). Total.
+ */
+export function secondPlaceFor(
+  people: unknown,
+  areas: readonly string[] | undefined,
+  stagePlace: string | null | undefined,
+): AreaTagId | null {
+  const n = typeof people === 'number' && Number.isFinite(people) ? people : 0;
+  const wanted = (areas ?? []).filter(isPlaceKind);
+  if (n < PLACE_TRACK_PEOPLE || wanted.length < 2 || !stagePlace) return null;
+  const at = wanted.indexOf(stagePlace);
+  return (at < 0 ? null : wanted[(at + 1) % wanted.length]) as AreaTagId | null;
+}
 
 /**
  * How many missions a middle stage holds beyond what a team must do (change: composer-variety).
@@ -1676,6 +1749,10 @@ export function composeGame(
   const stageMechanics = Array.from({ length: stageCount }, () => new Map<string, number>());
   const gameMechanics = new Map<string, number>();
 
+  // One place per stage. The soft area score above cannot do this: it is one term of a sum, so a strong
+  // mission from somewhere the game never goes could still win.
+  const stagePlaceOf = stagePlaces(ctx.areas, stageCount);
+
   const fillSlot = (slot: Slot): TaskBankEntry | null => {
     const slotCtx: FitContext = {
       ...ctx,
@@ -1693,9 +1770,17 @@ export function composeGame(
       }
       return out;
     };
-    let candidates = scoreAll(slotCtx);
+    const stagePlace = slot.place ?? stagePlaceOf[slot.stage] ?? null;
+    const atStagePlace = (list: BandCandidate[]) => list.filter((c) =>
+      missionFitsPlace(usable.find((e) => e.key === c.key)?.tags, stagePlace));
+    let candidates = atStagePlace(scoreAll(slotCtx));
     // A cap that would empty the slot is lifted for it: a shorter game is worse than a repeat.
-    if (candidates.length === 0 && diversity) candidates = scoreAll({ ...slotCtx, mechanicCaps: false });
+    if (candidates.length === 0 && diversity) candidates = atStagePlace(scoreAll({ ...slotCtx, mechanicCaps: false }));
+    // A closing mission that belongs elsewhere would walk the team out of the place for its last act: the
+    // place outranks the bookend. Only a bank with nothing at all for the place leaves it, and then it says where.
+    if (candidates.length === 0 && slot.place) return null;
+    if (candidates.length === 0 && slot.requiredTag) candidates = atStagePlace(scoreAll({ ...slotCtx, mechanicCaps: false, requiredTag: undefined }));
+    if (candidates.length === 0) candidates = scoreAll({ ...slotCtx, mechanicCaps: false });
 
     const picked = pickFromBand(candidates, rng);
     if (!picked) return null; // pool exhausted — the slot is dropped, never faked
@@ -1730,7 +1815,7 @@ export function composeGame(
   const keyOfTask = new Map<string, string>();
   const extraTaskIds: string[] = [];
 
-  const emit = (entry: TaskBankEntry, stageId: string, tasks: Task[]): boolean => {
+  const emit = (entry: TaskBankEntry, stageId: string, tasks: Task[], stagePlace: AreaTagId | null): boolean => {
       let task: Task;
       try {
         task = entry.build();
@@ -1749,7 +1834,13 @@ export function composeGame(
       // actually ask for that pin. With no prompt to show, the creator would meet
       // a mandatory blank field with no explanation — leave the mission playable
       // from anywhere instead.
-      const siteIt = placedGame && placePrompt !== '' && bankSiting(entry) === 'possible';
+      // A mission that belongs to one of several places says so, and a creator who came to prepare
+      // can pin it there too, whatever its siting says.
+      // A `must` mission has its own pin and its own directions; a second "go to" in front of them is noise.
+      const goToArea = bankSiting(entry) === 'must' ? null : goToAreaFor(entry.tags, ctx.areas, stagePlace);
+      const goToLine = goToArea ? oneParagraph(copy?.goToPlace?.(goToArea) ?? '') : '';
+      if (goToLine) task.description = `${goToLine} ${task.description ?? ''}`.trim();
+      const siteIt = placedGame && placePrompt !== '' && (bankSiting(entry) === 'possible' || (goToLine !== '' && bankSiting(entry) === 'never'));
       if (siteIt) {
         task.locationless = false;
         task.triggerMode = 'radius';
@@ -1769,7 +1860,7 @@ export function composeGame(
           stageId,
           taskId: task.id,
           targetFieldPath: 'coordinates',
-          instructionPrompt: stationPrompt(placePrompt, spotOf(entry), copy),
+          instructionPrompt: stationPrompt((goToArea && oneParagraph(copy?.placeMissionAt?.(goToArea) ?? '')) || placePrompt, spotOf(entry), copy),
           // Required: the mission was just made location-gated, so an unplaced
           // one would strand a team at a pin that is not there.
           isRequired: true,
@@ -1797,7 +1888,7 @@ export function composeGame(
     // choosing a location level on the prep scale IS choosing to place locations,
     // so the composer does not second-guess it with one station per stage.
     for (const entry of chosen[s]) {
-      if (entry) emit(entry, stageId, tasks);
+      if (entry) emit(entry, stageId, tasks, stagePlaceOf[s] ?? null);
     }
 
     // A stage with nothing in it is dropped rather than emitted empty — that is
@@ -1848,9 +1939,35 @@ export function composeGame(
     for (let si = 1; si < stages.length - 1; si++) {
       const stage = stages[si];
       const stageSlot = counts.findIndex((_, k) => k === si);
+      // A big game with two places: a whole second set elsewhere does what the extras do, and more.
+      const ownPlace = stagePlaceOf[stageSlot >= 0 ? stageSlot : si] ?? null;
+      const second = secondPlaceFor(people, ctx.areas, ownPlace);
+      if (second) {
+        const size = stage.tasks.length;
+        const marks = { used: usedEntries.length, steps: wizardSteps.length, extra: extraTaskIds.length };
+        const ownEntries = stageEntries.get(stage.id) ?? [];
+        while (stage.tasks.length < size * 2 && stage.tasks.length < MAX_TRACK_STAGE_TASKS) {
+          const entry = fillSlot({ stage: stageSlot >= 0 ? stageSlot : si, index: stage.tasks.length, place: second });
+          if (!entry || !emit(entry, stage.id, stage.tasks, second)) break;
+          const added = stage.tasks[stage.tasks.length - 1];
+          added.placeTrack = second;
+          extraTaskIds.push(added.id);
+        }
+        if (stage.tasks.length === size * 2) {
+          for (const task of stage.tasks.slice(0, size)) task.placeTrack = ownPlace as string;
+          continue;
+        }
+        // A set a team cannot finish would walk it to the other place mid stage: no second set at all.
+        for (const task of stage.tasks.splice(size)) sitedTaskIds.delete(task.id);
+        usedEntries.length = marks.used;
+        wizardSteps.length = marks.steps;
+        extraTaskIds.length = marks.extra;
+        stageEntries.set(stage.id, ownEntries);
+      }
       for (let k = 0; k < extras && stage.tasks.length < MAX_STAGE_TASKS; k++) {
-        const entry = fillSlot({ stage: stageSlot >= 0 ? stageSlot : Math.min(si, stageCount - 1), index: stage.tasks.length });
-        if (!entry || !emit(entry, stage.id, stage.tasks)) break;
+        const slotStage = stageSlot >= 0 ? stageSlot : Math.min(si, stageCount - 1);
+        const entry = fillSlot({ stage: slotStage, index: stage.tasks.length });
+        if (!entry || !emit(entry, stage.id, stage.tasks, stagePlaceOf[slotStage] ?? null)) break;
         extraTaskIds.push(stage.tasks[stage.tasks.length - 1].id);
       }
     }

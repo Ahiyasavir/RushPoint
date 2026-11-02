@@ -126,6 +126,8 @@ export default function TaskWizard({
   // hooks, above every conditional in this component.
   const isMobile = useIsMobile();
   const [step, setStep] = useState<WizardStep>(1);
+  // Next on a mission with no name answers instead of going dead (change: blank-start-clarity).
+  const [nameAsked, setNameAsked] = useState(false);
   // Which validation messages may be shown. Lives here and resets on mount (the
   // panel is keyed by task id), because the persistent, game wide record of what
   // is broken is the readiness surface, not this editor.
@@ -244,6 +246,11 @@ export default function TaskWizard({
   // The reveal-gated messages this task would show. The finish control reveals
   // them once and then closes; it is never disabled.
   const blockers = taskRevealBlockers(task);
+  const next = () => {
+    if (canGoNext(stepKey, task)) { setStep((s) => (s + 1) as WizardStep); return; }
+    setNameAsked(true);
+    rootRef.current?.querySelector<HTMLInputElement>('[data-qs-field="title"]')?.focus();
+  };
   const finish = () => {
     if (nextFinishAction(reveal, blockers) === 'reveal') {
       setReveal((s) => blockers.reduce((acc, f) => markTouched(acc, f), s));
@@ -412,7 +419,7 @@ export default function TaskWizard({
             containers never got it. */}
         {/* `data-qs-body` marks the LIST guided isolation subtracts within — the
             direct children of these wrappers are the sections a step can keep. */}
-        {stepKey === 'details' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} showTypePicker={view.showTypePicker} /></div>}
+        {stepKey === 'details' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} showTypePicker={view.showTypePicker} nameAsked={nameAsked} /></div>}
         {stepKey === 'execution' && <div data-qs-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} preset={scoringPreset} /></div>}
       </div>
 
@@ -446,7 +453,7 @@ export default function TaskWizard({
         ) : <span />}
         <div className="ms-auto flex items-center gap-2">
           {step < lastStep ? (
-            <Button disabled={!canGoNext(stepKey, task)} onClick={() => setStep((s) => (s + 1) as WizardStep)}>{b.next} →</Button>
+            <Button onClick={next}>{b.next} →</Button>
           ) : (
             /* Never disabled: the first press reveals every unrevealed blocker and
                keeps the editor open (landing on the offending step), the next
@@ -1095,7 +1102,7 @@ function typeMetaOf(b: B): Record<TaskType, { label: string; short: string; desc
 // on step 3, beside the point value it actually interacts with; every other
 // optional field became a chip there too. This step is the one a creator must
 // answer, so it asks nothing else.
-function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true }: {
+function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true, nameAsked = false }: {
   task: Task; set: (p: Partial<Task>) => void; b: B; replace: (t: Task) => void;
   // Media is authored here now (change: task-media-durability), and the upload path
   // needs the game id to build its storage prefix.
@@ -1105,6 +1112,7 @@ function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true 
   // choice it is not asking for (lib/guidedEditor). DISPLAY only, per that
   // module's rule 2: nothing here is written, so the type is untouched.
   showTypePicker?: boolean;
+  nameAsked?: boolean;
 }) {
   // Which type's sample list is open (only for a type that offers more than one).
   const [samplePickerFor, setSamplePickerFor] = useState<TaskType | null>(null);
@@ -1154,7 +1162,7 @@ function DetailsStepBody({ task, set, b, replace, gameId, showTypePicker = true 
         {/* The naming gate is the wizard's ONLY forward gate, so it states its
             reason beside the field. Calm register: this is a hint, not an error. */}
         {task.title.trim() === '' && (
-          <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.titleRequiredHint}</p>
+          <p className={`text-[13px] leading-snug mt-1 ${nameAsked ? 'text-ink-fire font-semibold' : 'text-[--ink-3]'}`}>{b.titleRequiredHint}</p>
         )}
       </div>
       <div className="flex flex-col gap-2">

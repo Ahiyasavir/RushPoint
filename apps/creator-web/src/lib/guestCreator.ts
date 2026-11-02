@@ -50,10 +50,12 @@ export function markSignedIn(): void {
 export const GUEST_FREE_EDITS = 3;
 export type GuestSaveMoment = 'none' | 'soft' | 'required';
 
-export function guestSaveMoment(input: { guest: boolean; edits: unknown; softSeen: boolean }): GuestSaveMoment {
+// A wall never lands in the middle of a mission: three moves of one pin hit it, on a game with
+// nothing in it yet (change: blank-start-clarity). Their work is saved, so it can wait for the close.
+export function guestSaveMoment(input: { guest: boolean; edits: unknown; softSeen: boolean; missionOpen?: boolean }): GuestSaveMoment {
   if (!input.guest) return 'none';
   const edits = typeof input.edits === 'number' && Number.isFinite(input.edits) ? input.edits : 0;
-  if (edits >= GUEST_FREE_EDITS) return 'required';
+  if (edits >= GUEST_FREE_EDITS) return input.missionOpen ? 'none' : 'required';
   return input.softSeen ? 'none' : 'soft';
 }
 

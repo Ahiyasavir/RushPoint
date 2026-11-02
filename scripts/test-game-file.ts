@@ -175,6 +175,7 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
         requirePresence: maybe(rng() < 0.5),
         // pause-clock-tasks: exercised by the random round trip like any other flag.
         pausesTimer: maybe(rng() < 0.5),
+        placeTrack: maybe('beach'),
         steps: type === 'sequence'
           ? [{ id: 'st1', prompt: text(), answer: maybe('שלום') }, { id: 'st2', prompt: text() }]
           : undefined,
@@ -476,6 +477,7 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     releaseAfterMinutes: true, expiresAfterMinutes: true, unlockAfterTaskIds: true, tags: true,
     // pause-clock-tasks: authored on the template, so it must round trip.
     pausesTimer: true,
+    placeTrack: 'beach',
     // mission-time-limit
     expiresAt: true, timeLimitMinutes: true,
     // game-file-full-settings (2026-09-27): authored mission fields the export used to drop.

@@ -1,3 +1,4 @@
+import type { FirebaseError } from 'firebase/app';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, connectFirestoreEmulator } from 'firebase/firestore';
 import {
@@ -332,8 +333,8 @@ export async function upgradeGuestWithEmail(email: string, password: string, dis
 
 /**
  * Link Google onto the guest. `credential-already-in-use` (this Google account already has a
- * RushPoint account) is rethrown untouched for the caller to explain: signing into the other
- * account would leave the guest's game behind, so that is the creator's choice, never ours.
+ * RushPoint account) is rethrown untouched: the caller takes a claim on the guest's games first, then
+ * signs in with `signInFromGoogleConflict`, so pressing Google works for an old account too (Ahiya, 2.11).
  */
 export async function upgradeGuestWithGoogle() {
   const user = auth.currentUser;
@@ -348,6 +349,13 @@ export async function upgradeGuestWithGoogle() {
   const cred = await linkWithPopup(user, googleProvider);
   await cred.user.reload();
   return cred;
+}
+
+/** The refusal carries the Google credential they just approved, so no second popup is needed. */
+export function signInFromGoogleConflict(error: unknown) {
+  const credential = GoogleAuthProvider.credentialFromError(error as FirebaseError);
+  if (!credential) throw error;
+  return signInWithCredential(auth, credential);
 }
 
 export function signInWithEmail(email: string, password: string) {

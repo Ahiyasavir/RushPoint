@@ -37,7 +37,7 @@ import {
   prepTierOf,
   type BankTagId,
 } from '../bankTags';
-import { seededRng, pickFromBand } from './composeGame';
+import { seededRng, pickFromBand, missionFitsPlace, placeLineOf } from './composeGame';
 import { TASTE_WEIGHT, tasteAffinity } from './tasteCodec';
 import { qualityBonus, qualityOf, type MissionStats } from './missionQuality';
 import type { OccasionId } from './occasions';
@@ -408,6 +408,8 @@ export interface RegenerateRequest {
   bank: readonly TaskBankEntry[];
   profile: readonly BankTagId[];
   context: RegenerateContext;
+  /** The place this mission's stage is played in, from `swapPlace`. */
+  place?: string | null;
   /** How many times THIS mission has already been regenerated. */
   drift: number;
   /** Bank keys already offered for this mission. */
@@ -483,7 +485,10 @@ export function chooseRegeneratedMission(req: RegenerateRequest | null | undefin
   };
   const fitsGame = (e: TaskBankEntry) => !(typeof e.family === 'string' && inGameFamilies.has(e.family)) && servesAll(e);
 
-  const eligible = bank.filter((e) => e && typeof e.key === 'string' && playable(e, ctx) && !inGame.has(e.key));
+  // A mission sent to a place stays there: the rest of its stage is played there (Ahiya, 2.11).
+  const here = (e: TaskBankEntry) => missionFitsPlace(tagsOf(e.tags), req!.place);
+  const open = bank.filter((e) => e && typeof e.key === 'string' && playable(e, ctx) && !inGame.has(e.key));
+  const eligible = open.some(here) ? open.filter(here) : open;
   if (eligible.length === 0) return null;
 
   // Widest-first fallbacks: fresh AND fitting the game; then fitting the game with the history
@@ -504,6 +509,45 @@ export function chooseRegeneratedMission(req: RegenerateRequest | null | undefin
   }));
   const picked = pickFromBand(scored, seededRng(num(req!.seed) ?? 0));
   return picked ? picked.entry : null;
+}
+
+/**
+ * Where a swapped mission stands, read from the game itself: no Task field carries the place (the
+ * participant sanitizer is an allowlist, and the line in the text is what the players need anyway).
+ * The mission's own line, else any line in its stage, because a mission that fits every place has none.
+ * `places` is every place the game sends anyone to. Total.
+ */
+export function swapPlace(
+  game: { stages?: readonly { tasks?: readonly Task[] }[] } | null | undefined,
+  sourceId: string,
+  dictionaries: readonly Record<string, string>[],
+): { place: string | null; places: string[]; lines: Record<string, string> | null } {
+  const stages = Array.isArray(game?.stages) ? game!.stages! : [];
+  for (const lines of dictionaries) {
+    const places = new Set<string>();
+    let own: string | null = null;
+    let stagePlace: string | null = null;
+    for (const stage of stages) {
+      const tasks = Array.isArray(stage?.tasks) ? stage.tasks! : [];
+      const inStage = tasks.some((t: Task) => t?.id === sourceId);
+      for (const t of tasks as readonly Task[]) {
+        const found = placeLineOf(t?.description, lines);
+        if (!found) continue;
+        places.add(found);
+        if (t.id === sourceId) own = found;
+        else if (inStage) stagePlace = stagePlace ?? found;
+      }
+    }
+    if (places.size > 0) return { place: own ?? stagePlace, places: [...places], lines };
+  }
+  return { place: null, places: [], lines: null };
+}
+
+/** The replacement's text, with the line its place needs. Its own place when the stage's one had nothing left. */
+export function withPlaceLine(task: Task, tags: readonly string[], spot: ReturnType<typeof swapPlace>): Task {
+  const area = [spot.place, ...spot.places].find((a): a is string => !!a && tags.includes(a));
+  const line = area ? spot.lines?.[area] : '';
+  return line ? { ...task, description: `${line} ${task.description ?? ''}`.trim() } : task;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -539,6 +583,7 @@ export function applyRegeneratedMission(
   if (typeof from.id === 'string' && from.id !== '') next.id = from.id;
   if (from.hidden === true) next.hidden = true;
   if (Array.isArray(from.unlockAfterTaskIds)) next.unlockAfterTaskIds = [...from.unlockAfterTaskIds];
+  if (from.placeTrack) next.placeTrack = from.placeTrack;
 
   if (!isLocationlessTask(to) && !isLocationlessTask(from)) {
     // Both sides want a place: keep the one the creator already chose.

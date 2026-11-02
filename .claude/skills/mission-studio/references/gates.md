@@ -75,6 +75,15 @@ helps only if it gains too (L46). A prop comes from an ordinary shop (L47).
 front of you" only on a mission with a pin, which opens on arrival; and phrased from the pin
 ("מהנקודה שבה אתם עומדים"). (L10)
 
+**G23 · Area tags are true and complete, and the text agrees with them.** Each stage of a game has one
+place, and only missions tagged for it are picked. For each of the nine kinds of place: can a team
+standing there at its busiest do this now, with what is there? Tag every yes, and no maybe. The text names
+no place the tags do not promise, and does not open with "לכו ל<place>": the composer adds that line.
+Bound to a kind of place (sand, trees, shops) but not to one spot: `siting: 'never'` or `'possible'`, the
+composer tells them where and a creator who chose to prepare can pin it. One real spot only: `'must'`, with
+its own directions. A closing or opening mission (`finish`, `start`) needs the widest true tags of all:
+the bank has 8 and 6, and a place with none loses its closing mission. (L51)
+
 **G13 · Hard by thought, not by missing pieces.** Every navigation clue has visible anchors;
 every puzzle is solvable from what is in the field. The method of a puzzle is NOT explained in
 the text (that makes it a worksheet); it can go in the paid hint. (L11, L12)

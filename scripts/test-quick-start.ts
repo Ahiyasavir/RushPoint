@@ -17,18 +17,18 @@ assert.equal(readStartOccasion('?occasion=birthday'), null, 'without start=game 
 assert.equal(readStartOccasion('?start=game'), null);
 assert.equal(readStartOccasion(null), null);
 
-// Three questions when the front page already asked, four when it did not.
+// Four questions when the front page already asked, five when it did not.
 const asked = initialSmartBuildState({ quick: true, occasion: 'birthday' });
 assert.equal(currentSmartBuildQuestion(asked), 'who');
 assert.equal(asked.answers.occasion, 'birthday');
-assert.equal(smartBuildProgress(asked).total, 3);
+assert.equal(smartBuildProgress(asked).total, 4);
 const notAsked = initialSmartBuildState({ quick: true });
 assert.equal(currentSmartBuildQuestion(notAsked), 'occasion');
-assert.equal(smartBuildProgress(notAsked).total, 4);
+assert.equal(smartBuildProgress(notAsked).total, 5);
 
 // The questionnaire ends after the last QUICK question, and back still leaves through the top.
 let s = asked;
-for (const q of ['who', 'duration', 'areas']) {
+for (const q of ['who', 'duration', 'areas', 'prep']) {
   assert.equal(currentSmartBuildQuestion(s), q);
   assert.equal(isSmartBuildComplete(s), false);
   s = smartBuildReducer(s, { type: 'next' });
@@ -39,7 +39,7 @@ assert.equal(hasLeftSmartBuild(smartBuildReducer(asked, { type: 'back' })), true
 // The long questionnaire is untouched.
 assert.equal(smartBuildProgress(initialSmartBuildState()).total, SMART_BUILD_QUESTION_ORDER.length);
 
-// Asks for nothing the creator did not offer: no prep, no pins.
+// Until they answer the prep question, nothing is assumed: no prep, no pins.
 assert.equal(smartBuildAnswers(asked).prepEffort, 1);
 assert.equal(smartBuildAnswers(asked).locationMissions, false);
 

@@ -164,6 +164,7 @@ export interface HostSheet {
  * other field must be read below as `t.<field>` (scripts/test-host-sheet.ts).
  */
 export const HOST_SHEET_IGNORED_TASK_FIELDS: Record<string, string> = {
+  placeTrack: 'routing only: the mission text already says where it is',
   currentTeamCount: 'a runtime counter on a run, meaningless on paper',
   status: 'a live operator override, not part of the authored game',
   maxDurationMinutes: 'a staff-console warning threshold',

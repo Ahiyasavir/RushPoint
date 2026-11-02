@@ -90,6 +90,7 @@ export const PUBLIC_CALLABLES = {
  *                              call would be a cost bug, not accountability.
  */
 export const PRIVILEGED_CALLABLES = {
+  setCreatorPlan: 'Opens launches or lifts the limits of a creator: who was given what must stay answerable.',
   setRunContacts:
     'Publishes phone numbers to every player and marshal of a live run. A wrong or swapped number '
     + 'sends a player in trouble to a stranger, so "who set which numbers, when" must stay answerable.',

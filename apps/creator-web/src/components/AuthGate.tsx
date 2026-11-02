@@ -20,7 +20,7 @@ import { startAsGuest,
 } from '../services/firebase';
 import { Button, Card, Input, Label, Spinner } from './ui';
 import { claimGuestGames, claimReferral, createGuestClaim } from '../services/calls';
-import { claimIsFinished, dropGuestClaim, keepGuestClaim, readGuestClaim } from '../lib/guestClaim';
+import { claimIsFinished, dropGuestClaim, keepGuestClaim, readGuestClaim, guestClaimPending } from '../lib/guestClaim';
 import { dialog, DialogHost } from './dialog';
 import { authErrorInfo } from '../lib/authError';
 import { ToastHost } from './toast';
@@ -87,13 +87,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Remember that this browser has a real account, so the next visit opens on sign in, not sign up.
   useEffect(() => { if (user && !user.isAnonymous) markSignedIn(); }, [user]);
   // Someone who left a guest game behind to sign in: it comes with them, and they land on it.
+  // Nothing renders until it answers: the game is not in this account yet, so the Builder would say it is gone.
+  const [claimSettled, setClaimSettled] = useState(false);
   useEffect(() => {
     const code = readGuestClaim();
     if (!user || user.isAnonymous || !code) return;
+    setClaimSettled(false);
     void claimGuestGames({ code }).then(({ moved }) => {
       dropGuestClaim();
       if (moved.length > 0) window.location.assign(`${import.meta.env.BASE_URL}build/${moved[moved.length - 1]}`);
-    }, (e: { code?: string }) => { if (claimIsFinished(e?.code)) dropGuestClaim(); });
+      else setClaimSettled(true);
+    }, (e: { code?: string }) => { if (claimIsFinished(e?.code)) dropGuestClaim(); setClaimSettled(true); });
   }, [user]);
   // Leaving a guest session by any door takes a claim first: nothing else can reach those games afterwards.
   async function signOutKeepingGames() {
@@ -125,6 +129,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return (
       <div className="min-h-screen bg-[--surface-0] flex items-center justify-center">
         <div className="w-8 h-8 rounded-full border-2 border-rp-fire/20 border-t-rp-fire animate-spin" />
+      </div>
+    );
+  }
+
+  if (guestClaimPending({ signedIn: !!user && !user.isAnonymous, code: readGuestClaim(), settled: claimSettled })) {
+    return (
+      <div className="min-h-screen bg-[--surface-0] flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="w-8 h-8 rounded-full border-2 border-rp-fire/20 border-t-rp-fire animate-spin" />
+        <p className="text-[16px] font-semibold text-[--ink-1]">{t.saveAccount.movingGame}</p>
       </div>
     );
   }

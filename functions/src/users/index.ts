@@ -169,6 +169,7 @@ export const deleteMyAccount = loggedCallable('deleteMyAccount', async (data, co
   // the callable. Best effort: a missing document is the normal case.
   await Promise.all([
     db.doc(`userEngagement/${uid}`).delete().catch((e) => logBestEffort('userEngagement.delete', { uid }, e)),
+    db.doc(`creatorPlans/${uid}`).delete().catch((e) => logBestEffort('creatorPlans.delete', { uid }, e)),
     db.doc(`userNotes/${uid}`).delete().catch((e) => logBestEffort('userNotes.delete', { uid }, e)),
   ]);
 

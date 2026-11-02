@@ -29,6 +29,20 @@ export function clampEngagementDelta(ms: unknown): number {
   return Math.round(Math.min(ms, MAX_ENGAGEMENT_FLUSH_MS));
 }
 
+/** Which kind of device the creator was last on. Only the browser knows, and without it a
+ *  two minute visit cannot be read: the same stuck moment means different things on each. */
+export type EngagementDevice = 'phone' | 'tablet' | 'desktop';
+
+export function engagementDevice(input: { coarsePointer: boolean; shortSide: number }): EngagementDevice {
+  if (!input.coarsePointer) return 'desktop';
+  return input.shortSide < 600 ? 'phone' : 'tablet';
+}
+
+/** The stored value, from an untrusted payload. Anything else is simply not recorded. */
+export function normalizeEngagementDevice(value: unknown): EngagementDevice | null {
+  return value === 'phone' || value === 'tablet' || value === 'desktop' ? value : null;
+}
+
 /** Split a stored total into whole hours plus the remaining whole minutes, for display.
  *  Formatting itself lives in the app dictionaries (this package is language free), so
  *  this returns parts rather than a string. Total: corrupt input reads as zero. */

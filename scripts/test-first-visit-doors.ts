@@ -23,6 +23,6 @@ const areas = wizard.slice(wizard.indexOf("id: 'areas'"), wizard.indexOf("id: 'p
 assert.match(areas, /MultiChoiceCardRow/, 'the place question takes several places');
 assert.doesNotMatch(areas, /autoAdvance/, 'the place question never moves on by itself');
 const feed = read('apps/creator-web/src/components/MissionFeed.tsx');
-assert.ok(feed.indexOf('{f.swipeHint}') < feed.indexOf('{f.swap}'), 'the swipe hint sits above the swap button');
+assert.ok(feed.indexOf('{f.swipeHint}') > feed.indexOf('{f.swap}'), 'the scroll hint sits under the swap button, its arrow pointing away from it');
 
 console.log('first-visit doors: 8 of 8 hold');

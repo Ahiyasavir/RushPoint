@@ -238,6 +238,7 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // One small doc write per save, driven by a human typing. Generous enough for rapid
   // edits across several creators, tight enough to bound a stuck client.
   setUserNote: { max: 30, windowMs: MIN },
+  setCreatorPlan: { max: 30, windowMs: MIN },
   // Admin-managed game templates (change: admin-manage-game-templates). Same
   // posture as setUserNote/listPlatformUsers: an infrequent, human-driven admin
   // action vs. a generous browse-poll budget for the creator-facing picker.

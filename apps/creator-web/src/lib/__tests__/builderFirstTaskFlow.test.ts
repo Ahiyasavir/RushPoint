@@ -49,16 +49,15 @@ function readyTask(p: Partial<Task> = {}): Task {
 // 1. Step order + placement classification
 // ─────────────────────────────────────────────────────────────────────────────
 describe('wizard step order is declared data, and naming still gates forward', () => {
-  // Reordered by task-editor-progressive-disclosure: location leads because it
-  // owns the map, which needs the whole panel. Naming remains the ONLY forward
-  // gate, so it now guards 2 → 3 instead of 1 → 2.
-  it('orders the steps location, details, execution', () => {
-    expect([...WIZARD_STEP_ORDER]).toEqual(['location', 'details', 'execution']);
+  // Details lead (change: blank-start-clarity): a real creator on a blank game spent three
+  // minutes on the map and left with a pin and no mission. Naming stays the ONLY forward gate.
+  it('orders the steps details, location, execution', () => {
+    expect([...WIZARD_STEP_ORDER]).toEqual(['details', 'location', 'execution']);
   });
 
   it('maps every 1 based position to its key and back', () => {
-    expect(stepKeyAt(1)).toBe('location');
-    expect(stepKeyAt(2)).toBe('details');
+    expect(stepKeyAt(1)).toBe('details');
+    expect(stepKeyAt(2)).toBe('location');
     expect(stepKeyAt(3)).toBe('execution');
     for (const key of WIZARD_STEP_ORDER) {
       expect(stepKeyAt(stepIndexOf(key))).toBe(key);

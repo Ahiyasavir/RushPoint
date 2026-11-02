@@ -12,6 +12,8 @@
 // callable). Do not extend this module to try to fold in player activity; there is no
 // data-model relationship to fold on.
 
+import type { EngagementDevice } from './engagement';
+
 export interface AdminAuthUserFacts {
   uid: string;
   email: string | null;
@@ -73,6 +75,9 @@ export interface AdminUserSummary {
    *  existed before that change starts at 0, so a 0 means "not measured yet", never
    *  "never visited". See ./engagement.ts for why the number is clamped. */
   engagementMs: number;
+  /** The device of their latest flush; null for everyone measured before blank-start-clarity. */
+  lastDevice?: EngagementDevice | null;
+  plan?: { plan: string; runsUsed: number; runsLeft: number } | null;
   /** Sum of participantCount across this creator's runs — how many players their games
    *  actually reached, which is the number that says whether a creator matters to the
    *  platform, as opposed to how many drafts they made. */
@@ -189,6 +194,7 @@ export function buildAdminUserSummary(
   /** Operator ticked "I emailed them" (change: admin-user-notes). */
   emailed = false,
   emailedAt: string | null = null,
+  lastDevice: EngagementDevice | null = null,
 ): AdminUserSummary {
   let lastActiveAt: string | null = authUser.lastSignInAt ?? null;
   const gameSummaries: AdminUserGameSummary[] = games.map((g) => {
@@ -221,6 +227,7 @@ export function buildAdminUserSummary(
     lastActiveAt,
     engagementMs: typeof engagementMs === 'number' && Number.isFinite(engagementMs) && engagementMs > 0
       ? engagementMs : 0,
+    lastDevice,
     note: typeof note === 'string' ? note : '',
     noteUpdatedAt: typeof noteUpdatedAt === 'string' ? noteUpdatedAt : null,
     emailed: emailed === true,

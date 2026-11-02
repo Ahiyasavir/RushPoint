@@ -5,6 +5,30 @@ the skill now catches it. **Add an entry after every round of feedback** (SKILL.
 
 ---
 
+## 2026-11-02 · Place tags are a promise the composer now enforces
+
+### L51 · An area tag decides where a team is sent, so it must be true and complete
+He played a generated game and met a sand wall in a game that was not only on the beach, with
+nothing saying where to go: "אם יש כמה מקומות... חשוב שזה יציין בתחילת משימה... לכו ל...", and then
+"זה לא רק רושם, תדאג ללוגיקה הזאת, זה דבר מורכב". Measured before the fix: 2,268 stages split
+between two places, 150 missions tagged only for places the game did not have.
+**Rule:** since 2.11 the composer gives each stage ONE place and picks only missions whose area tags
+include it, and it writes "לכו ל..." in front of any mission that does not fit every place of the
+game. So an area tag is no longer a hint for ranking. **A missing tag hides a good mission from that
+place; a false tag sends a team to a place where the mission cannot be played.**
+**Detect:** for every kind of place (forest, beach, park, neighborhood, cityCenter, home, mall, office,
+school), picture a team standing there at its busiest and ask: can they do this right now, with what is
+there? Yes = tag it. "It could be adapted" = no tag. Tag every place that passes, not only the obvious one.
+**Text:** the mission never names a place the tags do not promise, never says "כאן" about a place, and
+never opens with "לכו ל<place>" itself: the composer writes that line, and a bank line would double it.
+A mission with no area tag at all is read as "plays anywhere", so leave them off only when that is true.
+In a big game (24 people and up, two places or more) a middle stage runs a full set in each of two places,
+so both places need enough missions: thin places (forest 25) are where new missions are worth the most.
+**Caught by:** hard gate G23, engine card line "Where can it be played", and
+`scripts/test-blank-start-clarity.ts`, which sweeps real games.
+
+---
+
 ## 2026-10-30 · A role-play warm-up is childish for teens even with a camera
 
 ### L50 · Pretend identities are a kids' mechanic, whatever the proof

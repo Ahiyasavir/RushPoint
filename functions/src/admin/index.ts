@@ -9,13 +9,14 @@
 // `users/{uid}` doc, and no data-model link to any creator uid, so they are excluded
 // entirely rather than fabricated into a row. See design.md §D1.
 
+import { loadPlan } from '../plans';
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { loggedCallable } from '../obs/log';
 import { db, auth } from '../firebase';
 import { assertAdmin, requireAuth } from '../auth';
 import { enforceRateLimit } from '../rateLimitStore';
-import { clampEngagementDelta, normalizeUserNote } from '@rushpoint/shared';
+import { clampEngagementDelta, normalizeEngagementDevice, normalizeUserNote } from '@rushpoint/shared';
 import { isCreatorAccount, pageVerdict } from './authRoster';
 import {
   buildAdminUserSummary,
@@ -151,8 +152,8 @@ export const listPlatformUsers = loggedCallable('listPlatformUsers', async (data
         // Best effort: a missing or unreadable engagement document must degrade to
         // "not measured yet" (0), never fail the whole roster for one row.
         db.doc(`${ENGAGEMENT_COL}/${authUser.uid}`).get()
-          .then((s) => (s.data() as { totalMs?: number } | undefined)?.totalMs ?? 0)
-          .catch(() => 0),
+          .then((s) => s.data() as { totalMs?: number; lastDevice?: unknown } | undefined)
+          .catch(() => undefined),
         db.doc(`${NOTES_COL}/${authUser.uid}`).get()
           .then((s) => s.data() as
             { note?: string; updatedAt?: string; emailed?: boolean; emailedAt?: string } | undefined)
@@ -161,9 +162,12 @@ export const listPlatformUsers = loggedCallable('listPlatformUsers', async (data
       // Fill in real game titles for runs whose game still exists (runsFor only has gameId).
       const titleByGameId = new Map(games.map((g) => [g.id, g.title]));
       const runsWithTitles = runs.map((r) => ({ ...r, gameTitle: titleByGameId.get(r.gameId) ?? r.gameId }));
-      return buildAdminUserSummary(authUser, games, runsWithTitles, engagement,
+      const summary = buildAdminUserSummary(authUser, games, runsWithTitles, engagement?.totalMs ?? 0,
         noteDoc?.note ?? '', noteDoc?.updatedAt ?? null,
-        noteDoc?.emailed === true, noteDoc?.emailedAt ?? null);
+        noteDoc?.emailed === true, noteDoc?.emailedAt ?? null,
+        normalizeEngagementDevice(engagement?.lastDevice));
+      const plan = await loadPlan(authUser.uid, false).catch(() => null);
+      return { ...summary, plan: plan && { plan: plan.plan, runsUsed: plan.runsUsed, runsLeft: plan.runsLeft } };
     }),
   );
 
@@ -191,14 +195,17 @@ export const recordEngagement = loggedCallable('recordEngagement', async (data, 
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'recordEngagement');
 
-  const deltaMs = clampEngagementDelta((data as { deltaMs?: unknown } | undefined)?.deltaMs);
+  const payload = data as { deltaMs?: unknown; device?: unknown } | undefined;
+  const deltaMs = clampEngagementDelta(payload?.deltaMs);
   if (deltaMs <= 0) return { ok: true, applied: 0 };
+  const device = normalizeEngagementDevice(payload?.device);
 
   // increment() rather than read-modify-write: two tabs open in the same account are the
   // normal case, and a transaction here would serialise them for no benefit.
   await db.doc(`${ENGAGEMENT_COL}/${uid}`).set({
     totalMs: admin.firestore.FieldValue.increment(deltaMs),
     updatedAt: new Date().toISOString(),
+    ...(device ? { lastDevice: device } : {}),
   }, { merge: true });
 
   return { ok: true, applied: deltaMs };
