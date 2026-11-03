@@ -108,7 +108,9 @@ function SaveAccountSheet({ reason, required, onDone }: { reason: SaveReason; re
     setErr(''); setBusy(true);
     try { const cred = await upgradeGuestWithGoogle(); await finish(cred.user); }
     catch (e) {
-      const inUse = ((e as { code?: string } | null)?.code ?? '').includes('credential-already-in-use');
+      // Two refusals for one situation: the account was opened with Google, or with a password on this email.
+      const code = (e as { code?: string } | null)?.code ?? '';
+      const inUse = code.includes('credential-already-in-use') || code.includes('email-already-in-use');
       if (!inUse || !(await intoExistingAccount(() => signInFromGoogleConflict(e)))) explain(e);
     }
     finally { setBusy(false); }

@@ -198,6 +198,8 @@ export async function buildRecommendations(
   gameId: string,
   runId: string,
   limit = 5,
+  stageTasks: Task[] = tasks,
+  teamId = '',
 ): Promise<TaskRecommendation[]> {
   const { taskCounts, launchedAt, hotZone, taskStatusOverrides } = await getRunRouting(ownerUid, gameId, runId);
   const nowMs = Date.now();
@@ -218,7 +220,7 @@ export async function buildRecommendations(
     return true;
   });
 
-  return stickToPlaceTrack(candidates, tasks, completedTaskIds)
+  return stickToPlaceTrack(candidates, stageTasks, completedTaskIds, { taskCounts, spreadKey: teamId })
     .map((task) => ({
       task,
       priority: priorityScore(task, teamLocation, skillRatio, taskCounts, hotZone, nowMs),
@@ -353,6 +355,8 @@ export async function assignTask(
   ownerUid: string,
   gameId: string,
   runId: string,
+  stageTasks: Task[] = tasks,
+  teamId = '',
 ): Promise<{ taskId?: string; taskIndex?: number; reason?: NoAssignmentReason }> {
   const runRef = db.doc(runPath(ownerUid, gameId, runId));
 
@@ -396,7 +400,7 @@ export async function assignTask(
       return { reason: reason === 'expired' ? 'none' : reason };
     }
 
-    const chosen = stickToPlaceTrack(candidates, tasks, completedTaskIds).sort(
+    const chosen = stickToPlaceTrack(candidates, stageTasks, completedTaskIds, { taskCounts, spreadKey: teamId }).sort(
       (a, b) =>
         priorityScore(b, teamLocation, skillRatio, taskCounts, hotZone, nowMs) -
         priorityScore(a, teamLocation, skillRatio, taskCounts, hotZone, nowMs),

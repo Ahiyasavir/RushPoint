@@ -1714,28 +1714,32 @@ async function main() {
   check('plan: an opened account has every door', !!exported?.file, 'file');
   });
 
-  await scenario('parallel place tracks (a team stays on the set it started)', async () => {
-  const player = makeParty('trackPlayer');
-  await signInAnonymously(player.auth);
+  await scenario('parallel place tracks (a team stays on the set it started, teams split)', async () => {
+  // The sets are interleaved so "first task in the list" crosses places: only real stickiness passes.
+  const players = [];
+  for (let i = 0; i < 4; i++) { const p = makeParty(`trackPlayer${i}`); await signInAnonymously(p.auth); players.push(p); }
   const { gameId } = await creator.call('createGame', { title: 'Two Places', mode: 'individual' });
   const trackTask = (id, placeTrack) => ({ id, placeTrack, title: id, type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 100 });
   await creator.call('updateGame', {
     gameId, scoringPreset: 'fixed_points_speed',
     stages: [{
       id: 'st-tracks', order: 0, title: 'Two places', isFinal: true, requiredTaskCount: 2,
-      tasks: [trackTask('tr-a1', 'beach'), trackTask('tr-a2', 'beach'), trackTask('tr-b1', 'park'), trackTask('tr-b2', 'park')],
+      tasks: [trackTask('tr-a1', 'beach'), trackTask('tr-b1', 'park'), trackTask('tr-a2', 'beach'), trackTask('tr-b2', 'park')],
     }],
   });
   const { runId, accessCode } = await creator.call('launchRun', { gameId });
-  await player.call('joinRun', { code: accessCode, displayName: 'Track' });
+  for (const [i, p] of players.entries()) await p.call('joinRun', { code: accessCode, displayName: `Track ${i}` });
   await creator.call('startTeams', { gameId, runId });
-  let state = await player.call('getMyTeamState', { code: accessCode });
-  const first = state?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
-  check('tracks: the first mission is handed out', !!first, first?.taskId);
-  await player.call('completeTask', { taskId: first.taskId, code: accessCode, lat: 31.78, lng: 35.21 });
-  state = await player.call('getMyTeamState', { code: accessCode });
-  const second = state?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
-  check('tracks: the second mission is on the same set', second?.taskId?.slice(0, 4) === first.taskId.slice(0, 4), `${first.taskId} then ${second?.taskId}`);
+  const held = async (p) => (await p.call('getMyTeamState', { code: accessCode }))?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned')?.taskId;
+  const firsts = [];
+  for (const p of players) firsts.push(await held(p));
+  check('tracks: every team is handed a first mission', firsts.every(Boolean), firsts.join());
+  check('tracks: the teams are split between the places', new Set(firsts.map((id) => id?.slice(0, 4))).size === 2, firsts.join());
+  for (const [i, p] of players.entries()) {
+    await p.call('completeTask', { taskId: firsts[i], code: accessCode, lat: 31.78, lng: 35.21 });
+    const second = await held(p);
+    check('tracks: the second mission is on the same set', second?.slice(0, 4) === firsts[i].slice(0, 4), `${firsts[i]} then ${second}`);
+  }
   }); // scenario: place tracks
 
   await scenario('rejoin replaces the lost phone (no slot used, sender moves, foreign uid ignored)', async () => {

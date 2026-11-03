@@ -188,7 +188,7 @@ export default function ShareLinkDialog({ gameId, gameTitle, onClose }: {
             />
             <span>
               <span className="font-medium">{s.revealAnswers}</span>
-              <span className="block text-xs text-[--ink-3]">{s.revealAnswersHelp}</span>
+              <span className="block text-xs text-[--ink-3]">{mayMove ? s.revealAnswersHelp : s.revealAnswersHelpViewOnly}</span>
             </span>
           </label>
           {mayMove && (<label className="flex items-start gap-2 text-sm cursor-pointer">

@@ -108,7 +108,13 @@ ok(secondPlaceFor(24, ['beach', 'park'], 'beach') === 'park', 'a big game runs a
 ok(secondPlaceFor(23, ['beach', 'park'], 'beach') === null, 'a small group stays in one place');
 ok(secondPlaceFor(100, ['beach'], 'beach') === null, 'one place has no second');
 const pool = [{ id: 'a1', placeTrack: 'beach' }, { id: 'a2', placeTrack: 'beach' }, { id: 'b1', placeTrack: 'park' }, { id: 'b2', placeTrack: 'park' }];
-ok(stickToPlaceTrack(pool, pool, []).length === 4, 'the first mission of a stage is open to both sets, so load decides');
+ok(stickToPlaceTrack(pool, pool, []).length === 2, 'a team starts on one set, never with both open');
+ok(stickToPlaceTrack(pool, pool, [], { taskCounts: { a1: 3, b1: 1 } }).every((t) => t.placeTrack === 'park'), 'the first mission goes to the emptier place');
+ok(stickToPlaceTrack(pool, pool, [], { taskCounts: { a1: 1, a2: 1, b1: 3 } }).every((t) => t.placeTrack === 'beach'), 'the load of a whole set counts, not of one mission');
+const startedOn = new Set(Array.from({ length: 40 }, (_, i) => stickToPlaceTrack(pool, pool, [], { spreadKey: `team-${i}` })[0].placeTrack));
+ok(startedOn.size === 2, 'teams that arrive one at a time still spread across both places');
+ok(stickToPlaceTrack(pool.slice(1), pool, ['a1'], { taskCounts: { a2: 9 } }).map((t) => t.id).join() === 'a2', 'a team on a set stays there however full it is');
+ok(stickToPlaceTrack([pool[1], pool[2]], pool, ['a1']).map((t) => t.id).join() === 'a2', 'the whole stage remembers the set, done missions are not candidates');
 ok(stickToPlaceTrack(pool.slice(1), pool, ['a1']).map((t) => t.id).join() === 'a2', 'after one mission the team stays on its set');
 ok(stickToPlaceTrack([pool[2]], pool, ['a1']).length === 1, 'an empty set fails open and the stage still moves');
 ok(stickToPlaceTrack([{ id: 'x' }], [{ id: 'x' }], []).length === 1, 'a stage with no sets is untouched');

@@ -6195,7 +6195,7 @@ export async function assignNextInActiveStage(
   const skillRatio = resolveRoutingSkillRatio(game, team, paceSkillRatio);
   const result = await assignTask(
     teamLocation, candidateTasks, completedTaskIds, skillRatio,
-    ownerUid, gameId, runId,
+    ownerUid, gameId, runId, gameStage.tasks, teamId,
   );
   if (result.taskId) {
     // assignTask has already reserved a station slot (run.taskCounts[result.taskId]++).
@@ -7562,7 +7562,7 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
   };
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   // Read-only: any attached device may ask for recommendations.
-  const { ctx, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
+  const { ctx, team, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
 
   // The game template cannot change mid-run, and this is a hot participant path
   // (change: hot-path-read-cost).
@@ -7598,7 +7598,7 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
 
   const recommendations = await buildRecommendations(
     { lat, lng }, gameStage.tasks.filter((t) => stillOpen.has(t.id)), completedTaskIds, skillRatio,
-    ctx.ownerUid, ctx.gameId, ctx.runId, 5,
+    ctx.ownerUid, ctx.gameId, ctx.runId, 5, gameStage.tasks, teamId,
   );
   return { recommendations };
 });
