@@ -365,33 +365,47 @@ export function tourRecordFor(state: TourState, steps: readonly TourStep[]): Tou
 }
 
 /**
- * Whether the tour may greet this creator unprompted.
+ * The tour is never started unprompted any more: it is OFFERED (change: tour-invitation, Ahiya 3.11:
+ * a new user gets a notification right away that offers the tour). The offer is a card on the
+ * dashboard for a new account; "later" moves it into the bell, where it stays until the tour is
+ * taken or skipped.
  *
- * Auto-start is scoped to a FIRST-EVER SIGNUP and nothing else
- * (change: post-signup-redirect). Every other visit keeps the on-demand-only rule
- * that `onboarding-overload-fix` established: auto-firing the deep 15-step
- * walkthrough on a brand-new creator's EMPTY dashboard pointed seven Builder steps
- * at screens that did not exist yet — "take me there" was dead and every anchored
- * step degraded to a centred card over the (now clickable) first-run checklist.
- *
- * `justSignedUp` is what makes the narrow case different: the creator has just
- * finished signing up and has been sent to the dashboard deliberately, so a welcome
- * is expected rather than an interruption. It is a POSITIVE, explicit opt-in — an
- * omitted flag reads as `false`, so no existing call site can start firing the tour
- * by accident.
- *
- * Still false for anyone who already has a tour record (seen or dismissed) or who is
- * an established creator, so a returning creator is never interrupted.
+ * "New" is the account's own creation time, not its game count: a guest owns a game seconds after
+ * the home question, so the game count would call every guest established. Unknown, future or old
+ * (TOUR_INVITE_MAX_AGE_DAYS or more) offers nothing: an invitation is an interruption, so this
+ * fails CLOSED and a returning creator never gets one.
  */
-export function shouldAutoStartTour(args: {
-  record: TourRecord | null;
-  established: boolean;
-  justSignedUp?: boolean;
-}): boolean {
-  if (!args?.justSignedUp) return false;
-  if (args.established) return false;
-  return args.record == null;
+export const TOUR_INVITE_MAX_AGE_DAYS = 14;
+export const TOUR_INVITE_KEY_PREFIX = 'rp-tour-invite';
+
+export function tourInviteKey(uid: string | null | undefined): string {
+  return `${TOUR_INVITE_KEY_PREFIX}:${uid || 'anon'}`;
 }
+
+/** Total: only the exact stored word means "later". */
+export function readTourInviteLater(raw: string | null | undefined): boolean {
+  return raw === 'later';
+}
+
+export type TourInviteVerdict = 'card' | 'bell' | 'none';
+
+export function tourInviteVerdict(args: {
+  record: TourRecord | null;
+  later: boolean;
+  accountCreatedMs: number;
+  nowMs: number;
+}): TourInviteVerdict {
+  if (!args || typeof args !== 'object') return 'none';
+  if (args.record != null) return 'none';
+  const { accountCreatedMs, nowMs } = args;
+  if (!Number.isFinite(accountCreatedMs) || !Number.isFinite(nowMs)) return 'none';
+  const age = nowMs - accountCreatedMs;
+  if (age < 0 || age >= TOUR_INVITE_MAX_AGE_DAYS * 86_400_000) return 'none';
+  return args.later ? 'bell' : 'card';
+}
+
+/** Fired whenever the tour record or the invitation's "later" changes, so every reader re-reads. */
+export const TOUR_RECORD_EVENT = 'rp-tour-record';
 
 // ── Post-signup landing (change: post-signup-redirect) ──────────────────────
 

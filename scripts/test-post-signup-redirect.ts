@@ -10,17 +10,13 @@
 // offered the guided tour. A RETURNING creator is never moved — yanking someone who
 // deliberately opened /settings and re-authenticated would be a new bug, not a fix.
 //
-// TOUR SCOPE: `shouldAutoStartTour` was deliberately hard-disabled by
-// `onboarding-overload-fix` — auto-launching the deep 15-step walkthrough on an
-// empty dashboard pointed its Builder steps at screens that did not exist yet and
-// buried the first-run checklist. This re-enables it ONLY for a first-ever signup,
-// which is far narrower than what that change switched off: an established creator,
-// or anyone who already has a tour record, still never gets it automatically.
+// TOUR SCOPE: the tour is no longer started here; a new account is OFFERED it instead
+// (change: tour-invitation, scripts/test-tour-invite.ts).
 //
 // No emulator. Import SOURCE directly.
 //   npx tsx scripts/test-post-signup-redirect.ts
 import {
-  shouldRedirectAfterSignup, shouldAutoStartTour, POST_SIGNUP_TOUR_DELAY_MS,
+  shouldRedirectAfterSignup, POST_SIGNUP_TOUR_DELAY_MS,
   markJustSignedUp, consumeJustSignedUp, clearJustSignedUp, JUST_SIGNED_UP_EVENT,
 } from '../apps/creator-web/src/lib/creatorOnboarding';
 
@@ -44,24 +40,6 @@ check('an undetermined isNewUser does not redirect',
   shouldRedirectAfterSignup({ isNewUser: undefined as never }) === false);
 check('a malformed argument does not redirect, and does not throw',
   shouldRedirectAfterSignup(undefined as never) === false);
-
-// ── Tour auto-start: first-ever signup only ───────────────────────────────────
-check('auto-starts for a first-ever signup (no record, not established)',
-  shouldAutoStartTour({ record: null, established: false, justSignedUp: true }) === true);
-
-check('does NOT auto-start on an ordinary visit (the onboarding-overload-fix rule)',
-  shouldAutoStartTour({ record: null, established: false, justSignedUp: false }) === false);
-check('does NOT auto-start for an established creator even right after signup',
-  shouldAutoStartTour({ record: null, established: true, justSignedUp: true }) === false);
-check('does NOT auto-start when a tour record already exists',
-  shouldAutoStartTour({ record: { seenAt: '2026-01-01T00:00:00.000Z', outcome: 'completed' } as never, established: false, justSignedUp: true }) === false);
-check('does NOT auto-start when the tour was previously dismissed',
-  shouldAutoStartTour({ record: { seenAt: '2026-01-01T00:00:00.000Z', outcome: 'dismissed' } as never, established: false, justSignedUp: true }) === false);
-
-// The old 2-arg call sites must keep compiling AND stay shut — omitting
-// justSignedUp must never be read as "yes".
-check('omitting justSignedUp keeps the tour shut',
-  shouldAutoStartTour({ record: null, established: false } as never) === false);
 
 // ── The delay is a named constant, not a magic number at the call site ────────
 check('tour delay is a sane, positive, non-instant pause',

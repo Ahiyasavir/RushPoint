@@ -197,6 +197,15 @@ const ART: Record<string, ReactElement> = {
       <path d="M7 11v5c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-5" {...S} />
     </>
   ),
+  // A youth movement branch: a hut with its flag on the roof (it used to fall back to the
+  // neutral circle, and read as an empty option, Ahiya 3.11).
+  branch: (
+    <>
+      <path d="M4 21V12l8-5 8 5v9z" {...SOFT} />
+      <path d="M4 21V12l8-5 8 5v9z" {...S} />
+      <path d="M12 7V2.5l4 1.5-4 1.5M10 21v-5h4v5" {...S} />
+    </>
+  ),
   crowded: (
     <>
       <circle cx="6" cy="9" r="2" {...SOFT} />

@@ -20,6 +20,7 @@ import AppFooter from './components/AppFooter';
 // First-run guided tour (change: creator-guided-tour). Mounted once, renders
 // nothing unless it is running, and is replayable from here and from Settings.
 import CreatorTour, { restartCreatorTour } from './components/CreatorTour';
+import TourInviteCard from './components/TourInvite';
 import NotificationBell from './components/NotificationBell';
 import { SaveAccountHost, askToSaveAccount } from './components/SaveAccountSheet';
 import { isGuest } from './lib/guestCreator';
@@ -306,6 +307,7 @@ export default function App() {
       {/* Sibling of the hosts (outside <main>) so it survives every route change. */}
       {!isHostSheet && <ActiveRunBar />}
       <CreatorTour />
+      <TourInviteCard />
       <DialogHost />
       <ToastHost />
     </div>

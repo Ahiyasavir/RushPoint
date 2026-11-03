@@ -1276,8 +1276,10 @@ export default function DashboardPage() {
             </div>
             {/* Body — bounded to the modal; the compact cards fit without scrolling
                 on a normal screen, and only this region (never the page) scrolls on
-                a very short viewport. */}
-            <div className="overflow-y-auto p-4 pt-3">
+                a very short viewport. The scrollbar's room is kept even when it is
+                hidden: the questions are a carousel, and a body that is 6px wider on
+                a short question than on a tall one shifted every slide (3.11). */}
+            <div className="overflow-y-auto [scrollbar-gutter:stable] p-4 pt-3">
               {templateGroups === null ? (
                 <div className="flex items-center gap-2 text-sm text-[--ink-3] p-3">
                   <Skeleton className="h-10 w-10 rounded-xl shrink-0" />

@@ -19,7 +19,6 @@ import {
   readTourRecord,
   writeTourRecord,
   tourRecordFor,
-  shouldAutoStartTour,
   resolveTourAnchoring,
   tourStepTarget,
   tourNavIntent,
@@ -186,24 +185,9 @@ eq('a completed tour stores the last step',
   tourRecordFor({ status: 'completed', index: last }, ALL),
   { version: TOUR_VERSION, status: 'completed', lastStepId: ALL[last].id });
 
-console.log('\n── 8. auto-start predicate (tour is ON-DEMAND ONLY) ────────');
-// change: onboarding-overload-fix — the deep 15-step tour no longer auto-fires
-// on a fresh, empty dashboard (its Builder steps described screens with no game
-// behind them). The Wave-A checklist is the first-run guide; the tour is reached
-// only via the header "?" button. So the predicate is now false for EVERY input.
-ok('a brand new creator is NOT auto-greeted (checklist guides first run)',
-  shouldAutoStartTour({ record: null, established: false }) === false);
-ok('an established account is left alone', shouldAutoStartTour({ record: null, established: true }) === false);
-ok('a skipped record is never auto-fired',
-  shouldAutoStartTour({ record: { version: TOUR_VERSION, status: 'skipped' }, established: false }) === false);
-ok('a completed record is never auto-fired',
-  shouldAutoStartTour({ record: { version: TOUR_VERSION, status: 'completed' }, established: false }) === false);
-ok('a record from another version is never auto-fired',
-  shouldAutoStartTour({ record: { version: TOUR_VERSION + 9, status: 'completed' }, established: false }) === false);
-ok('no combination of record/established ever auto-starts the tour',
-  [null, { version: TOUR_VERSION, status: 'skipped' as const }, { version: TOUR_VERSION, status: 'completed' as const }]
-    .every((record) => [true, false].every((established) =>
-      shouldAutoStartTour({ record, established }) === false)));
+console.log('\n── 8. the tour never starts unprompted ────────────────────');
+// change: tour-invitation: a new account is OFFERED the tour (scripts/test-tour-invite.ts); the
+// auto-start predicate is gone, so nothing here can start it by accident.
 
 console.log('\n── 8b. "established" is a fact about the ACCOUNT, not the browser ──');
 // (change: post-review-fixes A) The seen-record beside it is uid scoped; the
@@ -229,20 +213,6 @@ console.log('\n── 8b. "established" is a fact about the ACCOUNT, not the bro
       isEstablishedCreator(bad as string | null) === false);
   }
 
-  // One browser, two creators. The tour is on-demand only now, so NEITHER is
-  // auto-greeted regardless of whose game count the browser already holds — the
-  // very interruption this change removed.
-  const storage: Record<string, string> = { [knownGameCountKey('creator-a')]: '4' };
-  const read = (key: string): string | null => storage[key] ?? null;
-  const autoStartsFor = (uid: string): boolean => shouldAutoStartTour({
-    record: readTourRecord(read(tourStorageKey(uid))),
-    established: isEstablishedCreator(read(knownGameCountKey(uid))),
-  });
-  ok('creator A, already established, is not interrupted', autoStartsFor('creator-a') === false);
-  ok('creator B, new on A\'s browser, is not auto-greeted either', autoStartsFor('creator-b') === false);
-  storage[tourStorageKey('creator-b')] = writeTourRecord({ version: TOUR_VERSION, status: 'skipped' });
-  ok('and a skip record keeps B on-demand only', autoStartsFor('creator-b') === false);
-  ok('B\'s record did not touch A', autoStartsFor('creator-a') === false);
 }
 
 console.log('\n── 9. anchoring ────────────────────────────────────────────');

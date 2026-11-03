@@ -8,7 +8,7 @@
 // different controls.
 //
 // The order is now declared ONCE, and the winner is decided by a pure function. That
-// decision is tested EXHAUSTIVELY below — all 32 subsets — rather than by example,
+// decision is tested EXHAUSTIVELY below — all 64 subsets — rather than by example,
 // because a missed pair is exactly the defect this change exists to end, and no gate
 // anywhere else in this repo can see an overlay.
 //
@@ -70,7 +70,7 @@ for (let mask = 0; mask < (1 << N); mask++) {
 // nothing and a check that examined everything read identically otherwise.
 eq(`all ${subsetsChecked} subsets pick the highest-priority candidate`, mismatches.length, 0);
 for (const m of mismatches.slice(0, 8)) ok(`  mismatch ${m}`, false);
-eq('the exhaustive sweep really covered 2^5 subsets', subsetsChecked, 32);
+eq('the exhaustive sweep really covered 2^6 subsets', subsetsChecked, 64);
 
 // The empty set is the "nothing qualifies" case the spec names explicitly.
 eq('no candidates -> no surface', activeGuidance([]), null);

@@ -12,6 +12,7 @@ import { db } from '../services/firebase';
 import { useT } from './LanguageContext';
 import { Icon } from './Icon';
 import { notificationView } from '../lib/notificationView';
+import { useTourInvite } from './TourInvite';
 
 const LIST_SIZE = 30;
 
@@ -25,7 +26,12 @@ function agoParts(iso: string): { unit: 'now' | 'minute' | 'hour' | 'day'; n: nu
 }
 
 export default function NotificationBell({ uid }: { uid: string }) {
-  const tn = useT().notifications;
+  const t = useT();
+  const tn = t.notifications;
+  // The tour offer the creator put off (change: tour-invitation). Pinned above the activity and
+  // counted in the badge until they take it or turn it down.
+  const invite = useTourInvite();
+  const pinned = invite.verdict === 'bell';
   const reduce = useReducedMotion();
   const nav = useNavigate();
   const [items, setItems] = useState<CreatorNotification[]>([]);
@@ -56,7 +62,7 @@ export default function NotificationBell({ uid }: { uid: string }) {
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
   }, [open]);
 
-  const unread = unreadCount(items, seenAt);
+  const unread = unreadCount(items, seenAt) + (pinned ? 1 : 0);
   const label = badgeLabel(unread);
   const views = useMemo(() => items.map((n) => notificationView(n, tn)).filter((v): v is NonNullable<typeof v> => !!v), [items, tn]);
 
@@ -93,7 +99,21 @@ export default function NotificationBell({ uid }: { uid: string }) {
             transition={{ duration: 0.14 }}
             className="fixed sm:absolute inset-x-3 sm:inset-x-auto top-16 sm:top-12 sm:end-0 z-50 sm:w-[380px] max-h-[70vh] overflow-y-auto rounded-2xl border border-[--rp-border] bg-[--surface-1] shadow-2xl">
             <p className="sticky top-0 bg-[--surface-1] px-4 pt-3.5 pb-2 text-[15px] font-bold">{tn.title}</p>
-            {views.length === 0 ? (
+            {pinned && (
+              <div className="mx-3 mb-2 rounded-xl bg-rp-fire/5 border border-rp-fire/20 p-3 flex items-start gap-3">
+                <span className="mt-0.5 inline-flex w-9 h-9 shrink-0 items-center justify-center rounded-full bg-rp-fire/10 text-ink-fire"><Icon name="compass" className="w-[18px] h-[18px]" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-semibold leading-snug text-[--ink-1]">{t.tour.inviteBell}</span>
+                  <button onClick={() => { setOpen(false); invite.start(); }}
+                    className="mt-1.5 min-h-[36px] text-[14px] font-bold text-ink-fire hover:underline">{t.tour.inviteStart}</button>
+                </span>
+                <button onClick={invite.decline} aria-label={t.tour.inviteDecline} title={t.tour.inviteDecline}
+                  className="w-11 h-11 -m-2 shrink-0 inline-flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]">
+                  <Icon name="close" className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {views.length === 0 && pinned ? null : views.length === 0 ? (
               <p className="px-4 pb-4 text-[14px] text-[--ink-2] leading-snug">{tn.empty}</p>
             ) : (
               <ul className="pb-2">

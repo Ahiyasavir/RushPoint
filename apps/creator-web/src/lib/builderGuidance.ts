@@ -23,6 +23,7 @@ export type GuidanceSurface =
   | 'launch-confirm'
   | 'quick-setup'
   | 'tour'
+  | 'tour-invite'
   | 'spotlight'
   | 'ready-nudge';
 
@@ -35,6 +36,7 @@ export const GUIDANCE_SURFACES: readonly GuidanceSurface[] = [
   'launch-confirm',
   'quick-setup',
   'tour',
+  'tour-invite',
   'spotlight',
   'ready-nudge',
 ];
@@ -55,6 +57,7 @@ export const GUIDANCE_PRIORITY: readonly GuidanceSurface[] = [
   'launch-confirm',
   'quick-setup',
   'tour',
+  'tour-invite',
   'spotlight',
   'ready-nudge',
 ];

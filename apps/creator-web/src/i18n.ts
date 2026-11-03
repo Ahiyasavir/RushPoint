@@ -3227,6 +3227,12 @@ const HE = {
   // ── סיור מודרך לפתיחה (change: creator-guided-tour) ──
   // סדר השלבים והמעברים נמצאים ב-lib/creatorOnboarding.ts; כאן רק הטקסט.
   tour: {
+    inviteTitle: 'רוצים סיור קצר?',
+    inviteBody: 'נראה לכם איפה כל דבר נמצא: בונים משחק, מוסיפים משימות, משגרים ומנהלים אותו בזמן אמת. כמה צעדים קצרים, ואפשר לעצור מתי שתרצו.',
+    inviteStart: 'התחלת הסיור',
+    inviteLater: 'אחר כך',
+    inviteBell: 'סיור קצר באפליקציה מחכה לכם. אפשר להתחיל מתי שתרצו.',
+    inviteDecline: 'לא צריך סיור',
     dialogLabel: 'סיור מודרך',
     helpLabel: 'פתיחת הסיור המודרך',
     deferred: 'הסיור יתחיל ברגע שתסיימו את מה שפתוח כרגע.',
@@ -6837,6 +6843,12 @@ const EN: typeof HE = {
   // The step order and every transition live in lib/creatorOnboarding.ts; this is
   // only the copy.
   tour: {
+    inviteTitle: 'Want a quick tour?',
+    inviteBody: 'We will show you where everything lives: building a game, adding missions, launching it and running it live. A few short steps, and you can stop whenever you like.',
+    inviteStart: 'Start the tour',
+    inviteLater: 'Later',
+    inviteBell: 'A quick tour of the app is waiting for you. Start it whenever you like.',
+    inviteDecline: 'No tour needed',
     dialogLabel: 'Guided tour',
     helpLabel: 'Open the guided tour',
     deferred: 'The tour will start as soon as you finish what is open.',

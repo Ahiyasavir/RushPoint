@@ -136,6 +136,23 @@ export default function SteppedWizard({
     if (embla && index >= 0 && index < total && embla.selectedScrollSnap() !== index) embla.scrollTo(index);
   }, [embla, index, total]);
 
+  // Embla's own resize watch missed a 6px change: the host scrolls while a tall question is shown
+  // and stops on a short one, so the carousel kept the narrower width and every slide drifted by it
+  // (on the fifth question the previous one showed 24px into the card, Ahiya, 3.11). Measure the
+  // viewport ourselves and re-measure the carousel on any change, staying on the current question.
+  useEffect(() => {
+    if (!embla || typeof ResizeObserver === 'undefined') return;
+    const root = embla.rootNode();
+    let width = root.offsetWidth;
+    const ro = new ResizeObserver(() => {
+      if (root.offsetWidth === width) return;
+      width = root.offsetWidth;
+      embla.reInit({ startIndex: indexRef.current });
+    });
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, [embla]);
+
   // Advancing is the moment worth acknowledging. `haptic` is itself a silent no-op without
   // vibration support and under reduced motion.
   const previousIndex = useRef(index);

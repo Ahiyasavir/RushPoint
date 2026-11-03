@@ -28,9 +28,8 @@ import { toast } from './toast';
 import { useGuidanceCandidate, useGuidanceVisible, useTourGuidance } from './GuidanceProvider';
 import {
   INITIAL_TOUR_STATE, firstGameIdKey,
-  buildTourSteps, currentTourStep, isEstablishedCreator, knownGameCountKey, readTourRecord,
-  resolveTourAnchoring, shouldAutoStartTour, tourCardPosition, tourProgress,
-  consumeJustSignedUp, POST_SIGNUP_TOUR_DELAY_MS, JUST_SIGNED_UP_EVENT,
+  buildTourSteps, currentTourStep,
+  resolveTourAnchoring, tourCardPosition, tourProgress, TOUR_RECORD_EVENT,
   tourNavIntent, TOUR_ACTION_ANCHORS,
   tourRecordFor, tourReducer, tourStorageKey, writeTourRecord,
   type TourAction, type TourRect, type TourState,
@@ -95,62 +94,8 @@ export default function CreatorTour() {
 
   const step = currentTourStep(state, steps);
   const uid = user?.uid ?? '';
-  // Latches ONLY a positive read of the one-shot signup flag. A `false` is never
-  // latched, because at mount time the flag legitimately may not be written yet
-  // (see the race described below) — latching it would permanently blind the
-  // component to the signup that is about to happen.
-  const sawSignupRef = useRef(false);
-
-  // ── Auto-start fires for a FIRST-EVER SIGNUP and nothing else
-  //    (change: post-signup-redirect). Everywhere else the tour stays on-demand
-  //    only (the header "?" button, via restartCreatorTour), which is the rule
-  //    onboarding-overload-fix established: auto-launching the deep 15-step
-  //    walkthrough on a brand new creator's empty dashboard pointed its seven
-  //    Builder steps at screens that did not exist yet and buried the first-run
-  //    checklist. The narrow case is different because the creator has just
-  //    finished signing up and been sent here deliberately, so a welcome is
-  //    expected rather than an interruption. Anyone with a tour record (seen or
-  //    dismissed) or any established creator is still never interrupted —
-  //    `shouldAutoStartTour` holds those rules; this effect only supplies inputs.
-  //
-  // TWO ordering hazards make a plain "read the flag on mount" wrong, and the
-  // tour never started for anyone because of them:
-  //   1. THE RACE. `markJustSignedUp()` runs after `await signUpWithEmail(...)`,
-  //      but auth flips the instant that promise resolves — so AuthProvider swaps
-  //      in the app tree and THIS component mounts and reads the flag before
-  //      AuthGate has written it. Mount-time polling always lost.
-  //   2. STRICTMODE. main.tsx:19 double-invokes effects: pass 1 would consume the
-  //      flag and arm the timer, the interleaved cleanup disarmed it, and pass 2
-  //      read the now-cleared flag as false and never re-armed.
-  // Subscribing to JUST_SIGNED_UP_EVENT fixes (1) by making the hand-off
-  // order-independent, and latching only a positive read fixes (2).
-  useEffect(() => {
-    if (!uid) return;
-    let timer = 0;
-    const evaluate = () => {
-      if (timer) return; // already armed
-      // Consumed on read (one-shot): a creator who does not qualify cannot have a
-      // stale "you just signed up" greet them on a later navigation.
-      if (!sawSignupRef.current && consumeJustSignedUp()) sawSignupRef.current = true;
-      const record = readTourRecord(readLocal(tourStorageKey(uid)));
-      const established = isEstablishedCreator(readLocal(knownGameCountKey(uid)));
-      if (!shouldAutoStartTour({ record, established, justSignedUp: sawSignupRef.current })) return;
-      // Let the dashboard mount and settle before the welcome appears — starting
-      // on the same tick anchors steps against a half-rendered page.
-      // Routed through the arbiter, which DROPS an auto-start that loses rather
-      // than holding it: an unrequested tour surfacing minutes later, after the
-      // creator has started working, would be a new bug rather than a fix.
-      timer = window.setTimeout(() => {
-        if (requestTour('auto') === 'start') dispatch({ type: 'start' });
-      }, POST_SIGNUP_TOUR_DELAY_MS);
-    };
-    evaluate();
-    window.addEventListener(JUST_SIGNED_UP_EVENT, evaluate);
-    return () => {
-      window.removeEventListener(JUST_SIGNED_UP_EVENT, evaluate);
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [uid, dispatch, requestTour]);
+  // The tour is never started unprompted: a new account is OFFERED it (TourInvite.tsx, change:
+  // tour-invitation), and every start goes through restartCreatorTour below.
 
   // ── Persist only a terminal outcome.
   useEffect(() => {
@@ -158,6 +103,7 @@ export default function CreatorTour() {
     const record = tourRecordFor(state, steps);
     if (!record) return;
     try { localStorage.setItem(tourStorageKey(uid), writeTourRecord(record)); } catch { /* storage unavailable */ }
+    window.dispatchEvent(new Event(TOUR_RECORD_EVENT));
   }, [state, steps, uid]);
 
   // ── Replay on demand. The "?" lives in the global nav and used to fire straight
