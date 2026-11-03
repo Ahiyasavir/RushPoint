@@ -66,19 +66,21 @@ const SharedGamePage = lazyWithRetry('sharedGame', () => import('./pages/SharedG
 // The printable host sheet (change: host-sheet).
 const HostSheetPage  = lazyWithRetry('hostSheet', () => import('./pages/HostSheetPage'));
 
+// Light unless the creator CHOSE dark (Ahiya, 3.11: the dark default "is not designed well, and light
+// is better anyway"). The OS preference is no longer read, and only a real toggle is remembered: the old
+// key was written on every first visit, so it holds the OS default rather than a choice, and is ignored.
+const THEME_CHOICE_KEY = 'rp-theme-choice';
 function useDarkMode() {
-  const [dark, setDark] = useState(() => {
+  const [dark, setDarkState] = useState(() => {
     if (typeof window === 'undefined') return false;
-    try {
-      const stored = localStorage.getItem('rp-theme');
-      if (stored) return stored === 'dark';
-    } catch { /* storage blocked — fall back to the OS preference */ }
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    try { return localStorage.getItem(THEME_CHOICE_KEY) === 'dark'; } catch { return false; }
   });
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    try { localStorage.setItem('rp-theme', dark ? 'dark' : 'light'); } catch { /* storage blocked — no-op */ }
-  }, [dark]);
+  useEffect(() => { document.documentElement.classList.toggle('dark', dark); }, [dark]);
+  const setDark = (next: (d: boolean) => boolean) => setDarkState((d) => {
+    const v = next(d);
+    try { localStorage.setItem(THEME_CHOICE_KEY, v ? 'dark' : 'light'); } catch { /* storage blocked — no-op */ }
+    return v;
+  });
   return [dark, setDark] as const;
 }
 

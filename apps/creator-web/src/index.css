@@ -108,8 +108,8 @@ html.dark {
   --rp-border: rgba(255,255,255,0.07);
   --ink-1: #E8EAFF;
   --ink-2: #8890B8;
-  /* Dark mode was the worse half, and it is not a niche: useDarkMode() seeds
-     itself from prefers-color-scheme, so this palette is the DEFAULT for every
+  /* Dark mode was the worse half, and it is not a niche: useDarkMode() seeded
+     itself from prefers-color-scheme until 3.11, so this palette was the DEFAULT for every
      creator whose OS is dark. --ink-3 was #464D6E = 2.42:1 on --surface-0 — every
      help line, hint and empty-state body in the app, effectively unreadable.
      Lightened along its own hue to #81869C (5.54:1, worst surface 4.57:1). */

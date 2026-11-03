@@ -90,7 +90,9 @@ for (let i = 0; i < 6; i++) lovesPuzzle = recordTaste(lovesPuzzle, ['puzzle', 't
 for (let i = 0; i < 6; i++) lovesPuzzle = recordTaste(lovesPuzzle, ['strangers'], -1);
 let puzzleWith = 0, puzzleWithout = 0, strangersWith = 0, strangersWithout = 0, sameDraws = true;
 for (const audience of ['youth', 'adults', 'mixed'] as const) {
-  for (let seed = 1; seed <= 15; seed++) {
+  // 40 seeds, not 15: the nudge is small (TASTE_WEIGHT 0.08 inside a 0.15 sampling band), and after the
+  // teen audit thinned the puzzle pool (3.11) fifteen games read 127 vs 130 while sixty read 528 vs 499.
+  for (let seed = 1; seed <= 40; seed++) {
     const a = { minutes: 120, audience, setting: 'outdoor', difficultyPreference: 'balanced', people: 20, ageBandId: 'band-14-17' } as ComposerAnswers;
     let n1 = 0, n2 = 0;
     const r1 = seededRng(seed), r2 = seededRng(seed);

@@ -517,6 +517,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     templateGroupKey: true, templateHidden: true, templateLang: true, templateOrder: true,
     // Issue 42: the host sheet fill-ins (EXCLUDED: one day's paperwork, not part of the game).
     hostSheetFields: true,
+    // place-setup-named-spots (EXCLUDED: the creator's own real places, not part of a shared game).
+    placeSpots: true,
   };
 
   const classify = (

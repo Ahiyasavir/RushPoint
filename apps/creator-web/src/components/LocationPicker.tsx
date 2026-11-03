@@ -14,6 +14,7 @@ import { useT } from './LanguageContext';
 import { Icon } from './Icon';
 import { mapLocale } from '../lib/mapLocale';
 import { keepAttributionFolded } from '../lib/mapAttribution';
+import { scrollChainOf, wantsCooperativeGestures } from '../lib/wheelPassThrough';
 
 // Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
 ensureRtlTextPlugin(maplibregl);
@@ -146,12 +147,26 @@ export default function LocationPicker({
 
     // In fill mode the container is sized by flexbox; keep the GL canvas in sync
     // with the container (panel width animation, viewport changes) via ResizeObserver.
+    // Cooperative gestures only while something around the map really scrolls (lib/wheelPassThrough):
+    // on a screen that does not scroll, the wheel zooms like on any map. Re-judged on resize, since a
+    // panel that fits today may overflow on a shorter window.
+    const judge = () => {
+      const m = map.current;
+      if (!m || !cooperativeGestures) return;
+      const want = wantsCooperativeGestures(true, scrollChainOf(ref.current));
+      if (want !== m.cooperativeGestures.isEnabled()) { if (want) m.cooperativeGestures.enable(); else m.cooperativeGestures.disable(); }
+    };
     let ro: ResizeObserver | undefined;
     if (typeof ResizeObserver !== 'undefined' && ref.current) {
-      ro = new ResizeObserver(() => map.current?.resize());
+      ro = new ResizeObserver(() => { map.current?.resize(); judge(); });
       ro.observe(ref.current);
     }
-    return () => { ro?.disconnect(); map.current?.remove(); map.current = null; marker.current = null; };
+    const settle = window.setTimeout(judge, 400);
+    window.addEventListener('resize', judge);
+    return () => {
+      window.clearTimeout(settle); window.removeEventListener('resize', judge);
+      ro?.disconnect(); map.current?.remove(); map.current = null; marker.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

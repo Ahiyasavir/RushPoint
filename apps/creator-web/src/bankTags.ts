@@ -77,6 +77,9 @@ export const BANK_TAGS = {
   mall: { he: 'קניון', en: 'Mall' },
   office: { he: 'משרד', en: 'Office' },
   school: { he: 'בית ספר', en: 'School' },
+  // A youth movement's branch (Ahiya, 3.11: "an option for movements making an activity"): rooms and a
+  // yard, so a mission fits one when it fits a school (taskBank derives the tag).
+  branch: { he: 'סניף', en: 'Youth movement branch' },
   // A QUALITY of the place, not a kind — see AREA_QUALITY_TAG_IDS.
   crowded: { he: 'מקום עם הרבה אנשים', en: 'Crowded' },
   historic: { he: 'מקום ישן / היסטורי', en: 'Historic' },
@@ -380,7 +383,7 @@ export function prepWantsPlacedMissions(level: unknown): boolean {
 }
 
 export const AREA_KIND_TAG_IDS = [
-  'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'home', 'mall', 'office', 'school',
+  'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'home', 'mall', 'office', 'school', 'branch',
 ] as const;
 
 /**
@@ -415,6 +418,8 @@ export const AREA_SETTING: Record<AreaKindTagId, 'indoor' | 'outdoor'> = {
   mall: 'indoor',
   office: 'indoor',
   school: 'indoor',
+  // Most branch activities run in its yard and the streets around it.
+  branch: 'outdoor',
 };
 
 /**

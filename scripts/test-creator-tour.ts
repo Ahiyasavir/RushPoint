@@ -71,20 +71,23 @@ ok('the first step is a centred welcome', ALL[0].anchor === null && ALL[0].surfa
 ok('the last step is a centred wrap-up', ALL[last].anchor === null && ALL[last].surface === 'anywhere');
 
 console.log('\n── 2. feature coverage (the owner brief) ───────────────────');
+// Ahiya, 3.11: fit the tour to the new generator, short and not tiring. The generator builds the
+// game, so the tour shows where a game starts, where games live, that a mission can be swapped, and
+// how to try before launching. Nothing more.
 const has = (id: string) => ids.includes(id as TourStepId);
-for (const required of [
-  'welcome', 'newGame', 'gameList',
-  'builderStages', 'builderTasks', 'builderTaskTypes', 'builderLocation',
-  'builderScoring', 'builderPreview', 'builderLaunch',
-  'runConsole', 'gallery', 'wallet', 'settings', 'finish',
-]) {
+for (const required of ['welcome', 'newGame', 'gameList', 'builderTasks', 'builderLaunch', 'finish']) {
   ok(`covers "${required}"`, has(required));
 }
-for (const surface of ['dashboard', 'builder', 'run', 'gallery', 'settings'] as TourSurface[]) {
+for (const surface of ['dashboard', 'builder'] as TourSurface[]) {
   ok(`the ${surface} surface is represented`, ALL.some((s) => s.surface === surface));
 }
-ok('the builder gets the most steps (it is the deepest surface)',
-  ALL.filter((s) => s.surface === 'builder').length >= 7);
+ok('the tour stays short: at most 7 steps with payments, 6 without',
+  ALL.length <= 7 && buildTourSteps({ paymentsEnabled: false }).length <= 6);
+ok('no card is long: every body is at most 140 characters, in both languages',
+  (['he', 'en'] as const).every((lang) => TOUR_STEPS.every((st) => {
+    const body = (translations[lang] as unknown as { tour: { steps: Record<string, { body: string }> } }).tour.steps[st.id]?.body ?? '';
+    return body.length <= 140;
+  })));
 
 console.log('\n── 3. payments filtering ───────────────────────────────────');
 const free = buildTourSteps({ paymentsEnabled: false });
@@ -258,11 +261,7 @@ console.log('\n── 10. navigation targets ───────────�
   eq('dashboard step', tourStepTarget(byId('newGame'), ctx), '/');
   eq('builder step with a game', tourStepTarget(byId('builderTasks'), ctx), '/build/g1');
   eq('builder step with no game', tourStepTarget(byId('builderTasks'), { firstGameId: null, liveRunPath: null }), null);
-  eq('gallery step', tourStepTarget(byId('gallery'), ctx), '/gallery');
   eq('wallet step', tourStepTarget(byId('wallet'), ctx), '/wallet');
-  eq('settings step', tourStepTarget(byId('settings'), ctx), '/settings');
-  eq('run step with a live run', tourStepTarget(byId('runConsole'), ctx), '/run/g1/r1');
-  eq('run step with no live run', tourStepTarget(byId('runConsole'), { firstGameId: 'g1', liveRunPath: null }), null);
   eq('an "anywhere" step has no destination', tourStepTarget(byId('welcome'), ctx), null);
 }
 

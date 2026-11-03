@@ -48,7 +48,8 @@
 // from that slot's point of view it was simply the best fit. The finale slot then
 // finds an empty pool and the game ends on filler. Reserving both ends first
 // costs nothing and makes the guarantee structural.
-import type { GameMode, ScoringPreset, Stage, Task, TemplateWizardStep } from '@rushpoint/shared';
+import type { Game, GameMode, ScoringPreset, Stage, Task, TemplateWizardStep } from '@rushpoint/shared';
+import { applyPlaceLines, type PlaceWords } from './placeSpots';
 import {
   AGE_BANDS,
   MAX_TAGS,
@@ -194,8 +195,8 @@ export interface ComposerDescriptionCopy extends NewGameDescriptionCopy {
    * property of the DECISION this composition made.
    */
   placeMissionPrompt(): string;
-  /** "Go to the beach." for a mission not every one of the game's places can host. '' leaves the text alone. */
-  goToPlace?(area: AreaTagId): string;
+  /** The words of the go-to line, the interface language first (see lib/placeSpots). None: no lines. */
+  placeWords?(): readonly PlaceWords[];
   /** The Quick Setup question for a mission bound to a place: "this one is at the beach, pick the spot". */
   placeMissionAt?(area: AreaTagId): string;
   /**
@@ -327,6 +328,12 @@ export interface FitContext {
    */
   placedPreference: boolean;
   /**
+   * A placed game from prep level 2 ("I'll put the missions on real spots"): a mission a pin can
+   * host is preferred, so the promise is kept. Without it an older group, whose pool lost the
+   * children's missions (3.11), often drew a game with no pin at all. A PREFERENCE, not a filter.
+   */
+  siteablePreference?: boolean;
+  /**
    * May a chosen mission carry a REQUIRED Quick Setup step?
    *
    * False only at prep level 1, whose answer is literally "I prepare nothing at
@@ -381,6 +388,7 @@ export const TERM_WEIGHTS = {
  */
 export const OCCASION_BONUS = 0.10;
 export const PLACED_PREFERENCE_BONUS = 0.08;
+export const SITEABLE_PREFERENCE_BONUS = 0.08;
 
 /**
  * Diversity (change: composer-v2-diversity). The share of a candidate's mechanic tags already in
@@ -646,6 +654,7 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
     // but only level 4 says the creator is going there beforehand, which is what
     // makes a located mission worth preferring rather than merely tolerable.
     placedPreference: prepWantsPlacedMissions(a.prepEffort) && (num(a.prepEffort) ?? 0) >= 4,
+    siteablePreference: prepWantsPlacedMissions(a.prepEffort) && wantsPlacedMissions(safeSetting(a.setting), a.locationMissions === true),
     // Level 2 ("I'll put the missions on real spots") is already an agreement to
     // fill something in, so only level 1 refuses. An ABSENT answer resolves via
     // `prepToleranceOf`'s fallback (level 3) and therefore allows it — a creator
@@ -727,6 +736,10 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
     return -Infinity;
   }
 
+  // A mission written for children only never reaches an older group (Ahiya, 3.11: "how does this fit
+  // 14 to 17?" about a spy code name opener tagged kids). Soft weighting let it win a thin opener pool.
+  if (kidsOnlyForOlder(tags, ctx.audience, num(ctx.ageFrom) ?? 0)) return -Infinity;
+
   // ── Soft terms ────────────────────────────────────────────────────────────
   const audienceMatch = tags.includes(ctx.audience) ? 1
     : tags.includes('mixed') ? MIXED_AUDIENCE_MATCH
@@ -787,6 +800,7 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
     + (ctx.qualityOf ? qualityBonus(ctx.qualityOf(entry.key)) : 0)
     + occasionBonus(tags, ctx.favouredTags)
     + (ctx.placedPreference === true && tags.includes('locationBased') ? PLACED_PREFERENCE_BONUS : 0)
+    + (ctx.siteablePreference === true && bankSiting(entry) === 'possible' ? SITEABLE_PREFERENCE_BONUS : 0)
     - recencyPenalty(entry.key, ctx.recentIndex);
 }
 
@@ -1074,6 +1088,21 @@ export function missionFitsPlace(tags: readonly string[] | undefined, place: str
   if (!place) return true;
   const own = (tags ?? []).filter(isPlaceKind);
   return own.length === 0 || own.includes(place);
+}
+
+/**
+ * A mission written for children, in a game for teens (14 and up) or adults: tagged `kids` and not
+ * tagged for this audience. `mixed` does not save it (Ahiya, 3.11: "no more babyish missions for
+ * teens, teens = 14 to 17"): a family mission is tagged mixed AND kids, and that is a children's game
+ * to a 15 year old. Preteens (11 to 13) still get the kids pool. A workplace group is adults, so a
+ * mission also tagged `adults` suits it (the corporate openers were all tagged that way). Total.
+ */
+export function kidsOnlyForOlder(tags: readonly string[] | undefined, audience: string | undefined, ageFrom: number): boolean {
+  const own = (tags ?? []).filter((t) => (AUDIENCE_TAG_IDS as readonly string[]).includes(t));
+  if (!own.includes('kids') || (audience && own.includes(audience))) return false;
+  if (audience === 'corporate' && own.includes('adults')) return false;
+  if (audience === 'youth') return ageFrom >= 14;
+  return audience === 'adults' || audience === 'corporate';
 }
 
 /** The place a mission's text sends the team to, read back from the line the composer wrote. */
@@ -1838,9 +1867,10 @@ export function composeGame(
       // can pin it there too, whatever its siting says.
       // A `must` mission has its own pin and its own directions; a second "go to" in front of them is noise.
       const goToArea = bankSiting(entry) === 'must' ? null : goToAreaFor(entry.tags, ctx.areas, stagePlace);
-      const goToLine = goToArea ? oneParagraph(copy?.goToPlace?.(goToArea) ?? '') : '';
-      if (goToLine) task.description = `${goToLine} ${task.description ?? ''}`.trim();
-      const siteIt = placedGame && placePrompt !== '' && (bankSiting(entry) === 'possible' || (goToLine !== '' && bankSiting(entry) === 'never'));
+      // The place is DATA on the mission; the words that send a team there are written once per stage
+      // at the end (applyPlaceLines, change: place-setup-named-spots), not repeated on every mission.
+      if (stagePlace) task.placeTrack = stagePlace;
+      const siteIt = placedGame && placePrompt !== '' && (bankSiting(entry) === 'possible' || (goToArea !== null && bankSiting(entry) === 'never'));
       if (siteIt) {
         task.locationless = false;
         task.triggerMode = 'radius';
@@ -2030,6 +2060,10 @@ export function composeGame(
     const searching = st.tasks.filter((t) => hiddenTaskIds.has(t.id)).length * HIDDEN_SEARCH_MINUTES;
     return sum + all * share + searching;
   }, 0);
+
+  // ── 12. Where to go, said once per stage where the place changes (change: place-setup-named-spots).
+  const lined = applyPlaceLines({ stages } as unknown as Game, copy?.placeWords?.() ?? [], []).stages ?? stages;
+  stages.splice(0, stages.length, ...lined);
 
   const descriptionAnswers = {
     people,

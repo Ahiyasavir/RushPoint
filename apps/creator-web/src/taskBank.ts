@@ -3171,7 +3171,8 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'human-letter',
     spot: 'openGrass',
     sourceTemplateKey: 'authored',
-        tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'youth', 'kids', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'school', 'indoor', 'outdoor', 'physical'],
+        // No `youth` (Ahiya, 3.11, asked how it fits 14 to 17): lying in a letter is a camp formation, G18.
+    tags: ['creative', 'teamwork', 'camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'medium', 'forest', 'beach', 'park', 'neighborhood', 'school', 'indoor', 'outdoor', 'physical'],
     difficulty: 4,
     build: () => anywhere({
       geofenceRadiusMeters: LOOSE_PIN_RADIUS_M,
@@ -3374,7 +3375,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'odd-one-planted',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'camera', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'neighborhood', 'school', 'office', 'mall', 'mixed', 'kids', 'youth', 'medium', 'hunt', 'observation'],
+    tags: ['thinking', 'camera', 'needsSetup', 'locationBased', 'outdoor', 'indoor', 'park', 'neighborhood', 'school', 'office', 'mall', 'mixed', 'kids', 'medium', 'hunt', 'observation'],
     difficulty: 5,
     transitMinutes: 4,
     setup: [
@@ -5070,7 +5071,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     siting: 'never',
     family: 'team-mascot',
     sourceTemplateKey: 'mission-studio',
-    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'youth', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'ongoing', 'humor', 'strangers', 'crowded'],
+    tags: ['camera', 'creative', 'teamwork', 'action', 'noPrep', 'fromAnywhere', 'outdoor', 'kids', 'mixed', 'medium', 'park', 'neighborhood', 'cityCenter', 'school', 'ongoing', 'humor', 'strangers', 'crowded'],
     difficulty: 4,
     // Jet Lag's "Egg Partner": a benign violation that lasts the whole game. Getting
     // the egg from a stranger is the founder's own addition ("דווקא להשיג ביצה זה
@@ -5167,7 +5168,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // Not tagged for streets or city centres (lessons L13): a line of bags across a busy
     // sidewalk blocks people and is easy to steal from.
     sourceTemplateKey: 'mission-studio',
-    tags: ['camera', 'action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'youth', 'adults', 'mixed', 'medium', 'park', 'school', 'beach', 'home', 'building', 'record', 'againstClock'],
+    tags: ['camera', 'action', 'teamwork', 'creative', 'noPrep', 'fromAnywhere', 'outdoor', 'indoor', 'kids', 'adults', 'mixed', 'medium', 'park', 'school', 'beach', 'home', 'building', 'record', 'againstClock'],
     difficulty: 4,
     // Taskmaster. The first draft allowed "only your own things", an honour rule
     // the team gains from breaking (lessons L1); with every source legal, the
@@ -6294,7 +6295,7 @@ export const TASK_BANK: TaskBankEntry[] = [
   {
     key: 'pirate-map',
     sourceTemplateKey: 'mission-studio',
-    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'park', 'cityCenter', 'neighborhood', 'kids', 'youth', 'adults', 'mixed', 'medium', 'navigation', 'puzzle'],
+    tags: ['thinking', 'action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'park', 'cityCenter', 'neighborhood', 'kids', 'adults', 'mixed', 'medium', 'navigation', 'puzzle'],
     difficulty: 5,
     transitMinutes: 5,
     setup: [
@@ -7155,3 +7156,9 @@ export const TASK_BANK: TaskBankEntry[] = [
     }),
   },
 ];
+
+// A youth movement branch is a school by another name for the bank: rooms, a yard, a fixed group
+// (change: place-setup-named-spots). Derived, so a new school mission fits a branch without a second tag.
+for (const entry of TASK_BANK) {
+  if (entry.tags.includes('school') && !entry.tags.includes('branch')) entry.tags.push('branch');
+}

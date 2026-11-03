@@ -497,7 +497,7 @@ export const SITE_TEMPLATES: SiteTemplateDecl[] = [
     sessionMinutes: [45, 80],
     stages: [
       { title: 'פתיחה', keys: ['open-everyone-airborne'] },
-      { title: 'גוף הפעולה', keys: ['longest-line', 'human-letter', 'three-feet', 'blind-describe', 'historic-speech'] },
+      { title: 'גוף הפעולה', keys: ['longest-line', 'chain-reaction', 'three-feet', 'blind-describe', 'historic-speech'] },
       { title: 'השיא', keys: ['thinking-room'] },
       { title: 'סיכום', keys: ['finish-what-we-didnt-know'] },
     ],

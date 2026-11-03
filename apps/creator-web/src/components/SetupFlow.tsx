@@ -26,6 +26,10 @@ import { walkEnding, calendarUrl } from '../lib/walkEnding';
 import { friendLink, shareWithFriends } from '../lib/friendShare';
 import { daysUntilEvent } from '@rushpoint/shared';
 import LocationStep from './LocationStep';
+import { isPlacedCoord } from '../lib/mapAnchor';
+import { applySpots, pinnedKinds, spotPlaced } from '../lib/placeSpots';
+import { placeWordsOf } from '../i18n';
+import type { PlaceSpot } from '@rushpoint/shared';
 import RoutePreviewMap from './RoutePreviewMap';
 import ConfettiBurst from './ConfettiBurst';
 import TaskWizard from './TaskWizard';
@@ -111,8 +115,8 @@ export default function SetupFlow({
   // Live: an item turns "configured" the moment its field is filled. The LIST is stable (the steps
   // are), so the walk never renumbers itself under the creator.
   const screens = useMemo(() => buildSetupScreens(game, steps, lang), [game, steps, lang]);
-  const beats = useMemo(() => buildSetupBeats(screens), [screens]);
-  const [at, setAt] = useState(() => firstBeat(beats, screens, resume));
+  const beats = useMemo(() => buildSetupBeats(screens, game, steps), [screens, game, steps]);
+  const [at, setAt] = useState(() => firstBeat(beats, screens, resume, game));
   const [dir, setDir] = useState(1);
   const [prevDone, setPrevDone] = useState(false);
   // A swapped mission keeps its id, so the beat index alone would not replay the entrance.
@@ -334,7 +338,7 @@ export default function SetupFlow({
     const t1 = e.touches[0];
     if (!start || !t1 || reduce) return;
     pull.set(swipePull({ dx: t1.clientX - start.x, dy: start.y - t1.clientY,
-      atTopAtStart: start.top, atBottomAtStart: start.bottom, canGoBack: at > 0, canGoOn: beat.kind === 'item' || beat.kind === 'plan' }));
+      atTopAtStart: start.top, atBottomAtStart: start.bottom, canGoBack: at > 0, canGoOn: beat.kind === 'item' || beat.kind === 'plan' || beat.kind === 'places' }));
   };
   const onTouchStart = (e: ReactTouchEvent) => {
     const el = bodyRef.current;
@@ -345,7 +349,7 @@ export default function SetupFlow({
       top: el.scrollTop <= 2, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 4 };
   };
   const swipeNext = () => {
-    if (beat.kind === 'item' || beat.kind === 'plan') go(beat.kind === 'plan' ? at + 1 : nextFrom(at), { swipe: true });
+    if (beat.kind === 'item' || beat.kind === 'plan' || beat.kind === 'places') go(beat.kind === 'item' ? nextFrom(at) : at + 1, { swipe: true });
   };
   const onTouchEnd = (e: ReactTouchEvent) => {
     const start = touch.current;
@@ -354,7 +358,7 @@ export default function SetupFlow({
     if (!start || !t1) return;
     const verdict = swipeVerdict({ dx: t1.clientX - start.x, dy: start.y - t1.clientY, ms: performance.now() - start.t,
       atTopAtStart: start.top, atBottomAtStart: start.bottom });
-    if (verdict === 'next' && (beat.kind === 'item' || beat.kind === 'plan')) swipeNext();
+    if (verdict === 'next' && (beat.kind === 'item' || beat.kind === 'plan' || beat.kind === 'places')) swipeNext();
     else if (verdict === 'back' && at > 0) go(at - 1, { swipe: true });
     // Not a page turn: the screen springs back under the finger. A turn leaves it where it is, so the
     // old screen leaves from where the finger let go; `onExitComplete` zeroes it for the new one.
@@ -365,6 +369,7 @@ export default function SetupFlow({
     && ['smart.secretCode', 'answers', 'numericAnswer'].includes(current.item.fieldPath);
   const primary = (() => {
     if (beat.kind === 'plan') return { label: sf.planCta, to: at + 1, onClick: () => go(at + 1), arrow: true };
+    if (beat.kind === 'places') return { label: sf.next, to: at + 1, onClick: () => go(at + 1), arrow: true };
     // Launch never bounces the creator out of the walk to a list of problems: while something required is
     // open, it brings them to the first one, inside the walk (research 29.10).
     if (beat.kind === 'prep') return { label: openLeft > 0 ? sf.launch : ending === 'later' ? sf.readyCta : ending === 'today' ? sf.launchToday : sf.launch, to: undefined, onClick: () => {
@@ -526,6 +531,7 @@ export default function SetupFlow({
                 <Icon name="chevronUp" role="img" aria-hidden={false} aria-label={sf.swipeHint} className="w-7 h-7 text-ink-fire rp-swipe-hint" />
               </p>
             )}
+            {beat.kind === 'places' && <PlacesBeat key={beat.place} game={game} steps={steps} place={beat.place} onGameChange={onGameChange} gameAnchors={gameAnchors} />}
             {beat.kind === 'finish' && <RouteBeat game={game} screens={screens} beats={beats} onJump={go} onFix={startFixing} />}
             {beat.kind === 'prep' && <PrepBeat game={game} screens={screens} onTestDrive={onTestDrive} onGameChange={onGameChange} />}
           </motion.div>
@@ -621,6 +627,73 @@ function PlanBeat({ game, itemCount, onTestDrive, onGameChange }: { game: Game; 
 }
 
 /** The "I saw it work" moment, offered where the plan is seen and again before launch (research 29.10). */
+/**
+ * "Where is the park?" (change: place-setup-named-spots): any number of spots of one kind, each with a
+ * name and a pin. Every change re-pins the missions of that kind and rewrites the go-to lines.
+ */
+function PlacesBeat({ game, steps, place, onGameChange, gameAnchors }: {
+  game: Game; steps: SetupFlowProps['steps']; place: string; onGameChange: (g: Game) => void;
+  gameAnchors?: SetupFlowProps['gameAnchors'];
+}) {
+  const sf = useT().setupFlow;
+  const { lang } = useLanguage();
+  const words = [placeWordsOf(lang), placeWordsOf(lang === 'he' ? 'en' : 'he')];
+  const all = game.placeSpots ?? [];
+  const mine = all.filter((s) => s.kind === place);
+  const newSpot = (): PlaceSpot => ({ id: Math.random().toString(36).slice(2, 10), kind: place, name: '', lat: 0, lng: 0 });
+  const [selected, setSelected] = useState<string | null>(mine[0]?.id ?? null);
+  const save = (next: PlaceSpot[]) => onGameChange(applySpots(game, steps, [...all.filter((s) => s.kind !== place), ...next], words));
+  // The first spot exists from the start: an empty list would open the screen on nothing to fill.
+  useEffect(() => { if (mine.length === 0) { const s = newSpot(); setSelected(s.id); save([s]); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = mine.find((s) => s.id === selected) ?? mine[0];
+  const put = (patch: Partial<PlaceSpot>) => current && save(mine.map((s) => (s.id === current.id ? { ...s, ...patch } : s)));
+  const bare = words[0].forms[place]?.bare ?? place;
+  const anyPlaced = mine.some(spotPlaced);
+  const pins = pinnedKinds(game, steps).includes(place);
+  return (
+    <div className="flex-1 flex flex-col gap-3">
+      <div>
+        <h2 className="text-[22px] sm:text-[26px] font-bold text-ink-900">{sf.placesTitle({ bare })}</h2>
+        <p className="text-[15px] text-ink-600 mt-1">{pins ? sf.placesHint : sf.placesHintNamed}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {mine.map((s, i) => (
+          <span key={s.id} className={`inline-flex items-center rounded-full border-2 ${s.id === current?.id ? 'border-rp-fire bg-rp-fire/10' : 'border-[--rp-border]'}`}>
+            <button type="button" onClick={() => setSelected(s.id)} aria-pressed={s.id === current?.id} dir="auto"
+              className="min-h-[44px] px-4 text-[15px] font-semibold text-ink-900">
+              {s.name.trim() || sf.spotN({ n: i + 1 })}
+            </button>
+            {mine.length > 1 && (
+              <button type="button" aria-label={sf.removeSpot} onClick={() => { const rest = mine.filter((x) => x.id !== s.id); save(rest); if (s.id === current?.id) setSelected(rest[0]?.id ?? null); }}
+                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-ink-600">
+                <Icon name="close" className="w-4 h-4" />
+              </button>
+            )}
+          </span>
+        ))}
+        <button type="button" onClick={() => { const s = newSpot(); save([...mine, s]); setSelected(s.id); }}
+          className="min-h-[44px] px-4 rounded-full border-2 border-dashed border-[--rp-border] text-[15px] text-ink-700 inline-flex items-center gap-1.5">
+          <Icon name="plus" className="w-4 h-4" />{sf.addSpot}
+        </button>
+      </div>
+      {current && (
+        <>
+          <label className="block">
+            <span className="text-[14px] font-semibold text-ink-700">{sf.placeNameLabel}</span>
+            <input className="mt-1 w-full min-h-[48px] rounded-xl border border-[--rp-border] bg-[--surface-0] px-3 text-[17px]" dir="auto"
+              value={current.name} placeholder={sf.placeNamePlaceholder} maxLength={60} onChange={(e) => put({ name: e.target.value })} />
+          </label>
+          <div className="h-[min(50dvh,480px)] min-h-[280px] flex flex-col">
+            <LocationStep key={current.id} coordinates={{ lat: current.lat, lng: current.lng }} onChange={(lat, lng) => { playSetupSound('check', soundEnabled()); put({ lat, lng }); }}
+              fill anchors={gameAnchors} cooperativeGestures />
+          </div>
+        </>
+      )}
+      {anyPlaced && <p className="text-[14px] text-ink-600 inline-flex items-center gap-1.5"><Icon name="check" className="w-4 h-4 text-ink-fire" />{pins ? sf.placesDone : sf.placesDoneNamed}</p>}
+    </div>
+  );
+}
+
 function TryItCard({ onTestDrive }: { onTestDrive: () => void }) {
   const sf = useT().setupFlow;
   return (
@@ -880,7 +953,12 @@ function FieldInput({ game, screen, item, task, onTaskChange, onGameChange, game
     case 'coordinates':
       return (
         <div className="h-[min(60dvh,560px)] min-h-[320px] walk:h-auto walk:flex-1 walk:min-h-[260px] walk:[@media(max-height:560px)]:min-h-[170px] flex flex-col">
-          <LocationStep coordinates={task.coordinates ?? { lat: 0, lng: 0 }} onChange={(lat, lng) => put({ coordinates: { lat, lng } })}
+          <LocationStep coordinates={task.coordinates ?? { lat: 0, lng: 0 }} onChange={(lat, lng) => {
+              // Moving a pin that was already placed sounds too (Ahiya, 3.11); the first placement already
+              // sounds through the "just filled" moment, so it is not played twice.
+              if (isPlacedCoord(task.coordinates)) playSetupSound('check', soundEnabled());
+              put({ coordinates: { lat, lng } });
+            }}
             fill anchors={gameAnchors} cooperativeGestures />
         </div>
       );

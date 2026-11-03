@@ -45,10 +45,8 @@ const NO_GAMES = { firstGameId: null, liveRunPath: null };
 const WITH_GAME = { firstGameId: 'g1', liveRunPath: null };
 
 console.log('\n── 1. a step with a reachable destination NAVIGATES, unprompted ──');
-eq('gallery step from the dashboard navigates to /gallery',
-  tourNavIntent(step('gallery'), WITH_GAME, '/'), { kind: 'navigate', to: '/gallery' });
-eq('settings step navigates to /settings',
-  tourNavIntent(step('settings'), WITH_GAME, '/'), { kind: 'navigate', to: '/settings' });
+eq('wallet step from the dashboard navigates to /wallet',
+  tourNavIntent(step('wallet'), WITH_GAME, '/'), { kind: 'navigate', to: '/wallet' });
 eq('a dashboard step navigates home from elsewhere',
   tourNavIntent(step('newGame'), WITH_GAME, '/gallery'), { kind: 'navigate', to: '/' });
 
@@ -57,8 +55,8 @@ console.log('\n── 2. …but never re-navigates to where it already is ──
 // `replace`, could trap the creator's Back button.
 eq('already on the dashboard ⇒ stay',
   tourNavIntent(step('newGame'), WITH_GAME, '/'), { kind: 'stay' });
-eq('already in the gallery ⇒ stay',
-  tourNavIntent(step('gallery'), WITH_GAME, '/gallery'), { kind: 'stay' });
+eq('already in the wallet ⇒ stay',
+  tourNavIntent(step('wallet'), WITH_GAME, '/wallet'), { kind: 'stay' });
 eq('a placeless step never moves anyone',
   tourNavIntent(step('welcome'), WITH_GAME, '/gallery'), { kind: 'stay' });
 eq('the finish step never moves anyone',
@@ -78,7 +76,7 @@ for (const s of builderSteps) {
 // The prompt has to be issued where the button actually exists, so a creator
 // standing anywhere else is first walked back to the dashboard.
 eq('asking from the gallery first returns to where the button lives',
-  tourNavIntent(step('builderStages'), NO_GAMES, '/gallery'),
+  tourNavIntent(step('builderTasks'), NO_GAMES, '/gallery'),
   { kind: 'navigate', to: '/' });
 
 console.log('\n── 4. …and the moment a game exists, it walks straight in ───────');
@@ -87,19 +85,11 @@ for (const s of builderSteps) {
     tourNavIntent(s, WITH_GAME, '/'), { kind: 'navigate', to: '/build/g1' });
 }
 eq('already inside that builder ⇒ stay',
-  tourNavIntent(step('builderStages'), WITH_GAME, '/build/g1'), { kind: 'stay' });
+  tourNavIntent(step('builderTasks'), WITH_GAME, '/build/g1'), { kind: 'stay' });
 // A creator editing a DIFFERENT game is not dragged to the first one: they are
 // already looking at a real builder, which is what the step is about.
 eq('inside a different builder ⇒ stay (any builder teaches the step)',
-  tourNavIntent(step('builderStages'), WITH_GAME, '/build/other'), { kind: 'stay' });
-
-console.log('\n── 5. the run step, which also depends on state that may not exist ──');
-eq('no live run ⇒ ask, do not narrate',
-  tourNavIntent(step('runConsole'), NO_GAMES, '/'),
-  { kind: 'awaitAction', anchor: TOUR_ACTION_ANCHORS.launchRun, at: '/' });
-eq('a live run ⇒ go straight to its console',
-  tourNavIntent(step('runConsole'), { firstGameId: 'g1', liveRunPath: '/run/g1/r1' }, '/'),
-  { kind: 'navigate', to: '/run/g1/r1' });
+  tourNavIntent(step('builderTasks'), WITH_GAME, '/build/other'), { kind: 'stay' });
 
 console.log('\n── 6. totality — the tour must never crash the console ──────────');
 let threw = false;
@@ -140,9 +130,9 @@ ok('the scoped key is never bare-equal to the legacy global key',
 console.log('\n── 8. the old target helper still answers the same question ─────');
 // tourNavIntent is layered ON TOP of tourStepTarget, not a fork of it.
 eq('target for a builder step with a game is unchanged',
-  tourStepTarget(step('builderStages'), WITH_GAME), '/build/g1');
+  tourStepTarget(step('builderTasks'), WITH_GAME), '/build/g1');
 eq('target for a builder step with no game is still null',
-  tourStepTarget(step('builderStages'), NO_GAMES), null);
+  tourStepTarget(step('builderTasks'), NO_GAMES), null);
 
 if (failures > 0) {
   console.error(`\n✗ ${failures} assertion(s) failed\n`);

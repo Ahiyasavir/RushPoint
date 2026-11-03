@@ -80,6 +80,7 @@ import {
   // Benched missions (change: mission-card-actions) — never published.
   playableTasks,
   normalizeEventAt,
+  normalizePlaceSpots,
 } from '@rushpoint/shared';
 import { assertGameNotDeleted, assertNotShareLocked, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
 // Read-only share links for an unpublished game (change: game-share-link).
@@ -422,7 +423,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
     autoStartLateJoiners, autoApproveAllMedia, requireAllMembersOnline,
-    instructions, pinnedFirst, wizardSteps, eventAt,
+    instructions, pinnedFirst, wizardSteps, eventAt, placeSpots,
   } = data as UpdateGamePayload;
   const { staffDefaults } = data as { staffDefaults?: unknown };
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
@@ -536,6 +537,12 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
   if (powerUpsEnabled !== undefined)    updates.powerUpsEnabled = powerUpsEnabled;
+  // change: place-setup-named-spots. Refused loudly when malformed, [] clears.
+  if (placeSpots !== undefined && placeSpots !== null) {
+    const spots = normalizePlaceSpots(placeSpots);
+    if (!spots) throw new functions.https.HttpsError('invalid-argument', 'placeSpots must be up to 40 named points');
+    updates.placeSpots = spots;
+  }
   // change: late-joiner-autostart. `autoStartLateJoiners` starts a team playing
   // without being asked, so it is stored as a STRICT boolean: a legacy truthy value
   // must never be read as the creator having asked for that.

@@ -21,6 +21,7 @@ import {
 } from '@rushpoint/shared';
 import { isPlacedCoord } from './mapAnchor';
 import { quickSetupFocusPlan, type QuickSetupCopyKey, type TaskEditorTab, type TaskOptInGroup } from './quickSetup';
+import { coveredKinds, ownsCoordinateStep, placedKinds, spotPlaced } from './placeSpots';
 
 export type SetupLang = 'he' | 'en';
 
@@ -86,6 +87,8 @@ export interface SetupItem {
   required: boolean;
   /** False while the field still needs something from the creator. */
   configured: boolean;
+  /** Set when the places screen pins this mission: the place kind it belongs to. */
+  placeKind?: string;
 }
 
 export interface SetupScreen {
@@ -149,6 +152,10 @@ export function buildSetupScreens(
       required: step.isRequired === true,
       configured,
     };
+    if (target.scope === 'task') {
+      const owner = taskOf(game, target.stageId, target.taskId);
+      if (ownsCoordinateStep(step, owner, steps) && owner?.placeTrack) item.placeKind = owner.placeTrack;
+    }
     let screen: SetupScreen;
     if (target.scope === 'task') {
       const key = `task:${target.stageId}:${target.taskId}`;
@@ -275,12 +282,26 @@ export type SetupBeat =
   | { kind: 'finish' }
   // The prep list on its own screen after the route: Ahiya wants nothing scrolled on a phone, and the
   // route map plus a long list plus the share buttons do not fit one phone screen.
-  | { kind: 'prep' };
+  | { kind: 'prep' }
+  // One screen per place (change: place-setup-named-spots): "Where is the park?", then the walk pins
+  // that place's missions itself, and their own map screens drop out.
+  | { kind: 'places'; place: string };
 
-export function buildSetupBeats(screens: readonly SetupScreen[]): SetupBeat[] {
+export function buildSetupBeats(screens: readonly SetupScreen[], game?: Game | null, steps?: readonly TemplateWizardStep[] | null): SetupBeat[] {
   const beats: SetupBeat[] = [{ kind: 'plan' }];
+  const kinds = game ? placedKinds(game, steps ?? screens.flatMap((s) => s.items.map((i) => ({
+    // Without the steps, a placed item is marked as one the walk owns, and the screen's other items are passed as they are.
+    id: i.placeKind ? `${i.stepId}-placed-coordinates` : i.stepId, stageId: s.stageId, taskId: s.taskId, targetFieldPath: i.fieldPath, instructionPrompt: '', isRequired: i.required,
+  })))) : [];
+  for (const place of kinds) beats.push({ kind: 'places', place });
+  const covered = game ? coveredKinds(game) : new Set<string>();
   screens.forEach((s, si) => {
-    s.items.forEach((_, ii) => beats.push({ kind: 'item', screen: si, item: ii, firstOfMission: ii === 0 }));
+    let first = true;
+    s.items.forEach((it, ii) => {
+      if (it.placeKind && covered.has(it.placeKind)) return;
+      beats.push({ kind: 'item', screen: si, item: ii, firstOfMission: first });
+      first = false;
+    });
   });
   beats.push({ kind: 'finish' }, { kind: 'prep' });
   return beats;
@@ -298,8 +319,13 @@ export function hasRouteToShow(stages: readonly { tasks?: readonly { coordinates
   return (stages ?? []).some((st) => (st.tasks ?? []).some((x) => isPlacedCoord(x.coordinates)));
 }
 
-export function firstBeat(beats: readonly SetupBeat[], screens: readonly SetupScreen[], resume: boolean): number {
+export function firstBeat(beats: readonly SetupBeat[], screens: readonly SetupScreen[], resume: boolean, game?: Game | null): number {
   if (!resume) return 0;
+  // A place not yet put on the map comes first: it answers several missions at once (Ahiya, 3.11:
+  // a resumed walk opened on one mission's map and never asked where the park was).
+  const located = game ? new Set((game.placeSpots ?? []).filter(spotPlaced).map((s) => s.kind)) : null;
+  const open = located ? beats.findIndex((b) => b.kind === 'places' && !located.has(b.place)) : -1;
+  if (open >= 0) return open;
   const i = beats.findIndex((b) => b.kind === 'item' && screens[b.screen].items[b.item].required && !screens[b.screen].items[b.item].configured);
   return i >= 0 ? i : 0;
 }

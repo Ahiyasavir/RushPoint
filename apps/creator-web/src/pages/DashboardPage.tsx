@@ -49,6 +49,7 @@ import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
 import { useLanguage } from '../components/LanguageContext';
+import { placeWordsOf } from '../i18n';
 import { useLiveRuns } from '../hooks/useLiveRuns';
 import { liveRunForGame } from '../lib/creatorNav';
 import {
@@ -477,7 +478,7 @@ export default function DashboardPage() {
     occasionStageNames: (occasion, role) => d.wizard.occasionStageNames[occasion]?.[role] ?? [],
     // Asked only for a mission the composer just pinned — see siteableInPlacedGame.
     placeMissionPrompt: () => d.wizard.placeMissionPrompt,
-    goToPlace: (area) => d.wizard.goToPlace[area] ?? '',
+    placeWords: () => [placeWordsOf(lang), placeWordsOf(lang === 'he' ? 'en' : 'he')],
     placeMissionAt: (area) => d.wizard.placeMissionAt[area] ?? '',
     // The station's spot kind, appended to the prompt (change: composer-siting-by-station).
     placeSpotHint: (spot) => d.wizard.placeSpotHint[spot] ?? '',

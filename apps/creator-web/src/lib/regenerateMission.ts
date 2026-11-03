@@ -481,7 +481,9 @@ export function chooseRegeneratedMission(req: RegenerateRequest | null | undefin
   const audiences = tagsOf(req!.audiences);
   const servesAll = (e: TaskBankEntry) => {
     const t = tagsOf(e.tags);
-    return t.includes('mixed') || audiences.every((a) => t.includes(a));
+    // `mixed` serves an older group only when it is not a children's mission too (Ahiya, 3.11).
+    const older = (a: string) => a === 'youth' || a === 'adults' || a === 'corporate';
+    return audiences.every((a) => t.includes(a) || (t.includes('mixed') && !(t.includes('kids') && older(a))));
   };
   const fitsGame = (e: TaskBankEntry) => !(typeof e.family === 'string' && inGameFamilies.has(e.family)) && servesAll(e);
 

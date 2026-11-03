@@ -1,3 +1,4 @@
+import type { PlaceWords } from './lib/placeSpots';
 export type Lang = 'he' | 'en';
 
 // ── Hebrew ─────────────────────────────────────────────────────────────────
@@ -600,12 +601,25 @@ const HE = {
         park: 'המשימה הזאת בפארק. בחרו לה נקודה על המפה.', neighborhood: 'המשימה הזאת בשכונה. בחרו לה נקודה על המפה.',
         cityCenter: 'המשימה הזאת במרכז העיר. בחרו לה נקודה על המפה.', home: 'המשימה הזאת בבית. בחרו לה נקודה על המפה.',
         mall: 'המשימה הזאת בקניון. בחרו לה נקודה על המפה.', office: 'המשימה הזאת במשרד. בחרו לה נקודה על המפה.',
-        school: 'המשימה הזאת בבית הספר. בחרו לה נקודה על המפה.',
+        school: 'המשימה הזאת בבית הספר. בחרו לה נקודה על המפה.', branch: 'המשימה הזאת בסניף. בחרו לה נקודה על המפה.',
       } as Record<string, string>,
       goToPlace: {
         forest: 'לכו ליער.', beach: 'לכו לים.', park: 'לכו לפארק.', neighborhood: 'לכו לשכונה.', cityCenter: 'לכו למרכז העיר.',
-        home: 'לכו הביתה.', mall: 'לכו לקניון.', office: 'לכו למשרד.', school: 'לכו לבית הספר.',
+        home: 'לכו הביתה.', mall: 'לכו לקניון.', office: 'לכו למשרד.', school: 'לכו לבית הספר.', branch: 'לכו לסניף.',
       } as Record<string, string>,
+      // The go-to line, one per stage where the place changes, in four forms (change: place-setup-named-spots).
+      placeWords: {
+        forms: {
+          forest: { to: 'ליער', bare: 'היער' }, beach: { to: 'לים', bare: 'הים' }, park: { to: 'לפארק', bare: 'הפארק' },
+          neighborhood: { to: 'לשכונה', bare: 'השכונה' }, cityCenter: { to: 'למרכז העיר', bare: 'מרכז העיר' },
+          home: { to: 'הביתה', bare: 'הבית' }, mall: { to: 'לקניון', bare: 'הקניון' }, office: { to: 'למשרד', bare: 'המשרד' },
+          school: { to: 'לבית הספר', bare: 'בית הספר' }, branch: { to: 'לסניף', bare: 'הסניף' },
+        },
+        phrases: [
+          ({ to }: PlaceArgs) => `לכו ${to}.`, ({ to }: PlaceArgs) => `תגיעו ${to}.`,
+          ({ to }: PlaceArgs) => `ממשיכים ${to}.`, ({ bare }: PlaceArgs) => `התחנה הבאה: ${bare}.`,
+        ],
+      } as Omit<PlaceWords, 'lang'>,
       hiddenCluePrompt: 'זאת המשימה הנסתרת של המשחק: לקבוצות לא תהיה סיכה על המפה, רק אזור חיפוש והרמז שתכתבו. כתבו רמז שיוביל אותן למקום, בלי השם שלו.',
       // What kind of spot suits the mission (change: composer-siting-by-station).
       placeSpotHint: {
@@ -2957,6 +2971,16 @@ const HE = {
     teamsWill: 'במשימה הזאת הקבוצות',
     praise: ['אלוף!', 'כל הכבוד!', 'מעולה!', 'יפה מאוד!', 'סגרנו את זה!'] as readonly string[],
     askPlace: 'בואו נשים את המשימה הזאת במקום באזור המשחק',
+    placesTitle: ({ bare }: { bare: string }) => `איפה ${bare}?`,
+    placesHint: 'אפשר להוסיף כמה מקומות כאלה. כל שלב שמתקיים שם מקבל אחד מהם, והמשימות שלו מסומנות על המפה לבד.',
+    placeNameLabel: 'איך קוראים למקום?',
+    placeNamePlaceholder: 'השם שהקבוצות יקראו',
+    addSpot: 'עוד מקום כזה',
+    removeSpot: 'הסרה',
+    spotN: ({ n }: { n: number }) => `מקום ${n}`,
+    placesDone: 'המשימות של המקום הזה כבר על המפה.',
+    placesHintNamed: 'אפשר להוסיף כמה מקומות כאלה. כל שלב שמתקיים שם מקבל אחד מהם, והקבוצות יקראו את השם שתבחרו.',
+    placesDoneNamed: 'נשמר. כשמגיעים לשלב הזה, הקבוצות יקראו לאן ללכת.',
     placeHint: 'חפשו כתובת, או לחצו על המפה במקום המדויק.',
     askSentence: 'תשלימו את החלקים החסרים במשפט',
     sentenceHint: 'ככה השחקנים יקראו את זה.',
@@ -3221,7 +3245,7 @@ const HE = {
     awaitCreateGame: 'צרו משחק ראשון כדי להמשיך, ואני אכניס אתכם פנימה',
     awaitLaunchRun: 'השיקו ריצה כדי לראות את חדר הבקרה החי',
     settingsTitle: 'סיור מודרך',
-    settingsDesc: 'הסבר קצר על כל המסכים: בניית משחק, השקה וניהול ריצה חיה. אפשר להפעיל אותו שוב מתי שרוצים.',
+    settingsDesc: 'סיבוב קצר של דקה: איך מתחילים משחק, איפה המשחקים שלכם ואיך מנסים לפני שמשיקים. אפשר להפעיל אותו שוב מתי שרוצים.',
     settingsBtn: 'הפעלת הסיור',
     // Builder first-open spotlight (change: guided-new-game-wizard) — two steps,
     // in situ, naming the only two words the Builder is built on.
@@ -3240,63 +3264,31 @@ const HE = {
     steps: {
       welcome: {
         title: 'ברוכים הבאים',
-        body: 'סיור קצר שעובר על כל מה שיש כאן: בניית משחק, מפה ומשימות, השקה וניהול ריצה חיה. אפשר לדלג בכל רגע ולהחזיר אותו מההגדרות.',
+        body: 'סיבוב של דקה, ואתם מכירים את המקום. אפשר לדלג בכל רגע.',
       },
       newGame: {
-        title: 'התחלת משחק חדש',
-        body: 'כל משחק מתחיל כאן. בוחרים תבנית מוכנה או דף ריק, ורואים מראש איך משחקים בו ואיך הוא ינוקד.',
+        title: 'משחק שלם בכמה שאלות',
+        body: 'עונים על כמה שאלות קצרות: מה האירוע, מי משחק ואיפה. אנחנו בונים לכם משחק שלם, עם שלבים, משימות ומקומות.',
       },
       gameList: {
         title: 'המשחקים שלכם',
-        body: 'כל כרטיס מציג שלבים, משימות ומספר ריצות, ומוביל לעריכה, לריצת בדיקה, לשיתוף או לריצה חיה שמתרחשת עכשיו.',
-      },
-      builderStages: {
-        title: 'שלבים קובעים את הסדר',
-        body: 'משחק בנוי מרשימת שלבים. קבוצה נכנסת לשלב הבא רק אחרי שסיימה את הנוכחי, והשלב האחרון מסיים את המשחק.',
+        body: 'כל משחק שבניתם מחכה כאן. נכנסים, משנים מה שרוצים ומפעילים אותו שוב מתי שרוצים.',
       },
       builderTasks: {
-        title: 'משימות הן מה שעושים בשטח',
-        body: 'מוסיפים משימות לשלב הפתוח, גוררים כדי לשנות סדר, וגוררים משימה אל שלב אחר ברשימת השלבים.',
-      },
-      builderTaskTypes: {
-        title: 'תשעה סוגי משימה',
-        body: 'צ׳ק אין במקום, דיווח עצמי, קוד בעמדה, צילום, חידון, מספר, הגעה אוטומטית, רצף צעדים בעצירה אחת וסקר. בוחרים את הסוג שמתאים למה שרוצים שיעשו.',
-      },
-      builderLocation: {
-        title: 'מיקום על המפה',
-        body: 'לכל משימה שקורית במקום מסוים יש נעיצה במפה ורדיוס הגעה. משימה שאפשר לבצע מכל מקום מסומנת ככזו ולא תופסת מקום במפה.',
-      },
-      builderScoring: {
-        title: 'ניקוד וכללי שלב',
-        body: 'אפשר לדרג לפי זמן בלבד, לפי נקודות קבועות עם בונוס מהירות, או לפי קושי ומהירות יחד. בהגדרות השלב נמצאים גם רמזים, הגבלות זמן וכמה משימות נדרשות לסיום.',
-      },
-      builderPreview: {
-        title: 'תצוגה מקדימה לפני שמישהו משחק',
-        body: 'לשונית התצוגה המקדימה מראה את כל המסלול על מפה, ואת המשחק בדיוק כפי שמשתתף רואה אותו.',
+        title: 'לא אהבתם משימה? מחליפים',
+        body: 'כל משימה אפשר להחליף במשימה אחרת, לערוך או למחוק. כל שינוי נשמר לבד.',
       },
       builderLaunch: {
-        title: 'מוכנות ואז השקה',
-        body: 'רשימת המוכנות מרכזת כל דבר שימנע השקה. ריצת בדיקה היא חזרה גנרלית חינם עד שני משתתפים, והשקה אמיתית פותחת קוד הצטרפות לכולם.',
-      },
-      runConsole: {
-        title: 'ניהול ריצה חיה',
-        body: 'בזמן ריצה מקבלים דירוג חי, מפת קבוצות, צ׳אט, אישור תמונות, הודעות והתראות מצוקה במסך אחד. נכנסים אליו מכרטיס המשחק או מסרגל הריצה.',
-      },
-      gallery: {
-        title: 'השראה מהגלריה',
-        body: 'משחקים ציבוריים וספריית משימות לחיפוש. אפשר להעתיק משימה מוכנה אל המשחק שלכם במקום לכתוב אותה מהתחלה.',
+        title: 'מנסים, ואז משיקים',
+        body: 'ריצת בדיקה מראה לכם את המשחק בטלפון, בדיוק כמו שהשחקנים יראו אותו. כשהכל מוכן, השקה פותחת קוד הצטרפות לכולם.',
       },
       wallet: {
         title: 'קרדיטים וריצות',
         body: 'כאן נמצאים היתרה, המחיר של כל ריצה ובונוסי ההפניה שקיבלתם.',
       },
-      settings: {
-        title: 'שפה, חשבון והסיור הזה',
-        body: 'בהגדרות נמצאים שפת הממשק, דרכי הכניסה לחשבון, ייצוא הנתונים שלכם והכפתור שמפעיל את הסיור הזה שוב.',
-      },
       finish: {
-        title: 'זהו, סיימנו',
-        body: 'בנו משחק, עשו ריצת בדיקה ואז השיקו באמת. סימן השאלה בראש המסך מחזיר את הסיור בכל רגע.',
+        title: 'זהו, אתם מוכנים',
+        body: 'בנו משחק, נסו אותו, ותנו לחברים לשחק. סימן השאלה למעלה מחזיר את הסיור הזה.',
       },
     },
   },
@@ -4283,12 +4275,24 @@ const EN: typeof HE = {
         park: 'This mission is in the park. Pick a spot for it on the map.', neighborhood: 'This mission is in the neighborhood. Pick a spot for it on the map.',
         cityCenter: 'This mission is in the city center. Pick a spot for it on the map.', home: 'This mission is at home. Pick a spot for it on the map.',
         mall: 'This mission is at the mall. Pick a spot for it on the map.', office: 'This mission is at the office. Pick a spot for it on the map.',
-        school: 'This mission is at the school. Pick a spot for it on the map.',
+        school: 'This mission is at the school. Pick a spot for it on the map.', branch: 'This mission is at the branch. Pick a spot for it on the map.',
       } as Record<string, string>,
       goToPlace: {
         forest: 'Go to the forest.', beach: 'Go to the beach.', park: 'Go to the park.', neighborhood: 'Go to the neighborhood.', cityCenter: 'Go to the city center.',
-        home: 'Go home.', mall: 'Go to the mall.', office: 'Go to the office.', school: 'Go to the school.',
+        home: 'Go home.', mall: 'Go to the mall.', office: 'Go to the office.', school: 'Go to the school.', branch: 'Go to the branch.',
       } as Record<string, string>,
+      placeWords: {
+        forms: {
+          forest: { to: 'to the forest', bare: 'the forest' }, beach: { to: 'to the beach', bare: 'the beach' }, park: { to: 'to the park', bare: 'the park' },
+          neighborhood: { to: 'to the neighborhood', bare: 'the neighborhood' }, cityCenter: { to: 'to the city center', bare: 'the city center' },
+          home: { to: 'home', bare: 'home' }, mall: { to: 'to the mall', bare: 'the mall' }, office: { to: 'to the office', bare: 'the office' },
+          school: { to: 'to the school', bare: 'the school' }, branch: { to: 'to the branch', bare: 'the branch' },
+        },
+        phrases: [
+          ({ to }: PlaceArgs) => `Go ${to}.`, ({ to }: PlaceArgs) => `Head ${to}.`,
+          ({ to }: PlaceArgs) => `On ${to}.`, ({ bare }: PlaceArgs) => `Next stop: ${bare}.`,
+        ],
+      } as Omit<PlaceWords, 'lang'>,
       hiddenCluePrompt: 'This is the game’s hidden mission: teams get no pin on the map, only a search area and the clue you write. Write a clue that leads them to the spot, without naming it.',
       placeSpotHint: {
         bench: 'A bench works well.',
@@ -6586,6 +6590,16 @@ const EN: typeof HE = {
     teamsWill: 'In this mission the teams',
     praise: ['Champ!', 'Well done!', 'Great!', 'Very nice!', 'Done and dusted!'] as readonly string[],
     askPlace: 'Let’s put this mission somewhere in the game area',
+    placesTitle: ({ bare }: { bare: string }) => `Where is ${bare}?`,
+    placesHint: 'You can add several. Each stage played there gets one of them, and its missions are put on the map for you.',
+    placeNameLabel: 'What do you call it?',
+    placeNamePlaceholder: 'The name the teams will read',
+    addSpot: 'Add another one',
+    removeSpot: 'Remove',
+    spotN: ({ n }: { n: number }) => `Spot ${n}`,
+    placesDone: 'This place’s missions are on the map.',
+    placesHintNamed: 'You can add several. Each stage played there gets one of them, and teams read the name you choose.',
+    placesDoneNamed: 'Saved. When teams reach this stage, they read where to go.',
     placeHint: 'Search an address, or tap the exact spot on the map.',
     askSentence: 'Fill in the missing parts of the sentence',
     sentenceHint: 'This is how the players will read it.',
@@ -6843,7 +6857,7 @@ const EN: typeof HE = {
     awaitCreateGame: 'Create your first game to continue, and I will take you inside',
     awaitLaunchRun: 'Launch a run to see the live control room',
     settingsTitle: 'Guided tour',
-    settingsDesc: 'A short walk through every screen: building a game, launching it, and running it live. You can play it again whenever you like.',
+    settingsDesc: 'A one minute look around: how a game starts, where your games live and how to try one before launching. Play it again whenever you like.',
     settingsBtn: 'Start the tour',
     // Builder first-open spotlight (change: guided-new-game-wizard) — two steps,
     // in situ, naming the only two words the Builder is built on.
@@ -6862,63 +6876,31 @@ const EN: typeof HE = {
     steps: {
       welcome: {
         title: 'Welcome',
-        body: 'A short tour of everything here: building a game, the map and its missions, launching, and running it live. You can skip it at any moment and bring it back from settings.',
+        body: 'A one minute look around, and you will know your way. Skip any time.',
       },
       newGame: {
-        title: 'Start a new game',
-        body: 'Every game starts here. Pick a ready made template or a blank page, and see how it is played and how it is scored before it is created.',
+        title: 'A whole game from a few questions',
+        body: 'Answer a few short questions: the occasion, who plays and where. We build you a whole game, with stages, missions and places.',
       },
       gameList: {
         title: 'Your games',
-        body: 'Each card shows stages, missions and how many times it was played, and leads to the editor, a rehearsal run, sharing, or a run happening right now.',
-      },
-      builderStages: {
-        title: 'Stages set the order',
-        body: 'A game is a list of stages. A team reaches the next stage only after finishing the current one, and the last stage ends the game.',
+        body: 'Every game you build waits here. Open it, change what you like and run it again whenever you want.',
       },
       builderTasks: {
-        title: 'Missions are what people do out there',
-        body: 'Add missions to the open stage, drag them to reorder, and drag one onto another stage in the stage list to move it.',
-      },
-      builderTaskTypes: {
-        title: 'Nine kinds of mission',
-        body: 'A check in, a self report, a code at a staffed stop, a photo, a quiz, a number, an automatic arrival, a multi step puzzle at one stop, and a survey. Pick the one that matches what you want people to do.',
-      },
-      builderLocation: {
-        title: 'Put it on the map',
-        body: 'Every mission that happens somewhere gets a pin and an arrival radius. A mission that can be done from anywhere is marked as one and takes no room on the map.',
-      },
-      builderScoring: {
-        title: 'Scoring and stage rules',
-        body: 'Rank by finishing time alone, by fixed points with a speed bonus, or by difficulty and speed together. Stage settings also hold hints, time limits, and how many missions a stage needs.',
-      },
-      builderPreview: {
-        title: 'Preview before anyone plays',
-        body: 'The preview tab shows the whole route on a map, and the game exactly as a player receives it.',
+        title: 'Not a fan of a mission? Swap it',
+        body: 'Any mission can be swapped for another one, edited or deleted. Every change saves itself.',
       },
       builderLaunch: {
-        title: 'Readiness, then launch',
-        body: 'The readiness list gathers everything that would refuse a launch. A test run is a free rehearsal for up to two players, and a real launch opens a join code for everyone.',
-      },
-      runConsole: {
-        title: 'Running it live',
-        body: 'While a run is on you get a live board, a team map, chat, photo review, announcements and distress alerts on one screen. You reach it from the game card or the run bar.',
-      },
-      gallery: {
-        title: 'Borrow from the gallery',
-        body: 'Public games and a searchable mission library. Copy a ready made mission into your own game instead of writing it from scratch.',
+        title: 'Try it, then launch',
+        body: 'A test run shows you the game on your phone, exactly as players will see it. When it is ready, launching opens a join code for everyone.',
       },
       wallet: {
         title: 'Credits and runs',
-        body: 'Your balance, what each run costs, and the referral bonuses you have earned.',
-      },
-      settings: {
-        title: 'Language, account, and this tour',
-        body: 'Settings holds the interface language, how you sign in, an export of your data, and the button that plays this tour again.',
+        body: 'Your balance, the price of each run and the referral bonuses you have earned live here.',
       },
       finish: {
-        title: 'That is everything',
-        body: 'Build a game, do a test run, then launch it for real. The question mark at the top of the screen brings this tour back whenever you want it.',
+        title: 'That is it, you are ready',
+        body: 'Build a game, try it, and let your friends play. The question mark at the top brings this tour back.',
       },
     },
   },
@@ -7327,3 +7309,11 @@ const EN: typeof HE = {
 
 export const translations: Record<Lang, typeof HE> = { he: HE, en: EN };
 export type T = typeof HE;
+
+/** The arguments of a go-to phrase: "to the park" and "the park". */
+type PlaceArgs = { to: string; bare: string };
+
+/** The go-to words of one language, tagged with it (the language code is not copy, so it is not in the dictionary). */
+export function placeWordsOf(l: 'he' | 'en'): PlaceWords {
+  return { ...translations[l].dashboard.wizard.placeWords, lang: l };
+}

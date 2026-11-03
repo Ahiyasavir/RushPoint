@@ -153,6 +153,8 @@ export const DELIBERATELY_EXCLUDED_GAME_KEYS = [
   'deletedAt', 'deletedBy', 'integrationWebhookUrl', 'integrationPlatform',
   // The date of ONE occasion (change: creator-engagement-loop); a file is reused for another one.
   'eventAt',
+  // The creator's own places (change: place-setup-named-spots): where they live and play, not the game.
+  'placeSpots',
   // Admin template curation: set only by setGameTemplateFlag. A file that could carry them would
   // let anyone publish a template into every creator's new-game menu.
   'isTemplate', 'pinnedFirst', 'templateEmoji', 'templateGenre', 'templateGroupKey', 'templateHidden',

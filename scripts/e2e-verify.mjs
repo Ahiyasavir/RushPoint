@@ -1740,6 +1740,21 @@ async function main() {
     const second = await held(p);
     check('tracks: the second mission is on the same set', second?.slice(0, 4) === firsts[i].slice(0, 4), `${firsts[i]} then ${second}`);
   }
+
+  // Named places (change: place-setup-named-spots): the walk stores each spot, so the app later knows
+  // where the creator's parks and branches are. A valid list is kept, trimmed; a malformed one is refused.
+  await creator.call('updateGame', { gameId, placeSpots: [
+    { id: 'sp-park', kind: 'park', name: '  פארק הירקון  ', lat: 32.1, lng: 34.81 },
+    { id: 'sp-branch', kind: 'branch', name: 'הסניף ברמות', lat: 31.81, lng: 35.2 },
+  ] });
+  const { game: spotted } = await creator.call('getGame', { gameId });
+  check('places: the named spots are stored', spotted?.placeSpots?.length === 2 && spotted.placeSpots[0].name === 'פארק הירקון', JSON.stringify(spotted?.placeSpots));
+  await expectError('places: a spot with no position is refused',
+    creator.call('updateGame', { gameId, placeSpots: [{ id: 'sp-x', kind: 'park', name: 'x', lat: 'north', lng: 1 }] }), { codeIn: ['functions/invalid-argument'] });
+  await expectError('places: a name past 60 characters is refused',
+    creator.call('updateGame', { gameId, placeSpots: [{ id: 'sp-y', kind: 'park', name: 'א'.repeat(61), lat: 31, lng: 35 }] }), { codeIn: ['functions/invalid-argument'] });
+  const { game: kept } = await creator.call('getGame', { gameId });
+  check('places: a refused save leaves the stored spots alone', kept?.placeSpots?.length === 2, JSON.stringify(kept?.placeSpots));
   }); // scenario: place tracks
 
   await scenario('rejoin replaces the lost phone (no slot used, sender moves, foreign uid ignored)', async () => {

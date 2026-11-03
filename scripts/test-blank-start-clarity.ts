@@ -79,13 +79,14 @@ for (let i = 0; i < kinds.length; i++) for (let j = i + 1; j < kinds.length; j++
     const here = new Set<string>();
     for (const t of st.tasks) {
       missions++;
-      const place = placeLineOf(t.description ?? '', lines);
+      // The place is data on the mission now; its words are said once per stage (place-setup-named-spots).
+      const place = t.placeTrack ?? null;
       if (place) { here.add(place); used.add(place); }
       const own = (tagsByTitle.get(t.title) ?? []).filter((x) => (AREA_KIND_TAG_IDS as readonly string[]).includes(x));
       const fit = own.filter((x) => areas.includes(x));
       if (own.length > 0 && fit.length === 0) wrong++;
       if (fit.length === 1 && !place && !pinnedTitles.has(t.title)) silent++;
-      if (place && pinnedTitles.has(t.title)) doubled++;
+      if (place && pinnedTitles.has(t.title) && /^GO:/.test(t.description ?? '')) doubled++;
     }
     if (here.size > 1) split++;
   }

@@ -162,17 +162,9 @@ export type TourStepId =
   | 'welcome'
   | 'newGame'
   | 'gameList'
-  | 'builderStages'
   | 'builderTasks'
-  | 'builderTaskTypes'
-  | 'builderLocation'
-  | 'builderScoring'
-  | 'builderPreview'
   | 'builderLaunch'
-  | 'runConsole'
-  | 'gallery'
   | 'wallet'
-  | 'settings'
   | 'finish';
 
 /** Which console area a step is ABOUT (drives the optional "take me there"). */
@@ -195,25 +187,18 @@ export interface TourStep {
  * The walkthrough, in the order a creator walks it. Copy lives in i18n
  * (`t.tour.steps[id]`) so the table stays language-free.
  *
- * Steps 5-7 share the canvas anchor on purpose: tasks, their types and their
- * locations are all authored in that one workspace, and pointing at three
- * different boxes for one pane would be theatre.
+ * Short on purpose (Ahiya, 3.11: fit it to the new generator; the goal is that the creator feels at
+ * home, and it must not be long or tiring). The generator builds the whole game, so the tour no longer
+ * teaches stages, task types, scoring or the console one by one: it shows where a game starts, where
+ * games live, that any mission can be changed, and how to try it before launching.
  */
 export const TOUR_STEPS: readonly TourStep[] = [
   { id: 'welcome',          surface: 'anywhere',  anchor: null,               placement: 'center' },
   { id: 'newGame',          surface: 'dashboard', anchor: 'new-game',         placement: 'bottom' },
   { id: 'gameList',         surface: 'dashboard', anchor: 'game-list',        placement: 'top' },
-  { id: 'builderStages',    surface: 'builder',   anchor: 'builder-stages',   placement: 'end' },
   { id: 'builderTasks',     surface: 'builder',   anchor: 'builder-canvas',   placement: 'center' },
-  { id: 'builderTaskTypes', surface: 'builder',   anchor: 'builder-canvas',   placement: 'center' },
-  { id: 'builderLocation',  surface: 'builder',   anchor: 'builder-canvas',   placement: 'center' },
-  { id: 'builderScoring',   surface: 'builder',   anchor: 'builder-tabs',     placement: 'bottom' },
-  { id: 'builderPreview',   surface: 'builder',   anchor: 'builder-tabs',     placement: 'bottom' },
   { id: 'builderLaunch',    surface: 'builder',   anchor: 'builder-launch',   placement: 'bottom' },
-  { id: 'runConsole',       surface: 'run',       anchor: null,               placement: 'center' },
-  { id: 'gallery',          surface: 'gallery',   anchor: 'nav-gallery',      placement: 'bottom' },
   { id: 'wallet',           surface: 'wallet',    anchor: 'nav-wallet',       placement: 'bottom', requiresPayments: true },
-  { id: 'settings',         surface: 'settings',  anchor: 'nav-settings',     placement: 'bottom' },
   { id: 'finish',           surface: 'anywhere',  anchor: null,               placement: 'center' },
 ] as const;
 

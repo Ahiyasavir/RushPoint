@@ -79,6 +79,8 @@ const fullGame = {
     id: 'qs-t1-coordinates', stageId: 's1', taskId: 't1', targetFieldPath: 'coordinates',
     instructionPrompt: 'Drop the pin where the mission happens', isRequired: true,
   }],
+  // Named places the setup walk remembers (change: place-setup-named-spots).
+  placeSpots: [{ id: 'park-1', kind: 'park', name: 'Central Park', lat: 31.77, lng: 35.21 }],
   deletedAt: '2026-07-01T00:00:00.000Z',
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-07-20T00:00:00.000Z',

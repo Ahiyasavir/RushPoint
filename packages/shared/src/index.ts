@@ -80,6 +80,7 @@ export * from './survey';
 // Per-interaction default task durations (change: task-duration-defaults).
 export * from './taskDuration';
 export * from './placeTrack';
+export * from './placeSpots';
 export * from './creatorPlan';
 export * from './taskEstimate';
 export * from './feedReactions';

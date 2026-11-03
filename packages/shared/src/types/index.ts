@@ -709,6 +709,9 @@ export interface Game {
   // flat). Default false — existing games are untouched. Never rolls on the
   // time_only preset (no task points to double; a flat bonus corrupts pure-time).
   powerUpsEnabled?: boolean;
+  // The places the creator named (change: place-setup-named-spots): kind, name, point. Written by the
+  // setup walk, never sent to players. See shared/placeSpots.
+  placeSpots?: import('../placeSpots').PlaceSpot[];
   // Game-level intro/instructions primer (change: game-intro-instructions).
   // Optional: absent games render no primer. Not secret — echoed to participants
   // and, when public, denormalized into publicGames. Cosmetic; never gates play.
@@ -1876,6 +1879,8 @@ export interface UpdateGamePayload {
   photoFeedEnabled?: boolean;
   // Power-ups toggle (change: power-ups). Default false when absent.
   powerUpsEnabled?: boolean;
+  // change: place-setup-named-spots. [] clears.
+  placeSpots?: import('../placeSpots').PlaceSpot[];
   // Late joiner auto start + run wide media approval (change: late-joiner-autostart).
   // Both default false when absent, so every existing game is untouched.
   autoStartLateJoiners?: boolean;

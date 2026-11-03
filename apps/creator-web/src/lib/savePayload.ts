@@ -53,6 +53,8 @@ export const BUILDER_EDITABLE_FIELDS = [
   'photoFeedEnabled',
   // Power-ups (change: power-ups). Undefined means off (default).
   'powerUpsEnabled',
+  // The places the creator named in the setup walk (change: place-setup-named-spots).
+  'placeSpots',
   // change: late-joiner-autostart. MUST be here: buildSavePayload copies only these
   // fields AND the Builder diffs the payload, so a field missing from this list never
   // saves *and* never registers as a change - the control round-trips through local
